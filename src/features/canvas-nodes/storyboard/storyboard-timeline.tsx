@@ -12,8 +12,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEv
 // 图标铁律（经验 #19）：播放语义图标一律走模块级 icons.ts Map，禁止散落内联 lucide
 import { Plus, Trash2, Pause, ChevronsLeft, ChevronsRight, MoreHorizontal, Download, Wand2, Copy } from 'lucide-react';
 import { CANVAS_NODE_ICONS } from '../icons.js';
-import { resolveVideoDurationSec } from './storyboard-utils';
-import type { Asset } from '@/features/asset-picker/index.js';
 import {
   TRACK_HEIGHT, RULER_HEIGHT, CLIP_GAP, CLIP_MIN_WIDTH,
   RULER_PADDING_LEFT, DEFAULT_MIN_CLIP_DURATION, DEFAULT_MAX_CLIP_DURATION, FRAME_STEP_SEC,
@@ -23,7 +21,7 @@ import {
   type TimelineClipData, type StoryboardTimelineProps,
 } from './timeline-constants.js';
 import { TimelineClip } from './timeline-clip.js';
-import { computeInsertIndex, insertSeamX, clipPlaceholderWidth, movedClipLeft } from './storyboard-drop-point';
+import { computeInsertIndex, insertSeamX, movedClipLeft } from './storyboard-drop-point';
 import { capsuleTransparentStyle } from '../../tools-dock/capsbtn.js';
 
 /** 拖拽插入占位框样式（2026-09-02 约定：整段蓝色虚线占位，替代单线指示） */
@@ -762,30 +760,18 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   const handleTrackDragEnter = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
     const types = Array.from(e.dataTransfer.types);
     if (!TRACK_DRAG_MIMES.some((m) => types.includes(m))) return;
-    // 读素材时长 → 占位框宽度（2026-09-02 约定：整段蓝色虚线占位框，宽度=素材时长×pps）
-    let durSec: number | undefined;
-    try {
-      const rawAsset = e.dataTransfer.getData('application/x-canvas-asset');
-      if (rawAsset) {
-        const p = JSON.parse(rawAsset) as { kind?: string; durationMs?: number };
-        if (p.kind === 'video' && p.durationMs) durSec = Math.max(0.5, p.durationMs / 1000);
-      } else {
-        const rawLib = e.dataTransfer.getData('application/x-testlib-item');
-        const item = rawLib ? (JSON.parse(rawLib) as { data?: Asset }) : null;
-        const a = item?.data;
-        const d = a?.data;
-        if (a && a.kind === 'video' && d && d.kind === 'video') {
-          const ms = d.durationMs ?? (a as any).durationMs;
-          if (ms) durSec = Math.max(0.5, ms / 1000);
-        }
-      }
-    } catch { /* 个别浏览器 dragEnter 阶段 getData 受限，静默兜底 */ }
-    // 2026-11-05 固定宽度卡片：卡片导轨模式下占位框 = 一张卡宽（不再按时长×pps）
-    setExternalDropWidth(cardWidth ?? (durSec && durSec > 0 ? clipPlaceholderWidth(durSec, ppsRef.current) : null));
+    // 2026-11-07 用户纠偏：资产拖入轨道**不得**再新建片段（片段只由分镜/剧本驱动）；
+    // 拖拽悬停也不再渲染"插入占位框"，避免暗示会插入
+    setExternalDropIdx(null);
+    externalDragIdxRef.current = null;
+    setExternalDropWidth(null);
+    return;
   }, [cardWidth]);
   const handleTrackDragOver = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
     const types = Array.from(e.dataTransfer.types);
-    if (TRACK_DRAG_MIMES.some((m) => types.includes(m))) {
+    // 资产拖入轨道：不接受（不 preventDefault → 浏览器显示禁止态），不计算插入点
+    if (TRACK_DRAG_MIMES.some((m) => types.includes(m))) return;
+    if (types.includes('application/x-workbench-shot')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
       // 落点 = 插入下标（占位框/drop 同源）。state 只存整数下标、仅变化时 set（低频，防卡顿）
@@ -811,71 +797,16 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   const handleTrackDrop = useCallback(async (e: ReactDragEvent<HTMLDivElement>) => {
     if (!onInsertAt) return;
     // 2026-09-02：先取占位框落点（用户松手那一刻看到的插入位置），再清空占位状态
-    const dropIndexRef = externalDragIdxRef.current;
     setExternalDropIdx(null);
     externalDragIdxRef.current = null;
     setExternalDropWidth(null);
     const rawAsset = e.dataTransfer.getData('application/x-canvas-asset');
     const rawLib = e.dataTransfer.getData('application/x-testlib-item');
     if (!rawAsset && !rawLib) return;
+    // 2026-11-07 用户纠偏：资产（视频）拖进轨道不得生成片段；吞掉事件避免冒泡到画布建节点
     e.preventDefault();
-    // 归一化两种 payload → { storageKey, coverUrl, title, durationMs }
-    let storageKey: string | undefined;
-    let coverUrl: string | undefined;
-    let title: string | undefined;
-    let durationMs: number | undefined;
-    try {
-      if (rawAsset) {
-        const p = JSON.parse(rawAsset) as {
-          kind?: string; title?: string; durationMs?: number; storageKey?: string; coverUrl?: string;
-        };
-        if (p.kind !== 'video') return; // 目前仅接受视频素材
-        storageKey = p.storageKey;
-        coverUrl = p.coverUrl;
-        title = p.title;
-        durationMs = p.durationMs;
-      } else {
-        // 画布资产抽屉 payload：{ type:'asset', name, data: Asset }
-        const item = JSON.parse(rawLib) as { type?: string; name?: string; data?: Asset };
-        const a = item?.data;
-        const d = a?.data;
-        if (!a || a.kind !== 'video' || !d || d.kind !== 'video') return;
-        storageKey = d.storageKey ?? (a as any).storageKey;
-        coverUrl = a.coverUrl;
-        title = item.name ?? a.title;
-        durationMs = d.durationMs;
-      }
-    } catch { return; }
-    if (!storageKey) return;
-    // 插入下标 = 占位框落点（与渲染占位框同一函数产出，杜绝「框在这、插到别处」）
-    let insertIndex = dropIndexRef;
-    if (insertIndex === null) {
-      const el = scrollRef.current;
-      if (!el) return;
-      // 容器 rect（位置固定）+ 实时 scrollLeft - padding = 内容坐标（同 commitPlayheadFromX）
-      const rect = el.getBoundingClientRect();
-      const x = (e.clientX - rect.left + el.scrollLeft) - inset;
-      insertIndex = computeInsertIndex(x, clipsRef.current);
-    }
-    // afterId 兼容语义（index 缺失的旧调用方用）：占位框处前一个 clip 之后
-    const prevClip = insertIndex > 0 ? clipsRef.current[insertIndex - 1] : undefined;
-    const afterId = prevClip ? prevClip.data.id : null;
-    // 素材按原时长（2026-09-02 约定）：payload 有 durationMs 直接用；
-    // 无时长元数据 → 先解析真实时长再插入（同步插入的兜底值会让 trimEnd 落错，且
-    // 插入后再回填会因 onInsertAt 闭包持有旧 data 而整体覆盖 → 刚拖入的 clip 消失）。
-    let durationSec: number | undefined = durationMs ? Math.max(0.5, durationMs / 1000) : undefined;
-    if (!durationSec) {
-      const real = await resolveVideoDurationSec(storageKey);
-      if (real && real > 0) durationSec = Math.round(real * 10) / 10;
-    }
-    onInsertAt(afterId, {
-      title,
-      durationSec,
-      sourceDuration: durationSec,
-      storageKey,
-      coverUrl,
-      index: insertIndex,
-    });
+    e.stopPropagation();
+    return;
   }, [onInsertAt]);
   // ===== 框选（2026-09-02，画布式矩形选框）：空白区按下拖出选框 → 相交片段多选 =====
   // 与「点击空白跳播放头」并存：拖动超过阈值(5px)才进入框选，否则走原 click。
