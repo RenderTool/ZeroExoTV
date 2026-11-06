@@ -232,6 +232,30 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     return result;
   }, [assets, materialScopeTab, materialKind, search]);
 
+  /** 分类标签计数（素材分组口径：当前作用域 + 搜索后按类型统计，与结果同一 predicate，避免"有数字没内容"） */
+  const materialKindCounts = useMemo(() => {
+    const base = (Array.isArray(assets) ? assets : []).filter(
+      (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
+    );
+    // openlib/subject 段不是用户素材（独立渲染），分类计数直接归零
+    if (materialScopeTab === 'openlib' || materialScopeTab === 'subject') {
+      return { all: 0, image: 0, video: 0, audio: 0, text: 0 };
+    }
+    const scoped = filterAssetsStrictScope(base, {
+      scopeTab: materialScopeTab as 'project' | 'library',
+      projectId: getCurrentCanvasId(),
+    });
+    const q = search.trim().toLowerCase();
+    const list = q ? scoped.filter((a) => a.title.toLowerCase().includes(q)) : scoped;
+    return {
+      all: list.length,
+      image: list.filter((a) => a.kind === 'image').length,
+      video: list.filter((a) => a.kind === 'video').length,
+      audio: list.filter((a) => a.kind === 'audio').length,
+      text: list.filter((a) => (a.kind as string) === 'text' || (a.kind as string) === 'zeroexo-text').length,
+    };
+  }, [assets, materialScopeTab, search]);
+
   /** 胶囊徽标计数（素材分组口径：排除剧本/实体/plan 后按作用域统计） */
   const materialScopeCounts = useMemo(() => {
     const base = (Array.isArray(assets) ? assets : []).filter(
@@ -467,6 +491,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     materialScopeTab,
     setMaterialScopeTab,
     materialScopeCounts,
+    materialKindCounts,
     openLibCount,
     // 素材批量操作（与资产库页面多选同形）
     assetMultiSelect,

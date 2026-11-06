@@ -112,9 +112,13 @@ export function MaterialGroup({ store, theme }: {
     </>
   ) : undefined;
 
+  // 分类标签计数（与结果同一 predicate；0 不显示，与主体库分类一致）
+  // 兼容测试桩（旧 store mock 无该字段）
+  const kindCounts = store.materialKindCounts ?? {};
   const kindOptions = KIND_OPTIONS.map((opt) => ({
     key: opt.key,
     label: t(opt.labelKey),
+    count: (kindCounts as Record<string, number>)[opt.key] ?? 0,
   }));
 
   // 页签按项目恢复：进入抽屉素材分组时读取 canvasDrawer 切片（与写入同一 view-prefs 存储键）

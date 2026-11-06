@@ -73,7 +73,7 @@ export interface AssetLibraryToolbarProps {
 interface FilterDropdownProps {
   /** 当前选中标签 */
   activeLabel: string;
-  options: Array<{ key: string | null; label: string; selected?: boolean }>;
+  options: Array<{ key: string | null; label: string; selected?: boolean; count?: number }>;
   theme: ThemeConfig;
   onSelect: (key: string | null) => void;
 }
