@@ -105,6 +105,10 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(split).toContain("inline ? 'calc(100vh - 230px)'");
     const mask = read('packages/plugins/image-editor/src/dialogs/mask-edit-dialog.tsx');
     expect(mask).toContain("inline ? 'calc(100vh - 230px)'");
+    // 笔刷反馈：系统光标隐藏 + 跟随指针的大小圆环（随缩放/笔刷大小变化）
+    expect(mask).toContain('data-brush-cursor');
+    expect(mask).toContain("cursor: 'none'");
+    expect(mask).toContain('brushSize * brushCursor.scale');
   });
 
   it('居中渲染器只保留只读/参数型 case', () => {

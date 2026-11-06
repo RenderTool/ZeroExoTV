@@ -51,6 +51,8 @@ export function MaskEditDialog({
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
   const [mode, setMode] = useState<DrawMode>('paint');
   const [error, setError] = useState('');
+  /** 笔刷光标（显示画笔大小圆环）：x/y = 画布内 CSS 坐标，scale = 显示尺寸/原图尺寸 */
+  const [brushCursor, setBrushCursor] = useState<{ x: number; y: number; scale: number } | null>(null);
 
   // 重置 + 读取图片
   useEffect(() => {
@@ -75,6 +77,28 @@ export function MaskEditDialog({
     clearCanvas(maskCanvasRef.current);
     clearCanvas(previewCanvasRef.current);
   }, [image]);
+
+  /** 笔刷圆环跟随指针（画布内 CSS 坐标；scale 让圆环直径跟随当前缩放与笔刷大小） */
+  const cursorRafRef = useRef(0);
+  const pendingCursorRef = useRef<{ x: number; y: number; scale: number } | null>(null);
+  const updateBrushCursor = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !image?.width) return;
+    pendingCursorRef.current = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      scale: rect.width / image.width,
+    };
+    // 每帧最多一次 setState：整段绘制时不因为光标状态把画布重渲染拖慢
+    if (cursorRafRef.current) return;
+    cursorRafRef.current = requestAnimationFrame(() => {
+      cursorRafRef.current = 0;
+      setBrushCursor(pendingCursorRef.current);
+    });
+  };
+  useEffect(() => () => {
+    if (cursorRafRef.current) cancelAnimationFrame(cursorRafRef.current);
+  }, []);
 
   const draw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const point = readCanvasPoint(event.currentTarget, event.clientX, event.clientY);
@@ -103,6 +127,7 @@ export function MaskEditDialog({
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     drawingRef.current = { active: true, last: null };
+    updateBrushCursor(event);
     if (maskCanvasRef.current) {
       renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current);
     }
@@ -110,6 +135,7 @@ export function MaskEditDialog({
   };
 
   const moveDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    updateBrushCursor(event);
     if (!drawingRef.current.active) return;
     event.preventDefault();
     draw(event);
@@ -186,12 +212,43 @@ export function MaskEditDialog({
             ref={previewCanvasRef}
             width={image.width}
             height={image.height}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'crosshair', touchAction: 'none' }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'none', touchAction: 'none' }}
             onPointerDown={startDraw}
             onPointerMove={moveDraw}
             onPointerUp={stopDraw}
             onPointerCancel={stopDraw}
+            onPointerEnter={updateBrushCursor}
+            onPointerLeave={() => { if (!drawingRef.current.active) setBrushCursor(null); }}
           />
+          {/* 笔刷大小圆环（跟随指针；随缩放与笔刷大小实时变化，系统光标已隐藏避免双光标） */}
+          {brushCursor && (
+            <>
+              <div
+                data-brush-cursor
+                style={{
+                  position: 'absolute',
+                  left: brushCursor.x,
+                  top: brushCursor.y,
+                  width: Math.max(4, brushSize * brushCursor.scale),
+                  height: Math.max(4, brushSize * brushCursor.scale),
+                  transform: 'translate(-50%, -50%)',
+                  borderRadius: '50%',
+                  border: '1.5px solid rgba(255,255,255,0.95)',
+                  boxShadow: '0 0 0 1px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.35)',
+                  pointerEvents: 'none',
+                  zIndex: 3,
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute', left: brushCursor.x, top: brushCursor.y,
+                  width: 2, height: 2, marginLeft: -1, marginTop: -1, borderRadius: '50%',
+                  background: 'rgba(255,255,255,0.95)', boxShadow: '0 0 0 1px rgba(0,0,0,0.55)',
+                  pointerEvents: 'none', zIndex: 4,
+                }}
+              />
+            </>
+          )}
         </>
       ) : null}
     </div>
