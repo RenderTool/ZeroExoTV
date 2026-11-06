@@ -109,6 +109,13 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(mask).toContain('data-brush-cursor');
     expect(mask).toContain("cursor: 'none'");
     expect(mask).toContain('brushSize * brushCursor.scale');
+    // 缩放/平移：工具条图标 + 滚轮缩放 + 手型拖拽；右侧笔刷预览
+    expect(mask).toContain('data-mask-view-tools');
+    expect(mask).toContain('data-brush-preview');
+    expect(mask).toContain("addEventListener('wheel'");
+    expect(mask).toContain('setPointerCapture');
+    expect(mask).toContain('Hand');
+    expect(mask).toContain('ZoomIn');
   });
 
   it('居中渲染器只保留只读/参数型 case', () => {

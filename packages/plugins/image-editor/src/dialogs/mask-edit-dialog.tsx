@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Modal, Button, Slider, Input } from 'antd';
-import { Brush, Eraser, RotateCcw, Sparkles } from 'lucide-react';
+import { Brush, Eraser, RotateCcw, Sparkles, ZoomIn, ZoomOut, Hand, Maximize2 } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { readImageMeta } from '../utils/image-meta.js';
 import type { MaskEditPayload, ImageMeta } from '../types.js';
@@ -51,8 +51,15 @@ export function MaskEditDialog({
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
   const [mode, setMode] = useState<DrawMode>('paint');
   const [error, setError] = useState('');
-  /** 笔刷光标（显示画笔大小圆环）：x/y = 画布内 CSS 坐标，scale = 显示尺寸/原图尺寸 */
+  /** 笔刷光标（显示画笔大小圆环）：x/y = 舞台内 CSS 坐标，scale = 显示像素/原图像素 */
   const [brushCursor, setBrushCursor] = useState<{ x: number; y: number; scale: number } | null>(null);
+  /** 画布视图（缩放 + 平移；以舞台中心为缩放原点） */
+  const [view, setView] = useState<{ zoom: number; pan: { x: number; y: number } }>({ zoom: 1, pan: { x: 0, y: 0 } });
+  /** 手型工具：开启后拖拽 = 平移图片（不画遮罩） */
+  const [panMode, setPanMode] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const panDragRef = useRef<{ x: number; y: number } | null>(null);
+  const clampZoom = (z: number): number => Math.min(8, Math.max(0.1, z));
 
   // 重置 + 读取图片
   useEffect(() => {
@@ -61,6 +68,9 @@ export function MaskEditDialog({
     setBrushSize(DEFAULT_BRUSH_SIZE);
     setMode('paint');
     setError('');
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+    setPanMode(false);
+    setBrushCursor(null);
     let cancelled = false;
     readImageMeta(dataUrl)
       .then((meta) => {
@@ -78,16 +88,74 @@ export function MaskEditDialog({
     clearCanvas(previewCanvasRef.current);
   }, [image]);
 
-  /** 笔刷圆环跟随指针（画布内 CSS 坐标；scale 让圆环直径跟随当前缩放与笔刷大小） */
+  // 滚轮缩放（以指针为锚点）：需要非 passive 监听才能 preventDefault 阻止页面滚动
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || !image) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cx = event.clientX - rect.left - rect.width / 2;
+      const cy = event.clientY - rect.top - rect.height / 2;
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setView((prev) => {
+        const zoom = clampZoom(prev.zoom * factor);
+        const ratio = zoom / prev.zoom;
+        return {
+          zoom,
+          pan: {
+            x: prev.pan.x + (cx - prev.pan.x) * (1 - ratio),
+            y: prev.pan.y + (cy - prev.pan.y) * (1 - ratio),
+          },
+        };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [image]);
+
+  const zoomBy = (factor: number): void => {
+    setView((prev) => ({ ...prev, zoom: clampZoom(prev.zoom * factor) }));
+  };
+  const resetView = (): void => {
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+    setPanMode(false);
+  };
+
+  /** 平移：手型工具（左键）或任何模式下中键拖拽 */
+  const startPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!(panMode || event.button === 1)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    panDragRef.current = { x: event.clientX, y: event.clientY };
+  };
+  const movePan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = panDragRef.current;
+    if (!drag) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    setView((prev) => ({ ...prev, pan: { x: prev.pan.x + dx, y: prev.pan.y + dy } }));
+  };
+  const stopPan = (): void => {
+    panDragRef.current = null;
+  };
+
+  /** 笔刷圆环跟随指针（舞台坐标；scale 含画布缩放，圆环在舞台层渲染不会被二次缩放） */
   const cursorRafRef = useRef(0);
   const pendingCursorRef = useRef<{ x: number; y: number; scale: number } | null>(null);
-  const updateBrushCursor = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (!rect.width || !image?.width) return;
+  const updateBrushCursor = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    const stage = stageRef.current;
+    const canvas = previewCanvasRef.current;
+    if (!stage || !canvas || !image?.width) return;
+    const stageRect = stage.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
     pendingCursorRef.current = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-      scale: rect.width / image.width,
+      x: event.clientX - stageRect.left,
+      y: event.clientY - stageRect.top,
+      scale: canvasRect.width / image.width,
     };
     // 每帧最多一次 setState：整段绘制时不因为光标状态把画布重渲染拖慢
     if (cursorRafRef.current) return;
@@ -123,6 +191,7 @@ export function MaskEditDialog({
   };
 
   const startDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return; // 中键/右键留给舞台平移/菜单
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -198,59 +267,159 @@ export function MaskEditDialog({
     </div>
   );
   const stage = (
-    <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', userSelect: 'none' }}>
-      <img
-        src={dataUrl}
-        alt=""
-        draggable={false}
-        style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : '68vh', maxWidth: '100%' }}
-      />
-      {image ? (
-        <>
-          <canvas ref={maskCanvasRef} width={image.width} height={image.height} style={{ display: 'none' }} />
-          <canvas
-            ref={previewCanvasRef}
-            width={image.width}
-            height={image.height}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'none', touchAction: 'none' }}
-            onPointerDown={startDraw}
-            onPointerMove={moveDraw}
-            onPointerUp={stopDraw}
-            onPointerCancel={stopDraw}
-            onPointerEnter={updateBrushCursor}
-            onPointerLeave={() => { if (!drawingRef.current.active) setBrushCursor(null); }}
+    <div
+      ref={stageRef}
+      data-mask-stage
+      style={{
+        position: 'relative',
+        width: inline ? '100%' : undefined,
+        height: inline ? '100%' : undefined,
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        userSelect: 'none',
+        touchAction: 'none',
+        cursor: panMode ? 'grab' : 'default',
+      }}
+      onPointerDown={startPan}
+      onPointerMove={movePan}
+      onPointerUp={stopPan}
+      onPointerCancel={stopPan}
+      onPointerLeave={stopPan}
+    >
+      <div
+        style={{
+          transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})`,
+          transformOrigin: 'center center',
+          willChange: 'transform',
+        }}
+      >
+        <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
+          <img
+            src={dataUrl}
+            alt=""
+            draggable={false}
+            style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : '68vh', maxWidth: '100%' }}
           />
-          {/* 笔刷大小圆环（跟随指针；随缩放与笔刷大小实时变化，系统光标已隐藏避免双光标） */}
-          {brushCursor && (
+          {image ? (
             <>
-              <div
-                data-brush-cursor
+              <canvas ref={maskCanvasRef} width={image.width} height={image.height} style={{ display: 'none' }} />
+              <canvas
+                ref={previewCanvasRef}
+                width={image.width}
+                height={image.height}
                 style={{
-                  position: 'absolute',
-                  left: brushCursor.x,
-                  top: brushCursor.y,
-                  width: Math.max(4, brushSize * brushCursor.scale),
-                  height: Math.max(4, brushSize * brushCursor.scale),
-                  transform: 'translate(-50%, -50%)',
-                  borderRadius: '50%',
-                  border: '1.5px solid rgba(255,255,255,0.95)',
-                  boxShadow: '0 0 0 1px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.35)',
-                  pointerEvents: 'none',
-                  zIndex: 3,
+                  position: 'absolute', inset: 0, width: '100%', height: '100%',
+                  cursor: 'none', touchAction: 'none',
+                  // 手型工具下让指针事件穿透到舞台，用于平移
+                  pointerEvents: panMode ? 'none' : 'auto',
                 }}
-              />
-              <div
-                style={{
-                  position: 'absolute', left: brushCursor.x, top: brushCursor.y,
-                  width: 2, height: 2, marginLeft: -1, marginTop: -1, borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.95)', boxShadow: '0 0 0 1px rgba(0,0,0,0.55)',
-                  pointerEvents: 'none', zIndex: 4,
-                }}
+                onPointerDown={startDraw}
+                onPointerMove={moveDraw}
+                onPointerUp={stopDraw}
+                onPointerCancel={stopDraw}
+                onPointerEnter={updateBrushCursor}
+                onPointerLeave={() => { if (!drawingRef.current.active) setBrushCursor(null); }}
               />
             </>
-          )}
+          ) : null}
+        </div>
+      </div>
+
+      {/* 缩放 / 平移工具条（按钮 + 百分比；图标与画布工具栏同风格） */}
+      <div
+        data-mask-view-tools
+        style={{
+          position: 'absolute', left: 10, bottom: 10, zIndex: 6,
+          display: 'inline-flex', alignItems: 'center', gap: 2, padding: 3,
+          borderRadius: 8, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          title="缩小"
+          aria-label="缩小"
+          onClick={() => zoomBy(1 / 1.25)}
+          style={{ width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer' }}
+        >
+          <ZoomOut size={14} />
+        </button>
+        <button
+          type="button"
+          title="恢复到 100%"
+          aria-label="恢复到 100%"
+          onClick={() => setView((prev) => ({ ...prev, zoom: 1 }))}
+          style={{ minWidth: 46, height: 24, padding: '0 4px', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}
+        >
+          {Math.round(view.zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          title="放大"
+          aria-label="放大"
+          onClick={() => zoomBy(1.25)}
+          style={{ width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer' }}
+        >
+          <ZoomIn size={14} />
+        </button>
+        <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.25)', margin: '0 3px' }} />
+        <button
+          type="button"
+          title="适应窗口（重置缩放与平移）"
+          aria-label="适应窗口"
+          onClick={resetView}
+          style={{ width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer' }}
+        >
+          <Maximize2 size={14} />
+        </button>
+        <button
+          type="button"
+          title="平移（手型工具：拖拽移动图片）"
+          aria-label="平移"
+          aria-pressed={panMode}
+          onClick={() => setPanMode((v) => { if (!v) setBrushCursor(null); return !v; })}
+          style={{
+            width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            border: 'none', borderRadius: 5, cursor: 'pointer',
+            background: panMode ? theme.toolbar.accent : 'transparent',
+            color: '#fff',
+          }}
+        >
+          <Hand size={14} />
+        </button>
+      </div>
+
+      {/* 笔刷大小圆环（舞台坐标系：位置含平移、直径含缩放，不会二次缩放） */}
+      {brushCursor && (
+        <>
+          <div
+            data-brush-cursor
+            style={{
+              position: 'absolute',
+              left: brushCursor.x,
+              top: brushCursor.y,
+              width: Math.max(4, brushSize * brushCursor.scale),
+              height: Math.max(4, brushSize * brushCursor.scale),
+              transform: 'translate(-50%, -50%)',
+              borderRadius: '50%',
+              border: '1.5px solid rgba(255,255,255,0.95)',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.35)',
+              pointerEvents: 'none',
+              zIndex: 5,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute', left: brushCursor.x, top: brushCursor.y,
+              width: 2, height: 2, marginLeft: -1, marginTop: -1, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.95)', boxShadow: '0 0 0 1px rgba(0,0,0,0.55)',
+              pointerEvents: 'none', zIndex: 6,
+            }}
+          />
         </>
-      ) : null}
+      )}
     </div>
   );
 
@@ -277,6 +446,34 @@ export function MaskEditDialog({
           <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
         </div>
         <Slider min={8} max={160} step={2} value={brushSize} onChange={(v) => setBrushSize(v)} />
+        {/* 笔刷预览：以 200 源像素窗口为参照等比缩放，直观看到实际笔刷相对大小 */}
+        <div
+          data-brush-preview
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, padding: '8px 10px',
+            borderRadius: 8, background: theme.toolbar.editorSurface,
+          }}
+        >
+          <div style={{
+            width: 64, height: 64, borderRadius: 8, flexShrink: 0,
+            background: 'rgba(0,0,0,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              width: Math.max(4, Math.min(56, (brushSize / 200) * 64)),
+              height: Math.max(4, Math.min(56, (brushSize / 200) * 64)),
+              borderRadius: '50%',
+              border: '1.5px solid rgba(255,255,255,0.95)',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.45)',
+            }} />
+          </div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: theme.toolbar.textMuted }}>
+            <div>笔刷预览</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text, fontVariantNumeric: 'tabular-nums' }}>
+              {brushSize} px
+            </div>
+            <div>参照 200 源像素窗口</div>
+          </div>
+        </div>
       </div>
 
       {/* 修改要求 */}
