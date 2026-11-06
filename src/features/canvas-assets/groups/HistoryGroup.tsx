@@ -18,10 +18,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App } from 'antd';
-import { Download, Film, Image as ImageIcon, LibraryBig, LocateFixed } from 'lucide-react';
+import { Download, Film, Image as ImageIcon, LibraryBig, LocateFixed, Pencil } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
-import { usePreviewImage } from '@zeroexo/plugin-nodes';
+import { usePreviewImage, nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
@@ -98,13 +98,15 @@ function ActionButton({ title, onClick, theme, children }: {
   );
 }
 
-function HistoryCard({ asset, visible, libraryHashes, onLocate, onPromote, onDownload, theme, t }: {
+function HistoryCard({ asset, visible, libraryHashes, onLocate, onPromote, onDownload, onEdit, theme, t }: {
   asset: Asset;
   visible: boolean;
   libraryHashes: Set<string>;
   onLocate: () => void;
   onPromote: () => void;
   onDownload: () => void;
+  /** 图片历史产出「编辑」：开画布图片编辑页签（视频不支持） */
+  onEdit?: () => void;
   theme: ThemeConfig;
   t: (key: string, opts?: { defaultValue?: string }) => string;
 }): React.ReactElement {
@@ -213,6 +215,11 @@ function HistoryCard({ asset, visible, libraryHashes, onLocate, onPromote, onDow
           <ActionButton title={t('common.download', { defaultValue: '下载' })} onClick={onDownload} theme={theme}>
             <Download size={14} />
           </ActionButton>
+          {!isVideo && onEdit && (
+            <ActionButton title={t('assetLibrary.editImage', { defaultValue: '编辑' })} onClick={onEdit} theme={theme}>
+              <Pencil size={14} />
+            </ActionButton>
+          )}
         </div>
       </div>
       {/* 信息区：标题 + 相对时间（hover 绝对时间）· 尺寸 · 时长 */}
@@ -312,6 +319,21 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
                     onLocate={() => handleLocate(asset)}
                     onPromote={() => handlePromote(asset)}
                     onDownload={() => void store.handleDownloadItem({ type: 'asset', data: asset })}
+                    onEdit={(asset.data as { kind?: string }).kind === 'image'
+                      ? () => {
+                        // 历史图片「编辑」：与素材抽屉同一入口（宿主建节点 + 开图片编辑页签）
+                        const d = asset.data as { storageKey?: string; dataUrl?: string; url?: string; width?: number; height?: number };
+                        nodeActionBus.emit('imageEditAsset', {
+                          nodeId: '',
+                          assetId: asset.id,
+                          title: asset.title,
+                          storageKey: d.storageKey,
+                          content: d.dataUrl || d.url,
+                          naturalWidth: d.width,
+                          naturalHeight: d.height,
+                        });
+                      }
+                      : undefined}
                     theme={theme}
                     t={t}
                   />

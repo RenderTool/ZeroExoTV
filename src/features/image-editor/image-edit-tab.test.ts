@@ -43,6 +43,9 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(material).toContain('onEditImage');
     const card = read('src/features/asset-library/cards/asset-card.tsx');
     expect(card).toContain('data-card-action="editImage"');
+    const history = read('src/features/canvas-assets/groups/HistoryGroup.tsx');
+    expect(history).toContain("nodeActionBus.emit('imageEditAsset'");
+    expect(history).toContain('onEdit');
     const host = read('src/pages/editor/editor-canvas/use-editor-interactions.ts');
     expect(host).toContain("nodeActionBus.on('imageEditAsset'");
     expect(host).toContain('openImageTab({ nodeId: id, title })');
