@@ -1165,7 +1165,6 @@
   "openLib": {
     "scopeTab": "开源库",
     "sectionTitle": "开源资产库",
-    "sectionSubtitle": "公开素材（photoai.life），只读引用",
     "noCanvasTarget": "当前没有打开的画布，可在画布内素材抽屉使用",
     "entriesCount": "{{count}} 条目",
     "categoryCount": "{{count}} 个分类",

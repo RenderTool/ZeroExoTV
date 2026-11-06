@@ -25,13 +25,10 @@ export function OpenLibraryPage(): React.ReactElement {
       display: 'flex', flexDirection: 'column', minHeight: 0,
       padding: '8px 0 0',
     }}>
-      {/* 头部：纯文字标题 + 一句副标题（任务G：无返回按钮、无装饰图标、不做横幅） */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 20px 8px', flexShrink: 0 }}>
+      {/* 头部：纯文字标题（任务G：无返回按钮、无装饰图标、不做横幅、无来源/只读说明） */}
+      <div style={{ padding: '6px 20px 8px', flexShrink: 0 }}>
         <span style={{ fontSize: 16, fontWeight: 600, color: theme.toolbar.text, whiteSpace: 'nowrap' }}>
           {t('openLib.sectionTitle')}
-        </span>
-        <span style={{ fontSize: 11, color: theme.toolbar.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {t('openLib.sectionSubtitle')}
         </span>
       </div>
       {/* 主体：与抽屉同一浏览器组件（单一定义源） */}

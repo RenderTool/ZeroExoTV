@@ -1154,7 +1154,6 @@
   "openLib": {
     "scopeTab": "Open Library",
     "sectionTitle": "Open Asset Library",
-    "sectionSubtitle": "Public assets (photoai.life), read-only",
     "noCanvasTarget": "No canvas is open — use it from the canvas asset drawer",
     "entriesCount": "{{count}} items",
     "categoryCount": "{{count}} categories",

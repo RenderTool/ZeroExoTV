@@ -1134,7 +1134,6 @@
   "openLib": {
     "scopeTab": "オープンライブラリ",
     "sectionTitle": "オープン素材ライブラリ",
-    "sectionSubtitle": "公開素材（photoai.life）、読み取り専用",
     "noCanvasTarget": "開いているキャンバスがありません。キャンバス内の素材ドロワーからご利用ください",
     "entriesCount": "{{count}} 項目",
     "categoryCount": "{{count}} カテゴリ",
