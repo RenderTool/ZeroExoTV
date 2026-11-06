@@ -11,7 +11,7 @@
  * jsdom 无法解析 ESM 目录导入 —— 与 workbench-sync.test.ts 同一规避手法)。
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, render, act, waitFor } from '@testing-library/react';
 
 // hierarchy-panel.tsx 从包级 index 引 useGraph/useSelection —— mock 为深路径 store 模块,
@@ -26,6 +26,14 @@ vi.mock('@zeroexo/plugin-nodes', () => ({
 }));
 // Bug2b 用例: 缩略图解析器可编程(模拟"派生图尚未就绪 → 就绪"时序),其余符号保留真实实现
 const persistenceState = vi.hoisted(() => ({ previewReady: false }));
+// Bug2b 用例：派生图就绪时序现在由「按变体读 Blob」的媒体链决定（字符串解析链已下线）
+const mediaChainState = vi.hoisted(() => ({ ready: false }));
+vi.mock('@/shared/media/resolve-media-blob.js', () => ({
+  resolveMediaBlob: vi.fn(async () => null),
+  resolveMediaBlobChain: async () => (
+    mediaChainState.ready ? { blob: new Blob(['preview']), origin: 'preview' } : null
+  ),
+}));
 vi.mock('@zeroexo/plugin-persistence', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@zeroexo/plugin-persistence')>();
   return {
@@ -66,6 +74,7 @@ import {
   toggleContentScale,
 } from '../../../../packages/plugins/nodes/src/utils/image-content-zoom';
 import {
+  __configureMediaUrlProviderForTests,
   IMAGE_CONTENT_UPDATED_EVENT,
   getImageContentVersion,
   bumpImageContentVersion,
@@ -280,8 +289,16 @@ describe('Bug3b 图片节点内容缩放(滚轮/双击实际改变缩放值)', (
 // 修复: uploadImage 待派生任务落定后 bumpImageContentVersion(与 setImageBlob 同一机制)。
 
 describe('Bug2b: 导入图片后层级缩略图不刷新', () => {
+  beforeEach(() => {
+    // 每个用例重置媒体 URL 提供者（会话级缓存），并给出可控 object URL
+    __configureMediaUrlProviderForTests();
+    mediaChainState.ready = false;
+    (URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => 'blob:preview-ready');
+    (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();
+  });
+
   it('派生图就绪事件到达后,同一挂载实例的 img src 更新(不重挂载)', async () => {
-    persistenceState.previewReady = false;
+    mediaChainState.ready = false;
     const v0 = getImageContentVersion('image:import-1');
 
     const { container } = render(
@@ -301,7 +318,7 @@ describe('Bug2b: 导入图片后层级缩略图不刷新', () => {
     });
 
     // 模拟 uploadImage 修复: 派生图生成完成 → bump 内容版本(派发 window 事件)
-    persistenceState.previewReady = true;
+    mediaChainState.ready = true;
     act(() => {
       bumpImageContentVersion('image:import-1');
     });
@@ -316,7 +333,7 @@ describe('Bug2b: 导入图片后层级缩略图不刷新', () => {
   });
 
   it('始终无图时保持占位图标(不渲染空白 img)', async () => {
-    persistenceState.previewReady = false;
+    mediaChainState.ready = false;
     const { container } = render(
       <HierarchyThumbnail
         storageKey="image:never-ready"

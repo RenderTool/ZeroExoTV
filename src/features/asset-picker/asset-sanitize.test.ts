@@ -17,6 +17,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import { createElement } from 'react';
+import { ThemeProvider } from '@zeroexo/plugin-theme';
 
 const mem = new Map<string, unknown>();
 
@@ -203,7 +204,7 @@ describe('⑤ 渲染兜底：无 storageKey 的媒体资产显示可读原因（
 
   it('asset-card：未落盘图片显示「该图片未落盘或文件缺失，请重新导入」', async () => {
     const { AssetCardGrid } = await import('./../asset-library/cards/asset-card.js');
-    const { container } = render(createElement(AssetCardGrid as never, {
+    const { container } = render(createElement(ThemeProvider, null, createElement(AssetCardGrid as never, {
       item: legacyImageAsset({ data: { kind: 'image', dataUrl: '', width: 1, height: 1 } }),
       multiSelectEnabled: false,
       onToggleSelect: () => {},
@@ -213,7 +214,7 @@ describe('⑤ 渲染兜底：无 storageKey 的媒体资产显示可读原因（
       onContextMenu: () => {},
       theme: { toolbar: { text: '#000', textMuted: '#888', border: '#ddd' } },
       t: (k: string, d?: string) => d ?? k,
-    } as never));
+    } as never)));
     await waitFor(() => {
       expect(container.textContent).toContain('该图片未落盘或文件缺失，请重新导入');
     });

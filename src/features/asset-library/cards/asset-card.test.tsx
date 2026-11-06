@@ -9,7 +9,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
+import { ThemeProvider } from '@zeroexo/plugin-theme';
 
 const { mediaUrlMock, authUrlMock } = vi.hoisted(() => ({
   mediaUrlMock: vi.fn(),
@@ -46,9 +47,14 @@ const ASSET = {
 
 const T = ((k: string, d?: any) => (typeof d === 'string' ? d : k)) as any;
 
+/** 卡片渲染链路使用 useTheme（usePreviewImage / MediaLightbox），测试统一包一层主题 Provider */
+function withTheme(ui: ReactElement): ReactElement {
+  return <ThemeProvider>{ui}</ThemeProvider>;
+}
+
 function renderCard(asset: any = ASSET) {
   return render(
-    <AssetCardGrid
+    withTheme(<AssetCardGrid
       item={asset}
       selected={false}
       multiSelectEnabled={false}
@@ -63,7 +69,7 @@ function renderCard(asset: any = ASSET) {
       onSendToDirector={() => undefined}
       theme={THEME}
       t={T}
-    />,
+    />),
   );
 }
 
@@ -121,7 +127,7 @@ describe('资产库卡片：悬浮动作按钮已移除', () => {
   });
 
   it('点击卡片任意位置 → 大图查看器可见且 img src 有值', () => {
-    const { container } = render(<PageLikeHarness />);
+    const { container } = render(withTheme(<PageLikeHarness />));
     expect(document.querySelector('[data-lightbox]')).toBeNull();
     // 真实 DOM 手势序列：卡片根 pointerdown → pointerup → click
     const span = container.querySelector('span') as HTMLElement;
@@ -189,7 +195,7 @@ describe('瀑布流性能（无虚拟化实测）', () => {
     }));
     const t0 = performance.now();
     render(
-      <MasonryGrid columns={5}>
+      withTheme(<MasonryGrid columns={5}>
         {items.map((item) => (
           <AssetCardGrid
             key={item.id}
@@ -206,7 +212,7 @@ describe('瀑布流性能（无虚拟化实测）', () => {
             t={T}
           />
         ))}
-      </MasonryGrid>,
+      </MasonryGrid>),
     );
     const cost = performance.now() - t0;
     // jsdom 渲染耗时（生产浏览器更快）：给宽松上限，只防“O(n²) 级别的实现退化”

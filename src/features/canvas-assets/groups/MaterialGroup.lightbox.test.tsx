@@ -33,6 +33,7 @@ vi.mock('@/shared/components/asset-detail-viewer.js', () => ({
   AssetDetailViewer: () => <div data-asset-detail />,
 }));
 
+import { ThemeProvider } from '@zeroexo/plugin-theme';
 import { MaterialGroup } from './MaterialGroup.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
 
@@ -105,9 +106,11 @@ describe('素材抽屉卡片：完整 pointer 序列 → 查看器真实可见',
   it('对卡片根派发 pointerdown/pointerup/click → lightbox 存在 + src 非空 + ESC 关闭', async () => {
     const store = makeStore();
     const { container } = render(
-      <App>
-        <MaterialGroup store={store} theme={THEME} />
-      </App>,
+      <ThemeProvider>
+        <App>
+          <MaterialGroup store={store} theme={THEME} />
+        </App>
+      </ThemeProvider>,
     );
 
     await waitFor(() => expect(container.textContent).toContain('素材 1'));
@@ -164,9 +167,11 @@ describe('素材抽屉卡片：完整 pointer 序列 → 查看器真实可见',
   it('抽屉 drop 外部文件 → 走同一 handleUpload，一次且文件数正确；不支持格式给可读原因', async () => {
     const store = makeStore();
     const { container } = render(
-      <App>
-        <MaterialGroup store={store} theme={THEME} />
-      </App>,
+      <ThemeProvider>
+        <App>
+          <MaterialGroup store={store} theme={THEME} />
+        </App>
+      </ThemeProvider>,
     );
     await waitFor(() => expect(container.textContent).toContain('素材 1'));
     const zone = container.querySelector('[data-upload-dropzone]') as HTMLElement;
