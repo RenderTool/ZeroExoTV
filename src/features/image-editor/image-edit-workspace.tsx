@@ -1,12 +1,13 @@
 /**
  * ImageEditWorkspace - 图片编辑独立页签（2026-11-06 用户定稿：像 Photoshop 一样编辑该图）
  *
- * 结构：顶部工具栏（裁剪 / 分割 / 局部遮罩 + 返回画布）+ 中间编辑舞台。
- * 编辑器内容体复用插件包 `inline` 模式（与浮层同一份 UI，不写第二套）；
- * 确认后产物照旧落回画布（裁剪/分割生成子节点 + 连线），随后关闭页签返回画布。
+ * 结构：顶部工具栏（裁剪 / 分割 / 局部遮罩 + 返回画布）+ 编辑工作区（左侧画布舞台 / 右侧属性面板，
+ * 由各编辑器 inline 布局提供）。编辑器内容体复用插件包 `inline` 模式，不写第二套 UI。
  *
- * 为什么改成独立页签（用户口径）：编辑有完整工作区与自己的工具栏，不挤压节点尺寸，
- * 节点本身永远不会因为编辑而改变大小或状态。
+ * 两种来源：
+ * - `node`：编辑画布上的图片节点，输出落在该节点右侧（与旧逻辑一致）；
+ * - `asset`：抽屉素材/历史产出直接编辑，**不先把资产加成画布节点**；确认输出时才在
+ *   视口中心附近创建结果节点（"编辑结果落在画布"）。
  */
 
 import { useMemo, useState } from 'react';
@@ -22,14 +23,33 @@ import { applyCrop, applySplit } from './image-edit-actions.js';
 
 export type ImageEditTool = 'crop' | 'split' | 'maskEdit';
 
-export interface ImageEditWorkspaceProps {
+export interface ImageEditNodeSource {
+  kind: 'node';
   node: NodeRecord;
-  /** 进入页签时默认工具（点胶囊哪个按钮就进哪个） */
+}
+
+export interface ImageEditAssetSource {
+  kind: 'asset';
+  assetId: string;
+  title: string;
+  storageKey?: string;
+  content?: string;
+  naturalWidth?: number;
+  naturalHeight?: number;
+}
+
+export type ImageEditSource = ImageEditNodeSource | ImageEditAssetSource;
+
+export interface ImageEditWorkspaceProps {
+  source: ImageEditSource;
+  /** 进入页签时默认工具（点哪个入口就进哪个） */
   initialMode?: ImageEditTool;
   theme: ThemeConfig;
   commandQueue: CommandQueue;
   /** 关闭页签并回到画布 */
   onClose: () => void;
+  /** 资产来源：输出节点落点（视口中心的世界坐标）；缺省回退画布原点 */
+  getInsertOrigin?: () => { x: number; y: number };
   onNodesCreated?: (nodeIds: string[]) => void;
   onGetNodeTitle?: (type: string, batchIndex?: number, baseCount?: number) => string;
 }
@@ -41,11 +61,12 @@ const TOOLS: { id: ImageEditTool; labelKey: string; fallback: string; icon: Reac
 ];
 
 export function ImageEditWorkspace({
-  node,
+  source,
   initialMode = 'crop',
   theme,
   commandQueue,
   onClose,
+  getInsertOrigin,
   onNodesCreated,
   onGetNodeTitle,
 }: ImageEditWorkspaceProps): React.ReactElement {
@@ -53,11 +74,34 @@ export function ImageEditWorkspace({
   const { message } = App.useApp();
   const [mode, setMode] = useState<ImageEditTool>(initialMode);
 
-  const rawDataUrl = (node.data as { content?: string } | undefined)?.content ?? '';
-  const storageKey = (node.data as { storageKey?: string } | undefined)?.storageKey;
+  const nodeSource = source.kind === 'node' ? source : null;
+  const assetSource = source.kind === 'asset' ? source : null;
+  const node = nodeSource?.node ?? null;
+  const nodeData = (node?.data ?? {}) as { content?: string; storageKey?: string; title?: string };
+  const storageKey = nodeSource ? nodeData.storageKey : assetSource?.storageKey;
+  const rawDataUrl = nodeSource ? (nodeData.content ?? '') : (assetSource?.content ?? '');
   const dataUrl = useHydratedContent(storageKey, rawDataUrl);
+  const title = nodeSource
+    ? (nodeSource.node.title || nodeData.title || t('imageEditor.tabTitle', '图片编辑'))
+    : (assetSource?.title ?? t('imageEditor.tabTitle', '图片编辑'));
 
-  const title = node.title || (node.data as { title?: string } | undefined)?.title || t('imageEditor.tabTitle', '图片编辑');
+  /** 输出用的源节点：资产来源在确认时才用视口中心生成一个虚拟原点，不往画布写源节点 */
+  const resolveEditNode = (): NodeRecord => {
+    if (node) return node;
+    const origin = getInsertOrigin?.() ?? { x: 0, y: 0 };
+    const width = 360;
+    const asset = source as ImageEditAssetSource;
+    const ratio = asset.naturalWidth && asset.naturalHeight ? asset.naturalHeight / asset.naturalWidth : 0.6;
+    const height = Math.max(160, Math.round(width * ratio));
+    return {
+      id: `asset-edit-${asset.assetId}`,
+      type: 'image',
+      title: asset.title,
+      position: origin,
+      size: { width, height },
+      data: { prompt: '' },
+    } as unknown as NodeRecord;
+  };
 
   const toolBar = useMemo(() => (
     <div
@@ -99,7 +143,7 @@ export function ImageEditWorkspace({
   const handleCrop = async (crop: CropRect): Promise<void> => {
     if (!dataUrl) return;
     try {
-      await applyCrop({ node, commandQueue, dataUrl, rect: crop, onGetNodeTitle });
+      await applyCrop({ node: resolveEditNode(), commandQueue, dataUrl, rect: crop, onGetNodeTitle });
       onClose();
     } catch (err) {
       console.error('[ImageEditWorkspace] crop failed:', err);
@@ -110,7 +154,7 @@ export function ImageEditWorkspace({
   const handleSplit = async (params: SplitParams): Promise<void> => {
     if (!dataUrl) return;
     try {
-      await applySplit({ node, commandQueue, dataUrl, params, onNodesCreated, onGetNodeTitle });
+      await applySplit({ node: resolveEditNode(), commandQueue, dataUrl, params, onNodesCreated, onGetNodeTitle });
       onClose();
     } catch (err) {
       console.error('[ImageEditWorkspace] split failed:', err);
@@ -143,10 +187,8 @@ export function ImageEditWorkspace({
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: theme.canvas.background, color: theme.toolbar.text }}>
       {toolBar}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', alignItems: 'stretch', padding: 16, overflow: 'auto' }}>
-        <div style={{ flex: 1, minWidth: 0, maxWidth: 1080, display: 'flex', flexDirection: 'column' }}>
-          {editor}
-        </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 16 }}>
+        {editor}
       </div>
     </div>
   );

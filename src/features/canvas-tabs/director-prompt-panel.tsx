@@ -1178,6 +1178,28 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   );
   const isDuplicate = useCallback((assetId: string) => currentIdSet.has(assetId), [currentIdSet]);
 
+  /** 插槽拖拽互换：把 A 拖到 B 上 = 两个槽位的内容互换，槽号不动（@引用跟着槽号指向新内容） */
+  const swapSlotAssets = useCallback((sourceAssetId: string, targetAssetId: string) => {
+    if (sourceAssetId === targetAssetId) return;
+    const refs = [...(shot.references ?? [])];
+    const i = refs.findIndex((r) => r.id === sourceAssetId);
+    const j = refs.findIndex((r) => r.id === targetAssetId);
+    if (i < 0 || j < 0) return;
+    const a = refs[i]!;
+    const b = refs[j]!;
+    const aSlot = a.slotNo;
+    const bSlot = b.slotNo;
+    // 槽号 pin 跟着"格子"走：内容换位后仍占原来的槽号
+    refs[i] = { ...b, slotNo: aSlot ?? bSlot };
+    refs[j] = { ...a, slotNo: bSlot ?? aSlot };
+    onShotChange({ references: refs });
+    const aLabel = slotInfo.byAssetId[a.id]?.label;
+    const bLabel = slotInfo.byAssetId[b.id]?.label;
+    if (aLabel && bLabel) {
+      message.success(t('director.slotSwapped', '已交换 {{a}} 与 {{b}}', { a: aLabel, b: bLabel }));
+    }
+  }, [shot.references, onShotChange, slotInfo, message, t]);
+
   /** 槽位格渲染（单行素材池，槽位全部属于当前片段、从 1 连续编号）：
    *  已填槽位默认只显示首帧/缩略图，hover 浮出大图（视频可播、音频可控）+名称；点已填槽位 = 替换该槽位；右上角 × 移除 */
   const renderSlotCells = (assets: DirectorAssetRef[]) => assets.map((a) => {
@@ -1192,18 +1214,29 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         data-slot-filled={a.id}
         onClick={() => { setReplaceTarget(a.id); setAssetPanelOpen(true); }}
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes(DIRECTOR_ASSET_DRAG_MIME)) return;
+          const canReplace = e.dataTransfer.types.includes(DIRECTOR_ASSET_DRAG_MIME);
+          const canSwap = e.dataTransfer.types.includes(DIRECTOR_SLOT_DRAG_MIME);
+          if (!canReplace && !canSwap) return;
           e.preventDefault();
           e.stopPropagation();
-          e.dataTransfer.dropEffect = 'copy';
+          e.dataTransfer.dropEffect = canSwap ? 'move' : 'copy';
         }}
         onDrop={(e) => {
-          const raw = e.dataTransfer.getData(DIRECTOR_ASSET_DRAG_MIME);
-          if (!raw) return;
           e.preventDefault();
           e.stopPropagation();
+          // 插槽 → 插槽：整格互换（内容换位、槽号固定）
+          const slotRaw = e.dataTransfer.getData(DIRECTOR_SLOT_DRAG_MIME);
+          if (slotRaw) {
+            try {
+              const payload = JSON.parse(slotRaw) as { assetId?: string };
+              if (payload.assetId) swapSlotAssets(payload.assetId, a.id);
+            } catch { /* 非法 payload 忽略 */ }
+            return;
+          }
+          // 素材面板条目 → 插槽：纯替换（槽位号固定不变，只换内容）
+          const raw = e.dataTransfer.getData(DIRECTOR_ASSET_DRAG_MIME);
+          if (!raw) return;
           try {
-            // 纯替换：槽位号固定不变，只换内容（@ 引用同步跟新资产）
             replaceSlotAssetAt(a.id, JSON.parse(raw) as DirectorAssetRef);
           } catch { /* 非法 payload 忽略 */ }
         }}

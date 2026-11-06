@@ -40,6 +40,13 @@ describe('导演台插槽拖动替换（槽号固定）', () => {
     expect(panel).toContain('slotNo: newRef.slotNo ?? slotInfo.byAssetId[targetId]?.slot');
   });
 
+  it('插槽之间拖拽互换（内容换位、槽号固定）', () => {
+    expect(panel).toContain('swapSlotAssets');
+    expect(panel).toContain('slotSwapped');
+    expect(panel).toContain('const canSwap = e.dataTransfer.types.includes(DIRECTOR_SLOT_DRAG_MIME)');
+    expect(panel).toContain('refs[i] = { ...b, slotNo: aSlot ?? bSlot }');
+  });
+
   it('素材面板条目可拖拽（拖到插槽格替换）', () => {
     expect(panel).toContain('draggable={!!ref}');
     expect(panel).toContain('setData(DIRECTOR_ASSET_DRAG_MIME');

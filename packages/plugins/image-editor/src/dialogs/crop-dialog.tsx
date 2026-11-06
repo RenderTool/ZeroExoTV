@@ -181,102 +181,97 @@ export function CropDialog({ dataUrl, open, onClose, onConfirm, theme, inline }:
       <Button type="primary" onClick={() => onConfirm(crop)}>确认裁剪</Button>
     </div>
   );
-  const content = (
-      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-        {/* 图片 + 裁剪框 */}
-        <div
-          ref={boxRef}
-          style={{
-            position: 'relative',
-            display: 'inline-block',
-            overflow: 'hidden',
-            borderRadius: 10,
-            background: theme.toolbar.editorSurface,
-            userSelect: 'none',
-            maxWidth: 540,
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          <img
-            src={dataUrl}
-            alt="crop"
-            draggable={false}
-            style={{ display: 'block', maxWidth: '100%', maxHeight: '60vh' }}
-          />
-          {/* 4 块遮罩(裁剪框外) */}
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-            <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: `${crop.y * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
-            <div style={{ position: 'absolute', left: 0, bottom: 0, right: 0, height: `${(1 - crop.y - crop.height) * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
-            <div style={{ position: 'absolute', left: 0, top: `${crop.y * 100}%`, width: `${crop.x * 100}%`, height: `${crop.height * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
-            <div style={{ position: 'absolute', right: 0, top: `${crop.y * 100}%`, width: `${(1 - crop.x - crop.width) * 100}%`, height: `${crop.height * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
-          </div>
-          {/* 裁剪框 */}
-          <div
-            style={{
-              position: 'absolute',
-              left: `${crop.x * 100}%`,
-              top: `${crop.y * 100}%`,
-              width: `${crop.width * 100}%`,
-              height: `${crop.height * 100}%`,
-              border: '2px solid #fff',
-              boxSizing: 'border-box',
-              cursor: 'move',
-              touchAction: 'none',
-            }}
-            onPointerDown={(e) => startDrag('move', e)}
-          >
-            {/* 九宫格辅助线 */}
-            <div style={{ position: 'absolute', left: '33.33%', top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.4)' }} />
-            <div style={{ position: 'absolute', left: '66.66%', top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.4)' }} />
-            <div style={{ position: 'absolute', top: '33.33%', left: 0, right: 0, borderTop: '1px solid rgba(255,255,255,0.4)' }} />
-            <div style={{ position: 'absolute', top: '66.66%', left: 0, right: 0, borderTop: '1px solid rgba(255,255,255,0.4)' }} />
-            {/* 8 手柄 */}
-            {HANDLES.map((h) => (
-              <div
-                key={h}
-                style={handleStyle(h)}
-                onPointerDown={(e) => startDrag('resize', e, h)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* 信息面板 — 无边框,背景分层 */}
-        <div style={{ width: 200, display: 'flex', flexDirection: 'column', gap: 10, background: theme.toolbar.editorSurface, borderRadius: 10, padding: '14px 16px', flexShrink: 0 }}>
-          <div style={infoRowStyle}>
-            <span>裁剪尺寸</span>
-            <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{cropWidthPx} × {cropHeightPx}</span>
-          </div>
-          <div style={infoRowStyle}>
-            <span>比例</span>
-            <span style={{ fontWeight: 600, color: theme.toolbar.text }}>
-              {cropWidthPx > 0 && cropHeightPx > 0 ? formatRatio(cropWidthPx, cropHeightPx) : '-'}
-            </span>
-          </div>
-          {image && (
-            <div style={infoRowStyle}>
-              <span>原图</span>
-              <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{image.width} × {image.height}</span>
-            </div>
-          )}
-          <Button
-            type={locked ? 'primary' : 'default'}
-            icon={locked ? <Lock size={13} /> : <Unlock size={13} />}
-            onClick={() => setLocked(!locked)}
-            style={{ marginTop: 4 }}
-          >
-            {locked ? '锁比例' : '自由比例'}
-          </Button>
-        </div>
+  const imageBox = (
+    <div
+      ref={boxRef}
+      style={{
+        position: 'relative',
+        display: 'inline-block',
+        overflow: 'hidden',
+        borderRadius: 10,
+        background: theme.toolbar.editorSurface,
+        userSelect: 'none',
+        maxWidth: inline ? '100%' : 540,
+      }}
+    >
+      <img
+        src={dataUrl}
+        alt="crop"
+        draggable={false}
+        style={{ display: 'block', maxWidth: '100%', maxHeight: inline ? 'calc(100vh - 230px)' : '60vh' }}
+      />
+      {/* 4 块遮罩(裁剪框外) */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: `${crop.y * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
+        <div style={{ position: 'absolute', left: 0, bottom: 0, right: 0, height: `${(1 - crop.y - crop.height) * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
+        <div style={{ position: 'absolute', left: 0, top: `${crop.y * 100}%`, width: `${crop.x * 100}%`, height: `${crop.height * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
+        <div style={{ position: 'absolute', right: 0, top: `${crop.y * 100}%`, width: `${(1 - crop.x - crop.width) * 100}%`, height: `${crop.height * 100}%`, background: 'rgba(0,0,0,0.55)' }} />
       </div>
+      {/* 裁剪框 */}
+      <div
+        style={{
+          position: 'absolute',
+          left: `${crop.x * 100}%`,
+          top: `${crop.y * 100}%`,
+          width: `${crop.width * 100}%`,
+          height: `${crop.height * 100}%`,
+          border: '2px solid #fff',
+          boxSizing: 'border-box',
+          cursor: 'move',
+          touchAction: 'none',
+        }}
+        onPointerDown={(e) => startDrag('move', e)}
+      >
+        <div style={{ position: 'absolute', left: '33.33%', top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.4)' }} />
+        <div style={{ position: 'absolute', left: '66.66%', top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.4)' }} />
+        <div style={{ position: 'absolute', top: '33.33%', left: 0, right: 0, borderTop: '1px solid rgba(255,255,255,0.4)' }} />
+        <div style={{ position: 'absolute', top: '66.66%', left: 0, right: 0, borderTop: '1px solid rgba(255,255,255,0.4)' }} />
+        {HANDLES.map((h) => (
+          <div key={h} style={handleStyle(h)} onPointerDown={(e) => startDrag('resize', e, h)} />
+        ))}
+      </div>
+    </div>
+  );
+
+  const infoPanel = (
+    <>
+      <div style={infoRowStyle}>
+        <span>裁剪尺寸</span>
+        <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{cropWidthPx} × {cropHeightPx}</span>
+      </div>
+      <div style={infoRowStyle}>
+        <span>比例</span>
+        <span style={{ fontWeight: 600, color: theme.toolbar.text }}>
+          {cropWidthPx > 0 && cropHeightPx > 0 ? formatRatio(cropWidthPx, cropHeightPx) : '-'}
+        </span>
+      </div>
+      {image && (
+        <div style={infoRowStyle}>
+          <span>原图</span>
+          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{image.width} × {image.height}</span>
+        </div>
+      )}
+      <Button
+        type={locked ? 'primary' : 'default'}
+        icon={locked ? <Lock size={13} /> : <Unlock size={13} />}
+        onClick={() => setLocked(!locked)}
+        style={{ marginTop: 4 }}
+      >
+        {locked ? '锁比例' : '自由比例'}
+      </Button>
+    </>
   );
 
   if (inline) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{content}</div>
-        {actions}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 16 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 20, overflow: 'auto' }}>
+          {imageBox}
+        </div>
+        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, background: theme.toolbar.editorSurface, borderRadius: 12, padding: 16 }}>
+          {infoPanel}
+          <div style={{ marginTop: 'auto' }}>{actions}</div>
+        </div>
       </div>
     );
   }
@@ -295,7 +290,12 @@ export function CropDialog({ dataUrl, open, onClose, onConfirm, theme, inline }:
       }}
       footer={actions}
     >
-      {content}
+      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>{imageBox}</div>
+        <div style={{ width: 200, display: 'flex', flexDirection: 'column', gap: 10, background: theme.toolbar.editorSurface, borderRadius: 10, padding: '14px 16px', flexShrink: 0 }}>
+          {infoPanel}
+        </div>
+      </div>
     </Modal>
   );
 }

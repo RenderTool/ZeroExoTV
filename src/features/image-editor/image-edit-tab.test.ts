@@ -48,7 +48,10 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(history).toContain('onEdit');
     const host = read('src/pages/editor/editor-canvas/use-editor-interactions.ts');
     expect(host).toContain("nodeActionBus.on('imageEditAsset'");
-    expect(host).toContain('openImageTab({ nodeId: id, title })');
+    // 资产来源：直接开页签，不预先把资产加成画布节点
+    expect(host).toContain('useCanvasTabStore.getState().openImageTab({');
+    expect(host).toContain('asset: {');
+    expect(host).not.toContain('store.selectNodes([id], false)');
   });
 
   it('页签 store 支持图片页签（打开/关闭/激活校验）', () => {
@@ -79,7 +82,8 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
   it('editor-page 挂载编辑页签层，且不与剧本/导演台内容层叠加', () => {
     const page = read('src/pages/editor/editor-canvas/editor-page.tsx');
     expect(page).toContain('<ImageEditWorkspace');
-    expect(page).toContain('imageTabNodeId(activeTabKey)');
+    expect(page).toContain('editingImageTab');
+    expect(page).toContain('source={editingImageSource}');
     expect(page).toContain('data-image-edit-host');
     expect(page).toContain('!isImageTabKey(activeTabKey)');
   });
@@ -91,6 +95,16 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(view).not.toContain('MaskEditDialog');
     expect(exists('packages/plugins/nodes/src/utils/image-edit-state.ts')).toBe(false);
     expect(exists('src/features/image-editor/node-image-editor.tsx')).toBe(false);
+  });
+
+  it('编辑器为 Photoshop 式页面布局（画布舞台 + 右侧属性面板）', () => {
+    const crop = read('packages/plugins/image-editor/src/dialogs/crop-dialog.tsx');
+    expect(crop).toContain("inline ? 'calc(100vh - 230px)'");
+    expect(crop).toContain("width: 280");
+    const split = read('packages/plugins/image-editor/src/dialogs/split-dialog.tsx');
+    expect(split).toContain("inline ? 'calc(100vh - 230px)'");
+    const mask = read('packages/plugins/image-editor/src/dialogs/mask-edit-dialog.tsx');
+    expect(mask).toContain("inline ? 'calc(100vh - 230px)'");
   });
 
   it('居中渲染器只保留只读/参数型 case', () => {

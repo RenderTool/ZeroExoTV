@@ -7,6 +7,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   CANVAS_TAB_KEY,
+  imageAssetTabKeyFor,
+  imageTabAssetId,
   imageTabKeyFor,
   imageTabNodeId,
   isImageTabKey,
@@ -62,11 +64,27 @@ describe('图片编辑页签', () => {
     expect(useCanvasTabStore.getState().openImageTabs).toHaveLength(0);
   });
 
+  it('资产来源：key = image:asset:<id>，节点/资产解析互不串', () => {
+    const store = useCanvasTabStore.getState();
+    store.openImageTab({ asset: { assetId: 'a1', storageKey: 'k1' }, title: '素材图', mode: 'crop' });
+    const key = imageAssetTabKeyFor('a1');
+    expect(useCanvasTabStore.getState().activeTabKey).toBe(key);
+    expect(imageTabNodeId(key)).toBeNull();
+    expect(imageTabAssetId(key)).toBe('a1');
+    expect(useCanvasTabStore.getState().openImageTabs[0]?.asset?.storageKey).toBe('k1');
+
+    // 关闭回画布
+    store.closeImageTab(key);
+    expect(useCanvasTabStore.getState().activeTabKey).toBe(CANVAS_TAB_KEY);
+  });
+
   it('key 工具函数口径一致', () => {
     expect(imageTabKeyFor('n1')).toBe('image:n1');
     expect(isImageTabKey('image:n1')).toBe(true);
     expect(isImageTabKey('canvas:sc1')).toBe(false);
     expect(imageTabNodeId('image:n1')).toBe('n1');
     expect(imageTabNodeId('canvas')).toBeNull();
+    expect(imageTabAssetId('image:asset:a1')).toBe('a1');
+    expect(imageTabAssetId('image:n1')).toBeNull();
   });
 });

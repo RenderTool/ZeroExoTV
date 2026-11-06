@@ -1321,7 +1321,8 @@ export function useEditorInteractions({
       });
     });
 
-    // 抽屉图片资产「编辑」→ 先在画布建一个图片节点，再打开图片编辑页签（结果落回画布）
+    // 抽屉图片资产「编辑」→ 直接开**资产来源**的图片编辑页签（不预先把资产加成画布节点）；
+    // 编辑结果（裁剪/分割）确认时才落回画布，位置取视口中心。
     const unsubEditImageAsset = nodeActionBus.on('imageEditAsset', (event) => {
       const payload = event as unknown as {
         assetId?: string;
@@ -1331,39 +1332,18 @@ export function useEditorInteractions({
         naturalWidth?: number;
         naturalHeight?: number;
       };
-      const store = refs.store;
-      const queue = refs.commandQueue;
-      if (!store || !queue) return;
-      const vp = store.getViewport();
-      const el = containerRef.current;
-      const viewW = el?.clientWidth ?? 800;
-      const viewH = el?.clientHeight ?? 600;
-      const k = vp.k > 0 ? vp.k : 1;
-      const worldX = (viewW / 2 - vp.x) / k;
-      const worldY = (viewH / 2 - vp.y) / k;
-      const nodeW = 360;
-      const ratio = payload.naturalWidth && payload.naturalHeight
-        ? payload.naturalHeight / payload.naturalWidth
-        : 0.6;
-      const nodeH = Math.max(160, Math.round(nodeW * ratio));
-      const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const title = payload.title || '图片';
-      queue.execute(new AddNodeCommand({
-        id,
-        type: 'image',
-        title,
-        position: { x: Math.round(worldX - nodeW / 2), y: Math.round(worldY - nodeH / 2) },
-        size: { width: nodeW, height: nodeH },
-        data: {
-          content: payload.content,
+      if (!payload.assetId) return;
+      useCanvasTabStore.getState().openImageTab({
+        asset: {
+          assetId: payload.assetId,
           storageKey: payload.storageKey,
-          status: 'success',
+          content: payload.content,
           naturalWidth: payload.naturalWidth,
           naturalHeight: payload.naturalHeight,
         },
-      } as NodeRecord));
-      store.selectNodes([id], false);
-      useCanvasTabStore.getState().openImageTab({ nodeId: id, title });
+        title: payload.title,
+        mode: 'crop',
+      });
     });
 
     // Plan#74 Phase D：存量长文本(assetId → text: 本地资源)一次性迁移（幂等，会话级按项目守卫）

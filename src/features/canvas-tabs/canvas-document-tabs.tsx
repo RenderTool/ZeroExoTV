@@ -166,7 +166,7 @@ export function CanvasDocumentTabs(): React.ReactElement | null {
               type="button"
               role="tab"
               aria-selected={active}
-              data-image-doc-tab={tab.nodeId}
+              data-image-doc-tab={tab.nodeId ?? tab.asset?.assetId}
               onClick={() => activateTab(tab.key)}
               style={tabStyle(active)}
               title={tab.title}
@@ -177,7 +177,7 @@ export function CanvasDocumentTabs(): React.ReactElement | null {
                 role="button"
                 tabIndex={0}
                 aria-label={t('canvasTab.close', '关闭页签')}
-                data-image-doc-close={tab.nodeId}
+                data-image-doc-close={tab.nodeId ?? tab.asset?.assetId}
                 style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   width: 16, height: 16, padding: 0, borderRadius: 4,

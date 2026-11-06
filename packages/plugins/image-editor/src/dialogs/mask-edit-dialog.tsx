@@ -171,93 +171,98 @@ export function MaskEditDialog({
       <Button type="primary" icon={<Sparkles size={13} />} onClick={submit}>AI 修改</Button>
     </div>
   );
-  const content = (
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) 300px', gap: 20 }}>
-        {/* 左侧:图片 + 双 canvas 蒙版 */}
-        <div style={{ display: 'flex', minHeight: 360, alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: theme.toolbar.editorSurface, padding: 12 }}>
-          <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', userSelect: 'none' }}>
-            <img
-              src={dataUrl}
-              alt=""
-              draggable={false}
-              style={{ display: 'block', maxHeight: '68vh', maxWidth: '100%' }}
-            />
-            {image ? (
-              <>
-                <canvas
-                  ref={maskCanvasRef}
-                  width={image.width}
-                  height={image.height}
-                  style={{ display: 'none' }}
-                />
-                <canvas
-                  ref={previewCanvasRef}
-                  width={image.width}
-                  height={image.height}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'crosshair', touchAction: 'none' }}
-                  onPointerDown={startDraw}
-                  onPointerMove={moveDraw}
-                  onPointerUp={stopDraw}
-                  onPointerCancel={stopDraw}
-                />
-              </>
-            ) : null}
-          </div>
-        </div>
+  const stage = (
+    <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', userSelect: 'none' }}>
+      <img
+        src={dataUrl}
+        alt=""
+        draggable={false}
+        style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : '68vh', maxWidth: '100%' }}
+      />
+      {image ? (
+        <>
+          <canvas ref={maskCanvasRef} width={image.width} height={image.height} style={{ display: 'none' }} />
+          <canvas
+            ref={previewCanvasRef}
+            width={image.width}
+            height={image.height}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'crosshair', touchAction: 'none' }}
+            onPointerDown={startDraw}
+            onPointerMove={moveDraw}
+            onPointerUp={stopDraw}
+            onPointerCancel={stopDraw}
+          />
+        </>
+      ) : null}
+    </div>
+  );
 
-        {/* 右侧:工具 + 参数 */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minHeight: 360 }}>
-          <div style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
-            {image ? `${image.width} × ${image.height} px` : '读取中'}
-          </div>
-
-          {/* 画笔/橡皮擦切换 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <button type="button" onClick={() => setMode('paint')} style={modeBtnStyle(mode === 'paint')}>
-              <Brush size={13} /> 画笔
-            </button>
-            <button type="button" onClick={() => setMode('erase')} style={modeBtnStyle(mode === 'erase')}>
-              <Eraser size={13} /> 擦除
-            </button>
-          </div>
-
-          {/* 笔刷大小 */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 4 }}>
-              <span>笔刷大小</span>
-              <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
-            </div>
-            <Slider min={8} max={160} step={2} value={brushSize} onChange={(v) => setBrushSize(v)} />
-          </div>
-
-          {/* 修改要求 */}
-          <div>
-            <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 6 }}>修改要求</div>
-            <Input.TextArea
-              rows={6}
-              value={prompt}
-              placeholder="例如:把选中区域改成金属材质,保持原图光影"
-              onChange={(e) => {
-                setPrompt(e.target.value);
-                setError('');
-              }}
-              status={error && !prompt.trim() ? 'error' : undefined}
-            />
-            {error ? (
-              <div style={{ fontSize: 12, color: theme.toolbar.danger, marginTop: 6, fontWeight: 500 }}>{error}</div>
-            ) : null}
-          </div>
-        </div>
+  const toolsPanel = (
+    <>
+      <div style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
+        {image ? `${image.width} × ${image.height} px` : '读取中'}
       </div>
+
+      {/* 画笔/橡皮擦切换 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <button type="button" onClick={() => setMode('paint')} style={modeBtnStyle(mode === 'paint')}>
+          <Brush size={13} /> 画笔
+        </button>
+        <button type="button" onClick={() => setMode('erase')} style={modeBtnStyle(mode === 'erase')}>
+          <Eraser size={13} /> 擦除
+        </button>
+      </div>
+
+      {/* 笔刷大小 */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 4 }}>
+          <span>笔刷大小</span>
+          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
+        </div>
+        <Slider min={8} max={160} step={2} value={brushSize} onChange={(v) => setBrushSize(v)} />
+      </div>
+
+      {/* 修改要求 */}
+      <div>
+        <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 6 }}>修改要求</div>
+        <Input.TextArea
+          rows={6}
+          value={prompt}
+          placeholder="例如:把选中区域改成金属材质,保持原图光影"
+          onChange={(e) => {
+            setPrompt(e.target.value);
+            setError('');
+          }}
+          status={error && !prompt.trim() ? 'error' : undefined}
+        />
+        {error ? (
+          <div style={{ fontSize: 12, color: theme.toolbar.danger, marginTop: 6, fontWeight: 500 }}>{error}</div>
+        ) : null}
+      </div>
+    </>
+  );
+
+  const content = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) 300px', gap: 20 }}>
+      <div style={{ display: 'flex', minHeight: 360, alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: theme.toolbar.editorSurface, padding: 12 }}>
+        {stage}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minHeight: 360 }}>{toolsPanel}</div>
+    </div>
   );
 
   if (!open) return null;
 
   if (inline) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{content}</div>
-        {actions}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 16 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 20, overflow: 'auto' }}>
+          {stage}
+        </div>
+        <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, background: theme.toolbar.editorSurface, borderRadius: 12, padding: 16, overflowY: 'auto' }}>
+          {toolsPanel}
+          <div style={{ marginTop: 'auto' }}>{actions}</div>
+        </div>
       </div>
     );
   }

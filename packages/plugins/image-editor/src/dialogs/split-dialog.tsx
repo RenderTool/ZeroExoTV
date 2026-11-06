@@ -166,98 +166,102 @@ export function SplitDialog({
       </Button>
     </div>
   );
+  const subtitle = (
+    <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 12 }}>
+      按网格拆分,子节点自动排列到画布 · 可拖拽分割线微调
+    </div>
+  );
+
+  const imageBlock = (
+    <div ref={imgBoxRef} style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', userSelect: 'none' }}>
+      <img
+        src={dataUrl}
+        alt=""
+        draggable={false}
+        style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : 340, maxWidth: '100%', objectFit: 'contain' }}
+      />
+      {/* 列分割线(可拖拽) */}
+      <div style={{ position: 'absolute', inset: 0 }}>
+        {columnBreaks.map((b, i) => (
+          <div key={`col-${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${b * 100}%`, width: 0 }}>
+            <div
+              style={{
+                position: 'absolute', top: 0, bottom: 0, left: -1, width: 2,
+                background: 'rgba(255,255,255,0.9)', boxShadow: '0 0 0 1px rgba(0,0,0,0.35)', pointerEvents: 'none',
+              }}
+            />
+            <div
+              onPointerDown={startDrag('col', i)}
+              style={{ position: 'absolute', top: 0, bottom: 0, left: -6, width: 12, cursor: 'col-resize', touchAction: 'none' }}
+            />
+          </div>
+        ))}
+        {rowBreaks.map((b, i) => (
+          <div key={`row-${i}`} style={{ position: 'absolute', left: 0, right: 0, top: `${b * 100}%`, height: 0 }}>
+            <div
+              style={{
+                position: 'absolute', left: 0, right: 0, top: -1, height: 2,
+                background: 'rgba(255,255,255,0.9)', boxShadow: '0 0 0 1px rgba(0,0,0,0.35)', pointerEvents: 'none',
+              }}
+            />
+            <div
+              onPointerDown={startDrag('row', i)}
+              style={{ position: 'absolute', left: 0, right: 0, top: -6, height: 12, cursor: 'row-resize', touchAction: 'none' }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const originalRow = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginTop: 10 }}>
+      <span>原图</span>
+      <span style={{ fontWeight: 600, color: theme.toolbar.text }}>
+        {image ? `${image.width} × ${image.height} px` : '读取中'}
+      </span>
+    </div>
+  );
+
+  const paramsPanel = (
+    <>
+      <div>
+        <span style={labelStyle}>行数</span>
+        <InputNumber min={1} max={MAX_GRID_SIZE} step={1} value={rows} onChange={(v) => updateRows(Number(v ?? 1))} style={{ width: '100%' }} />
+      </div>
+      <div>
+        <span style={labelStyle}>列数</span>
+        <InputNumber min={1} max={MAX_GRID_SIZE} step={1} value={columns} onChange={(v) => updateColumns(Number(v ?? 1))} style={{ width: '100%' }} />
+      </div>
+      <div style={{ background: surface, borderRadius: 10, padding: '12px 14px', fontSize: 13, color: theme.toolbar.textMuted, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={summaryRowStyle}>
+          <span>子节点</span>
+          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{total} 个</span>
+        </div>
+        <div style={summaryRowStyle}>
+          <span>单块约</span>
+          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>
+            {pieceSize ? `${pieceSize.width} × ${pieceSize.height}` : '未知'}
+          </span>
+        </div>
+        {nonUniform && (
+          <div style={{ fontSize: 11, color: theme.toolbar.accent }}>已手动微调分割线</div>
+        )}
+      </div>
+    </>
+  );
+
   const content = (
     <>
-      <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 12 }}>
-        按网格拆分,子节点自动排列到画布 · 可拖拽分割线微调
-      </div>
+      {subtitle}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) 220px', gap: 20 }}>
-        {/* 左侧:图片 + 可拖拽网格预览 */}
         <div>
-          <div
-            style={{
-              display: 'grid',
-              minHeight: 300,
-              placeItems: 'center',
-              borderRadius: 10,
-              background: surface,
-              padding: 16,
-            }}
-          >
-            <div ref={imgBoxRef} style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', userSelect: 'none' }}>
-              <img
-                src={dataUrl}
-                alt=""
-                draggable={false}
-                style={{ display: 'block', maxHeight: 340, maxWidth: '100%', objectFit: 'contain' }}
-              />
-              {/* 列分割线(可拖拽) */}
-              <div style={{ position: 'absolute', inset: 0 }}>
-                {columnBreaks.map((b, i) => (
-                  <div key={`col-${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${b * 100}%`, width: 0 }}>
-                    <div
-                      style={{
-                        position: 'absolute', top: 0, bottom: 0, left: -1, width: 2,
-                        background: 'rgba(255,255,255,0.9)', boxShadow: '0 0 0 1px rgba(0,0,0,0.35)', pointerEvents: 'none',
-                      }}
-                    />
-                    <div
-                      onPointerDown={startDrag('col', i)}
-                      style={{ position: 'absolute', top: 0, bottom: 0, left: -6, width: 12, cursor: 'col-resize', touchAction: 'none' }}
-                    />
-                  </div>
-                ))}
-                {rowBreaks.map((b, i) => (
-                  <div key={`row-${i}`} style={{ position: 'absolute', left: 0, right: 0, top: `${b * 100}%`, height: 0 }}>
-                    <div
-                      style={{
-                        position: 'absolute', left: 0, right: 0, top: -1, height: 2,
-                        background: 'rgba(255,255,255,0.9)', boxShadow: '0 0 0 1px rgba(0,0,0,0.35)', pointerEvents: 'none',
-                      }}
-                    />
-                    <div
-                      onPointerDown={startDrag('row', i)}
-                      style={{ position: 'absolute', left: 0, right: 0, top: -6, height: 12, cursor: 'row-resize', touchAction: 'none' }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+          <div style={{ display: 'grid', minHeight: 300, placeItems: 'center', borderRadius: 10, background: surface, padding: 16 }}>
+            {imageBlock}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginTop: 10 }}>
-            <span>原图</span>
-            <span style={{ fontWeight: 600, color: theme.toolbar.text }}>
-              {image ? `${image.width} × ${image.height} px` : '读取中'}
-            </span>
-          </div>
+          {originalRow}
         </div>
-
-        {/* 右侧:参数 */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <span style={labelStyle}>行数</span>
-            <InputNumber min={1} max={MAX_GRID_SIZE} step={1} value={rows} onChange={(v) => updateRows(Number(v ?? 1))} style={{ width: '100%' }} />
-          </div>
-          <div>
-            <span style={labelStyle}>列数</span>
-            <InputNumber min={1} max={MAX_GRID_SIZE} step={1} value={columns} onChange={(v) => updateColumns(Number(v ?? 1))} style={{ width: '100%' }} />
-          </div>
-          <div style={{ background: surface, borderRadius: 10, padding: '12px 14px', fontSize: 13, color: theme.toolbar.textMuted, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={summaryRowStyle}>
-              <span>子节点</span>
-              <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{total} 个</span>
-            </div>
-            <div style={summaryRowStyle}>
-              <span>单块约</span>
-              <span style={{ fontWeight: 600, color: theme.toolbar.text }}>
-                {pieceSize ? `${pieceSize.width} × ${pieceSize.height}` : '未知'}
-              </span>
-            </div>
-            {nonUniform && (
-              <div style={{ fontSize: 11, color: theme.toolbar.accent }}>已手动微调分割线</div>
-            )}
-          </div>
-        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>{paramsPanel}</div>
       </div>
     </>
   );
@@ -266,9 +270,16 @@ export function SplitDialog({
 
   if (inline) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{content}</div>
-        {actions}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 16 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 20, overflow: 'auto' }}>
+          {imageBlock}
+          {originalRow}
+        </div>
+        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, background: surface, borderRadius: 12, padding: 16 }}>
+          {subtitle}
+          {paramsPanel}
+          <div style={{ marginTop: 'auto' }}>{actions}</div>
+        </div>
       </div>
     );
   }

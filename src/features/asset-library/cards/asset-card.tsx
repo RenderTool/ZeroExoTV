@@ -25,7 +25,7 @@ import type { ThemeConfig } from '@zeroexo/shared';
 import type { TFunction } from 'i18next';
 import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { registerCard, type GridCardRendererProps, type ListCardRendererProps } from './card-registry.js';
-import { SendActionButtons } from './card-send-actions.js';
+import { SendActionButtons, cardActionBtnStyle } from './card-send-actions.js';
 import { AssetScopeBadge } from '@/features/asset-picker/components/scope-badge.js';
 import { cardCoverMetrics, CARD_COVER_TRANSITION, useMasonryColumnWidth } from '@/shared/components/masonry-grid.js';
 import {
@@ -311,13 +311,9 @@ function AssetCardGrid({
               aria-label={t('assetLibrary.editImage', '编辑')}
               title={t('assetLibrary.editImage', '编辑')}
               onClick={(e) => { e.stopPropagation(); onEditImage(); }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 22, height: 22, padding: 0, border: 'none', borderRadius: 5,
-                background: 'transparent', color: theme.toolbar.textMuted, cursor: 'pointer', flexShrink: 0,
-              }}
+              style={cardActionBtnStyle}
             >
-              <Pencil size={13} />
+              <Pencil size={14} />
             </button>
           )}
           {showQuickActions && (

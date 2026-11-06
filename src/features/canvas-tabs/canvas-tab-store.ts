@@ -112,21 +112,40 @@ export function openCanvasTabCid(key: string): string | null {
 
 /**
  * 图片编辑页签（2026-11-06 用户定稿：像 Photoshop 一样用独立页签编辑该图）：
- * key = `image:<nodeId>`，页面自带工具栏（裁剪/分割/局部遮罩），输出后回到画布。
+ * - 节点来源：key = `image:<nodeId>`
+ * - 资产来源：key = `image:asset:<assetId>`（抽屉素材/历史产出直接编辑，**不预先把资产加进画布**，
+ *   编辑结果在确认时才落回画布）
+ * 页面自带工具栏（裁剪/分割/局部遮罩），输出后关闭页签回画布。
  */
 export interface OpenImageTab {
   key: string;
-  nodeId: string;
   title: string;
-  /** 打开时直接进入的工具（点节点胶囊哪个按钮就进哪个） */
+  /** 打开时直接进入的工具（点哪个入口就进哪个） */
   mode?: 'crop' | 'split' | 'maskEdit';
+  /** 来源 A：画布上的图片节点 */
+  nodeId?: string;
+  /** 来源 B：素材/历史资产（编辑结果落回画布） */
+  asset?: {
+    assetId: string;
+    storageKey?: string;
+    content?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+  };
 }
 
 export const IMAGE_TAB_PREFIX = 'image:';
+/** 资产来源的图片页签前缀（image:asset:<assetId>） */
+export const IMAGE_ASSET_TAB_PREFIX = 'image:asset:';
 
-/** 图片编辑页签 key */
+/** 节点来源的图片编辑页签 key */
 export function imageTabKeyFor(nodeId: string): string {
   return `${IMAGE_TAB_PREFIX}${nodeId}`;
+}
+
+/** 资产来源的图片编辑页签 key */
+export function imageAssetTabKeyFor(assetId: string): string {
+  return `${IMAGE_ASSET_TAB_PREFIX}${assetId}`;
 }
 
 /** 是否图片编辑页签 key */
@@ -134,9 +153,15 @@ export function isImageTabKey(key: string): boolean {
   return key.startsWith(IMAGE_TAB_PREFIX) && key.length > IMAGE_TAB_PREFIX.length;
 }
 
-/** 从图片编辑页签 key 取 nodeId（非图片页签返回 null） */
+/** 从图片编辑页签 key 取 nodeId（资产来源/非图片页签返回 null） */
 export function imageTabNodeId(key: string): string | null {
-  return isImageTabKey(key) ? key.slice(IMAGE_TAB_PREFIX.length) : null;
+  if (!isImageTabKey(key) || key.startsWith(IMAGE_ASSET_TAB_PREFIX)) return null;
+  return key.slice(IMAGE_TAB_PREFIX.length);
+}
+
+/** 从图片编辑页签 key 取 assetId（节点来源/非图片页签返回 null） */
+export function imageTabAssetId(key: string): string | null {
+  return key.startsWith(IMAGE_ASSET_TAB_PREFIX) ? key.slice(IMAGE_ASSET_TAB_PREFIX.length) : null;
 }
 
 function isCanvasCopyKey(key: string): boolean {
@@ -241,8 +266,13 @@ export interface CanvasTabState {
   restoreCanvasTabs: (tabs: OpenCanvasTab[]) => void;
   /** 打开中的图片编辑页签（Photoshop 式文档页签，关掉即回画布） */
   openImageTabs: OpenImageTab[];
-  /** 打开（或复用激活）图片编辑页签；同一 nodeId 幂等，只更新工具与标题 */
-  openImageTab: (input: { nodeId: string; title?: string; mode?: OpenImageTab['mode'] }) => void;
+  /** 打开（或复用激活）图片编辑页签；同一来源幂等，只更新工具与标题 */
+  openImageTab: (input: {
+    nodeId?: string;
+    asset?: OpenImageTab['asset'];
+    title?: string;
+    mode?: OpenImageTab['mode'];
+  }) => void;
   /** 关闭图片编辑页签：只关页签；关的是当前激活项 → 回画布 */
   closeImageTab: (key: string) => void;
 }
@@ -344,22 +374,34 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
 
   setSlotBindings: (patch) => set({ slotBindings: { ...get().slotBindings, ...patch } }),
 
-  openImageTab: ({ nodeId, title, mode }) => {
-    if (!nodeId) return;
-    const key = imageTabKeyFor(nodeId);
+  openImageTab: ({ nodeId, asset, title, mode }) => {
+    const key = nodeId
+      ? imageTabKeyFor(nodeId)
+      : asset?.assetId
+        ? imageAssetTabKeyFor(asset.assetId)
+        : '';
+    if (!key) return;
     const existing = get().openImageTabs.find((t) => t.key === key);
     if (existing) {
-      // 幂等：已打开 → 只激活；点不同工具进来时切到那个工具
+      // 幂等：已打开 → 只激活；点不同工具进来时切到那个工具；资产可刷新最新媒体信息
       set({
         activeTabKey: key,
         openImageTabs: get().openImageTabs.map((t) => (t.key === key
-          ? { ...t, title: title?.trim() || t.title, mode: mode ?? t.mode }
+          ? {
+            ...t,
+            title: title?.trim() || t.title,
+            mode: mode ?? t.mode,
+            asset: asset ?? t.asset,
+          }
           : t)),
       });
       return;
     }
     set({
-      openImageTabs: [...get().openImageTabs, { key, nodeId, title: title?.trim() || '图片编辑', mode }],
+      openImageTabs: [
+        ...get().openImageTabs,
+        { key, nodeId, asset, title: title?.trim() || asset?.assetId || '图片编辑', mode },
+      ],
       activeTabKey: key,
     });
   },

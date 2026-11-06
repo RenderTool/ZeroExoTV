@@ -70,7 +70,7 @@ import { ConfirmDialog, NodeCreateMenu, AppearanceDialog, ShortcutsDialog, Mobil
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 // Plan#84（征集#184）：副本画布挂载层（与 1 号并排的顶层标签激活时渲染另一块画布）
 import { CanvasDocumentTabs } from '@/features/canvas-tabs/canvas-document-tabs.js';
-import { isImageTabKey, imageTabNodeId } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { isImageTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { ImageEditWorkspace } from '@/features/image-editor/image-edit-workspace.js';
 import { useCanvasDocumentSwitch, useRestoreCanvasTabs } from '@/features/canvas-tabs/use-canvas-document-switch.js';
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
@@ -149,10 +149,18 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
   const openImageTabs = useCanvasTabStore((s) => s.openImageTabs);
   const closeImageTab = useCanvasTabStore((s) => s.closeImageTab);
-  // 图片编辑独立页签（Photoshop 式）：key = image:<nodeId>，页面自带工具栏
-  const editingImageNodeId = imageTabNodeId(activeTabKey);
-  const editingImageNode = editingImageNodeId && state.editor ? state.editor.store.getNode(editingImageNodeId) : null;
-  const editingImageMode = openImageTabs.find((tb) => tb.key === activeTabKey)?.mode;
+  // 图片编辑独立页签（Photoshop 式）：节点来源 image:<nodeId>、资产来源 image:asset:<id>
+  const editingImageTab = isImageTabKey(activeTabKey)
+    ? (openImageTabs.find((tb) => tb.key === activeTabKey) ?? null)
+    : null;
+  const editingImageNode = editingImageTab?.nodeId && state.editor
+    ? state.editor.store.getNode(editingImageTab.nodeId)
+    : null;
+  const editingImageSource = editingImageTab
+    ? (editingImageTab.nodeId
+      ? (editingImageNode ? { kind: 'node' as const, node: editingImageNode } : null)
+      : (editingImageTab.asset ? { kind: 'asset' as const, ...editingImageTab.asset, title: editingImageTab.title } : null))
+    : null;
   const setTabContentHost = useCanvasTabStore((s) => s.setContentHost);
   const setCanvasHost = useCanvasTabStore((s) => s.setCanvasHost);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
@@ -1104,7 +1112,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         ) : null}
 
         {/* 图片编辑独立页签（Photoshop 式）：覆盖画布区，自带工具栏；关闭/输出后回画布 */}
-        {editingImageNodeId && (
+        {editingImageTab && (
           <div
             data-image-edit-host
             style={{
@@ -1112,13 +1120,25 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               pointerEvents: 'auto', overflow: 'hidden', background: theme.canvas.background,
             }}
           >
-            {editingImageNode && state.editor ? (
+            {editingImageSource ? (
               <ImageEditWorkspace
-                node={editingImageNode}
-                initialMode={editingImageMode}
+                source={editingImageSource}
+                initialMode={editingImageTab.mode}
                 theme={theme}
-                commandQueue={state.editor.core.commandQueue}
+                commandQueue={state.editor!.core.commandQueue}
                 onClose={() => closeImageTab(activeTabKey)}
+                getInsertOrigin={() => {
+                  // 资产来源：输出节点落在当前视口中心（世界坐标）附近
+                  const vp = refs.store?.getViewport();
+                  const el = containerRef.current;
+                  const viewW = el?.clientWidth ?? 800;
+                  const viewH = el?.clientHeight ?? 600;
+                  const k = vp?.k && vp.k > 0 ? vp.k : 1;
+                  return {
+                    x: (viewW / 2 - (vp?.x ?? 0)) / k - 180,
+                    y: (viewH / 2 - (vp?.y ?? 0)) / k - 120,
+                  };
+                }}
                 onNodesCreated={(nodeIds: string[]) => {
                   // 切图后自动成组：选中新节点 → 触发预览 → 确认成组
                   if (!refs.store || !refs.groupPlugin || nodeIds.length < 2) return;
