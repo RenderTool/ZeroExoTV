@@ -12,7 +12,7 @@ import { Modal, Button, InputNumber } from 'antd';
 import { RotateCcw } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { readImageMeta } from '../utils/image-meta.js';
-import type { SplitParams, ImageMeta } from '../types.js';
+import { MAX_SPLIT_PIECES, type SplitParams, type ImageMeta } from '../types.js';
 
 export interface SplitDialogProps {
   dataUrl: string;
@@ -59,6 +59,8 @@ export function SplitDialog({
   const dragRef = useRef<{ axis: 'col' | 'row'; index: number } | null>(null);
 
   const total = rows * columns;
+  /** 总块数上限（行/列输入互相约束，正常操作不会超限，这里兜底） */
+  const overLimit = total > MAX_SPLIT_PIECES;
   const nonUniform = !isUniform(columnBreaks, columns) || !isUniform(rowBreaks, rows);
   const pieceSize: ImageMeta | null = image
     ? {
@@ -89,16 +91,17 @@ export function SplitDialog({
   }, [dataUrl, open]);
 
   const updateRows = useCallback((value: number) => {
-    const next = clampGrid(value);
+    // 行数上限同时受总块数约束：floor(64 / 当前列数)
+    const next = Math.max(1, Math.min(clampGrid(value), Math.floor(MAX_SPLIT_PIECES / columns)));
     setRows(next);
     setRowBreaks(uniformBreaks(next));
-  }, []);
+  }, [columns]);
 
   const updateColumns = useCallback((value: number) => {
-    const next = clampGrid(value);
+    const next = Math.max(1, Math.min(clampGrid(value), Math.floor(MAX_SPLIT_PIECES / rows)));
     setColumns(next);
     setColumnBreaks(uniformBreaks(next));
-  }, []);
+  }, [rows]);
 
   const resetUniform = useCallback(() => {
     setColumnBreaks(uniformBreaks(columns));
@@ -161,14 +164,19 @@ export function SplitDialog({
         </Button>
       )}
       <Button onClick={onClose}>取消</Button>
-      <Button type="primary" onClick={() => onConfirm({ rows, columns, columnBreaks, rowBreaks })}>
+      <Button
+        type="primary"
+        disabled={overLimit}
+        title={overLimit ? `单次最多切 ${MAX_SPLIT_PIECES} 块（当前 ${total} 块）` : undefined}
+        onClick={() => onConfirm({ rows, columns, columnBreaks, rowBreaks })}
+      >
         确认切分({total})
       </Button>
     </div>
   );
   const subtitle = (
     <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 12 }}>
-      按网格拆分,子节点自动排列到画布 · 可拖拽分割线微调
+      按网格拆分,子节点自动排列到画布 · 可拖拽分割线微调 · 单次最多 64 块
     </div>
   );
 
@@ -236,7 +244,9 @@ export function SplitDialog({
       <div style={{ background: surface, borderRadius: 10, padding: '12px 14px', fontSize: 13, color: theme.toolbar.textMuted, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={summaryRowStyle}>
           <span>子节点</span>
-          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{total} 个</span>
+          <span style={{ fontWeight: 600, color: overLimit ? theme.toolbar.danger : theme.toolbar.text }}>
+            {total} 个{overLimit ? `（上限 ${MAX_SPLIT_PIECES}）` : ''}
+          </span>
         </div>
         <div style={summaryRowStyle}>
           <span>单块约</span>

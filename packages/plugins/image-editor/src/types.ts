@@ -123,3 +123,6 @@ export const UPSCALE_ALGORITHMS = [
 
 /** 放大长边上限 */
 export const MAX_UPSCALE_LONG_EDGE = 4096;
+
+/** 单次分割最大块数：每块都要 canvas 编码 + 上传 + 建节点 + 连线，块数过多会把浏览器拖死 */
+export const MAX_SPLIT_PIECES = 64;

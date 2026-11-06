@@ -7,7 +7,7 @@
 
 import { AddEdgeCommand, AddNodeCommand, type CommandQueue, type NodeRecord } from '@zeroexo/core';
 import { uploadImage } from '@zeroexo/plugin-persistence';
-import { cropDataUrl, splitDataUrl } from '@zeroexo/plugin-image-editor';
+import { cropDataUrl, splitDataUrl, MAX_SPLIT_PIECES } from '@zeroexo/plugin-image-editor';
 import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 
 interface BaseInput {
@@ -102,6 +102,10 @@ export function computeSplitLayout(
 export async function applySplit({
   node, commandQueue, dataUrl, onGetNodeTitle, onNodesCreated, params,
 }: BaseInput & { params: SplitParams; onNodesCreated?: (nodeIds: string[]) => void }): Promise<void> {
+  // 兜底：一次切太多块会同时做 N 次 canvas 编码 + 上传 + 建节点/连线（浏览器会卡死）
+  if (params.rows * params.columns > MAX_SPLIT_PIECES) {
+    throw new Error(`单次最多切 ${MAX_SPLIT_PIECES} 块（当前 ${params.rows * params.columns} 块）`);
+  }
   const pieces = await splitDataUrl(dataUrl, params);
   const uploaded = await Promise.all(pieces.map((p) => uploadImage(p)));
   const baseX = node.position.x + (node.size?.width ?? 340) + 40;

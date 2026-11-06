@@ -5,7 +5,12 @@
  * 新口径：**同一缩放比例 + 累计边界取整**，切片默认零间距紧贴，宽度/高度之和恒等于整图缩放后的尺寸。
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { MAX_SPLIT_PIECES } from '@zeroexo/plugin-image-editor';
 import { computeSplitLayout } from './image-edit-actions.js';
+
+const read = (rel: string): string => readFileSync(resolve(process.cwd(), rel), 'utf8');
 
 /** 断言同一行内水平无缝、相邻行垂直无缝 */
 function expectTiled(dims: { width: number; height: number }[], columns: number): void {
@@ -33,6 +38,25 @@ function expectTiled(dims: { width: number; height: number }[], columns: number)
   const lastRowCell = cells[(rows - 1) * columns]!;
   expect(lastRowCell.y + lastRowCell.height).toBe(totalHeight);
 }
+
+describe('分割块数上限（防误操作把浏览器拖死）', () => {
+  it('单次最多 64 块：行/列输入受总块数约束，超限禁用确认', () => {
+    expect(MAX_SPLIT_PIECES).toBeLessThanOrEqual(64);
+    const dialog = read('packages/plugins/image-editor/src/dialogs/split-dialog.tsx');
+    // 行/列互相约束（如 12 列时行数最多 5）
+    expect(dialog).toContain('Math.floor(MAX_SPLIT_PIECES / columns)');
+    expect(dialog).toContain('Math.floor(MAX_SPLIT_PIECES / rows)');
+    expect(dialog).toContain('disabled={overLimit}');
+  });
+
+  it('落图前硬拦截：超限直接抛可读错误，不做 canvas 编码/上传/建节点', () => {
+    const actions = read('src/features/image-editor/image-edit-actions.ts');
+    expect(actions).toContain('params.rows * params.columns > MAX_SPLIT_PIECES');
+    expect(actions).toContain('throw new Error');
+    // 拦截必须在 splitDataUrl 之前
+    expect(actions.indexOf('MAX_SPLIT_PIECES)')).toBeLessThan(actions.indexOf('splitDataUrl(dataUrl'));
+  });
+});
 
 describe('分割切片布局：非均匀也能严丝合缝', () => {
   it('2 列非均匀（187 / 549）：宽度之和等于整图、块块相接', () => {

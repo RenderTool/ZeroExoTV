@@ -158,7 +158,7 @@ export function ImageEditWorkspace({
       onClose();
     } catch (err) {
       console.error('[ImageEditWorkspace] split failed:', err);
-      message.error(t('imageEditor.splitFailed', '分割失败，请重试'));
+      message.error(err instanceof Error && err.message ? err.message : t('imageEditor.splitFailed', '分割失败，请重试'));
     }
   };
 
