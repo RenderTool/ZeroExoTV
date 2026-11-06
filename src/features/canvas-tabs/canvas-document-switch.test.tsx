@@ -35,6 +35,11 @@ vi.mock('@zeroexo/plugin-persistence', () => ({
   })),
 }));
 
+// 切文档时会退出「图片节点内编辑」；这里只关心调用，不引入节点包整条依赖链
+vi.mock('@zeroexo/plugin-nodes', () => ({
+  closeImageNodeEdit: vi.fn(),
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, opts?: unknown) => (typeof opts === 'string' ? opts : key) }),
 }));

@@ -32,7 +32,8 @@
     "@zeroexo/shared": "workspace:*",
     "antd": "^6.5.1",
     "lucide-react": "^0.469.0",
-    "wavesurfer.js": "^7.12.11"
+    "wavesurfer.js": "^7.12.11",
+    "@zeroexo/plugin-image-editor": "workspace:*"
   },
   "peerDependencies": {
     "i18next": "^26.0.0",

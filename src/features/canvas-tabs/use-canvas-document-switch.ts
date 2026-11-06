@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import type { CommandQueue, GraphModel } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
+import { closeImageNodeEdit } from '@zeroexo/plugin-nodes';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import {
   getCanvas,
@@ -205,6 +206,8 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
     }
     switchingRef.current = true;
     try {
+      // 切文档前退出图片节点内编辑（编辑态是运行时状态，不跟着文档走）
+      closeImageNodeEdit();
       const flushed = await flushCurrent();
       if (!flushed) {
         // 冲突未决：本次切换中止，等用户处理完再点

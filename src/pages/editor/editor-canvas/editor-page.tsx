@@ -74,7 +74,6 @@ import { useCanvasDocumentSwitch, useRestoreCanvasTabs } from '@/features/canvas
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ImageDialogRenderer } from '@/features/image-editor/image-dialog-renderer.js';
-import { NodeImageEditor } from '@/features/image-editor/node-image-editor.js';
 import { useCanvasHandlers } from '@/features/canvas-interaction/use-canvas-handlers.js';
 import { useDropHandler } from '@/features/canvas-interaction/drop-handler.js';
 import { UploadQueueOverlay } from '@/features/upload-queue/index.js';
@@ -431,7 +430,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     setContextMenuItems,
     setConnectionDrop: dialogs.setConnectionDrop,
     setImageDialog: dialogs.setImageDialog,
-    setImageNodeEdit: dialogs.setImageNodeEdit,
     setDetailNode: dialogs.setDetailNode,
     setAssetPickerOpen: dialogs.setAssetPickerOpen,
     setReplaceNodeId: dialogs.setReplaceNodeId,
@@ -1132,15 +1130,29 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
         {/* 征集 #92:右下角独立 ZoomToolbar 移除——缩放百分比回归底部工具条 */}
 
-        {/* 2026-11-05 用户定稿：画布图片节点「查看大图」也走统一 MediaLightbox 壳；
-            非图片/无 storageKey 的节点详情（含编辑/节点动作）保留旧详情面板 */}
+        {/* 节点胶囊「详情」：媒体节点统一走主页资产同款查看器（MediaLightbox，图片/视频/文本）；
+            非媒体节点（剧本/生成器/组等）保留节点详情面板 */}
         {dialogs.detailNode && (() => {
-          const n = dialogs.detailNode as unknown as { id: string; data?: { kind?: string; storageKey?: string; title?: string } };
+          const n = dialogs.detailNode as unknown as {
+            id: string;
+            title?: string;
+            data?: { kind?: string; storageKey?: string; url?: string; content?: string; title?: string };
+          };
           const d = n.data ?? {};
-          if (d.kind === 'image' && d.storageKey) {
+          const kind = d.kind === 'image' || d.kind === 'video' || d.kind === 'text' ? d.kind : null;
+          const hasMedia = !!kind && !!(d.storageKey || d.url || (kind === 'text' && d.content));
+          if (kind && hasMedia) {
             return (
               <MediaLightbox
-                items={[{ id: n.id, title: d.title ?? '画布节点', kind: 'image', storageKey: d.storageKey, source: '画布节点' }]}
+                items={[{
+                  id: n.id,
+                  title: n.title ?? d.title ?? '画布节点',
+                  kind,
+                  storageKey: d.storageKey,
+                  url: d.url,
+                  content: kind === 'text' ? d.content : undefined,
+                  source: '画布节点',
+                }]}
                 index={0}
                 onIndexChange={() => undefined}
                 onClose={() => dialogs.setDetailNode(null)}
@@ -1178,7 +1190,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       <SubjectLinkDialogHost />
 
       {/* 图片只读/参数型浮层（查看大图 / 详情 / 放大 / 多角度）；
-          编辑类（裁剪/分割/局部遮罩）走下面的节点内编辑 */}
+          编辑类（裁剪/分割/局部遮罩）在图片节点卡片内部完成（见 image-node-view） */}
       {dialogs.imageDialog && refs.commandQueue ? (
         <ImageDialogRenderer
           state={dialogs.imageDialog}
@@ -1188,43 +1200,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         />
       ) : null}
 
-      {/* 图片节点内编辑：面板以节点矩形为锚点展开，产物照旧落成子节点/节点数据 */}
-      {dialogs.imageNodeEdit && refs.commandQueue ? (
-        <NodeImageEditor
-          state={dialogs.imageNodeEdit}
-          commandQueue={refs.commandQueue}
-          theme={theme}
-          onClose={() => dialogs.setImageNodeEdit(null)}
-          onNodesCreated={(nodeIds: string[]) => {
-            // 切图后自动成组:选中节点 → 触发预览 → 确认成组
-            if (!refs.store || !refs.groupPlugin || nodeIds.length < 2) return;
-            const ctrl = refs.groupPlugin.getController();
-            refs.store.setSelection({
-              selectedNodeIds: new Set(nodeIds),
-              selectedEdgeIds: new Set(),
-            });
-            // setSelection 同步触发 SelectionEvents.CHANGED → createPreview 同步执行
-            // 确认预览组(如果已创建)
-            if (ctrl.isPreviewing()) {
-              ctrl.confirmPreview(t('groupTools.defaultGroupName'));
-            }
-          }}
-          onGetNodeTitle={(type: string, batchIndex = 0, baseCount?: number) => {
-            if (!refs.store) return '';
-            const graph = refs.store.getGraph();
-            // baseCount 由切图等批量操作传入,避免循环中 graph 动态更新导致跳号
-            // 2026-11-04 幽灵节点治理：编号只统计可见节点（墓碑不占号）
-            const sameTypeCount = baseCount ?? filterVisibleNodes(graph.nodes).filter((n) => n.type === type).length;
-            const baseNameKey =
-              type === 'text' ? 'nodeTypes.text'
-                : type === 'image' ? 'nodeTypes.ai.image'
-                  : type === 'video' ? 'nodeTypes.ai.video'
-                    : type === 'audio' ? 'nodeTypes.ai.audio'
-                      : 'nodes.generatorTitle';
-            return `${t(baseNameKey)}${sameTypeCount + 1 + batchIndex}`;
-          }}
-        />
-      ) : null}
 
       {/* P2.1 ② replace 图片/视频/音频:隐藏文件输入(由 replace 工具触发 click) */}
       <input

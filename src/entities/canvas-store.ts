@@ -22,7 +22,9 @@ import { ConflictError, ensureDir, listDir, readJson, remove, stat, writeJson, w
 export const CANVAS_SCHEMA_VERSION = 1 as const;
 /** 1 号主画布的固定 id（与 app_meta 里的项目 id 一一对应，不可删不可关） */
 export const MAIN_CANVAS_ID = 'main';
-export const MAIN_CANVAS_TITLE = '1号画布';
+export const MAIN_CANVAS_TITLE = '主画布';
+/** 旧默认标题：读到就归一成「主画布」，不影响用户自定义名 */
+export const LEGACY_MAIN_CANVAS_TITLE = '1号画布';
 
 export type CanvasGraphRef = 'project' | 'inline';
 
@@ -138,7 +140,11 @@ export async function listCanvases(projectId: string): Promise<CanvasSummary[]> 
     const id = e.name.slice(0, -'.json'.length);
     if (id === MAIN_CANVAS_ID) {
       const raw = await readJson<CanvasDocument>(canvasPath(projectId, id));
-      if (isCanvasDoc(raw)) out[0] = { ...raw, locked: true, order: 0, nodeCount: 0 };
+      // 旧默认标题「1号画布」归一成「主画布」；用户自定义名不动
+      if (isCanvasDoc(raw)) {
+        const title = raw.title === LEGACY_MAIN_CANVAS_TITLE ? MAIN_CANVAS_TITLE : raw.title;
+        out[0] = { ...raw, title, locked: true, order: 0, nodeCount: 0 };
+      }
       continue;
     }
     if (!/^(sc[a-z0-9_-]{3,63})$/i.test(id)) continue;
@@ -158,7 +164,10 @@ export async function getCanvas(projectId: string, canvasId: string): Promise<Lo
   const raw = await readJson<CanvasDocument>(canvasPath(projectId, canvasId));
   if (canvasId === MAIN_CANVAS_ID) {
     // 1 号：元数据文件可能还没自愈挂载；graph 永远取项目主 graph（B 方案）
-    const doc = isCanvasDoc(raw) ? { ...raw, locked: true, graphRef: 'project' as const } : mainDocFallback(projectId);
+    // 旧默认标题「1号画布」归一成「主画布」；用户自定义名不动
+    const doc = isCanvasDoc(raw)
+      ? { ...raw, title: raw.title === LEGACY_MAIN_CANVAS_TITLE ? MAIN_CANVAS_TITLE : raw.title, locked: true, graphRef: 'project' as const }
+      : mainDocFallback(projectId);
     const graph = await loadProjectGraph(projectId);
     return { doc, graph: graph ?? emptyGraph(), stamp: null };
   }

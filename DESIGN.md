@@ -334,12 +334,15 @@ page container (height: 100%, flex column, overflow: hidden)
 - 宽度规范：编辑类 680px，详情类 960px，确认类 520px，上传类 440px
 - 自研 `modal.tsx`（portal-based）仅用于极简场景（不需要 antd 依赖时，如 asset-picker 和 image-dialog-renderer）
 
-### 图片节点编辑（节点内编辑）
-- 裁剪 / 分割 / 局部遮罩**一律在节点内完成**：面板以节点当前屏幕矩形为锚点展开（淡遮罩接住画布指针事件），
-  不弹居中 Modal、不开独立页签；Esc 退出，编辑期间拦 Delete/Backspace 防误删。
-- 只读 / 参数型操作（查看大图、详情、放大、多角度）仍走浮层。
-- 编辑器内容体**只有一份**：插件包对话框同时支持 `inline`，节点内编辑复用同一内容体，禁止第二套 UI。
-- 产物落图（子节点 + 连线）只有一份实现：`features/image-editor/image-edit-actions.ts`。
+### 图片节点编辑（节点卡片内）
+- 裁剪 / 分割 / 局部遮罩**在图片节点卡片内部完成**：进入编辑时节点临时放大到工作尺寸，
+  图片区直接变成裁剪框 / 切分网格 / 蒙版画布，确认或取消后还原节点尺寸；**不弹居中窗口、也不额外浮一层面板**。
+- 编辑态：Esc 退出，拦 Delete/Backspace 防误删；尺寸变化走 `ResizeNodeCommand`（可撤销）。
+- 只读 / 参数型操作（查看大图、详情、放大、多角度）仍走浮层；节点的「详情」与主页资产一致，
+  统一用 `MediaLightbox` 查看（图片/视频/文本），不再弹旧版详情面板。
+- 编辑器内容体**只有一份**：插件包对话框同时支持 `inline`，节点内直接复用，禁止第二套 UI。
+- 产物落图（子节点 + 连线）只有一份实现：`features/image-editor/image-edit-actions.ts`，
+  由节点通过 `nodeActionBus`（`imageEditApply`）冒泡给宿主执行。
 
 ### 按钮（Button）
 - 尺寸规范：工具栏 `size="small"`（24px），主操作 `default`（32px），大按钮 `large`（44px）

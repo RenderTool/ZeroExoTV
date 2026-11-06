@@ -13,13 +13,16 @@ import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinitio
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 // Plan#84（征集#184）：选区→**另存为项目内画布副本**（复制，主画布不动），与 1 号平级并排
 import { createCanvasCopyFromSelection } from '@/features/sub-canvas/canvas-copy.js';
-import { nodeActionBus, createAssetNode } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, createAssetNode, closeImageNodeEdit, openImageNodeEdit } from '@zeroexo/plugin-nodes';
 import type { AssetNodePayload } from '@zeroexo/plugin-nodes';
 import { PREVIEW_GROUP_ID, getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 import { configToPinDefaults, configToNodeDefaults, configToGroupDefaults } from '@/features/top-bar/index.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { requestNodeDockPrompt } from '@/features/tools-dock/node-generate-dock.js';
+import { applyCrop, applySplit } from '@/features/image-editor/image-edit-actions.js';
+import { newNodeTitle } from '@/features/canvas-nodes/new-node.js';
+import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
@@ -136,7 +139,6 @@ export function useEditorInteractions({
   setContextMenuItems,
   setConnectionDrop,
   setImageDialog,
-  setImageNodeEdit,
   setDetailNode,
   setAssetPickerOpen,
   setReplaceNodeId,
@@ -173,8 +175,6 @@ export function useEditorInteractions({
   setContextMenuItems: React.Dispatch<React.SetStateAction<ContextMenuItem[] | null | undefined>>;
   setConnectionDrop: React.Dispatch<React.SetStateAction<any>>;
   setImageDialog: React.Dispatch<React.SetStateAction<ImageDialogState | null>>;
-  /** 图片节点内编辑（裁剪/分割/局部遮罩）锚点状态 */
-  setImageNodeEdit: (state: import('@/features/image-editor/node-image-editor.js').ImageNodeEditState | null) => void;
   setDetailNode: React.Dispatch<React.SetStateAction<NodeRecord | null>>;
   setAssetPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setReplaceNodeId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -1324,6 +1324,61 @@ export function useEditorInteractions({
       });
     });
 
+    // 图片节点内编辑 → 产物落图：裁剪/分割与只读浮层共用 image-edit-actions 单一实现
+    const unsubImageEdit = nodeActionBus.on('imageEditApply', (event) => {
+      const payload = event as unknown as {
+        nodeId: string;
+        mode: 'crop' | 'split' | 'maskEdit';
+        dataUrl: string;
+        crop?: CropRect;
+        params?: SplitParams;
+      };
+      const node = refs.store?.getGraph().nodes.find((n: any) => n.id === payload.nodeId);
+      const queue = refs.commandQueue;
+      if (!node || !queue) {
+        closeImageNodeEdit(payload.nodeId);
+        return;
+      }
+      const getNodeTitle = (type: string, batchIndex = 0, baseCount?: number): string => {
+        const count = baseCount
+          ?? (refs.store?.getGraph().nodes.filter((n: any) => n.type === type && !n._deleted).length ?? 0);
+        return newNodeTitle(type, count + batchIndex, t);
+      };
+      if (payload.mode === 'crop' && payload.crop && payload.dataUrl) {
+        void applyCrop({ node, commandQueue: queue, dataUrl: payload.dataUrl, rect: payload.crop, onGetNodeTitle: getNodeTitle })
+          .then(() => closeImageNodeEdit(payload.nodeId))
+          .catch((err) => {
+            console.error('[image-edit] crop failed:', err);
+            message.error(t('imageEditor.cropFailed', '裁剪失败，请重试'));
+          });
+        return;
+      }
+      if (payload.mode === 'split' && payload.params && payload.dataUrl) {
+        void applySplit({
+          node,
+          commandQueue: queue,
+          dataUrl: payload.dataUrl,
+          params: payload.params,
+          onGetNodeTitle: getNodeTitle,
+          onNodesCreated: (ids) => {
+            if (!refs.store || !refs.groupPlugin || ids.length < 2) return;
+            const ctrl = refs.groupPlugin.getController();
+            refs.store.setSelection({ selectedNodeIds: new Set(ids), selectedEdgeIds: new Set() });
+            if (ctrl.isPreviewing()) ctrl.confirmPreview(t('groupTools.defaultGroupName'));
+          },
+        })
+          .then(() => closeImageNodeEdit(payload.nodeId))
+          .catch((err) => {
+            console.error('[image-edit] split failed:', err);
+            message.error(t('imageEditor.splitFailed', '分割失败，请重试'));
+          });
+        return;
+      }
+      // 局部遮罩：生成后端未接入 → 明确告知，不假装成功
+      message.info(t('imageEditor.maskBackendPending', '局部修改需要接入生成后端，本次未提交'));
+      closeImageNodeEdit(payload.nodeId);
+    });
+
     // Plan#74 Phase D：存量长文本(assetId → text: 本地资源)一次性迁移（幂等，会话级按项目守卫）
     runNovelMigration(refs, getSessionProjectId() ?? 'default');
 
@@ -1331,6 +1386,7 @@ export function useEditorInteractions({
       unsubRetry();
       unsubReplay();
       unsubCancel();
+      unsubImageEdit();
       unsubGenStory();
       unsubAssetSaved();
       unsubGenSb();
@@ -1397,30 +1453,17 @@ export function useEditorInteractions({
           replaceInputRef.current?.click();
           return;
         }
-        // 编辑类操作（裁剪/分割/局部遮罩）走**节点内编辑**：面板锚定节点当前屏幕矩形，
-        // 不弹居中窗口、也不开独立页签；锚点在此刻计算（编辑期间画布交互被遮罩接住，锚点不漂）
+        // 编辑类操作（裁剪/分割/局部遮罩）走**节点卡片内编辑**（2026-11-06 用户纠偏）：
+        // 节点临时放大，图片区直接变成裁剪框/切分网格/蒙版画布；不弹窗口、不额外浮面板。
         if (type === 'crop' || type === 'split' || type === 'maskEdit') {
-          const el = containerRef.current;
-          const vp = refs.store?.getViewport();
-          const size = node.size ?? { width: 340, height: 240 };
-          // 容器/视口不可用时给一个居中的默认锚点，仍然走节点内编辑（不退回已下线的居中弹窗）
-          const box = el?.getBoundingClientRect();
-          const anchor = box && vp
-            ? {
-                left: box.left + node.position.x * vp.k + vp.x,
-                top: box.top + node.position.y * vp.k + vp.y,
-                width: size.width * vp.k,
-                height: size.height * vp.k,
-              }
-            : { left: (typeof window === 'undefined' ? 640 : window.innerWidth / 2) - 200, top: 120, width: 400, height: 320 };
-          setImageNodeEdit({ node, mode: type, anchor });
+          openImageNodeEdit(node.id, type);
           return;
         }
         // 只读/参数型操作：仍走浮层（查看大图 / 详情 / 放大 / 多角度）
         setImageDialog({ node, type });
       },
     };
-  }, [refs.commandQueue, refs.store, state.editor, handleSaveNodeAsset, handleReversePrompt, setImageNodeEdit, containerRef]);
+  }, [refs.commandQueue, refs.store, state.editor, handleSaveNodeAsset, handleReversePrompt, containerRef]);
 
   const minimapNodeFilter = (n: NodeRecord) => n.type !== 'group';
 

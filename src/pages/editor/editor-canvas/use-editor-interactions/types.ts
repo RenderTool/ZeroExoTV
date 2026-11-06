@@ -7,7 +7,6 @@
 import type { EditorRefs } from '../use-editor-state.js';
 import type { NodeRecord, NodeTypeExtension, ToolDefinition, ToolContext } from '@zeroexo/core';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
-import type { ImageNodeEditState } from '@/features/image-editor/node-image-editor.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import type { StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
@@ -43,8 +42,6 @@ export interface UseEditorInteractionsParams {
   setContextMenuItems: React.Dispatch<React.SetStateAction<ContextMenuItem[] | null | undefined>>;
   setConnectionDrop: React.Dispatch<React.SetStateAction<any>>;
   setImageDialog: React.Dispatch<React.SetStateAction<any>>;
-  /** 打开图片节点内编辑（锚点由宿主按节点屏幕矩形计算） */
-  setImageNodeEdit: (state: ImageNodeEditState | null) => void;
   setDetailNode: React.Dispatch<React.SetStateAction<NodeRecord | null>>;
   setAssetPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setReplaceNodeId: React.Dispatch<React.SetStateAction<string | null>>;

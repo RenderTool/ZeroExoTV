@@ -235,7 +235,7 @@ export function CanvasCopiesGroup({ store, theme }: CanvasCopiesGroupProps) {
             return (
               <div key={c.id} data-canvas-card={c.id}>
                 <ProjectCard
-                  title={isMain ? `${c.title}（${t('canvasCopy.mainTag', '主画布')}）` : c.title}
+                  title={c.title}
                   cover={covers[c.id] ?? undefined}
                   updateTime={`${t('home.updatedAt')} ${c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : '-'}`}
                   onClick={() => open(c)}
