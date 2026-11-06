@@ -106,6 +106,7 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         if (got) {
           stampRef.current = got.stamp;
           ed.core.commandQueue.replaceState(got.graph);
+          ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
           ed.store.setViewport(viewportOf(got.graph));
         }
         conflictRef.current = false;
@@ -214,6 +215,7 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         const graph = await loadProjectGraph(projectId);
         if (!graph) throw new Error('main graph missing');
         ed.core.commandQueue.replaceState(graph);
+        ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
         ed.store.setViewport(viewportOf(graph));
         ed.plugins.persistence?.resume();
       } else {
@@ -228,6 +230,7 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
           return;
         }
         ed.core.commandQueue.replaceState(got.graph);
+        ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
         ed.store.setViewport(viewportOf(got.graph));
         stampRef.current = got.stamp;
         conflictRef.current = false;
