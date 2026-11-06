@@ -474,8 +474,20 @@ function AssetPickPanel({
         const inSlot = slotLabels[a.id];
         return (
           <>
-            {ref?.kind === 'image' ? (
-              <ThumbImage storageKey={ref.storageKey} url={ref.url} prefer="preview" width="100%" height={120} radius={8} title={a.title} icon={<ImageIcon size={20} style={{ opacity: 0.6 }} />} />
+            {ref ? (
+              /* 详情预览：图片取 preview 档；视频取原文件可播（muted loop，点击播放/暂停）；音频给播放器 */
+              <ThumbImage
+                kind={ref.kind}
+                playable={ref.kind !== 'image'}
+                storageKey={ref.storageKey}
+                url={ref.url}
+                prefer="preview"
+                width="100%"
+                height={ref.kind === 'audio' ? 40 : 120}
+                radius={8}
+                title={a.title}
+                icon={<ImageIcon size={20} style={{ opacity: 0.6 }} />}
+              />
             ) : null}
             {detailRow(t('director.detailName', '名称'), a.title, 'name', true)}
             {detailRow(t('director.detailKind', '类型'), ref ? ASSET_KIND_NAME[ref.kind] : '-', 'kind')}
@@ -590,6 +602,22 @@ function AssetPickPanel({
       )}
       {panelTab === 'asset' && (
       <div data-asset-panel-list ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {/* 导入资产：列表顶部一行（2026-11-07 用户指令：导入类按钮统一放顶部，不再埋到底部） */}
+        {flat.length > 0 && (
+          <button
+            type="button"
+            data-asset-import
+            onClick={() => importInputRef.current?.click()}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%',
+              height: 34, border: `1px dashed ${palette.popBorder}`, borderRadius: 8, cursor: 'pointer',
+              fontFamily: 'inherit', background: 'transparent', color: palette.sub, fontSize: 12, flexShrink: 0, marginBottom: 4,
+            }}
+          >
+            <Plus size={14} />
+            {t('director.importAsset', '导入资产')}
+          </button>
+        )}
         {groups.map((g) => (
           <div key={g.name}>
             <div style={{ fontSize: 11, color: palette.sub, padding: '8px 8px 4px' }}>{g.name}</div>
@@ -630,8 +658,19 @@ function AssetPickPanel({
                     color: palette.capsuleText, fontSize: 13, textAlign: 'left',
                   }}
                 >
-                  {ref?.kind === 'image' ? (
-                    <ThumbImage storageKey={ref.storageKey} url={ref.url} width={ASSET_PICK_THUMB_SIZE} height={ASSET_PICK_THUMB_SIZE} radius={6} title={a.title} icon={<Icon size={18} style={{ opacity: 0.7 }} />} />
+                  {ref ? (
+                    /* 视频也走缩略图（poster 优先、取不到用 video 首帧）；音频仍是图标 */
+                    <ThumbImage
+                      kind={ref.kind}
+                      storageKey={ref.storageKey}
+                      url={ref.url}
+                      prefer="thumb"
+                      width={ASSET_PICK_THUMB_SIZE}
+                      height={ASSET_PICK_THUMB_SIZE}
+                      radius={6}
+                      title={a.title}
+                      icon={<Icon size={18} style={{ opacity: 0.7 }} />}
+                    />
                   ) : (
                     <span style={{ width: ASSET_PICK_THUMB_SIZE, height: ASSET_PICK_THUMB_SIZE, borderRadius: 6, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Icon size={18} style={{ opacity: 0.7 }} />
@@ -678,22 +717,6 @@ function AssetPickPanel({
               {t('director.importAsset', '导入资产')}
             </button>
           </div>
-        )}
-        {flat.length > 0 && (
-          /* 非空态轻量导入入口：列表底部一行（不用退出去导入） */
-          <button
-            type="button"
-            data-asset-import
-            onClick={() => importInputRef.current?.click()}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%',
-              height: 36, border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
-              background: 'transparent', color: palette.sub, fontSize: 12, flexShrink: 0,
-            }}
-          >
-            <Plus size={14} />
-            {t('director.importAsset', '导入资产')}
-          </button>
         )}
       </div>
       )}

@@ -19,14 +19,13 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as AntdApp } from 'antd';
-import { AudioLines, Trash2, Upload as UploadIcon, Search, Loader2, X } from 'lucide-react';
+import { AudioLines, Trash2, Upload as UploadIcon, Search, Loader2, X, Image as ImageIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { listAssets } from '@/features/asset-picker/asset-store.js';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
-import { AuthorizedImage } from '@/shared/components/authorized-media.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
+import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 import type { SubjectStateMediaAsset } from './subject-state-media';
 
@@ -83,6 +82,8 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
   const [projectList, setProjectList] = useState<MediaEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  /** 悬停/最近浏览条目 → 面板内预览（图/音频），点条目才写入 */
+  const [previewEntry, setPreviewEntry] = useState<MediaEntry | null>(null);
   const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null);
 
   // ===== 数据装载（打开时） =====
@@ -249,10 +250,16 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
     upload: t('subject.srcTabUpload', '手动上传'),
   })[key];
 
-  const thumb = (storageKey: string): React.ReactElement => (
-    <span style={{ width: 28, height: 28, borderRadius: 4, overflow: 'hidden', flexShrink: 0, display: 'inline-flex', background: 'rgba(255,255,255,0.06)' }}>
-      <AuthorizedImage src={getResourceUrl(storageKey, 'preview') ?? ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-    </span>
+  const thumb = (storageKey: string, kind: 'image' | 'audio' = 'image', size = 28): React.ReactElement => (
+    <ThumbImage
+      kind={kind}
+      storageKey={storageKey}
+      prefer="thumb"
+      width={size}
+      height={size}
+      radius={4}
+      icon={kind === 'audio' ? <AudioLines size={14} /> : <ImageIcon size={14} />}
+    />
   );
   const audioIcon = (
     <span style={{ width: 28, height: 28, borderRadius: 4, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', color: popSub }}>
@@ -289,6 +296,21 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
         <span style={{ fontSize: 11, fontWeight: 600, color: popText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {t('subject.sourceTitle', '选择图片或语音来源')}
         </span>
+        <button
+          type="button"
+          data-subject-media-upload-top
+          aria-label={t('subject.uploadMedia', '上传图片/语音')}
+          title={t('subject.uploadMedia', '上传图片/语音')}
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 20, height: 20, flexShrink: 0, border: 'none', borderRadius: 6,
+            background: 'transparent', color: popSub, cursor: uploading ? 'default' : 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <UploadIcon size={13} />
+        </button>
         <button
           type="button"
           data-subject-media-close
@@ -402,6 +424,36 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
         </div>
       )}
 
+      {/* 预览区：悬停条目即看大图/音频（与导演台素材面板同款信息层级） */}
+      {tab !== 'upload' && (
+        <div
+          data-subject-media-preview
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '4px 4px 8px',
+            borderBottom: `1px solid ${popBorder}`, marginBottom: 4, flexShrink: 0, minHeight: 52,
+          }}
+        >
+          {previewEntry ? (
+            <>
+              {thumb(previewEntry.storageKey, previewEntry.kind, 72)}
+              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ fontSize: 11, color: popText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {previewEntry.label}
+                </span>
+                <span style={{ fontSize: 10, color: popSub }}>
+                  {previewEntry.kind === 'image' ? t('subject.mediaImage', '图片') : t('subject.mediaAudio', '音频')}
+                  {formatDuration(previewEntry.durationMs) ? ` · ${formatDuration(previewEntry.durationMs)}` : ''}
+                </span>
+              </div>
+            </>
+          ) : (
+            <span style={{ fontSize: 10, color: popSub, padding: '6px 4px' }}>
+              {t('subject.panelPreviewHint', '悬停条目可预览')}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* 列表（@ 面板同款分组行：36px 高、28px 缩略、hover 高亮、单击写入） */}
       {tab !== 'upload' && (
         <div ref={listRef} style={{ flex: 1, minHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -417,7 +469,7 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
               type="button"
               data-subject-media-item={`${tab}:${entry.storageKey}`}
               onClick={() => doPick(entry, tab)}
-              onMouseEnter={(e) => { e.currentTarget.style.background = popHover; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = popHover; setPreviewEntry(entry); }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%', height: 36,
@@ -425,7 +477,7 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
                 background: 'transparent', color: popText, fontSize: 12, textAlign: 'left', fontFamily: 'inherit',
               }}
             >
-              {entry.kind === 'image' ? thumb(entry.storageKey) : audioIcon}
+              {thumb(entry.storageKey, entry.kind === 'image' ? 'image' : 'audio')}
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {entry.label}
               </span>
