@@ -1,0 +1,647 @@
+/**
+ * @zeroexo/plugin-nodes - 统一业务节点集
+ *
+ * 合并 7 种业务节点(text/generator/image/video/audio/ai-placeholder/stacked-media)为单包,
+ * 遵循 Node Model/View 契约(每个扩展声明 capabilities/runtime/viewContract)。
+ *
+ * 架构:
+ * - BaseNodeView: 所有节点的外壳(NodeShell 包裹 + 引脚布局 + 引脚拖拽回调)
+ * - AIStateView: AI 生成节点的 4 状态机(idle/loading/error/success)
+ * - 各派生视图: 提供内容区,通过 BaseNodeView 渲染引脚
+ * - stacked-media-model: StackNode 纯数据层,收纳/移出/合并/多选堆叠均通过 BatchCommand 原子事务
+ *
+ * 引脚回调:
+ *   NodeRendererProps 不含引脚事件回调。插件 install 时获取 ConnectionController,
+ *   通过闭包传入各 renderNode,BaseNodeView 用 controller + node.id 构造引脚回调。
+ *
+ * AI 生成闭包:
+ *   install 时从 context 获取 AIProvider,构造 generate 函数传给 AI 节点渲染器。
+ *   generate 仅封装 provider 调用,状态管理由组件 handleGenerate 处理。
+ */
+
+import type { Plugin, PluginContext, NodeTypeExtension, NodeRendererProps, ToolDefinition, ToolContext, NodeRuntimeContract } from '@zeroexo/core';
+import type { NodeRecord } from '@zeroexo/core';
+import type { NodeRegistryPlugin } from '@zeroexo/plugin-node-registry';
+import type { ConnectionController, ConnectionEndpoint, ConnectionValidation } from '@zeroexo/plugin-connection';
+import { ConnectionPlugin } from '@zeroexo/plugin-connection';
+import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
+import i18next from 'i18next';
+import { NODE_ICONS } from './icons.js';
+import type {
+  TextNodeData,
+  ImageNodeData,
+  VideoNodeData,
+  AudioNodeData,
+} from '@zeroexo/plugin-ai-provider';
+
+// 基类组件
+import { nodeActionBus } from './base-node-view.js';
+export { BaseNodeView, AIStateView, createPinHandlers, nodeActionBus } from './base-node-view.js';
+export type { BaseNodeViewProps, AIStateViewProps, PinHandlers, NodeActionEvent } from './base-node-view.js';
+export { NODE_ICONS } from './icons.js';
+
+// 冒泡评论层(从 comment-box 插件迁入,评论是节点本身的功能)
+export { CommentLayer } from './comment-layer.js';
+export type { CommentLayerProps } from './comment-layer.js';
+
+// 节点工具定义(供 NodeTypeExtension.getTools 使用)
+import { getTextTools, getImageTools, getVideoTools, getAudioTools } from './node-tools.js';
+
+// 工具函数 — storageKey → blob URL 重建
+export { useHydratedContent, useProgressiveImage, usePreviewImage, buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from './utils/hydrate.js';
+
+// 资产节点工厂 — 拖拽/上传/粘贴时创建节点实例
+export { createAssetNode } from './asset-node-factory.js';
+export type { AssetNodePayload } from './asset-node-factory.js';
+
+// 生成器提示词编辑器(@ 引用素材) — NodeGenerateDock 等外部消费方复用
+export { default as GeneratorPromptEditor } from './nodes/generator-prompt-editor.js';
+export type { GeneratorPromptEditorHandle, ReferenceItem } from './nodes/generator-prompt-editor.js';
+// 生成器模型派生函数/类型 — NodeGenerateDock 复用连入参考素材计算
+export {
+  deriveIncomingReferences,
+  referencesChanged,
+  computeReferenceCompatibility,
+  NODE_TYPE_TO_INPUT_TYPE,
+  GENERATOR_TYPE_META,
+} from './nodes/generator-model.js';
+export type { IncomingReference, RawIncomingNode, CompatibilityOptions } from './nodes/generator-model.js';
+
+// 图片替换 — 上传文件 → 替换节点图片(支持撤销/重做)
+export { replaceNodeImage } from './utils/replace-node-image.js';
+// 媒体替换模型 — video/audio 替换命令化(视图只消费命令,支持撤销/重做)
+export { replaceNodeVideo, replaceNodeAudio, stripFileExtension, computeVideoReplaceSize, buildReplacePatches } from './utils/media-replace-model.js';
+export { convertToStack, createStackNode, resolveStackSpawnPosition } from './node-tools.js';
+export { stackSelectedNodes, appendCards } from './nodes/stacked-media-model.js';
+export type { StackCard } from './nodes/stacked-media-types.js';
+export { ThumbNav, useThumbTier, THUMB_COUNT_MAX } from './nodes/thumb-nav.js';
+export type { ThumbNavItem, ThumbNavProps } from './nodes/thumb-nav.js';
+export { StackDetailsModal } from './nodes/stack-details-modal.js';
+export type { StackDetailsModalProps } from './nodes/stack-details-modal.js';
+// 视图组件 import(供 extension factory 使用)
+import { TextNodeView, getTextNodePins } from './nodes/text-node-view.js';
+import { GeneratorNodeView, getGeneratorNodePins } from './nodes/generator-node-view.js';
+import { ImageNodeView, getImageNodePins } from './nodes/image-node-view.js';
+import { VideoNodeView, getVideoNodePins } from './nodes/video-node-view.js';
+import { AudioNodeView, getAudioNodePins } from './nodes/audio-node-view.js';
+import { AiPlaceholderNodeView } from './nodes/ai-placeholder-node-view.js';
+import type { AiPlaceholderNodeData } from './nodes/ai-placeholder-node-view.js';
+import { StackedMediaNodeView } from './nodes/stacked-media-node-view.js';
+import { getStackedMediaPins } from './nodes/stacked-media-pins.js';
+import { createStackedMediaDefaultData, parseStackedMediaData } from './nodes/stacked-media-types.js';
+import { ejectCard } from './nodes/stacked-media-model.js';
+import { downloadStackCards } from './utils/download-stack-cards.js';
+// 配置专用节点(Plan#13):hidden 契约类型,仅供配置面板静态挂载,零实例约束
+import { createConfigPreviewExtension } from './config-preview/config-preview-node.js';
+export { ConfigPreviewNodeView, CONFIG_PREVIEW_TYPE } from './config-preview/config-preview-node.js';
+export type { ConfigPreviewNodeViewProps } from './config-preview/config-preview-node.js';
+
+// 派生节点视图(重导出本地 import,避免 Vite 中同时 import + export from 的绑定问题)
+export {
+  TextNodeView, getTextNodePins,
+  GeneratorNodeView, getGeneratorNodePins,
+  ImageNodeView, getImageNodePins,
+  VideoNodeView, getVideoNodePins,
+  AudioNodeView, getAudioNodePins,
+  AiPlaceholderNodeView,
+  StackedMediaNodeView, getStackedMediaPins,
+};
+export type { AiPlaceholderNodeData } from './nodes/ai-placeholder-node-view.js';
+export { StaggerGridRipple } from './components/StaggerGridRipple.js';
+
+// 文字节点数据工厂(纯文本,无富文本)
+function createTextDefaultData(): TextNodeData {
+  return { content: '', prompt: '', status: 'idle' };
+}
+function createGeneratorDefaultData(): Record<string, unknown> {
+  return {
+    prompt: '',
+    status: 'idle',
+    generationMode: 'image',
+    referenceImages: [],
+    channelId: '',
+    model: '',
+  };
+}
+function createImageDefaultData(): ImageNodeData {
+  return { prompt: '', content: '', status: 'idle' };
+}
+function createVideoDefaultData(): VideoNodeData {
+  return { prompt: '', content: '', status: 'idle' };
+}
+function createAudioDefaultData(): AudioNodeData {
+  return { prompt: '', content: '', status: 'idle' };
+}
+function createAiPlaceholderDefaultData(): AiPlaceholderNodeData {
+  return { status: 'generating', generationType: 'image', targetNodeType: 'image' };
+}
+
+// ===== 节点类型常量 =====
+const NODE_TYPES = {
+  text: 'text',
+  generator: 'generator',
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  aiPlaceholder: 'ai-placeholder',
+  stackedMedia: 'stacked-media',
+} as const;
+
+// 尺寸契约常量(单一事实源:扩展声明与包内工具统一引用,改契约只改 node-contracts.ts)
+import {
+  TEXT_DEFAULT_SIZE,
+  GENERATOR_DEFAULT_SIZE,
+  IMAGE_DEFAULT_SIZE,
+  VIDEO_DEFAULT_SIZE,
+  AUDIO_DEFAULT_SIZE,
+  AI_PLACEHOLDER_DEFAULT_SIZE,
+  STACKED_MEDIA_DEFAULT_SIZE,
+  MEDIA_MIN_SIZE,
+  STACKED_MEDIA_MIN_SIZE,
+  TEXT_MIN_SIZE,
+} from './utils/node-contracts.js';
+export {
+  TEXT_DEFAULT_SIZE,
+  GENERATOR_DEFAULT_SIZE,
+  IMAGE_DEFAULT_SIZE,
+  IMAGE_LONG_SIDE,
+  VIDEO_DEFAULT_SIZE,
+  AUDIO_DEFAULT_SIZE,
+  AI_PLACEHOLDER_DEFAULT_SIZE,
+  STACKED_MEDIA_DEFAULT_SIZE,
+  MEDIA_MIN_SIZE,
+  STACKED_MEDIA_MIN_SIZE,
+  TEXT_MIN_SIZE,
+  SUBJECT_DEFAULT_SIZE,
+  SUBJECT_MIN_SIZE,
+} from './utils/node-contracts.js';
+
+// ===== 扩展定义工厂 =====
+
+function createNodeRuntime(
+  defaultSize: { width: number; height: number },
+  options: { mode?: 'free' | 'uniform' | 'locked'; appearance?: 'shell' | 'custom'; preserveAspectRatio?: boolean } = {},
+): NodeRuntimeContract {
+  return {
+    definition: {
+      schemaVersion: 1,
+      size: {
+        basis: { ...defaultSize, referenceSize: 500 },
+        mode: options.mode ?? 'free',
+        preserveAspectRatio: options.preserveAspectRatio ?? false,
+      },
+      visual: {
+        appearance: options.appearance ?? 'shell',
+        selectionMode: 'runtime',
+      },
+    },
+  };
+}
+
+function createTextExtension(controller: ConnectionController | null, store: ReactGraphStore | null): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.text,
+    displayName: i18next.t('nodes.textTitle'),
+    category: 'Basic',
+    color: '#6b7280',
+    defaultSize: TEXT_DEFAULT_SIZE,
+    // Plan#1 T3(验收修正): free→uniform 契约迁移,但**不锁等比**——用户要求自由宽高 resize(内容重排不变形);
+    // 非等比尺寸时 isUniformScale=false 自动回退真实尺寸渲染,等比时才走 GPU scale
+    runtime: createNodeRuntime(TEXT_DEFAULT_SIZE, { mode: 'uniform' }),
+    capabilities: { stackable: true, capabilities: ['text'] },
+    resizable: true,
+    // 自由 resize 下限(契约显式化: 不声明则 resize 几何走隐式 80×60 兜底,违反契约自维护)
+    minSize: TEXT_MIN_SIZE,
+    viewContract: {
+      selectionEffect: 'default',
+      focusEffect: 'default',
+      hoverEffect: 'default',
+      connectionHoverEffect: 'default',
+      useShellChrome: true,
+    },
+    getPins: () => getTextNodePins(),
+    createDefaultData: createTextDefaultData,
+    getTools: () => getTextTools(),
+    renderNode: (props: NodeRendererProps) => (
+      <TextNodeView {...props} connectionController={controller} store={store ?? undefined} />
+    ),
+  };
+}
+
+// [DEPRECATED] 生成器节点扩展(2026-08-22 tA5):生成器节点已废弃(画布冗余),
+// 生成语义由「空 media 节点三态」承担(NodeGenerateDock 吸附面板)。
+// 注册保留仅用于旧项目数据中的 generator 节点渲染兼容,禁止再新建。
+function createGeneratorExtension(controller: ConnectionController | null, store: ReactGraphStore | null): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.generator,
+    displayName: i18next.t('nodes.generatorTitle'),
+    category: 'Generator',
+    color: '#8b5cf6',
+    defaultSize: GENERATOR_DEFAULT_SIZE,
+    // 显式 uniform 契约(resizable:false 无行为差异,但契约语义与全节点统一)
+    runtime: createNodeRuntime(GENERATOR_DEFAULT_SIZE, { mode: 'uniform' }),
+    capabilities: { stackable: false, capabilities: ['generation'] },
+    resizable: false,
+    viewContract: {
+      selectionEffect: 'default',
+      focusEffect: 'default',
+      hoverEffect: 'default',
+      connectionHoverEffect: 'default',
+      useShellChrome: true,
+    },
+    getPins: () => getGeneratorNodePins(),
+    createDefaultData: createGeneratorDefaultData,
+    renderNode: (props: NodeRendererProps) => (
+      <GeneratorNodeView {...props} connectionController={controller} store={store} />
+    ),
+  };
+}
+
+/**
+ * AI 生成结果只读素材防线(2026-08-25 用户拍板):
+ * 有 generationId 且当前无上游连入 = 只读素材节点态 → 禁止被连入上游(连入无意义);
+ * 生成节点态(已有上游)不受限,可继续连入参考输入。
+ */
+function rejectReadonlyAssetAsTarget(
+  store: ReactGraphStore | null,
+  _source: ConnectionEndpoint,
+  target: ConnectionEndpoint,
+): ConnectionValidation | void {
+  if (!store || target.direction !== 'input') return;
+  const tgtNode = store.getNode(target.nodeId);
+  if (!tgtNode) return;
+  const d = (tgtNode.data ?? {}) as Record<string, unknown>;
+  if (!d.generationId) return;
+  const hasIncoming = store.getGraph().edges.some((e) => e.target.nodeId === target.nodeId);
+  if (hasIncoming) return;
+  return { valid: false, reason: i18next.t('nodes.readonlyAssetNoInput') };
+}
+
+function createImageExtension(
+  controller: ConnectionController | null,
+  store: ReactGraphStore | null,
+): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.image,
+    displayName: i18next.t('nodes.imageTitle'),
+    category: 'Media',
+    color: '#9b59b6',
+    defaultSize: IMAGE_DEFAULT_SIZE,
+    runtime: createNodeRuntime(IMAGE_DEFAULT_SIZE, { mode: 'uniform', preserveAspectRatio: true }),
+    capabilities: { stackable: true, mediaKinds: ['image'], capabilities: ['media', 'replace', 'crop', 'split'] },
+    resizable: true,
+    lockAspectRatio: true,
+    minSize: MEDIA_MIN_SIZE,
+    viewContract: {
+      selectionEffect: 'default',
+      focusEffect: 'default',
+      hoverEffect: 'default',
+      connectionHoverEffect: 'default',
+      useShellChrome: true,
+    },
+    getPins: () => getImageNodePins(),
+    canConnect: (source, target) => rejectReadonlyAssetAsTarget(store, source, target),
+    createDefaultData: createImageDefaultData,
+    getTools: () => getImageTools(),
+    renderNode: (props: NodeRendererProps) => (
+      <ImageNodeView {...props} connectionController={controller} store={store ?? undefined} />
+    ),
+  };
+}
+
+function createVideoExtension(
+  controller: ConnectionController | null,
+  store: ReactGraphStore | null,
+): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.video,
+    displayName: i18next.t('nodes.videoTitle'),
+    category: 'Media',
+    color: '#3b82f6',
+    defaultSize: VIDEO_DEFAULT_SIZE,
+    runtime: createNodeRuntime(VIDEO_DEFAULT_SIZE, { mode: 'uniform', preserveAspectRatio: true }),
+    capabilities: { stackable: true, mediaKinds: ['video'], capabilities: ['media', 'replace'] },
+    resizable: true,
+    lockAspectRatio: true,
+    minSize: MEDIA_MIN_SIZE,
+    viewContract: {
+      selectionEffect: 'default',
+      focusEffect: 'default',
+      hoverEffect: 'default',
+      connectionHoverEffect: 'default',
+      useShellChrome: true,
+    },
+    getPins: () => getVideoNodePins(),
+    canConnect: (source, target) => rejectReadonlyAssetAsTarget(store, source, target),
+    createDefaultData: createVideoDefaultData,
+    getTools: () => getVideoTools(),
+    renderNode: (props: NodeRendererProps) => (
+      <VideoNodeView {...props} connectionController={controller} store={store ?? undefined} />
+    ),
+  };
+}
+
+function createAudioExtension(
+  controller: ConnectionController | null,
+  store: ReactGraphStore | null,
+): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.audio,
+    displayName: i18next.t('nodes.audioTitle'),
+    category: 'Media',
+    color: '#10b981',
+    // 气泡比例(特化外观:不参与全局外观配置与尺寸统一)
+    defaultSize: AUDIO_DEFAULT_SIZE,
+    // 显式 uniform 契约(与全节点统一;resizable:false 无行为差异)
+    runtime: createNodeRuntime(AUDIO_DEFAULT_SIZE, { mode: 'uniform', appearance: 'custom' }),
+    capabilities: { stackable: true, mediaKinds: ['audio'], capabilities: ['media', 'replace', 'playback'] },
+    resizable: false,
+    specialAppearance: true,
+    viewContract: {
+      selectionEffect: 'default',
+      focusEffect: 'default',
+      hoverEffect: 'default',
+      connectionHoverEffect: 'default',
+      useShellChrome: true,
+    },
+    getPins: () => getAudioNodePins(),
+    canConnect: (source, target) => rejectReadonlyAssetAsTarget(store, source, target),
+    createDefaultData: createAudioDefaultData,
+    getTools: () => getAudioTools(),
+    renderNode: (props: NodeRendererProps) => (
+      <AudioNodeView {...props} connectionController={controller} store={store ?? undefined} />
+    ),
+  };
+}
+
+/** AI 占位节点扩展 - 不显示在节点菜单中,仅用于 AI 生成任务占位 */
+function createAiPlaceholderExtension(controller: ConnectionController | null, store: ReactGraphStore | null): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.aiPlaceholder,
+    displayName: 'AI 生成中',
+    category: '_hidden',
+    color: '#8b5cf6',
+    // 尺寸:网格179×101 + 四周8px留白 = 195×117
+    defaultSize: AI_PLACEHOLDER_DEFAULT_SIZE,
+    runtime: createNodeRuntime(AI_PLACEHOLDER_DEFAULT_SIZE, { mode: 'uniform', appearance: 'custom' }),
+    capabilities: { stackable: false, capabilities: ['placeholder'] },
+    resizable: false,
+    getPins: () => [],
+    createDefaultData: createAiPlaceholderDefaultData,
+    getTools: () => [],
+    renderNode: (props: NodeRendererProps) => (
+      <AiPlaceholderNodeView {...props} connectionController={controller} store={store ?? undefined} />
+    ),
+  };
+}
+
+/** StackNode 资源浏览器扩展 - 支持图片/视频节点连线收纳(特化外观通用节点) */
+function createStackedMediaExtension(controller: ConnectionController | null, store: ReactGraphStore | null): NodeTypeExtension {
+  return {
+    type: NODE_TYPES.stackedMedia,
+    displayName: i18next.t('nodes.stackedMediaTitle'),
+    // Basic 分类:可拖拽/菜单创建的通用节点(多选堆叠入口已移除)
+    category: 'Basic',
+    color: '#f59e0b',
+    // 基准尺寸与 image/video 节点一致
+    defaultSize: STACKED_MEDIA_DEFAULT_SIZE,
+    resizable: true,
+    // 舞台高度固定,不同卡片只在展示区内自适应。
+    lockAspectRatio: true,
+    // minSize 必须与 defaultSize 等比(620:404 ≈ 220:143):resize-geometry 先钳 minSize 后锁比例,
+    // 非等比下限会在触底时破坏宽高比 → isUniformScale=false → 回退真实尺寸渲染(挤压+字体跳跃)
+    minSize: STACKED_MEDIA_MIN_SIZE,
+    specialAppearance: true,
+    // resize handle 回归节点四角标准位置(用户验收反馈:底部内缩使命中区落在内容上,语义反直觉)
+    runtime: createNodeRuntime(STACKED_MEDIA_DEFAULT_SIZE, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
+    capabilities: { stackable: true, mediaKinds: ['image', 'video', 'audio', 'text'], capabilities: ['stack', 'merge-stacks', 'media-edit'] },
+    getPins: () => getStackedMediaPins(),
+    createDefaultData: createStackedMediaDefaultData,
+    // 节点视图契约(MVVM 试点):默认走 NodeShell 状态渲染,声明排布边界
+    viewContract: {
+      selectionEffect: 'default',
+      connectionHoverEffect: 'default',
+      hoverEffect: 'default',
+    },
+    // 纵深防御:作为 input 端时仅接受已声明可堆叠的基础节点
+    // (既有类型兼容矩阵已排除其余类型,不存在"未识别"态)
+    canConnect: (source, target) => {
+      if (!store) return;
+      const tgtNode = store.getNode(target.nodeId);
+      if (!tgtNode || tgtNode.type !== NODE_TYPES.stackedMedia) return;
+      const srcNode = store.getNode(source.nodeId);
+      if (srcNode && !['image', 'video', 'audio', 'text', NODE_TYPES.stackedMedia].includes(srcNode.type)) {
+        return { valid: false, reason: i18next.t('nodes.stackOnlyAcceptsMedia') };
+      }
+    },
+    getTools: (node: NodeRecord, ctx: ToolContext): ToolDefinition[] => {
+      const data = parseStackedMediaData(node.data as Record<string, unknown> | undefined);
+      const activeCard = data.cards[data.activeIndex];
+      const tools: ToolDefinition[] = [];
+
+      // 根据活跃卡片类型注入原始工具(排除"堆叠"自身)
+      if (activeCard) {
+        const sourceTools = activeCard.sourceType === 'video'
+          ? getVideoTools()
+          : activeCard.sourceType === 'audio'
+            ? getAudioTools()
+            : activeCard.sourceType === 'text'
+              ? getTextTools()
+              : activeCard.sourceType === 'image'
+                ? getImageTools()
+                : [];
+        const activeTarget: NodeRecord = {
+          id: activeCard.sourceNodeId ?? activeCard.id,
+          type: activeCard.sourceType,
+          title: activeCard.title ?? '',
+          position: node.position,
+          size: activeCard.size ?? node.size,
+          data: activeCard.data,
+        };
+        for (const t of sourceTools) {
+          if (t.id === 'createStackNode') continue; // 排除"堆叠"自身
+          if (t.id === 'detail') continue; // 排除源详情:堆叠下方已有统一详情按钮(避免胶囊出现两个"信息"按钮)
+          tools.push({ ...t, targetNode: () => activeTarget });
+        }
+      }
+
+      // 详情按钮(Plan#20 验收反馈 #2:>5 卡断层兜底,打开全部卡片网格;与主体「详情」同模式)
+      tools.push({
+        id: 'detail',
+        label: '',
+        title: i18next.t('nodes.stackDetails'),
+        icon: <NODE_ICONS.stack size={14} />,
+        group: 'basic',
+        run: (node) => { nodeActionBus.emit('stack:openDetails', { nodeId: node.id }); },
+      });
+
+      // 移出按钮(仅 StackNode 显示;图标走注册表 eject 语义=Combine,与移出组 LogOut 区分——用户拍板表 2026-08-20)
+      tools.push({
+        id: 'eject',
+        // 胶囊中统一使用图标按钮，title/tooltip 提供语义(title 空串走 TOOL_TITLE_I18N_KEY.eject 映射)。
+        label: '',
+        title: '',
+        icon: <NODE_ICONS.eject size={14} />,
+        visible: () => data.cards.length > 0,
+        run: () => {
+          if (data.cards.length === 0) return;
+          const result = ejectCard(ctx.commandQueue, node, data, data.activeIndex);
+          if (result) ctx.commandQueue.execute(result.command);
+        },
+      });
+
+      // 批量下载(征集 #78):一键下载堆叠内全部卡片(媒体二进制/文本 .txt,逐个错峰触发);
+      // id 复用 download → 胶囊 TOOL_TITLE_I18N_KEY.download 自动提供多语 tooltip,零 i18n 新增
+      tools.push({
+        id: 'download',
+        label: '',
+        title: '',
+        icon: <NODE_ICONS.download size={14} />,
+        visible: () => data.cards.length > 0,
+        run: (n) => {
+          const d = parseStackedMediaData(n.data as Record<string, unknown> | undefined);
+          if (d.cards.length === 0) return;
+          void downloadStackCards(d.cards);
+        },
+      });
+
+      return tools;
+    },
+    renderNode: (props: NodeRendererProps) => (
+      <StackedMediaNodeView {...props} connectionController={controller} store={store ?? undefined} />
+    ),
+  };
+}
+
+// ===== 主插件 =====
+
+/**
+ * PluginNodesPlugin - 统一业务节点插件 + 节点注册入口
+ *
+ * 一个插件注册全部 7 种业务节点类型(text/generator/image/video/audio/ai-placeholder/stacked-media)。
+ * 替代原先 5 个独立插件包,符合"节点集"而非"独立插件"的设计理念。
+ *
+ * 同时作为 app 注册自定义节点的统一入口:对外暴露 register/registerAll/get/all/
+ * search 等代理方法(代理到底层 NodeRegistryPlugin),app 无需直接持有 registry。
+ *
+ * 依赖:
+ * - node-registry: 必需,底层注册中心(由本插件代理)
+ * - connection: 必需,提供引脚拖拽连线能力
+ * - ai-provider: 可选,未安装时 AI 节点仍可渲染但生成会报错
+ */
+export class PluginNodesPlugin implements Plugin {
+  id = 'nodes';
+  dependencies = ['node-registry', 'connection'];
+
+  private registeredTypes: string[] = [];
+  /** 底层注册中心引用(install 时从 context 获取并缓存) */
+  private registry?: NodeRegistryPlugin;
+
+  install(context: PluginContext): void {
+    const registry = context.getPlugin<NodeRegistryPlugin>('node-registry');
+    if (!registry) {
+      throw new Error('PluginNodesPlugin requires NodeRegistryPlugin to be installed first');
+    }
+    this.registry = registry;
+
+    // 获取连线控制器(引脚拖拽连线)
+    const connectionPlugin = context.getPlugin<ConnectionPlugin>('connection');
+    const controller = connectionPlugin?.getController() ?? null;
+
+    // Bug9: 获取 store(用于 GeneratorNodeView 订阅 graph 变化自动刷新引用计数)
+    const renderReactPlugin = context.getPlugin<Plugin & { getStore(): ReactGraphStore }>('render-react');
+    const store = renderReactPlugin?.getStore() ?? null;
+
+    // 创建并注册全部 7 种节点扩展
+    const extensions: NodeTypeExtension[] = [
+      createTextExtension(controller, store),
+      createGeneratorExtension(controller, store),
+      createImageExtension(controller, store),
+      createVideoExtension(controller, store),
+      createAudioExtension(controller, store),
+      createAiPlaceholderExtension(controller, store),
+      createStackedMediaExtension(controller, store),
+      // 配置专用节点(hidden):仅注册表契约完整,零实例约束,不出现在任何用户入口
+      createConfigPreviewExtension(),
+    ];
+
+    for (const ext of extensions) {
+      registry.register(ext, this.id);
+      this.registeredTypes.push(ext.type);
+    }
+  }
+
+  uninstall(context: PluginContext): void {
+    const registry = context.getPlugin<NodeRegistryPlugin>('node-registry');
+    for (const type of this.registeredTypes) {
+      registry?.unregister(type);
+    }
+    this.registeredTypes = [];
+    this.registry = undefined;
+  }
+
+  // ===== 注册中心代理(app 统一入口)=====
+
+  /** 获取底层注册中心(install 后可用) */
+  getRegistry(): NodeRegistryPlugin {
+    if (!this.registry) {
+      throw new Error('PluginNodesPlugin not installed: call editor.install(plugin) first');
+    }
+    return this.registry;
+  }
+
+  /** 注册节点类型(代理到底层 registry) */
+  register(definition: NodeTypeExtension, registeredBy = 'app'): void {
+    this.getRegistry().register(definition, registeredBy);
+  }
+
+  /** 批量注册节点类型(代理到底层 registry) */
+  registerAll(definitions: NodeTypeExtension[], registeredBy = 'app'): void {
+    this.getRegistry().registerAll(definitions, registeredBy);
+  }
+
+  /** 按 type 获取定义(代理) */
+  get(type: string): NodeTypeExtension | undefined {
+    return this.getRegistry().get(type);
+  }
+
+  /** 获取所有已注册定义(代理) */
+  all(): NodeTypeExtension[] {
+    return this.getRegistry().all();
+  }
+
+  /** 模糊搜索节点类型(代理,用于右键菜单节点选择器) */
+  search(query: string, limit = 20): ReturnType<NodeRegistryPlugin['search']> {
+    return this.getRegistry().search(query, limit);
+  }
+
+  /** 获取所有 type 字符串(代理) */
+  types(): string[] {
+    return this.getRegistry().types();
+  }
+
+  /** 按分类获取(代理) */
+  byCategory(category: string): NodeTypeExtension[] {
+    return this.getRegistry().byCategory(category);
+  }
+
+  /** 获取所有分类名(代理) */
+  categories(): string[] {
+    return this.getRegistry().categories();
+  }
+
+  /** 构建分类树(代理) */
+  categoryTree(): ReturnType<NodeRegistryPlugin['categoryTree']> {
+    return this.getRegistry().categoryTree();
+  }
+
+  /** 已注册数量(代理) */
+  size(): number {
+    return this.getRegistry().size();
+  }
+
+  /** 判断类型是否已注册(代理) */
+  has(type: string): boolean {
+    return this.getRegistry().has(type);
+  }
+}

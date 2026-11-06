@@ -1,0 +1,27 @@
+# 需求征集索引 — zeroexo-comfyui
+
+> 本目录是 **zeroexo-comfyui 唯一**的需求 / 遗漏 / 决策征集位。
+> 2026-11-06 从外部前端规则库 `zeroexo/.project-rules/suggestion-board/` 迁回 17 份；此后禁止再往外部库写 comfyui 征集。
+> 新增流程：`_template.md` 复制 → 命名 `YYYY-MM-DD-主题.md` → 归属分析（功能强化 / bug 遗漏 / 决策）→ 决定并入 `../plans/` 哪个 Plan 或独立热修 → 在本表登记。
+
+| # | 日期 | 主题 | 归属 | 状态 | 文件 |
+|---|---|---|---|---|---|
+| S-01 | 2026-11-02 | 本地 ComfyUI 作为部署底座 / 画布是否剥离成独立前端 | C-02 立项依据 | 🟢 merged | [2026-11-02-comfyui-as-channel-vs-strip-canvas.md](2026-11-02-comfyui-as-channel-vs-strip-canvas.md) |
+| S-02 | 2026-11-05 | 资源显示机制 / 日文素材与发送按钮 / 服务停摆 / 交接烂摊子 | 独立热修 · C-02 验收轮 | 🟢 merged | [2026-11-05-comfyui-asset-display-and-service-recovery.md](2026-11-05-comfyui-asset-display-and-service-recovery.md) |
+| S-03 | 2026-11-05 | 拖入画布节点尺寸与「发送到画布」不一致 + 抽屉「剧本」分组移除 | 独立热修 | 🟢 merged | [2026-11-05-comfyui-drop-node-size-and-drawer-script-tab.md](2026-11-05-comfyui-drop-node-size-and-drawer-script-tab.md) |
+| S-04 | 2026-11-05 | 子画布 Sub-Canvas 新模块 | C-03 | 🟢 merged | [2026-11-05-comfyui-sub-canvas-module.md](2026-11-05-comfyui-sub-canvas-module.md) |
+| S-05 | 2026-11-05 | 主体库标题/新建入口形态 + 状态色去红去绿 | 独立热修 | 🟢 merged | [2026-11-05-comfyui-subject-add-tile-and-state-colors.md](2026-11-05-comfyui-subject-add-tile-and-state-colors.md) |
+| S-06 | 2026-11-06 | 导演台衔接箭头胶囊化 + 提示词面板镜头跳转胶囊 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-director-arrow-capsule-and-shot-nav.md](2026-11-06-comfyui-director-arrow-capsule-and-shot-nav.md) |
+| S-07 | 2026-11-06 | 导演台时长下拉改 0–30s 滑动条 + 超推荐时长提醒 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-director-duration-slider-cap-warning.md](2026-11-06-comfyui-director-duration-slider-cap-warning.md) |
+| S-08 | 2026-11-06 | 素材分段批量操作 + 「我的资产」改名「全局」+ 开源库排末位 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-drawer-asset-batch-and-scope-rename.md](2026-11-06-comfyui-drawer-asset-batch-and-scope-rename.md) |
+| S-09 | 2026-11-06 | 抽屉瀑布流宽度区间抖动（三环反馈） | 独立热修 | 🟢 merged | [2026-11-06-comfyui-drawer-masonry-jitter-hysteresis.md](2026-11-06-comfyui-drawer-masonry-jitter-hysteresis.md) |
+| S-10 | 2026-11-06 | 抽屉主体分段工具栏与素材对齐 + 批量编辑 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-drawer-subject-toolbar-parity-and-batch-edit.md](2026-11-06-comfyui-drawer-subject-toolbar-parity-and-batch-edit.md) |
+| S-11 | 2026-11-06 | 预览图档位混乱：统一契约 + 入口自动派生 + 尺寸协商 + 明确缓存 | 独立热修 · 建议后续 Plan | 🟢 merged | [2026-11-06-comfyui-image-variant-contract-and-cache.md](2026-11-06-comfyui-image-variant-contract-and-cache.md) |
+| S-12 | 2026-11-06 | 弹层居中 + 主体选中/弹性排列对齐 + 状态页冗余提示 + 插槽拖入正文 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-modal-centering-subject-masonry-slot-drop.md](2026-11-06-comfyui-modal-centering-subject-masonry-slot-drop.md) |
+| S-13 | 2026-11-06 | 画布节点引脚默认值改到 12 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-pin-default-size-12.md](2026-11-06-comfyui-pin-default-size-12.md) |
+| S-14 | 2026-11-06 | 抽屉主体段总数 / 新建序号递增 / 同名主体身份绑定 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-subject-item-binding-and-count.md](2026-11-06-comfyui-subject-item-binding-and-count.md) |
+| S-15 | 2026-11-06 | 主体类型修改丢写竞态（无锁 read-merge-write） | 独立热修 | 🟢 merged | [2026-11-06-comfyui-subject-kind-lost-write-race.md](2026-11-06-comfyui-subject-kind-lost-write-race.md) |
+| S-16 | 2026-11-06 | 主体状态编辑页美化 + 状态可当封面 | 独立热修 | 🟢 merged | [2026-11-06-comfyui-subject-state-page-trim-and-cover.md](2026-11-06-comfyui-subject-state-page-trim-and-cover.md) |
+| S-17 | 2026-11-06 | 项目 = N 个画布 + 剧本 + 出片 的挂载模型（C-03） | C-03 | 🟢 merged | [2026-11-06-project-canvases-mount-model.md](2026-11-06-project-canvases-mount-model.md) |
+
+状态：open 0 / merged 17。

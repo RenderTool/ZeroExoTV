@@ -1,0 +1,114 @@
+/*
+ * CanvasTabBar 胶囊分段页签条样式（2026-11-04 视觉改造）
+ *
+ * 参考分段控件（segmented control）视觉：容器统一内边距 + 整体圆角外壳；
+ * 选中项 = 独立底色块 + 圆角（不用下划线）；未选中项 = 低对比文字。
+ * 颜色全部经 CSS 变量由组件按主题（深/浅）注入，本文件不含硬编码色值。
+ */
+
+.zx-canvas-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;               /* 四枚页签等距 */
+  padding: 3px;           /* 容器统一内边距 */
+  border-radius: 10px;    /* 整体圆角外壳 */
+  background: var(--zx-tabs-bg);
+  border: 1px solid var(--zx-tabs-border);
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.zx-canvas-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--zx-tab-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+/* hover：未选中项轻抬底，不抢选中态 */
+.zx-canvas-tab:hover:not(.is-active) {
+  background: var(--zx-tab-hover);
+  color: var(--zx-tab-text);
+}
+
+/* active（按下）：比 hover 再深一档 */
+.zx-canvas-tab:active:not(.is-active) {
+  background: var(--zx-tab-press);
+}
+
+/* 选中态：独立底色块 + 圆角 + 轻投影（由容器+底块表达，非下划线） */
+.zx-canvas-tab.is-active {
+  background: var(--zx-tab-active);
+  color: var(--zx-tab-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px var(--zx-tab-active-shadow);
+}
+
+/* focus-visible：键盘可达性描边
+   2026-11-05 用户指令（状态色不用品牌红）：旧值 var(--zx-tab-accent) = 主题强调红，
+   与 app.css 全局 :focus-visible 已改的中性 slate 不一致 → 统一改中性亮色。 */
+.zx-canvas-tab:focus-visible {
+  outline: 2px solid rgba(148, 163, 184, 0.9);
+  outline-offset: 1px;
+}
+
+/* 未绑定槽位（分镜/出片尚无内容载体）：降透明度提示，仍可点击供应 */
+.zx-canvas-tab.is-unbound {
+  opacity: 0.55;
+}
+
+/* 图标基线统一：尺寸/笔画由组件 props 控制，这里只锁对齐与收缩 */
+.zx-canvas-tab svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* 副本画布标签（Spec v2 / 征集#184）：标题过长省略，× 只在悬停/激活时显形 */
+.zx-canvas-tab-label {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zx-canvas-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity .15s, background .15s;
+}
+
+.zx-canvas-tab:hover .zx-canvas-tab-close,
+.zx-canvas-tab.is-active .zx-canvas-tab-close {
+  opacity: 0.85;
+}
+
+.zx-canvas-tab-close:hover {
+  opacity: 1;
+  background: var(--zx-tab-hover);
+}

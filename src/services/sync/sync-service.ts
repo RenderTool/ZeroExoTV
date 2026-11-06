@@ -1,0 +1,177 @@
+/**
+ * sync-service - 简化版云同步服务（核心编排模块）
+ *
+ * 已拆分为以下模块:
+ * - sync-utils.ts: 工具函数(待删除追踪、本地未推送检查、防抖常量)
+ * - sync-resources.ts: 资源上传(CAS 去重、blob 上传)
+ * - sync-projects.ts: 项目同步(推送、合并、冲突处理)
+ * - sync-assets.ts: 资产同步
+ *
+ * 本文件仅保留核心编排逻辑:fullSync、事件处理、防抖推送。
+ */
+
+import { getProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
+import { apiGet, apiDelete, ApiError } from '../api-client.js';
+import type { CloudProject } from './sync-projects.js';
+import { mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushProjectMeta } from './sync-projects.js';
+import { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets } from './sync-resources.js';
+import { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted } from './sync-assets.js';
+import {
+  debugLog, debugError,
+  FULL_SYNC_DEBOUNCE_MS,
+  markPendingDelete, clearPendingDelete,
+  hasLocalChanges,
+} from './sync-utils.js';
+import { isOnline, isTabActive, setSyncStatus, setLastSyncedAt, CLOUD_ENABLED } from './sync-store.js';
+
+// 重新导出子模块的公共 API，保持向后兼容
+// Phase3 后仅保留存活通道;旧 HTTP 写函数与脏标记/冲突机制不再 re-export
+export { pushProjectMeta };
+export { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets };
+export { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted };
+
+// ===== 全量同步状态（本地变量，避免 ES 模块导入赋值错误）=====
+let isFullSyncing = false;
+let fullSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ===== 单项目云端拉取 ====
+
+export async function syncProjectFromCloud(projectId: string, force = false): Promise<void> {
+  // 本地版（2026-11-02）：无云端 → 不拉取
+  if (!CLOUD_ENABLED) return;
+  if (!isOnline()) return;
+  try {
+    const cloud: CloudProject = await apiGet<CloudProject>(`/projects/${projectId}`);
+    await mergeCloudProjectToLocal(cloud, force);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      // 仅当本地项目曾有 cloudId(之前同步过)时才删除本地数据
+      // 新项目(cloudId 为空)不应删除,否则会导致"项目不存在或已被删除"误报
+      const local = await getProject(projectId);
+      if (local?.cloudId) {
+        await deleteProjectGraph(projectId);
+        await deleteProject(projectId);
+      }
+    }
+    throw err;
+  }
+}
+
+// ===== 全量同步 =====
+
+export async function fullSync(): Promise<void> {
+  // 本地版（2026-11-02）：无云端 → 全量同步整体不启用
+  if (!CLOUD_ENABLED) return;
+  if (isFullSyncing) {
+    debugLog('[sync] fullSync already in progress, skip');
+    return;
+  }
+  if (!isOnline()) {
+    debugLog('[sync] offline, skip fullSync');
+    return;
+  }
+  if (!isTabActive()) {
+    debugLog('[sync] tab inactive, skip fullSync');
+    return;
+  }
+
+  // 清除全量同步防抖定时器
+  if (fullSyncTimer) {
+    clearTimeout(fullSyncTimer);
+    fullSyncTimer = null;
+  }
+
+  isFullSyncing = true;
+  setSyncStatus('syncing');
+  try {
+    await pullAllFromCloud();
+
+    // 推送到云端前先检查是否有脏数据,无脏数据时跳过全量推送扫描
+    if (await hasLocalChanges()) {
+      debugLog('[sync] has local changes, pushing to cloud');
+      await pushAllToCloud();
+    } else {
+      debugLog('[sync] no local changes, skip push');
+    }
+
+    await setLastSyncedAt(new Date().toISOString());
+    setSyncStatus('idle');
+  } catch (err) {
+    if (err instanceof TypeError && err.message.includes('fetch')) {
+      debugError('[sync] fullSync failed: network error (backend unreachable), will retry on next sync');
+    } else {
+      debugError('[sync] fullSync failed:', err);
+    }
+    setSyncStatus('error');
+  } finally {
+    isFullSyncing = false;
+  }
+}
+
+/** 防抖版 fullSync:短时间内多次调用只触发最后一次 */
+export function debouncedFullSync(): void {
+  // 本地版（2026-11-02）：无云端 → 不排防抖任务
+  if (!CLOUD_ENABLED) return;
+  if (fullSyncTimer) clearTimeout(fullSyncTimer);
+  fullSyncTimer = setTimeout(() => {
+    fullSyncTimer = null;
+    void fullSync();
+  }, FULL_SYNC_DEBOUNCE_MS);
+}
+
+async function pullAllFromCloud(): Promise<void> {
+  // 本地版（2026-11-02）：无云端 → 整体不启用
+  if (!CLOUD_ENABLED) return;
+  await pullCloudAssets();
+  await pullCloudProjects();
+}
+
+async function pushAllToCloud(): Promise<void> {
+  if (!CLOUD_ENABLED) return;
+  await pushLocalAssets();
+  await pushLocalProjects();
+}
+
+// ===== 项目事件处理 =====
+
+// Phase3(Yjs 单主干):onProjectCreated / onProjectUpdated / 防抖推送已整体退役。
+// 画布数据写路径由 Y.Doc 承担(服务端 storeCanvasDocument 防抖落库),
+// 元数据(title/thumbnailUrl/tags)走 pushProjectMeta 轻量通道;删除走 onProjectDeleted。
+
+export async function onProjectDeleted(localId: string, options?: { skipLocalDelete?: boolean }): Promise<void> {
+  const local = await getProject(localId);
+  const cloudId = local?.cloudId;
+
+  if (CLOUD_ENABLED && isOnline()) {
+    const deleteId = cloudId || localId;
+    try {
+      await apiDelete(`/projects/${deleteId}`);
+      debugLog(`[sync] deleted project from cloud: ${deleteId}`);
+      if (cloudId) clearPendingDelete(cloudId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        debugLog(`[sync] cloud project ${deleteId} already deleted (404), treat as success`);
+        if (cloudId) clearPendingDelete(cloudId);
+      } else {
+        debugError(`[sync] onProjectDeleted ${localId} failed to delete from cloud:`, err);
+        if (cloudId) markPendingDelete(cloudId);
+      }
+    }
+  } else {
+    if (cloudId) markPendingDelete(cloudId);
+  }
+
+  if (!options?.skipLocalDelete) {
+    try {
+      await deleteProjectGraph(localId);
+      await deleteProject(localId);
+      debugLog(`[sync] deleted local project ${localId}`);
+    } catch (err) {
+      debugError(`[sync] onProjectDeleted ${localId} failed to delete locally:`, err);
+    }
+  }
+}
+
+// ===== 强制拉取 =====
+// forcePullProjectFromCloud 已迁移至 sync-projects.ts(与 mergeCloudProjectToLocal 同模块,避免循环依赖)
+

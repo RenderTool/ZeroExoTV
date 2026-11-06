@@ -1,0 +1,418 @@
+/**
+ * StackNode Model - 纯数据操作层(MVVM 试点)
+ *
+ * 视图层消费本模块构造命令,数据变换规则集中于此,无 React 依赖。
+ * 每个操作返回「正向命令数组」,撤销由 commandQueue 的 undo 栈负责。
+ */
+
+import {
+  AddNodeCommand,
+  AddEdgeCommand,
+  RemoveEdgeCommand,
+  RemoveNodeCommand,
+  UpdateNodeDataCommand,
+  BatchCommand,
+} from '@zeroexo/core';
+import type { Command, NodeRecord, EdgeRecord } from '@zeroexo/core';
+import type { StackedMediaData, StackCard } from './stacked-media-types.js';
+import { STACKED_MEDIA_DEFAULT_SIZE, IMAGE_DEFAULT_SIZE } from '../utils/node-contracts.js';
+
+/** 兄弟垂直队列间距 */
+const SIBLING_GAP = 40;
+/** 移出节点放置在 StackNode 前方的间距 */
+const EJECT_OFFSET_X = 40;
+/** StackNode 总高 = 扩展契约 defaultSize.height(展示区 + 底部导航)。 */
+const STACK_BASE_HEIGHT = STACKED_MEDIA_DEFAULT_SIZE.height;
+
+function genId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 单张卡片媒体源类型 */
+export type StackMediaSource = 'image' | 'video';
+
+export interface CollectResult {
+  /** 正向命令(BatchCommand 打包) */
+  command: BatchCommand;
+  /** 更新后的卡片列表 */
+  cards: StackCard[];
+  /** 新卡片 id(供视图快照撤销用) */
+  cardId: string;
+}
+
+/**
+ * 收纳:把源节点(图片/视频)收纳为堆叠卡片
+ * 正向:删边 + 更新堆叠数据 + 删源节点
+ */
+export function collectCard(
+  nodeId: string,
+  data: StackedMediaData,
+  sourceNode: NodeRecord,
+  edge: EdgeRecord,
+): CollectResult {
+  const card: StackCard = {
+    id: genId('card'),
+    sourceType: sourceNode.type as StackCard['sourceType'],
+    sourceNodeId: sourceNode.id,
+    data: (sourceNode.data as Record<string, unknown>) ?? {},
+    title: sourceNode.title,
+    size: sourceNode.size,
+  };
+  const cards = [...data.cards, card];
+  return {
+    command: new BatchCommand([
+      new RemoveEdgeCommand(edge.id),
+      new UpdateNodeDataCommand(nodeId, { cards, activeIndex: cards.length - 1 } as Record<string, unknown>),
+      new RemoveNodeCommand(sourceNode.id),
+    ], 'stacked-media-collect'),
+    cards,
+    cardId: card.id,
+  };
+}
+
+export interface StackSelectedResult {
+  command: BatchCommand;
+  stackNodeId: string;
+  cards: StackCard[];
+  collectedCount: number;
+  skippedCount: number;
+  skippedIds: string[];
+}
+
+/** 各源类型的 output pin id(用于把源节点的下游边转移到新 StackNode) */
+const SOURCE_OUTPUT_PIN: Record<string, string> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  text: 'output',
+  'stacked-media': 'media',
+};
+
+/**
+ * 多选堆叠:将多个源节点原子收纳进一个新 StackNode。
+ * 仅收纳通过 isStackable 判定的节点(image/video/audio/text/stacked-media)。
+ * - stacked-media 源节点展平其卡片后并入
+ * - 源节点所有关联边显式删除(RemoveNodeCommand 不清理边,悬挂边会残留数据)
+ * - 源 Stack 的下游边转移到新 StackNode,避免静默丢失图关系
+ * 返回原子 BatchCommand 与跳过摘要,调用方负责 UI 提示。
+ */
+export function stackSelectedNodes(
+  position: { x: number; y: number },
+  sourceNodes: NodeRecord[],
+  graph: { edges: EdgeRecord[] },
+  isStackable: (node: NodeRecord) => boolean,
+): StackSelectedResult | null {
+  const stackable = sourceNodes.filter(isStackable);
+  if (stackable.length === 0) return null;
+
+  const stackNodeId = genId('stack-node');
+  const stackNode: NodeRecord = {
+    id: stackNodeId,
+    type: 'stacked-media',
+    position,
+    size: { ...STACKED_MEDIA_DEFAULT_SIZE },
+    title: '堆叠媒体',
+    data: { cards: [], activeIndex: 0 },
+  };
+
+  const commands: Command[] = [new AddNodeCommand(stackNode)];
+  const cards: StackCard[] = [];
+  const removedIds = new Set(stackable.map((n) => n.id));
+
+  for (const src of stackable) {
+    // 源 Stack:展平其卡片
+    if (src.type === 'stacked-media') {
+      const srcData = (src.data ?? {}) as Record<string, unknown>;
+      const srcCards = (srcData.cards as StackCard[] | undefined) ?? [];
+      for (const c of srcCards) {
+        cards.push({ ...c, id: genId('card') });
+      }
+      // 下游边转移到新 StackNode(output pin 换成 'media'),上游边删除
+      for (const e of graph.edges) {
+        if (e.source.nodeId === src.id) {
+          commands.push(new RemoveEdgeCommand(e.id));
+          if (!removedIds.has(e.target.nodeId)) {
+            commands.push(new AddEdgeCommand({
+              ...e,
+              id: genId('merged-edge'),
+              source: { nodeId: stackNodeId, pinId: 'media' },
+            }));
+          }
+        } else if (e.target.nodeId === src.id) {
+          commands.push(new RemoveEdgeCommand(e.id));
+        }
+      }
+      commands.push(new RemoveNodeCommand(src.id));
+      continue;
+    }
+
+    // 常规源节点:构造卡片 + 删除全部关联边
+    cards.push({
+      id: genId('card'),
+      sourceType: src.type as StackCard['sourceType'],
+      sourceNodeId: src.id,
+      data: (src.data as Record<string, unknown>) ?? {},
+      title: src.title,
+      size: src.size,
+    });
+    for (const e of graph.edges) {
+      if (e.source.nodeId !== src.id && e.target.nodeId !== src.id) continue;
+      commands.push(new RemoveEdgeCommand(e.id));
+      // 源节点有下游边且下游节点未被收纳 → 转移到新 StackNode,保留图语义
+      if (e.source.nodeId === src.id && !removedIds.has(e.target.nodeId)) {
+        commands.push(new AddEdgeCommand({
+          ...e,
+          id: genId('stacked-edge'),
+          source: { nodeId: stackNodeId, pinId: SOURCE_OUTPUT_PIN[src.type] ?? 'media' },
+        }));
+      }
+    }
+    commands.push(new RemoveNodeCommand(src.id));
+  }
+
+  commands.push(new UpdateNodeDataCommand(
+    stackNodeId,
+    { cards, activeIndex: Math.max(0, cards.length - 1) } as Record<string, unknown>,
+  ));
+
+  return {
+    command: new BatchCommand(commands, 'stacked-media-stack-selected'),
+    stackNodeId,
+    cards,
+    collectedCount: stackable.length,
+    skippedCount: sourceNodes.length - stackable.length,
+    skippedIds: sourceNodes.filter((n) => !isStackable(n)).map((n) => n.id),
+  };
+}
+
+export interface MergeStacksResult {
+  command: BatchCommand;
+  cards: StackCard[];
+  activeIndex: number;
+}
+
+/** 合并 StackNode：源堆叠进入目标堆叠，目标节点拥有最终领域状态。 */
+export function mergeStacks(
+  targetNode: NodeRecord,
+  targetData: StackedMediaData,
+  sourceNode: NodeRecord,
+  incomingEdge: EdgeRecord,
+  graph: { edges: EdgeRecord[] },
+): MergeStacksResult {
+  const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
+  const sourceCards = (sourceData.cards as StackCard[] | undefined) ?? [];
+  const cards = [...targetData.cards, ...sourceCards];
+  const commands: Command[] = [
+    new RemoveEdgeCommand(incomingEdge.id),
+    new UpdateNodeDataCommand(targetNode.id, { cards, activeIndex: Math.max(0, cards.length - 1) } as Record<string, unknown>),
+  ];
+
+  // 源 Stack 的下游边转移到目标 Stack，避免合并时静默丢失图关系。
+  for (const edge of graph.edges) {
+    if (edge.source.nodeId !== sourceNode.id || edge.id === incomingEdge.id) continue;
+    commands.push(new RemoveEdgeCommand(edge.id));
+    commands.push(new AddEdgeCommand({
+      ...edge,
+      id: genId('merged-edge'),
+      source: { ...edge.source, nodeId: targetNode.id },
+    }));
+  }
+  commands.push(new RemoveNodeCommand(sourceNode.id));
+  return {
+    command: new BatchCommand(commands, 'stacked-media-merge'),
+    cards,
+    activeIndex: Math.max(0, cards.length - 1),
+  };
+}
+
+export interface UndoCollectResult {
+  command: BatchCommand;
+  activeIndex: number;
+}
+
+/**
+ * 收纳提示胶囊「移出」:把刚收纳的卡片解绑为独立节点(与胶囊 eject 语义一致)。
+ * 不恢复原连线 —— 恢复连线会被入边自动收纳 effect 再次捕获形成循环,
+ * 且与用户心智「移出=断开关系的独立节点」不符。
+ */
+export function dismissCollected(
+  nodeId: string,
+  cards: StackCard[],
+  activeIndex: number,
+  cardId: string,
+  sourceNode: NodeRecord,
+): UndoCollectResult {
+  const newCards = cards.filter((c) => c.id !== cardId);
+  const nextActive = Math.min(activeIndex, Math.max(0, newCards.length - 1));
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: newCards, activeIndex: nextActive } as Record<string, unknown>),
+      new AddNodeCommand(sourceNode),
+    ], 'stacked-media-dismiss-collected'),
+    activeIndex: nextActive,
+  };
+}
+
+/** 更新指定卡片的 data 字段(文本卡片编辑落盘等) */
+export function updateCardData(
+  nodeId: string,
+  cards: StackCard[],
+  cardId: string,
+  dataPatch: Record<string, unknown>,
+): { command: BatchCommand; cards: StackCard[] } {
+  const next = cards.map((c) => (c.id === cardId ? { ...c, data: { ...c.data, ...dataPatch } } : c));
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: next } as Record<string, unknown>),
+    ], 'stacked-media-card-data'),
+    cards: next,
+  };
+}
+
+/**
+ * 撤销收纳:恢复源节点 + 连线 + 卡片列表(快照反向命令,不依赖 undo 栈,
+ * 避免 5 秒窗口内其他操作污染撤销历史)
+ * @deprecated 改用 dismissCollected —— 恢复连线与胶囊 eject 行为不一致且会触发自动收纳循环
+ */
+export function undoCollect(
+  nodeId: string,
+  sourceNode: NodeRecord,
+  edge: EdgeRecord,
+  prevCards: StackCard[],
+  prevActiveIndex: number,
+): UndoCollectResult {
+  const nextActive = Math.min(prevActiveIndex, Math.max(0, prevCards.length - 1));
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: prevCards, activeIndex: nextActive } as Record<string, unknown>),
+      new AddNodeCommand(sourceNode),
+      new AddEdgeCommand(edge),
+    ], 'stacked-media-undo-collect'),
+    activeIndex: nextActive,
+  };
+}
+
+export interface EjectResult {
+  command: BatchCommand;
+  cards: StackCard[];
+  activeIndex: number;
+}
+
+/** 移出:活跃卡片 → 断开关系的独立节点 + StackNode 前方垂直排序 */
+export function ejectCard(
+  commandQueue: { getState: () => { nodes: NodeRecord[]; edges: EdgeRecord[] } },
+  node: NodeRecord,
+  data: StackedMediaData,
+  cardIndex: number,
+): EjectResult | null {
+  const card = data.cards[cardIndex];
+  if (!card) return null;
+
+  const graph = commandQueue.getState();
+  const newCards = data.cards.filter((_, idx) => idx !== cardIndex);
+  const newIndex = newCards.length === 0 ? 0 : Math.min(cardIndex, newCards.length - 1);
+
+  const siblings = graph.edges
+    .filter((e) => e.target.nodeId === node.id)
+    .map((e) => graph.nodes.find((n) => n.id === e.source.nodeId))
+    .filter((n): n is NodeRecord => !!n);
+  const siblingBottom = siblings.length > 0
+    ? Math.max(...siblings.map((s) => s.position.y + (s.size?.height ?? 0)))
+    : node.position.y;
+  const position = {
+    x: node.position.x - (card.size?.width ?? IMAGE_DEFAULT_SIZE.width) - EJECT_OFFSET_X,
+    y: Math.max(node.position.y, siblingBottom + SIBLING_GAP),
+  };
+
+  const newNode: NodeRecord = {
+    id: genId('stacked-ejected'),
+    type: card.sourceType,
+    title: card.title ?? '',
+    position,
+    size: card.size ?? { ...IMAGE_DEFAULT_SIZE },
+    data: { ...card.data },
+  };
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(node.id, { cards: newCards, activeIndex: newIndex } as Record<string, unknown>),
+      new AddNodeCommand(newNode),
+    ], 'stacked-media-eject'),
+    cards: newCards,
+    activeIndex: newIndex,
+  };
+}
+
+export interface ReplaceResult {
+  command: BatchCommand;
+  cards: StackCard[];
+}
+
+/** 替换指定索引的卡片内容 */
+export function replaceCardContent(
+  nodeId: string,
+  cards: StackCard[],
+  cardIndex: number,
+  newCard: StackCard,
+): ReplaceResult {
+  const next = cards.map((c, i) => (i === cardIndex ? newCard : c));
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: next } as Record<string, unknown>),
+    ], 'stacked-media-replace'),
+    cards: next,
+  };
+}
+
+export interface AppendResult {
+  command: BatchCommand;
+  cards: StackCard[];
+  activeIndex: number;
+}
+
+/** 追加多张卡片(空态上传入口),并跳到本次上传的第一张 */
+export function appendCards(
+  nodeId: string,
+  cards: StackCard[],
+  newCards: StackCard[],
+): AppendResult {
+  const next = [...cards, ...newCards];
+  const nextActive = next.length - newCards.length;
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: next, activeIndex: nextActive } as Record<string, unknown>),
+    ], 'stacked-media-append'),
+    cards: next,
+    activeIndex: nextActive,
+  };
+}
+
+export interface SwitchResult {
+  patch: { cards: StackCard[]; activeIndex: number };
+  activeIndex: number;
+}
+
+/**
+ * 返回固定舞台高度:图片/视频展示区基准高度加底部导航高度。
+ */
+export function getStackDisplayHeight(_card: StackCard | undefined, _width: number): number {
+  return STACK_BASE_HEIGHT;
+}
+
+/** 切换活跃卡片,只更新内容索引,舞台高度和导航位置保持不变。 */
+export function activateStackCard(node: NodeRecord, data: StackedMediaData, index: number): SwitchResult & { command: BatchCommand } {
+  const activeIndex = Math.max(0, Math.min(index, Math.max(0, data.cards.length - 1)));
+  const command = new BatchCommand([
+    new UpdateNodeDataCommand(node.id, { cards: data.cards, activeIndex } as Record<string, unknown>),
+  ], 'stacked-media-activate-card');
+  return {
+    patch: { cards: data.cards, activeIndex },
+    activeIndex,
+    command,
+  };
+}
+
+/** 无 node 上下文时仅生成数据 patch，供纯数据工具使用。 */
+export function switchActive(data: StackedMediaData, index: number): SwitchResult {
+  const activeIndex = Math.max(0, Math.min(index, Math.max(0, data.cards.length - 1)));
+  return { patch: { cards: data.cards, activeIndex }, activeIndex };
+}

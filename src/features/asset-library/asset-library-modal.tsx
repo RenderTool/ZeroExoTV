@@ -1,0 +1,63 @@
+/**
+ * AssetLibraryModal - 资产库 Modal（画布中使用）
+ *
+ * 将 AssetLibraryPage 包裹在 antd Modal 中，新增"发送到画布"功能。
+ */
+
+import { useCallback } from 'react';
+import { Modal } from 'antd';
+import { AssetLibraryPage } from './asset-library-page.js';
+import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
+
+interface AssetLibraryModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSendToCanvas: (item: {
+    type: 'asset' | 'script';
+    id: string;
+    data: any;
+  }) => void;
+}
+
+export function AssetLibraryModal({
+  open,
+  onClose,
+  onSendToCanvas,
+}: AssetLibraryModalProps): React.ReactElement {
+
+  const handleSendToCanvas = useCallback(
+    (item: { type: 'asset' | 'script'; id: string; data: any }) => {
+      onSendToCanvas(item);
+      onClose();
+    },
+    [onSendToCanvas, onClose],
+  );
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={1280}
+      centered
+      styles={{
+        body: {
+          padding: 0,
+          height: '80vh',
+          overflow: 'hidden',
+        },
+      }}
+      style={{ maxWidth: 'calc(100vw - 32px)' }}
+    >
+      <AssetLibraryPage
+        // FIX-6: 每次打开强制重挂载（画布侧剧本加入资产库/节点保存素材后，打开即可看到最新数据）
+        key={open ? 'open' : 'closed'}
+        // 资产项目化：画布内 Modal = 项目内，显式传入当前画布 ID 作为项目上下文
+        // （无 embeddedInCanvas 形态可判定，故用 projectId 覆盖；解锁「本项目/公共库」切换）
+        projectId={getCurrentCanvasId()}
+        onSendToCanvas={handleSendToCanvas}
+        sidebarRadius={12}
+      />
+    </Modal>
+  );
+}

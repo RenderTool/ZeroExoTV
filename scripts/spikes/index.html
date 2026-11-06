@@ -1,0 +1,120 @@
+<!doctype html>
+<!--
+  Plan#83 Phase 0 spike（一次性验证页，验收后可归档至 references）
+  验证三件事：T0.1 File System Access API 授权与二次恢复 / T0.2 云 API 的浏览器 CORS / T0.3 经 ComfyUI 同源转发
+  运行：浏览器（Chromium）直接打开本文件即可；若要测同源转发，则打开 http://127.0.0.1:8188/zeroexo/scripts/spikes/
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>zeroexo-comfyui · Phase0 Spike</title>
+    <style>
+      body { font: 14px/1.7 system-ui, sans-serif; margin: 24px auto; max-width: 880px; padding: 0 16px; }
+      section { border: 1px solid #d0d0d0; border-radius: 8px; padding: 14px 16px; margin: 14px 0; }
+      h2 { font-size: 16px; margin: 0 0 8px; }
+      button, input { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid #bbb; }
+      input { min-width: 320px; }
+      pre { background: #f7f7f7; padding: 10px; border-radius: 6px; overflow: auto; max-height: 240px; }
+      .ok { color: #137333; font-weight: 600; }
+      .fail { color: #c5221f; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>Plan#83 · Phase 0 技术前提验证</h1>
+
+    <section>
+      <h2>T0.1 本地目录授权（权威源 = 磁盘，不留浏览器）</h2>
+      <button id="pick">选择数据目录</button>
+      <button id="restore">恢复上次授权</button>
+      <button id="write">写入 projects/demo/project.json</button>
+      <button id="read">读回并校验</button>
+      <pre id="fsa">待操作</pre>
+    </section>
+
+    <section>
+      <h2>T0.2 云 API 直连是否被 CORS 拒（决定 D3 是否必须）</h2>
+      <input id="base" placeholder="https://apiARK.../v1" />
+      <input id="key" placeholder="apiKey（只存本页内存，不落盘）" type="password" />
+      <button id="cors">GET /models</button>
+      <pre id="corsOut">待操作</pre>
+    </section>
+
+    <section>
+      <h2>T0.3 经 ComfyUI 同源转发（bridge 路由）</h2>
+      <button id="health">GET /zeroexo/health</button>
+      <button id="proxy">用上面 base/key 走转发</button>
+      <pre id="bridge">待操作（需把 bridge/zeroexo_bridge 放进 ComfyUI/custom_nodes 后重启）</pre>
+    </section>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const say = (id, ok, text) => { $(id).innerHTML = `<span class="${ok ? 'ok' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</span>\n` + text; };
+      const KEY = 'zeroexo:spike:dirhandle';
+
+      // ===== T0.1 =====
+      let root = null;
+      async function persist(h) {
+        const db = await new Promise((res) => { const r = indexedDB.open('zeroexo-spike', 1); r.onupgradeneeded = () => r.result.createObjectStore('h'); r.onsuccess = () => res(r.result); });
+        const tx = db.transaction('h', 'readwrite'); tx.objectStore('h').put(h, KEY); await new Promise((r) => (tx.oncomplete = r));
+      }
+      $('pick').onclick = async () => {
+        try {
+          root = await window.showDirectoryPicker({ id: 'zeroexo-data', mode: 'readwrite' });
+          await persist(root);
+          say('fsa', true, `已授权：${root.name}（句柄已存 IndexedDB —— 注意：只存句柄，不存数据）`);
+        } catch (e) { say('fsa', false, String(e)); }
+      };
+      $('restore').onclick = async () => {
+        try {
+          const db = await new Promise((res) => { const r = indexedDB.open('zeroexo-spike', 1); r.onsuccess = () => res(r.result); });
+          const h = await new Promise((res) => { const g = db.transaction('h').objectStore('h').get(KEY); g.onsuccess = () => res(g.result); });
+          if (!h) throw new Error('无记录，请先点「选择数据目录」');
+          const p = await h.queryPermission({ mode: 'readwrite' });
+          if (p !== 'granted') { say('fsa', false, `queryPermission=${p} → 需点「选择数据目录」重授权（本用例正是要量化这一点）`); return; }
+          root = h; say('fsa', true, '重开页面后句柄免点击恢复（granted）');
+        } catch (e) { say('fsa', false, String(e) + ' —— 若因 file:// 受限，改由 ComfyUI http://127.0.0.1:8188/zeroexo/ 打开再测'); }
+      };
+      async function need() { if (!root) throw new Error('先授权目录'); return root; }
+      $('write').onclick = async () => {
+        try {
+          const r = await need();
+          const proj = await r.getDirectoryHandle('projects', { create: true }).then((d) => d.getDirectoryHandle('demo', { create: true }));
+          const f = await proj.getFileHandle('project.json', { create: true });
+          const w = await f.createWritable();
+          await w.write(JSON.stringify({ version: 1, savedAt: Date.now(), nodes: [] }, null, 2));
+          await w.close(); // 全量原子替换（tmp+rename 语义由 API 保证）
+          say('fsa', true, `已写盘：${root.name}/projects/demo/project.json`);
+        } catch (e) { say('fsa', false, String(e)); }
+      };
+      $('read').onclick = async () => {
+        try {
+          const f = await (await need()).getDirectoryHandle('projects').then((d) => d.getDirectoryHandle('demo')).then((d) => d.getFileHandle('project.json'));
+          const file = await f.getFile();
+          const txt = await file.text();
+          JSON.parse(txt);
+          say('fsa', true, `读回成功 lastModified=${new Date(file.lastModified).toISOString()} size=${file.size}\n（外部改动检测就靠这两个字段做乐观锁）`);
+        } catch (e) { say('fsa', false, String(e)); }
+      };
+
+      // ===== T0.2 / T0.3 =====
+      const base = () => $('base').value.replace(/\/$/, '');
+      $('cors').onclick = async () => {
+        say('corsOut', false, '请求中…');
+        try {
+          const r = await fetch(`${base()}/models`, { headers: { Authorization: `Bearer ${$('key').value}` } });
+          say('corsOut', r.ok, `HTTP ${r.status}\n` + (await r.text()).slice(0, 600) + '\n\n→ 若这里是 TypeError: Failed to fetch，即浏览器被 CORS 拦截，D3 转发必需');
+        } catch (e) { say('corsOut', false, `${e}\n\n→ 判定为 CORS 拒（或混合内容/网络不可达，看 DevTools Network 的 CORS error 字样确认）`); }
+      };
+      $('health').onclick = async () => {
+        try { const r = await fetch('/zeroexo/health'); say('bridge', r.ok, `HTTP ${r.status} ` + (await r.text())); }
+        catch (e) { say('bridge', false, `${e}\n未走同源：请用 http://127.0.0.1:8188/zeroexo/scripts/spikes/ 打开本页`); }
+      };
+      $('proxy').onclick = async () => {
+        try {
+          const r = await fetch('/zeroexo/proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: `${base()}/models`, apiKey: $('key').value }) });
+          say('bridge', r.ok, `转发 HTTP ${r.status}\n` + (await r.text()).slice(0, 600));
+        } catch (e) { say('bridge', false, String(e)); }
+      };
+    </script>
+  </body>
+</html>

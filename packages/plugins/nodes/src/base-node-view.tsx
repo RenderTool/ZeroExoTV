@@ -1,0 +1,695 @@
+/**
+ * BaseNodeView + AIStateView - 节点基类组件
+ *
+ * 架构(C++ 派生类模式的 React 等价):
+ * - BaseNodeView: 所有节点的外壳,用 NodeShell 包裹,提供引脚布局 + 引脚拖拽回调
+ * - AIStateView: AI 生成节点的 4 状态机(idle/loading/error/success)
+ * - 各派生节点视图(BaseNodeView 的"子类")传入 children 作为内容
+ *
+ * 引脚回调问题:
+ *   NodeRendererProps 不含引脚事件回调(只有节点级回调)。
+ *   解法: 插件 install 时获取 ConnectionController,通过闭包传入 BaseNodeView,
+ *   BaseNodeView 用 controller + 当前 node.id 构造引脚回调。
+ */
+
+import React from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  AlertTriangle,
+  Lock,
+  Gauge,
+  Wifi,
+  Server,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+  Upload,
+  LoaderCircle,
+} from 'lucide-react';
+import type { NodeRecord, Pin } from '@zeroexo/core';
+import { NodeShell } from '@zeroexo/plugin-render-react';
+import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
+import type { ConnectionController } from '@zeroexo/plugin-connection';
+import type { GenerationStatus, AiErrorType } from '@zeroexo/plugin-ai-provider';
+
+// ===== 节点级动作事件(div/重试/取消)=====
+// 节点视图内无法直接访问 editor-page 的生成回调,通过轻量模块级事件总线解耦:
+// 节点视图 emit → editor-page 订阅并调用 handlePromptGenerate/handlePromptStop。
+export interface NodeActionEvent { nodeId: string; [key: string]: unknown }
+type NodeActionHandler = (event: NodeActionEvent) => void;
+interface NodeActionBus {
+  handlers: Map<string, Set<NodeActionHandler>>;
+  on: (type: string, handler: NodeActionHandler) => () => void;
+  emit: (type: string, event: NodeActionEvent) => void;
+}
+export const nodeActionBus: NodeActionBus = {
+  handlers: new Map(),
+  on(type, handler) {
+    if (!this.handlers.has(type)) this.handlers.set(type, new Set());
+    this.handlers.get(type)!.add(handler);
+    return () => this.handlers.get(type)?.delete(handler);
+  },
+  emit(type, event) {
+    this.handlers.get(type)?.forEach((h) => h(event));
+  },
+};
+
+// ===== 引脚回调集合 =====
+export interface PinHandlers {
+  onPinPointerDown: (e: React.PointerEvent, pin: Pin) => void;
+  onPinPointerEnter: (e: React.PointerEvent, pin: Pin) => void;
+  onPinPointerLeave: (e: React.PointerEvent) => void;
+}
+
+/**
+ * 订阅图是否有指向该节点的入边 —— 媒体节点「生成器态」判定依据:
+ * 空节点(无内容)连入上游支持节点 → 生成器态(隐藏节点内上传按钮,避免"既是生成器又是资源器"二义态)。
+ * 订阅 graph 变化,连线上线/下线即时响应。
+ * active=false 时不订阅(未选中节点上传按钮本就隐藏,避免大量节点全局监听 graph 的性能开销)。
+ */
+export function useHasIncomingEdges(
+  store: ReactGraphStore | null | undefined,
+  nodeId: string,
+  active = true,
+): boolean {
+  const [hasIncoming, setHasIncoming] = React.useState(() => {
+    if (!store) return false;
+    return store.getGraph().edges.some((e) => e.target.nodeId === nodeId);
+  });
+  React.useEffect(() => {
+    if (!store || !active) {
+      setHasIncoming(false);
+      return;
+    }
+    const update = (): void => {
+      setHasIncoming(store.getGraph().edges.some((e) => e.target.nodeId === nodeId));
+    };
+    update();
+    return store.subscribeGraph(update);
+  }, [store, nodeId, active]);
+  return hasIncoming;
+}
+
+/** 从 ConnectionController + node.id 构造引脚回调(每次渲染创建,与 demo 模式一致) */
+export function createPinHandlers(
+  controller: ConnectionController | null,
+  nodeId: string,
+): PinHandlers {
+  return {
+    onPinPointerDown: (e, pin) => {
+      e.stopPropagation();
+      controller?.handlePinPointerDown(
+        e.nativeEvent,
+        e.currentTarget as HTMLElement,
+        nodeId,
+        pin.id,
+        pin.direction,
+      );
+    },
+    onPinPointerEnter: (e, pin) => {
+      controller?.handlePinPointerEnter(
+        e.nativeEvent,
+        nodeId,
+        pin.id,
+        pin.direction,
+      );
+    },
+    onPinPointerLeave: () => {
+      controller?.handlePinPointerLeave();
+    },
+  };
+}
+
+// ===== BaseNodeView - 节点外壳基类 =====
+
+export interface BaseNodeViewProps {
+  node: NodeRecord;
+  pins: Pin[];
+  isSelected: boolean;
+  isHovered: boolean;
+  title: string;
+  color: string;
+  /** 连线控制器(install 时获取,通过闭包传入); null 则引脚不响应拖拽 */
+  connectionController: ConnectionController | null;
+  /** 强制显示所有引脚(连线拖拽期间所有节点Pin可见) */
+  forceShowPins?: boolean;
+  /** 内容区内边距(默认 '0 20px';图片/视频节点传 0 实现无留白填充) */
+  contentPadding?: React.CSSProperties['padding'];
+  /** 1/viewport.k,用于引脚磁吸偏移等屏幕恒定尺寸计算 */
+  invK?: number;
+  /** 标题栏左侧图标(问题5) */
+  titleIcon?: React.ReactNode;
+  /** 标题栏右侧尺寸规格文本(问题5) */
+  titleSize?: string;
+  children: React.ReactNode;
+  /** 节点更新回调(用于重命名等) */
+  updateNode?: (patch: Partial<NodeRecord>) => void;
+  /** 外部触发重命名(由工具栏按钮触发) */
+  externalRenaming?: boolean;
+  /** 重命名完成/取消回调 */
+  onRenameFinish?: () => void;
+  /** 画布图 store(用于获取连线信息,渲染上一个/下一个导航按钮) */
+  store?: ReactGraphStore | null;
+  /** 外壳圆角覆写(特化外观节点使用,忽略全局外观配置) */
+  borderRadiusOverride?: React.CSSProperties['borderRadius'];
+}
+
+/**
+ * BaseNodeView - 所有业务节点的统一外壳
+ *
+ * 用 NodeShell 包裹,自动渲染:
+ * - 标题栏(title)
+ * - 左侧 input 引脚 / 右侧 output 引脚
+ * - 引脚拖拽回调(连线)
+ *
+ * 派生节点只需提供 children(内容区)。
+ */
+export function BaseNodeView({
+  node,
+  pins,
+  isSelected,
+  isHovered,
+  title,
+  color,
+  connectionController,
+  forceShowPins,
+  contentPadding,
+  invK,
+  titleIcon,
+  titleSize,
+  children,
+  updateNode,
+  externalRenaming,
+  onRenameFinish,
+  borderRadiusOverride,
+}: BaseNodeViewProps): React.ReactElement {
+  const pinHandlers = createPinHandlers(connectionController, node.id);
+
+  return React.createElement(
+    NodeShell,
+    {
+      node,
+      pins,
+      title,
+      color,
+      isSelected,
+      isHovered,
+      forceShowPins,
+      contentPadding,
+      invK,
+      titleIcon,
+      titleSize,
+      onUpdateNode: updateNode,
+      onPinPointerDown: pinHandlers.onPinPointerDown,
+      onPinPointerEnter: pinHandlers.onPinPointerEnter,
+      onPinPointerLeave: pinHandlers.onPinPointerLeave,
+      externalRenaming,
+      onRenameFinish,
+      borderRadiusOverride,
+    },
+    // children 直接传入(data-node-content 已设 position:relative,减少一层嵌套)
+    children,
+  );
+}
+
+// ===== AIStateView - AI 生成 4 状态机 =====
+
+export interface AIStateViewProps {
+  status: GenerationStatus;
+  errorDetails?: string;
+  /** P3.5: 错误分类(决定错误态图标 + 文案) */
+  errorType?: AiErrorType;
+  /** 主题色(loading spinner / error 按钮) */
+  accentColor: string;
+  /** 空状态(idle 无内容)图标 */
+  emptyIcon: React.ReactNode;
+  /** 是否有生成内容(决定显示 success 还是 empty) */
+  hasContent: boolean;
+  /** 节点激活态(选中):替换按钮仅激活显示(空节点亦然,与胶囊工具栏一致) */
+  isSelected?: boolean;
+  /** 替换按钮显隐覆写:生成器态(空节点连入上游)传 false 隐藏上传按钮,避免"既是生成器又是资源器"二义态;缺省回退 isSelected */
+  showReplaceButton?: boolean;
+  /** Bug3: 空状态点击触发替换内容(打开文件选择器) */
+  onReplace: () => void;
+  /** 替换按钮位置: top-right(右上角) / left(帧左侧并排),默认 top-right */
+  replaceBtnPosition?: 'top-right' | 'left';
+  /** Bug3: 统一背景色(与文本节点一致) */
+  backgroundColor: string;
+  /** 生成中任务信息(渠道 · 模型 · 任务hash,由生成时写入 node.data) */
+  taskLabel?: string;
+  /** 失败/生成中:重试回调(节点视图内 emit 到 editor-page) */
+  onRetry?: () => void;
+  /** 失败态清理回调(节点视图内 emit 到 editor-page;仅 error 态渲染——媒体生成中不可取消,拍板 2026-08-23 R3 D2) */
+  onCancel?: () => void;
+  /** 生成中骨架类型: media(图片/视频/音频)/text(文本)——视觉已统一为分镜同款骨架（脉冲点+阶段文案+shimmer 行） */
+  skeleton?: 'media' | 'text';
+  /** 骨架阶段文案类型（与生成物一致；禁止用分镜文案渲染图片/视频生成） */
+  skeletonKind?: GenLoaderKind;
+  /** 成功状态内容(由派生节点提供) */
+  children: React.ReactNode;
+}
+
+const aiContainerStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  overflow: 'hidden',
+  position: 'relative',
+  boxSizing: 'border-box',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+};
+
+/** 生成中骨架文案类型：按生成物类型取阶段文案，禁止混用分镜专属文案（editor.loader 段仅限分镜） */
+export type GenLoaderKind = 'image' | 'video' | 'audio' | 'text' | 'storyboard';
+
+/** 骨架阶段 i18n 后缀（与分镜 StoryboardGeneratingLoader 同轮播节奏） */
+const AI_SKELETON_STAGES = ['analyzing', 'drafting', 'refining', 'finalizing'] as const;
+
+/** 骨架行宽度（与分镜同款：渐进式从左到右，模拟流式输出） */
+const AI_SKELETON_ROW_WIDTHS = ['96%', '88%', '92%', '60%'];
+
+/** 按生成类型解析阶段文案 key：storyboard 用专属段，其余走 nodes.genLoader.{kind} */
+function genLoaderStageKey(kind: GenLoaderKind, stageIndex: number): string {
+  const stage = AI_SKELETON_STAGES[stageIndex] ?? AI_SKELETON_STAGES[0]!;
+  return kind === 'storyboard' ? `editor.loader.${stage}` : `nodes.genLoader.${kind}.${stage}`;
+}
+
+/**
+ * AISkeleton - 生成中骨架（契约：与分镜 StoryboardGeneratingLoader 同款视觉）
+ *
+ * 三元素：AI 脉冲点 + 阶段文案轮播 + shimmer 骨架行。
+ * media/text 统一形态（此前 media 为 2×2 四宫格，已按用户多次强调废止）。
+ * 阶段文案按 kind 区分生成类型（图片生成显示图片文案，禁止串用分镜文案）。
+ * 宿主节点背景深色，骨架块用白色半透明渐变扫光；文案/脉冲点随 accentColor。
+ */
+export function AISkeleton({ type: _type, accentColor, kind = 'image' }: { type: 'media' | 'text'; accentColor: string; kind?: GenLoaderKind }): React.ReactElement {
+  const { t } = useTranslation();
+  const animId = `ze-skel-${accentColor.replace('#', '')}`;
+  const [stageIndex, setStageIndex] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setStageIndex((prev) => (prev + 1 >= AI_SKELETON_STAGES.length ? prev : prev + 1));
+    }, 2200);
+    return () => clearInterval(timer);
+  }, []);
+
+  const row: React.CSSProperties = {
+    height: 14,
+    borderRadius: 6,
+    background: 'linear-gradient(90deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.14) 20%, rgba(255,255,255,0.05) 40%)',
+    backgroundSize: '200% 100%',
+    animation: `${animId}-shimmer 1.6s ease-in-out infinite, ${animId}-grow 0.5s ease forwards`,
+    transformOrigin: 'left center',
+    transform: 'scaleX(0)',
+    animationFillMode: 'forwards',
+  };
+
+  return (
+    <div style={{ position: 'relative', width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 头部：AI 脉冲点 + 阶段文案（与分镜同款轮播节奏 2.2s） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+        <div
+          style={{
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            background: accentColor,
+            animation: `${animId}-pulse 1.2s ease-in-out infinite`,
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', animation: `${animId}-fade 0.25s ease` }}>
+          {t(genLoaderStageKey(kind, stageIndex))}
+        </span>
+      </div>
+      {/* Shimmer 骨架行（分镜同款宽度序列） */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
+        {AI_SKELETON_ROW_WIDTHS.map((w, i) => (
+          <div key={i} style={{ ...row, width: w, animationDelay: `0s, ${i * 0.15}s` }} />
+        ))}
+      </div>
+      <style>{`
+@keyframes ${animId}-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } }
+@keyframes ${animId}-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes ${animId}-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes ${animId}-fade { 0% { opacity: 0; } 100% { opacity: 1; } }
+`}</style>
+    </div>
+  );
+}
+
+/**
+ * AIStateView - AI 生成节点的 4 状态渲染
+ *
+ * 状态分支:
+ * - loading: 旋转加载动画
+ * - error: 错误信息(BUG5: 移除重试按钮,统一交给下方生成按钮触发)
+ * - success(hasContent): 渲染 children(媒体内容)
+ * - idle(无内容): 空状态占位,双击触发生成
+ */
+/** 根据 errorType 返回 (图标, 文案 key) */
+function errorTypeVisual(errorType: AiErrorType | undefined): {
+  icon: React.ReactNode;
+  labelKey: string;
+} {
+  switch (errorType) {
+    case 'AUTH_ERROR':
+      return { icon: <Lock size={18} />, labelKey: 'nodes.errorTypeAuth' };
+    case 'RATE_LIMIT':
+      return { icon: <Gauge size={18} />, labelKey: 'nodes.errorTypeRateLimit' };
+    case 'NETWORK_ERROR':
+      return { icon: <Wifi size={18} />, labelKey: 'nodes.errorTypeNetwork' };
+    case 'PROVIDER_ERROR':
+      return { icon: <Server size={18} />, labelKey: 'nodes.errorTypeProvider' };
+    case 'TIMEOUT':
+      return { icon: <Clock size={18} />, labelKey: 'nodes.errorTypeTimeout' };
+    case 'VALIDATION_ERROR':
+      return { icon: <AlertCircle size={18} />, labelKey: 'nodes.errorTypeValidation' };
+    default:
+      return { icon: <AlertTriangle size={18} />, labelKey: 'nodes.generateFailed' };
+  }
+}
+
+export function AIStateView({
+  status,
+  errorDetails,
+  errorType,
+  accentColor,
+  emptyIcon,
+  hasContent,
+  isSelected = false,
+  showReplaceButton,
+  onReplace,
+  replaceBtnPosition,
+  backgroundColor,
+  taskLabel,
+  onRetry,
+  onCancel,
+  skeleton,
+  skeletonKind,
+  children,
+}: AIStateViewProps): React.ReactElement {
+  const { t } = useTranslation();
+  // loading: 骨架(spinner) + 半透明遮罩 + 任务信息(媒体生成提交后不可取消,不渲染停止按钮;打断入口在 dock 的 interruptible 分支)
+  if (status === 'loading') {
+    const spinId = `ze-ai-spin-${accentColor.replace('#', '')}`;
+    return (
+      <div style={{ ...aiContainerStyle, background: backgroundColor, gap: 10, position: 'relative' }}>
+        {/* 半透明遮罩,弱化旧内容,强调生成中 */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(0,0,0,0.35)',
+            backdropFilter: 'blur(1px)',
+          }}
+        />
+        {skeleton ? (
+          <AISkeleton type={skeleton} accentColor={accentColor} kind={skeletonKind ?? 'image'} />
+        ) : (
+          <>
+            <div
+              style={{
+                position: 'relative',
+                width: 40,
+                height: 40,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {/* 内圈:静态圆环(缺口基础) */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  border: `3px solid ${accentColor}30`,
+                }}
+              />
+              {/* 外圈:旋转的进度环 */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  border: `3px solid transparent`,
+                  borderTopColor: accentColor,
+                  borderRightColor: `${accentColor}aa`,
+                  animation: `${spinId} 0.7s linear infinite`,
+                }}
+              />
+              <LoaderCircle size={16} color={accentColor} />
+            </div>
+            <span style={{ position: 'relative', fontSize: 12, color: '#fff', fontWeight: 500 }}>
+              {t('nodes.generating')}
+            </span>
+          </>
+        )}
+        {taskLabel ? (
+          <span
+            style={{
+              position: 'relative',
+              fontSize: 10,
+              color: 'rgba(255,255,255,0.85)',
+              maxWidth: '90%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={taskLabel}
+          >
+            {taskLabel}
+          </span>
+        ) : null}
+        {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
+      </div>
+    );
+  }
+
+  // error 且已有内容:保留上次成功内容,叠加错误横幅 + 重试/取消(便于回退)
+  if (status === 'error' && hasContent) {
+    const visual = errorTypeVisual(errorType);
+    const typeLabel = errorType ? t(visual.labelKey) : null;
+    return (
+      <div className="ze-node-content-wrap" style={{ position: 'relative', width: '100%', height: '100%' }}>
+        {children}
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 8px',
+            background: 'rgba(239,68,68,0.92)',
+            color: '#fff',
+            fontSize: 11,
+            zIndex: 9,
+          }}
+        >
+          {visual.icon}
+          {typeLabel && <span style={{ fontWeight: 600, flexShrink: 0 }}>{typeLabel}</span>}
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {errorDetails ?? t('nodes.generateFailed')}
+          </span>
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              onPointerDown={(e) => e.stopPropagation()}
+              style={errorBtnStyle(false)}
+            >
+              <RefreshCw size={12} />
+              {t('nodes.retry')}
+            </button>
+          ) : null}
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              onPointerDown={(e) => e.stopPropagation()}
+              style={errorBtnStyle(true)}
+            >
+              {t('common.cancel')}
+            </button>
+          ) : null}
+        </div>
+        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
+      </div>
+    );
+  }
+
+  // success / idle(有内容)error 无内容: 错误类型图标 + 类型标签 + 错误详情 + 重试/取消
+  if (status === 'error') {
+    const visual = errorTypeVisual(errorType);
+    const typeLabel = errorType ? t(visual.labelKey) : null;
+    return (
+      <div style={{ ...aiContainerStyle, background: backgroundColor, gap: 6, padding: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ef4444' }}>
+          {visual.icon}
+          {typeLabel && (
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{typeLabel}</span>
+          )}
+        </div>
+        <span
+          style={{
+            fontSize: 12,
+            color: '#ef4444',
+            textAlign: 'center',
+            wordBreak: 'break-word',
+            lineHeight: 1.4,
+            whiteSpace: 'pre-line',
+          }}
+        >
+          {errorDetails ?? t('nodes.generateFailed')}
+        </span>
+        {(onRetry || onCancel) ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: '#ef4444',
+                  color: '#fff',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                <RefreshCw size={13} />
+                {t('nodes.retry')}
+              </button>
+            ) : null}
+            {onCancel ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 12px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(0,0,0,0.15)',
+                  background: 'transparent',
+                  color: '#6b7280',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                {t('common.cancel')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // success / idle(有内容): 渲染媒体内容 + Bug1: 左下角替换按钮(激活节点显示)
+  if (hasContent) {
+    return (
+      <div className="ze-node-content-wrap" style={{ position: 'relative', width: '100%', height: '100%' }}>
+        {children}
+        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
+      </div>
+    );
+  }
+
+  // Bug1: idle(无内容): 空状态占位(仅图标,不渲染空态文字标签) + 左下角替换按钮(移除整区域点击避免误触)
+  return (
+    <div
+      style={{
+        ...aiContainerStyle,
+        background: backgroundColor,
+        opacity: 0.7,
+      }}
+    >
+      {emptyIcon}
+      <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
+    </div>
+  );
+}
+
+/** error 横幅上的小按钮样式(重试实心 / 取消描边) */
+function errorBtnStyle(outline: boolean): React.CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '2px 8px',
+    borderRadius: 5,
+    border: outline ? '1px solid rgba(255,255,255,0.5)' : 'none',
+    background: outline ? 'transparent' : 'rgba(255,255,255,0.25)',
+    color: '#fff',
+    fontSize: 11,
+    cursor: 'pointer',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  };
+}
+
+// Bug1: 节点替换按钮(避免空状态整区域点击误触)
+// 显隐语义与胶囊工具栏"选中显示"对齐:无论是否空节点,仅节点激活(选中)时显示 —— 保持卡片视觉清爽
+// 使用 inline style + onMouseEnter/Leave 替代全局 CSS class,避免多实例互相覆盖
+function ReplaceButton({ onClick, position = 'top-right', visible = false }: {
+  onClick: () => void;
+  position?: 'top-right' | 'left';
+  /** 节点激活态:仅选中时显示 */
+  visible?: boolean;
+}): React.ReactElement {
+  const [hover, setHover] = React.useState(false);
+  const opacity = visible ? (hover ? 0.85 : 1) : 0;
+  // 隐藏时同步屏蔽指针事件:opacity 0 仍接收点击,曾致生成节点态"按钮看不见但能点开文件选择器"(2026-08-25)
+  const pointerEvents = visible ? 'auto' : 'none';
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'absolute',
+        // 空节点左上角替换按钮:右下对角偏移 12px 避开左上缩放句柄(react-flow 四角均布 resize handle,6px 会被遮挡)
+        ...(position === 'left'
+          ? { left: 12, top: 12 }
+          : { right: 20, top: 20 }
+        ),
+        width: 24,
+        height: 24,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 6,
+        border: 'none',
+        background: 'rgba(0,0,0,0.55)',
+        color: '#fff',
+        cursor: 'pointer',
+        transition: 'opacity 0.15s',
+        zIndex: 10,
+        opacity,
+        pointerEvents,
+      }}
+    >
+      <Upload size={13} />
+    </button>
+  );
+}

@@ -1,0 +1,227 @@
+/* ==========================================================
+   Tailwind CSS v4 入口 + ZEROEXO 核心样式
+   ==========================================================
+   所有 UI 样式均通过 Tailwind 内联工具类或 antd 主题系统表达。
+   此处仅保留 @theme 设计令牌、关键帧动画（被组件 animation
+   属性引用）、以及 Tailwind preflight 未覆盖的基础层样式。 */
+
+@import "tailwindcss";
+
+/* ===== 设计令牌 ===== */
+@theme inline {
+  --font-display: 'Sora', 'SF Pro Display', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', system-ui, sans-serif;
+  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  --ease-zx: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ===== @keyframes 动画定义 ===== */
+@keyframes zeroexo-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes zeroexo-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes zeroexo-fade-scale {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes zeroexo-slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes zeroexo-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes zeroexo-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+/* 瀑布流单元格：绝对定位下 hover 放大（translateY+scale）的卡片需提升层级，
+   否则会被后续兄弟卡片遮挡（DOM 顺序在后的元素默认绘制在上层） */
+.zeroexo-masonry-cell { z-index: 0; }
+.zeroexo-masonry-cell:hover { z-index: 3; }
+@keyframes typingBlink {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* ===== 基础层 ===== */
+@layer base {
+  body {
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* 标题/品牌用 display 字体 */
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+  h3 {
+    font-size: 1.125rem;
+    font-weight: 500;
+  }
+  p {
+    font-size: 0.875rem;
+    line-height: 1.625;
+  }
+
+  /* 选区 */
+  ::selection {
+    background: rgba(233, 69, 96, 0.25);
+    color: inherit;
+  }
+
+  /* 聚焦轮廓（2026-11-05 用户指令：点击/聚焦状态别用红色）
+     旧值 = 品牌红 rgba(233,69,96,0.5)，作为全局 :focus-visible 会命中所有输入框
+     （导演台提示词框、资产命名、主体表单……）——改用中性 slate 调，浅/深两主题都可读。
+     注：::selection 仍为品牌红（文字选区，不是“状态色”），如需一并中性化再说。 */
+  :focus-visible {
+    outline: 2px solid rgba(148, 163, 184, 0.9);
+    outline-offset: 2px;
+  }
+
+  /* 滚动条(暗色专业工具风格) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(120, 113, 108, 0.3);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 113, 108, 0.5);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* 细滚动条工具类(弹窗/面板内使用,与 chapter-selector 等页面同款观感) */
+  .zx-thin-scroll {
+    scrollbar-width: none; /* Firefox 隐藏原生回退,统一走 webkit 定制 */
+  }
+  .zx-thin-scroll::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .zx-thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .zx-thin-scroll::-webkit-scrollbar-thumb {
+    background: rgba(120, 113, 108, 0.35);
+    border-radius: 4px;
+  }
+  .zx-thin-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 113, 108, 0.55);
+  }
+
+  /* 时间轴专用极细滚动条（2026-09-01 约定：克制的细条白色，4px/透明轨道） */
+  .zx-timeline-scroll {
+    scrollbar-width: none; /* Firefox 隐藏原生回退，统一走 webkit 定制 */
+  }
+  .zx-timeline-scroll::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .zx-timeline-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .zx-timeline-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 2px;
+  }
+  .zx-timeline-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.45);
+  }
+
+  /* 2026-11-05 导演台卡片导轨：滚动条不再用白色细条（浅底不可见/深底泛白），
+     改中性灰；仅 zx-director-rail 生效，出片页时间轴保持原样 */
+  .zx-director-rail::-webkit-scrollbar-thumb {
+    background: rgba(120, 113, 108, 0.32);
+  }
+  .zx-director-rail::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 113, 108, 0.5);
+  }
+
+  /* 时间轴缩放滑条（2026-09-01 约定：与滚动条同套画风——2px 白细轨道 + 10px 白圆点） */
+  .zx-timeline-zoom {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .zx-timeline-zoom::-webkit-slider-runnable-track {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 1px;
+  }
+  .zx-timeline-zoom::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    margin-top: -4px;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    transition: transform 0.12s ease;
+  }
+  .zx-timeline-zoom:hover::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+  .zx-timeline-zoom::-moz-range-track {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 1px;
+  }
+.zx-timeline-zoom::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* 时间轴缩放滑条 —— 明亮主题变体（轨道灰黑色 + 圆点深色，2026-09-08 约定） */
+.zx-timeline-zoom[data-theme="light"]::-webkit-slider-runnable-track {
+  background: rgba(0, 0, 0, 0.22);
+}
+.zx-timeline-zoom[data-theme="light"]::-webkit-slider-thumb {
+  background: #1c1917;
+}
+.zx-timeline-zoom[data-theme="light"]::-moz-range-track {
+  background: rgba(0, 0, 0, 0.22);
+}
+.zx-timeline-zoom[data-theme="light"]::-moz-range-thumb {
+  background: #1c1917;
+}
+}

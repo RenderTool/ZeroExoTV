@@ -1,0 +1,99 @@
+/**
+ * 统一连线约束规则
+ *
+ * 一个方向性兼容矩阵,覆盖两个查询入口:
+ * - 正向(源→目标): 源节点 output 能连到哪些目标节点 input
+ * - 反向(目标←源): 目标节点 input 能接受哪些源节点 output
+ *
+ * 使用方:
+ * - ConnectionController.validate(): 手动拖拽连线时验证
+ * - ConnectionDropMenu: 菜单项禁用过滤(引用该节点生成)
+ * - NodeCreateMenu: 无约束(空白创建)
+ */
+
+import type { AddNodeType } from './components/node-create-menu.js';
+
+/** 所有节点类型（2026-08-30：production-manager 剧管已合并进分镜节点，移除；2026-09-02：新增 color-card 色卡节点） */
+const ALL_NODE_TYPES: AddNodeType[] = [
+  'text', 'image', 'video', 'audio', 'generator', 'stacked-media', 'script', 'storyboard', 'workbench', 'color-card', 'novel',
+];
+
+/**
+ * 兼容性矩阵 (output → input 方向)
+ * key = 源节点类型, value = 允许连接的目标节点类型列表
+ */
+const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
+  // [DEPRECATED] generator 相关连线规则(2026-08-22 tA5):生成器节点已废弃(画布冗余),
+  // 生成语义由「空 media 节点三态」承担(NodeGenerateDock)。以下规则仅保留旧项目数据中
+  // 已存在的 generator 节点连线兼容,新建生成器入口已移除。
+  // 生成:可输出到所有节点(含自身,支持链式生成)
+  generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench'],
+  // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成/堆叠
+  text: ['text', 'image', 'video', 'audio', 'stacked-media', 'script', 'generator'],
+  // 图片:图生图/图生视频/图生音频/生成/堆叠
+  image: ['image', 'video', 'audio', 'stacked-media', 'generator'],
+  // 视频:视频生视频/视频生音频/生成/堆叠
+  video: ['video', 'audio', 'stacked-media', 'generator'],
+  // 音频:音频生视频(多模态)/生成/堆叠
+  audio: ['video', 'stacked-media', 'generator'],
+  // 剧本:可连分镜 + 上下游规则开放（2026-09-04 方案 D++ 小步实验：text 可作上游输入，修复 canConnect 双向调用陷阱）
+  script: ['text', 'image', 'video', 'audio', 'stacked-media', 'script', 'generator', 'storyboard', 'workbench'],
+  // 分镜:可连工作台（2026-08-30：剧管已并入分镜，不再作为独立连线目标）
+  storyboard: ['workbench'],
+  // 工作台:终端节点,不接下游
+  workbench: [],
+  // 色卡:静态展示型终端节点,无引脚不参与连线(2026-09-02 Plan#65)
+  'color-card': [],
+  // novel 长文本素材源(Plan#74 Phase C):可连剧本(转剧本)或分镜(直接转分镜),多下游不锁死
+  novel: ['script', 'storyboard'],
+  // 堆叠是当前 item 的切换器：可进入生成链路，也可连入另一个 StackNode 触发合并。
+  'stacked-media': ['image', 'video', 'audio', 'generator', 'stacked-media'],
+  /*
+   * 子画布代理节点（Plan#84 T2，故意不写进本矩阵）：
+   * - 作为**源**：未知类型默认放行（见 canConnect）→ 代理卡 output 可连到下游，
+   *   表达“子画布的产出流向外部”；
+   * - 作为**目标**：故意不出现在任何 value 列表 → 手工外部→代理卡连入被拒。
+   *   原因：代理只有一个 in 引脚，而子画布内部哪个节点接收该输入语义未定（需用户选），
+   *   只允许 create-sub-canvas 的程序化重连（跨界边自动接到 in/out，保留生成链可见性）。
+   */
+};
+
+/**
+ * 判断 source→target 是否允许连接 (统一规则)
+ *
+ * 正向和反向共用此函数:
+ * - 正向: canConnect(sourceType, targetType)
+ * - 反向: canConnect(actualSourceType, targetType)
+ *
+ * 未知类型默认允许(向后兼容未注册的节点类型)
+ */
+export function canConnect(sourceType: string, targetType: string): boolean {
+  const allowed = COMPATIBILITY_MATRIX[sourceType];
+  if (!allowed) return true; // 未知类型默认允许
+  return allowed.includes(targetType as AddNodeType);
+}
+
+/**
+ * 获取源节点允许连接的所有目标类型 (用于菜单禁用过滤)
+ *
+ * 未知类型返回全部(向后兼容)
+ */
+export function getAllowedTargetTypes(sourceType: string): AddNodeType[] {
+  const allowed = COMPATIBILITY_MATRIX[sourceType];
+  return allowed ?? ALL_NODE_TYPES;
+}
+
+/**
+ * 获取目标节点能接受的所有源类型 (用于反向查询)
+ *
+ * 遍历矩阵,找出 value 中包含 targetType 的所有 key
+ */
+export function getAllowedSourceTypes(targetType: string): AddNodeType[] {
+  const result: AddNodeType[] = [];
+  for (const [sourceType, allowedTargets] of Object.entries(COMPATIBILITY_MATRIX)) {
+    if (allowedTargets.includes(targetType as AddNodeType)) {
+      result.push(sourceType as AddNodeType);
+    }
+  }
+  return result;
+}

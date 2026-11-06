@@ -1,0 +1,239 @@
+{
+  "generatedAt": "2026-11-03T18:22:03.198Z",
+  "storageRoot": "D:\\AICode\\zeroexo\\zeroexo-platform\\zeroexo_backend\\storage",
+  "scope": "后端 scene-v*.json 版本快照（每项目取最新一份）；前端 IndexedDB 与数据库 JSON 字段不在本报告内",
+  "summary": {
+    "projectCount": 10,
+    "globalTypeCounts": {
+      "image": 17,
+      "text": 8,
+      "group": 1,
+      "stacked-media": 1,
+      "video": 3,
+      "novel": 1
+    },
+    "bizNodeTotals": {
+      "script": 0,
+      "storyboard": 0,
+      "workbench": 0
+    },
+    "bizFieldUnion": {
+      "script": [],
+      "storyboard": [],
+      "workbench": []
+    }
+  },
+  "fieldMappingProposal": {
+    "script": {
+      "data.content": {
+        "to": "script.json → episodes[0].content（旧单集迁移为首集）",
+        "keep": true
+      },
+      "data.episodes": {
+        "to": "script.json → episodes[]（集/段落/行）",
+        "keep": true
+      },
+      "data.activeEpisodeId": {
+        "to": "script.json → meta.activeEpisodeId",
+        "keep": true
+      },
+      "data.title": {
+        "to": "script.json → title",
+        "keep": true
+      },
+      "data.status": {
+        "to": "丢弃（节点运行态）",
+        "keep": false
+      },
+      "data.isSample / data.sampleInitialized": {
+        "to": "丢弃（示例数据标记）",
+        "keep": false
+      },
+      "position / size": {
+        "to": "graph.layout（画布只留布局）",
+        "keep": true
+      }
+    },
+    "storyboard": {
+      "data.shots / data.shotsByEpisode": {
+        "to": "shots/<segId>.json → 分镜段（seq/frameCount/prompt/槽位）",
+        "keep": true
+      },
+      "data.entities": {
+        "to": "assets.json → 项目内资产关联",
+        "keep": true
+      },
+      "data.sourceScriptId": {
+        "to": "shots.json → sourceRef（指回 script.json 段落）",
+        "keep": true
+      },
+      "data.subjectTree / data.subjectAiIndex / data.aiSubjects": {
+        "to": "assets.json → 主体圣经关联",
+        "keep": true
+      },
+      "data.colorCard": {
+        "to": "project.json → colorCardRef",
+        "keep": true
+      },
+      "data.status / data.progress / data.steps / data.conflicts": {
+        "to": "丢弃（生成运行态）",
+        "keep": false
+      },
+      "data.productionManagerId / data.productionItems": {
+        "to": "待拍板（制作管理模块归属）",
+        "keep": null
+      },
+      "data.aiMemory": {
+        "to": "待拍板（Agent 记忆是否随项目迁移）",
+        "keep": null
+      }
+    },
+    "workbench": {
+      "data.shots": {
+        "to": "outputs.json → 出片条目（对应段/版本/视频路径/生成参数）",
+        "keep": true
+      },
+      "data.mediaAssets": {
+        "to": "assets.json → 媒体资产关联",
+        "keep": true
+      },
+      "data.entities": {
+        "to": "assets.json → 项目内资产关联",
+        "keep": true
+      },
+      "data.tracks": {
+        "to": "outputs.json → 多轨时间线（若保留多轨）",
+        "keep": true
+      },
+      "data.sourceStoryboardId": {
+        "to": "outputs.json → sourceRef（指回分镜段）",
+        "keep": true
+      },
+      "data.scriptSummary / data.report": {
+        "to": "丢弃（可再生的派生物）",
+        "keep": false
+      },
+      "data.status / data.totalDuration / data.completedCount": {
+        "to": "派生字段（由 outputs 条目聚合，不落库）",
+        "keep": false
+      },
+      "data.deletedSourceShotIds": {
+        "to": "outputs.json → 同步墓碑（若保留删改同步语义）",
+        "keep": true
+      },
+      "data.aiMemory": {
+        "to": "待拍板",
+        "keep": null
+      }
+    }
+  },
+  "projects": [
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "-D29LU2OYVUFhdCYgj6d4",
+      "snapshotFile": "scene-v27.json",
+      "snapshotCount": 1,
+      "nodeTotal": 23,
+      "typeCounts": {
+        "image": 17,
+        "text": 4,
+        "group": 1,
+        "stacked-media": 1
+      },
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "NH7_rQlsR8oD3NnYAdOLI",
+      "snapshotFile": "scene-v58.json",
+      "snapshotCount": 58,
+      "nodeTotal": 1,
+      "typeCounts": {
+        "text": 1
+      },
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "scwepq3FuTtjwLMmlXEsP",
+      "snapshotFile": "scene-v6.json",
+      "snapshotCount": 6,
+      "nodeTotal": 1,
+      "typeCounts": {
+        "text": 1
+      },
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "sez1dhcX8bjAA9gO8yDMJ",
+      "snapshotFile": "scene-v35.json",
+      "snapshotCount": 1,
+      "nodeTotal": 3,
+      "typeCounts": {
+        "video": 2,
+        "novel": 1
+      },
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "V2jN4y40oJQe2p9iDHJya",
+      "snapshotFile": "scene-v19.json",
+      "snapshotCount": 19,
+      "nodeTotal": 0,
+      "typeCounts": {},
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "vS996FqeLP_qynm6mOzHy",
+      "snapshotFile": "scene-v15.json",
+      "snapshotCount": 15,
+      "nodeTotal": 2,
+      "typeCounts": {
+        "text": 1,
+        "video": 1
+      },
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c5505b4a-b7ef-44fe-afda-e22eecdcda13",
+      "projectId": "XV5IK0FUUL3X1hATRvdn7",
+      "snapshotFile": "scene-v16.json",
+      "snapshotCount": 16,
+      "nodeTotal": 0,
+      "typeCounts": {},
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c7177652-ecaf-441d-94e0-38a191cba707",
+      "projectId": "22b1f7a1-f245-4bcc-ae5b-a83ad9339dd4",
+      "snapshotFile": "scene-v1.json",
+      "snapshotCount": 1,
+      "nodeTotal": 0,
+      "typeCounts": {},
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c7177652-ecaf-441d-94e0-38a191cba707",
+      "projectId": "aa101703-d441-470a-852a-c0544da171c6",
+      "snapshotFile": "scene-v1.json",
+      "snapshotCount": 1,
+      "nodeTotal": 0,
+      "typeCounts": {},
+      "bizNodes": []
+    },
+    {
+      "ownerId": "c7177652-ecaf-441d-94e0-38a191cba707",
+      "projectId": "gacJfyEjGCEg20_XrSFQF",
+      "snapshotFile": "scene-v3.json",
+      "snapshotCount": 1,
+      "nodeTotal": 1,
+      "typeCounts": {
+        "text": 1
+      },
+      "bizNodes": []
+    }
+  ]
+}
