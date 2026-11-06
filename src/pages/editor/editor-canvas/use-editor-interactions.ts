@@ -136,6 +136,7 @@ export function useEditorInteractions({
   setContextMenuItems,
   setConnectionDrop,
   setImageDialog,
+  setImageNodeEdit,
   setDetailNode,
   setAssetPickerOpen,
   setReplaceNodeId,
@@ -172,6 +173,8 @@ export function useEditorInteractions({
   setContextMenuItems: React.Dispatch<React.SetStateAction<ContextMenuItem[] | null | undefined>>;
   setConnectionDrop: React.Dispatch<React.SetStateAction<any>>;
   setImageDialog: React.Dispatch<React.SetStateAction<ImageDialogState | null>>;
+  /** 图片节点内编辑（裁剪/分割/局部遮罩）锚点状态 */
+  setImageNodeEdit: (state: import('@/features/image-editor/node-image-editor.js').ImageNodeEditState | null) => void;
   setDetailNode: React.Dispatch<React.SetStateAction<NodeRecord | null>>;
   setAssetPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setReplaceNodeId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -1394,11 +1397,30 @@ export function useEditorInteractions({
           replaceInputRef.current?.click();
           return;
         }
-        // 对话框类型:设置 imageDialog 状态,由 ImageDialogRenderer 渲染
+        // 编辑类操作（裁剪/分割/局部遮罩）走**节点内编辑**：面板锚定节点当前屏幕矩形，
+        // 不弹居中窗口、也不开独立页签；锚点在此刻计算（编辑期间画布交互被遮罩接住，锚点不漂）
+        if (type === 'crop' || type === 'split' || type === 'maskEdit') {
+          const el = containerRef.current;
+          const vp = refs.store?.getViewport();
+          const size = node.size ?? { width: 340, height: 240 };
+          // 容器/视口不可用时给一个居中的默认锚点，仍然走节点内编辑（不退回已下线的居中弹窗）
+          const box = el?.getBoundingClientRect();
+          const anchor = box && vp
+            ? {
+                left: box.left + node.position.x * vp.k + vp.x,
+                top: box.top + node.position.y * vp.k + vp.y,
+                width: size.width * vp.k,
+                height: size.height * vp.k,
+              }
+            : { left: (typeof window === 'undefined' ? 640 : window.innerWidth / 2) - 200, top: 120, width: 400, height: 320 };
+          setImageNodeEdit({ node, mode: type, anchor });
+          return;
+        }
+        // 只读/参数型操作：仍走浮层（查看大图 / 详情 / 放大 / 多角度）
         setImageDialog({ node, type });
       },
     };
-  }, [refs.commandQueue, state.editor, handleSaveNodeAsset, handleReversePrompt]);
+  }, [refs.commandQueue, refs.store, state.editor, handleSaveNodeAsset, handleReversePrompt, setImageNodeEdit, containerRef]);
 
   const minimapNodeFilter = (n: NodeRecord) => n.type !== 'group';
 

@@ -561,7 +561,11 @@
     "fileSize": "File Size",
     "reversePromptPlaceholder": "(Prompt to be reversed)",
     "reversePromptLoading": "Reversing...",
-    "reversePromptFailed": "Reverse failed"
+    "reversePromptFailed": "Reverse failed",
+    "cropFailed": "Crop failed, please retry",
+    "splitFailed": "Split failed, please retry",
+    "maskBackendPending": "Local edits need the generation backend; nothing was submitted",
+    "nodeEditHint": "In-node editing · Esc to exit"
   },
   "sort": {
     "bringToFront": "Bring to Front",
@@ -782,7 +786,7 @@
   "hierarchy": {
     "title": "Canvas Structure",
     "collapse": "Collapse",
-    "empty": "Project is empty",
+    "empty": "No nodes on this canvas yet: use the + toolbar below to add images, videos or text nodes",
     "nodeCount": "{{count}} nodes",
     "noSearchResults": "No matching results",
     "searchPlaceholder": "Search node name...",

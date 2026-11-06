@@ -546,7 +546,11 @@
     "fileSize": "ファイルサイズ",
     "reversePromptPlaceholder": "(逆推プロンプト待ち)",
     "reversePromptLoading": "逆推中...",
-    "reversePromptFailed": "逆推失敗"
+    "reversePromptFailed": "逆推失敗",
+    "cropFailed": "切り抜きに失敗しました。再試行してください",
+    "splitFailed": "分割に失敗しました。再試行してください",
+    "maskBackendPending": "部分修正には生成バックエンドが必要です。今回は送信していません",
+    "nodeEditHint": "ノード内編集 · Esc で終了"
   },
   "sort": {
     "bringToFront": "最前面へ",
@@ -763,7 +767,7 @@
   "hierarchy": {
     "title": "キャンバス構造",
     "collapse": "折りたたむ",
-    "empty": "プロジェクトは空です",
+    "empty": "キャンバスにノードがまだありません：下の「+」から画像・動画・テキストを追加してください",
     "nodeCount": "{{count}} ノード",
     "noSearchResults": "該当する結果がありません",
     "searchPlaceholder": "ノード名を検索...",

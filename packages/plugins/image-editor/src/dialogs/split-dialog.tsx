@@ -20,6 +20,8 @@ export interface SplitDialogProps {
   onClose: () => void;
   onConfirm: (params: SplitParams) => void;
   theme: ThemeConfig;
+  /** 内联渲染（节点内编辑）：不套 Modal 外壳，由宿主给出容器 */
+  inline?: boolean;
 }
 
 const MAX_GRID_SIZE = 12;
@@ -46,6 +48,7 @@ export function SplitDialog({
   onClose,
   onConfirm,
   theme,
+  inline,
 }: SplitDialogProps): React.ReactElement | null {
   const [rows, setRows] = useState(2);
   const [columns, setColumns] = useState(2);
@@ -150,32 +153,21 @@ export function SplitDialog({
   const labelStyle: CSSProperties = { fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 6, display: 'block' };
   const summaryRowStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
 
-  return (
-    <Modal
-      open={open && Boolean(dataUrl)}
-      onCancel={onClose}
-      title="切分图片"
-      width={760}
-      centered
-      destroyOnHidden
-      styles={{
-        header: { borderBottom: 'none', marginBottom: 0, paddingBottom: 8 },
-        footer: { borderTop: 'none', paddingTop: 4 },
-      }}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {nonUniform && (
-            <Button icon={<RotateCcw size={13} />} onClick={resetUniform}>
-              重置为均匀
-            </Button>
-          )}
-          <Button onClick={onClose}>取消</Button>
-          <Button type="primary" onClick={() => onConfirm({ rows, columns, columnBreaks, rowBreaks })}>
-            确认切分({total})
-          </Button>
-        </div>
-      }
-    >
+  const actions = (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+      {nonUniform && (
+        <Button icon={<RotateCcw size={13} />} onClick={resetUniform}>
+          重置为均匀
+        </Button>
+      )}
+      <Button onClick={onClose}>取消</Button>
+      <Button type="primary" onClick={() => onConfirm({ rows, columns, columnBreaks, rowBreaks })}>
+        确认切分({total})
+      </Button>
+    </div>
+  );
+  const content = (
+    <>
       <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 12 }}>
         按网格拆分,子节点自动排列到画布 · 可拖拽分割线微调
       </div>
@@ -267,6 +259,35 @@ export function SplitDialog({
           </div>
         </div>
       </div>
+    </>
+  );
+
+  if (!open) return null;
+
+  if (inline) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{content}</div>
+        {actions}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      open={open && Boolean(dataUrl)}
+      onCancel={onClose}
+      title="切分图片"
+      width={760}
+      centered
+      destroyOnHidden
+      styles={{
+        header: { borderBottom: 'none', marginBottom: 0, paddingBottom: 8 },
+        footer: { borderTop: 'none', paddingTop: 4 },
+      }}
+      footer={actions}
+    >
+      {content}
     </Modal>
   );
 }

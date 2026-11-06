@@ -22,6 +22,8 @@ export interface MaskEditDialogProps {
   onClose: () => void;
   onConfirm: (payload: MaskEditPayload) => void;
   theme: ThemeConfig;
+  /** 内联渲染（节点内编辑）：不套 Modal 外壳，由宿主给出容器 */
+  inline?: boolean;
 }
 
 type DrawMode = 'paint' | 'erase';
@@ -36,6 +38,7 @@ export function MaskEditDialog({
   onClose,
   onConfirm,
   theme,
+  inline,
 }: MaskEditDialogProps): React.ReactElement | null {
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -161,26 +164,14 @@ export function MaskEditDialog({
     transition: 'all 0.15s',
   });
 
-  return (
-    <Modal
-      open={open && Boolean(dataUrl)}
-      onCancel={onClose}
-      title="局部遮罩编辑"
-      width={980}
-      centered
-      destroyOnHidden
-      styles={{
-        header: { borderBottom: 'none', marginBottom: 0, paddingBottom: 8 },
-        footer: { borderTop: 'none', paddingTop: 4 },
-      }}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button icon={<RotateCcw size={13} />} onClick={resetMask}>重置</Button>
-          <Button onClick={onClose}>取消</Button>
-          <Button type="primary" icon={<Sparkles size={13} />} onClick={submit}>AI 修改</Button>
-        </div>
-      }
-    >
+  const actions = (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+      <Button icon={<RotateCcw size={13} />} onClick={resetMask}>重置</Button>
+      <Button onClick={onClose}>取消</Button>
+      <Button type="primary" icon={<Sparkles size={13} />} onClick={submit}>AI 修改</Button>
+    </div>
+  );
+  const content = (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) 300px', gap: 20 }}>
         {/* 左侧:图片 + 双 canvas 蒙版 */}
         <div style={{ display: 'flex', minHeight: 360, alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: theme.toolbar.editorSurface, padding: 12 }}>
@@ -258,6 +249,34 @@ export function MaskEditDialog({
           </div>
         </div>
       </div>
+  );
+
+  if (!open) return null;
+
+  if (inline) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{content}</div>
+        {actions}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      open={open && Boolean(dataUrl)}
+      onCancel={onClose}
+      title="局部遮罩编辑"
+      width={980}
+      centered
+      destroyOnHidden
+      styles={{
+        header: { borderBottom: 'none', marginBottom: 0, paddingBottom: 8 },
+        footer: { borderTop: 'none', paddingTop: 4 },
+      }}
+      footer={actions}
+    >
+      {content}
     </Modal>
   );
 }

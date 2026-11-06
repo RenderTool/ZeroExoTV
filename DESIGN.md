@@ -326,6 +326,13 @@ page container (height: 100%, flex column, overflow: hidden)
 - 宽度规范：编辑类 680px，详情类 960px，确认类 520px，上传类 440px
 - 自研 `modal.tsx`（portal-based）仅用于极简场景（不需要 antd 依赖时，如 asset-picker 和 image-dialog-renderer）
 
+### 图片节点编辑（节点内编辑）
+- 裁剪 / 分割 / 局部遮罩**一律在节点内完成**：面板以节点当前屏幕矩形为锚点展开（淡遮罩接住画布指针事件），
+  不弹居中 Modal、不开独立页签；Esc 退出，编辑期间拦 Delete/Backspace 防误删。
+- 只读 / 参数型操作（查看大图、详情、放大、多角度）仍走浮层。
+- 编辑器内容体**只有一份**：插件包对话框同时支持 `inline`，节点内编辑复用同一内容体，禁止第二套 UI。
+- 产物落图（子节点 + 连线）只有一份实现：`features/image-editor/image-edit-actions.ts`。
+
 ### 按钮（Button）
 - 尺寸规范：工具栏 `size="small"`（24px），主操作 `default`（32px），大按钮 `large`（44px）
 - 类型规范：主要操作 `type="primary"`，次要操作 `type="default"`
@@ -387,6 +394,8 @@ page container (height: 100%, flex column, overflow: hidden)
   剧本 / 主体库 / 导演台模块只挂「资产」「历史」两个按钮，且不挂载画布层级树与子画布列表——
   每个模块独立记住自己的激活分组，避免用户在其他模块里误选画布层级与子画布。
 - 层级树的数据 hook 必须挂在该分组组件内部（激活才订阅整张图），禁止提到抽屉壳层常驻订阅。
+- 「层级」分组空态文案必须说明**这是画布的节点层级**（例：「画布上还没有节点：用下方「+」添加图片、视频或文本节点」），
+  禁止写「项目为空」这类让用户不知道在看什么层级的文案。
 
 ### MCP 配置页（`McpSettingsDialog`）
 - 全页只有**一份** `mcpServers` 配置块和**一个**「一键复制」按钮；「本地数据面板」只负责

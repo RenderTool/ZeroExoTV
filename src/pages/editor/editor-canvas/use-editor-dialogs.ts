@@ -1,4 +1,4 @@
-﻿/**
+/**
  * useEditorDialogs - 画布编辑页弹窗/模态框状态管理与回调
  *
  * 从 EditorPage 提取的弹窗相关状态和回调,统一管理。
@@ -13,6 +13,7 @@ import { copyCanvasScript, createCanvasScript, bindCanvasScript } from '@/servic
 import { openCanvasTab } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
+import type { ImageNodeEditState } from '@/features/image-editor/node-image-editor.js';
 import { toInsertPayload } from '@/features/asset-picker/components/picker-card.js';
 import type { NavProjectAction } from '@/shared/components/index.js';
 import type { Asset } from '@/features/asset-picker/index.js';
@@ -133,6 +134,8 @@ export function useEditorDialogs({
 
   // ===== 图片编辑对话框 =====
   const [imageDialog, setImageDialog] = useState<ImageDialogState | null>(null);
+  // 图片节点内编辑（裁剪/分割/局部遮罩）：锚点 = 节点当前屏幕矩形
+  const [imageNodeEdit, setImageNodeEdit] = useState<ImageNodeEditState | null>(null);
 
   // ===== 连线释放菜单 =====
   const [connectionDrop, setConnectionDrop] = useState<{
@@ -487,6 +490,9 @@ export function useEditorDialogs({
     // 图片编辑对话框
     imageDialog,
     setImageDialog,
+    // 图片节点内编辑（裁剪/分割/局部遮罩）
+    imageNodeEdit,
+    setImageNodeEdit,
 
     // 连线释放菜单
     connectionDrop,

@@ -566,7 +566,11 @@
     "fileSize": "文件大小",
     "reversePromptPlaceholder": "(待反推提示词)",
     "reversePromptLoading": "反推中...",
-    "reversePromptFailed": "反推失败"
+    "reversePromptFailed": "反推失败",
+    "cropFailed": "裁剪失败，请重试",
+    "splitFailed": "分割失败，请重试",
+    "maskBackendPending": "局部修改需要接入生成后端，本次未提交",
+    "nodeEditHint": "节点内编辑 · Esc 退出"
   },
   "sort": {
     "bringToFront": "置顶",
@@ -793,7 +797,7 @@
   "hierarchy": {
     "title": "项目结构",
     "collapse": "收起",
-    "empty": "项目为空",
+    "empty": "画布上还没有节点：用下方「+」添加图片、视频或文本节点",
     "nodeCount": "共 {{count}} 个节点",
     "noSearchResults": "无匹配结果",
     "searchPlaceholder": "搜索节点名称...",

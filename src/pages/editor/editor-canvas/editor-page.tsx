@@ -73,6 +73,7 @@ import { CanvasLayer } from '@/features/sub-canvas/CanvasLayer.js';
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ImageDialogRenderer } from '@/features/image-editor/image-dialog-renderer.js';
+import { NodeImageEditor } from '@/features/image-editor/node-image-editor.js';
 import { useCanvasHandlers } from '@/features/canvas-interaction/use-canvas-handlers.js';
 import { useDropHandler } from '@/features/canvas-interaction/drop-handler.js';
 import { UploadQueueOverlay } from '@/features/upload-queue/index.js';
@@ -425,6 +426,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     setContextMenuItems,
     setConnectionDrop: dialogs.setConnectionDrop,
     setImageDialog: dialogs.setImageDialog,
+    setImageNodeEdit: dialogs.setImageNodeEdit,
     setDetailNode: dialogs.setDetailNode,
     setAssetPickerOpen: dialogs.setAssetPickerOpen,
     setReplaceNodeId: dialogs.setReplaceNodeId,
@@ -1174,13 +1176,24 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           挂在应用树内以获得 antd App 上下文(message 3 秒可撤销轻提示)与主题 */}
       <SubjectLinkDialogHost />
 
-      {/* 图片编辑独立对话框 */}
+      {/* 图片只读/参数型浮层（查看大图 / 详情 / 放大 / 多角度）；
+          编辑类（裁剪/分割/局部遮罩）走下面的节点内编辑 */}
       {dialogs.imageDialog && refs.commandQueue ? (
         <ImageDialogRenderer
           state={dialogs.imageDialog}
           commandQueue={refs.commandQueue}
           theme={theme}
           onClose={() => dialogs.setImageDialog(null)}
+        />
+      ) : null}
+
+      {/* 图片节点内编辑：面板以节点矩形为锚点展开，产物照旧落成子节点/节点数据 */}
+      {dialogs.imageNodeEdit && refs.commandQueue ? (
+        <NodeImageEditor
+          state={dialogs.imageNodeEdit}
+          commandQueue={refs.commandQueue}
+          theme={theme}
+          onClose={() => dialogs.setImageNodeEdit(null)}
           onNodesCreated={(nodeIds: string[]) => {
             // 切图后自动成组:选中节点 → 触发预览 → 确认成组
             if (!refs.store || !refs.groupPlugin || nodeIds.length < 2) return;

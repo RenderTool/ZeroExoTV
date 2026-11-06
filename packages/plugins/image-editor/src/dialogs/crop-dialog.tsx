@@ -16,6 +16,8 @@ export interface CropDialogProps {
   onClose: () => void;
   onConfirm: (crop: CropRect) => void;
   theme: ThemeConfig;
+  /** 内联渲染（节点内编辑）：不套 Modal 外壳，由宿主给出容器 */
+  inline?: boolean;
 }
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
@@ -25,7 +27,7 @@ type DragMode = 'move' | 'resize';
 const MIN_SIZE = 0.06;
 const DEFAULT_CROP: CropRect = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
 
-export function CropDialog({ dataUrl, open, onClose, onConfirm, theme }: CropDialogProps): React.ReactElement {
+export function CropDialog({ dataUrl, open, onClose, onConfirm, theme, inline }: CropDialogProps): React.ReactElement {
   const [crop, setCrop] = useState<CropRect>(DEFAULT_CROP);
   const [locked, setLocked] = useState(true);
   const [image, setImage] = useState<ImageMeta | null>(null);
@@ -172,26 +174,14 @@ export function CropDialog({ dataUrl, open, onClose, onConfirm, theme }: CropDia
     color: theme.toolbar.textMuted,
   };
 
-  return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      title="裁剪图片"
-      width={800}
-      centered
-      destroyOnHidden
-      styles={{
-        header: { borderBottom: 'none', marginBottom: 0, paddingBottom: 8 },
-        footer: { borderTop: 'none', paddingTop: 4 },
-      }}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={() => setCrop(DEFAULT_CROP)}>重置</Button>
-          <Button onClick={onClose}>取消</Button>
-          <Button type="primary" onClick={() => onConfirm(crop)}>确认裁剪</Button>
-        </div>
-      }
-    >
+  const actions = (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+      <Button onClick={() => setCrop(DEFAULT_CROP)}>重置</Button>
+      <Button onClick={onClose}>取消</Button>
+      <Button type="primary" onClick={() => onConfirm(crop)}>确认裁剪</Button>
+    </div>
+  );
+  const content = (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         {/* 图片 + 裁剪框 */}
         <div
@@ -280,6 +270,32 @@ export function CropDialog({ dataUrl, open, onClose, onConfirm, theme }: CropDia
           </Button>
         </div>
       </div>
+  );
+
+  if (inline) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{content}</div>
+        {actions}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      title="裁剪图片"
+      width={800}
+      centered
+      destroyOnHidden
+      styles={{
+        header: { borderBottom: 'none', marginBottom: 0, paddingBottom: 8 },
+        footer: { borderTop: 'none', paddingTop: 4 },
+      }}
+      footer={actions}
+    >
+      {content}
     </Modal>
   );
 }
