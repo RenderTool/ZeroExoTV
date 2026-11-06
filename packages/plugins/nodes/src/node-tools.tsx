@@ -9,7 +9,7 @@
  * 统一工具栏顺序:
  * - 固定操作(基础): 复制(duplicate) → 删除(delete) → 重命名(rename) → 存素材(saveAsset) → 替换(replace) → 下载(download)
  * - 分割线
- * - 节点特定操作: AI相关(复制提示词) → 编辑相关(更多:局部遮罩/裁剪/分割) → 查看(详情)
+ * - 节点特定操作: AI相关(复制提示词) → 编辑相关(单一「编辑」，打开独立图片编辑页签) → 查看(详情)
  */
 
 import {
@@ -319,7 +319,7 @@ function createDetailTool(): ToolDefinition {
  * 工具顺序:
  * - 基础固定操作: 详情(detail)
  * - AI相关: 复制提示词(copyPrompt) → 反推(reversePrompt) → 放大(upscale) → 多角度(angle)
- * - 编辑相关: 锁比例(resize) → 局部编辑(maskEdit) → 裁剪(crop) → 切图(split)
+ * - 编辑相关: 锁比例(resize) → 编辑(edit：打开图片编辑页签，内含裁剪/分割/局部遮罩)
  *
  * 注: 复制/删除/重命名/存素材/替换/下载 已移至右键菜单
  */
