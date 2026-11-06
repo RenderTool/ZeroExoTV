@@ -99,13 +99,16 @@ describe('入口三处仍接在同一宿主回调上', () => {
   });
 });
 
-describe('副本标签与 1 号并排在顶层', () => {
-  it('CanvasTabBar 渲染 openCanvasTabs（可拖拽、可 ×），key = canvas:<cid>', () => {
+describe('副本页签挂在画布区第二层（主画布固定）', () => {
+  it('第二层页签条：主画布固定第一个 + 副本可关闭，顶层槽位条不再塞副本', () => {
+    const docTabs = read('features/canvas-tabs/canvas-document-tabs.tsx');
+    expect(docTabs).toContain('data-canvas-doc-tab="main"');
+    expect(docTabs).toContain('data-canvas-doc-close');
+    expect(docTabs).toContain('closeCanvasTab(tab.key)');
+    expect(docTabs).toContain('useCanvasTabStore');
     const bar = read('features/canvas-tabs/canvas-tab-bar.tsx');
-    expect(bar).toContain('openCanvasTabs');
-    expect(bar).toContain('data-canvas-copy-tab');
-    expect(bar).toContain('data-canvas-copy-close');
-    expect(bar).toContain('CANVAS_COPY_TAB_ICON');
+    expect(bar).not.toContain('data-canvas-copy-tab');
+    expect(bar).not.toContain('openCanvasTabs');
     const tabStore = read('features/canvas-tabs/canvas-tab-store.ts');
     expect(tabStore).toContain("export const CANVAS_TAB_PREFIX = 'canvas:'");
     expect(tabStore).toContain('export function openCanvasTabCid');
@@ -113,7 +116,7 @@ describe('副本标签与 1 号并排在顶层', () => {
     expect(tabStore).toContain('if (!get().openCanvasTabs.some((t) => t.key === key)) return;');
   });
 
-  it('第二层子页签条与 旧文件已删除（不允许两套实现共存）', () => {
+  it('旧文件已删除（不允许两套实现共存），第二引擎画布也不得复活', () => {
     for (const gone of [
       'features/canvas-tabs/sub-canvas-tab-bar.tsx',
       'features/canvas-tabs/sub-canvas-tab.test.tsx',
@@ -126,27 +129,36 @@ describe('副本标签与 1 号并排在顶层', () => {
       'features/sub-canvas/subcanvas-removal.ts',
       'features/sub-canvas/SubCanvasLayer.tsx',
       'features/sub-canvas/SubCanvasWorkspace.tsx',
+      // 2026-11-06 纠偏：副本不再另起一套画布，第二个引擎实例与工作区外壳一并删除
+      'features/sub-canvas/CanvasLayer.tsx',
+      'features/sub-canvas/CanvasWorkspace.tsx',
     ]) {
       expect(exists(gone), `${gone} 应该已被删除`).toBe(false);
     }
   });
 
-  it('editor-page 渲染 CanvasLayer，且副本激活时不叠渲染剧本/导演台内容层', () => {
+  it('editor-page 用同一编辑器切换文档，不再挂第二个画布实例', () => {
     const page = read('pages/editor/editor-canvas/editor-page.tsx');
-    expect(page).toContain('<CanvasLayer');
+    expect(page).toContain('useCanvasDocumentSwitch');
+    expect(page).toContain('<CanvasDocumentTabs');
+    expect(page).not.toContain('<CanvasLayer');
+    expect(page).not.toContain('<CanvasWorkspace');
+    // 副本激活时画布照常接收指针事件（同一套画布，不再盖一层工作区）
+    expect(page).toContain("activeTabKey === CANVAS_TAB_KEY || isOpenCanvasTabKey(activeTabKey) ? 'auto' : 'none'");
+    // 剧本/导演台内容层仍不叠在副本上
     expect(page).toContain('activeTabKey !== CANVAS_TAB_KEY && !isOpenCanvasTabKey(activeTabKey)');
-    expect(page).not.toContain('<SubCanvasLayer');
   });
 
-  it('工作区按 cid 走 canvas-store，并保持 S1 三开关 + 冲突居中确认框 + 新建单一来源', () => {
-    const ws = read('features/sub-canvas/CanvasWorkspace.tsx');
-    expect(ws).toContain('getCanvas(projectId, cid)');
-    expect(ws).toContain('saveCanvas(projectId, cid, { graph }, stampRef.current)');
-    expect(ws).toContain('enablePersistence: false');
-    expect(ws).toContain('enableKeyboard: false');
-    expect(ws).toContain('enableMinimap: false');
-    expect(ws).toContain('centered: true');
-    expect(ws).toContain("from '@/features/canvas-nodes/new-node.js'");
+  it('切文档：先落盘当前文档 → 换图；副本期间主画布自动保存暂停', () => {
+    const sw = read('features/canvas-tabs/use-canvas-document-switch.ts');
+    expect(sw).toContain('await flushCurrent()');
+    expect(sw).toContain('persistence?.pause()');
+    expect(sw).toContain('persistence?.resume()');
+    expect(sw).toContain('replaceState(got.graph)');
+    expect(sw).toContain('getCanvas(projectId, cid)');
+    expect(sw).toContain('saveCanvas(projectId, cid');
+    expect(sw).toContain('isCanvasConflict');
+    expect(sw).toContain('centered: true');
   });
 });
 

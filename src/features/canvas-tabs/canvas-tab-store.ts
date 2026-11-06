@@ -122,6 +122,24 @@ export function slotTabKey(kind: FixedSlotKind, bindings: SlotBindings): string 
 }
 
 /**
+ * 被显式删除的画布副本 cid：删除流程先标记，再关页签，
+ * 避免「关闭页签 → 切换文档」时把刚删掉的文件又写回来（2026-11-06）。
+ */
+const discardedCanvasCids = new Set<string>();
+
+export function markCanvasDiscarded(cid: string): void {
+  discardedCanvasCids.add(cid);
+}
+
+export function unmarkCanvasDiscarded(cid: string): void {
+  discardedCanvasCids.delete(cid);
+}
+
+export function isCanvasDiscarded(cid: string): boolean {
+  return discardedCanvasCids.has(cid);
+}
+
+/**
  * 页签 → Agent 关注点映射（Plan#55 Phase B，2026-08-31）：
  * 打开/激活某页签即通知 Agent「用户当前关注 X」（仅声明，不读数据；
  * 用户明确修改意图后由 Agent 走 read_* 工具正式读节点）。

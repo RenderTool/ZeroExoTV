@@ -21,7 +21,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import type { LucideIcon } from 'lucide-react';
 import { useCanvasTabStore, slotTabKey } from './canvas-tab-store.js';
 import type { FixedSlotKind } from './canvas-tab-store.js';
-import { CANVAS_TAB_ICONS, CANVAS_COPY_TAB_ICON, CANVAS_TAB_CLOSE_ICON } from './icons.js';
+import { CANVAS_TAB_ICONS } from './icons.js';
 import './canvas-tab-bar.css';
 
 function SlotIcon({ kind, active }: { kind: FixedSlotKind; active: boolean }): React.ReactElement {
@@ -55,14 +55,9 @@ export function CanvasTabBar(): React.ReactElement {
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
   const reorderSlots = useCanvasTabStore((s) => s.reorderSlots);
-  // 副本画布标签（Spec）：与 1 号主画布**同一层并排**，可拖拽排序、可 ×（只关页签不删数据）
-  const copyTabs = useCanvasTabStore((s) => s.openCanvasTabs);
-  const closeCanvasTab = useCanvasTabStore((s) => s.closeCanvasTab);
-  const reorderCanvasTabs = useCanvasTabStore((s) => s.reorderCanvasTabs);
+  // 画布副本页签已移到画布区顶部的第二层页签条（CanvasDocumentTabs），本组件只负责固定槽位
   // 拖拽中的槽位下标（四个固定槽位整体参与排序）
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  // 副本标签自己的拖拽下标（与固定槽位互不串位：两套序各自排）
-  const [copyDragIndex, setCopyDragIndex] = useState<number | null>(null);
 
   const dark = mode === 'dark';
   // 胶囊分段控件色板：深色=浮层灰块（参考图），浅色=白底块+轻投影（经典 segmented control）
@@ -135,56 +130,6 @@ export function CanvasTabBar(): React.ReactElement {
           >
             <SlotIcon kind={kind} active={active} />
             {label}
-          </button>
-        );
-      })}
-
-      {/* 副本画布标签（征集#184）：本质都是本项目目录下的画布，与 1 号平级并排。
-          外观沿用同一套 .zx-canvas-tab（分段胶囊），只多一个 ×；1 号是上面的固定槽位，不重复出现。 */}
-      {copyTabs.map((tab, idx) => {
-        const active = activeTabKey === tab.key;
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            draggable
-            data-canvas-copy-tab={tab.cid}
-            data-active={active || undefined}
-            className={['zx-canvas-tab', active ? 'is-active' : ''].filter(Boolean).join(' ')}
-            onClick={() => activateTab(tab.key)}
-            onDragStart={(e) => {
-              setCopyDragIndex(idx);
-              e.dataTransfer.effectAllowed = 'move';
-              e.dataTransfer.setData('text/plain', tab.key);
-            }}
-            onDragOver={(e) => {
-              if (copyDragIndex === null) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = 'move';
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (copyDragIndex !== null && copyDragIndex !== idx) reorderCanvasTabs(copyDragIndex, idx);
-              setCopyDragIndex(null);
-            }}
-            onDragEnd={() => setCopyDragIndex(null)}
-            title={tab.title}
-          >
-            <CANVAS_COPY_TAB_ICON size={13} strokeWidth={active ? 2.2 : 1.8} />
-            <span className="zx-canvas-tab-label">{tab.title}</span>
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={t('canvasTab.close', '关闭页签')}
-              data-canvas-copy-close={tab.cid}
-              className="zx-canvas-tab-close"
-              onClick={(e) => { e.stopPropagation(); closeCanvasTab(tab.key); }}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); closeCanvasTab(tab.key); } }}
-            >
-              <CANVAS_TAB_CLOSE_ICON size={12} />
-            </span>
           </button>
         );
       })}

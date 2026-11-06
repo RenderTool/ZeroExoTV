@@ -80,8 +80,11 @@
 
 - **生成**：框选（组自动展开后代）→「保存为画布副本」= **复制**节点与内部连线到新文档，**主画布原样不动**；
   节点保留原 id 与 `storageKey`（副本是另一份文档，不跨文档抢 id）；不插代理卡、不重连跨界边。
-- **打开**：副本与 1 号在**同一层标签**并排（顶层 CanvasTabBar）；
-  1 号不可关，副本可 ×（关完回 1 号）；页签 key = `canvas:<cid>`（1 号 `canvas` 即主画布槽位）。
+- **打开**：副本页签挂在**画布区顶部第二层页签条**（固定槽位页签条下方，线上版本活动页签同款）；
+  主画布页签始终第一个、不可关闭，副本可 ×（可拖拽排序，关完回主画布）；页签 key = `canvas:<cid>`。
+  点击页签 = **同一个画布编辑器切换文档**（视图/工具栏/胶囊/快捷键/分组全部同一套），
+  **不新建第二个引擎实例、不另写第二套画布界面**；切换前先落盘当前文档，副本期间主画布自动保存暂停。
+
 - **抽屉**：独立分组「画布」，卡片**直接复用主页 `ProjectCard` + `CoverUploadModal`**（同一封面机制），
   菜单：打开 / 重命名 / 设封面 / 存为独立项目 / 删除（1 号不显示删除）。
 - **存为独立新项目**：`createProject` + 写入新项目的 **1 号画布**（封面同步到 `graph.metadata.coverUrl`
@@ -106,8 +109,8 @@
 
 1. 地基：`canvas-store.ts`（✅ 已完成）
 2. 生成链：选区 → `createCanvas(graphRef:inline)`（复制语义，主画布不动）
-3. 标签层：顶层 `CanvasTabBar` 的「画布」右侧并排副本标签（可 ×），页签 key = `canvas:<cid>`
-4. 工作区：`SubCanvasWorkspace` 改接 `canvas-store`（按 cid 读写，1 号不走这条路径）
+3. 标签层：画布区顶部第二层页签条（主画布固定 + 副本可 ×），页签 key = `canvas:<cid>`
+4. 文档切换：同一编辑器按 cid 读写（主画布走 `.lf`，副本走 `canvas-store`），不建第二实例
 5. 抽屉：新分组「画布」= 复用 `ProjectCard` + `CoverUploadModal`，菜单 打开/重命名/设封面/存为独立项目/删除（1 号不显示删除）
 6. MCP：`subcanvas` 三工具改名 `canvas` 域且 1 号可读
 7. 验收：typecheck / 全量单测 / build / Spec 与 Plan 回写
@@ -118,8 +121,8 @@
 |---|---|---|
 | 契约层 | `src/entities/canvas-store.ts` + `canvas-store.test.ts`（8 例） | 与 `slot-containers` 同构：`{schemaVersion, kind:'canvas', id, projectId, title, order, locked, coverKey, version, createdAt, updatedAt, graphRef, graph?}`；1 号 `graphRef='project'`（图仍在 `.lf/graph_data`），副本 `graphRef='inline'` |
 | 生成链 | `features/sub-canvas/canvas-copy.ts` | **纯复制**（组自动展开后代，保留原 id 与 storageKey）；不进命令队列，主画布零改动 |
-| 顶层标签 | `canvas-tab-store.ts`（`openCanvasTabs` / key=`canvas:<cid>`）+ `canvas-tab-bar.tsx` 并排渲染 | 1 号仍是不可关的固定槽位；副本可拖拽、可 ×；第二层页签条已删除 |
-| 工作区 | `CanvasWorkspace.tsx` | 第二引擎实例（三开关不变）+ 500ms debounce 乐观锁自存 + 冲突居中确认框；按 cid 读写 |
+| 画布页签 | `canvas-document-tabs.tsx`（画布区第二层）+ `canvas-tab-store.ts`（`openCanvasTabs` / key=`canvas:<cid>`） | 主画布固定不可关；副本可拖拽、可 ×；顶层槽位条不再塞副本 |
+| 文档切换 | `use-canvas-document-switch.ts` | **同一编辑器**切换文档：先落盘当前文档 → `replaceState` 换图 → 副本 500ms 防抖 + 乐观锁自存 + 冲突居中确认框；副本期间主画布自动保存 `pause()`，回主画布 `resume()` |
 | 抽屉 | `canvas-assets/groups/CanvasCopiesGroup.tsx` | 直接用主页 `ProjectCard` + `CoverUploadModal`；菜单：打开/重命名/设封面/存为独立项目/删除（1 号无后两项） |
 | MCP | `mcp-server/src/store/canvases.ts` + `tools/canvases.ts` + `test/canvases.test.ts`（11 例） | 工具改名 `list_canvases`/`get_canvas`/`patch_canvas_nodes`；**1 号可读不可写**（写它会和前端防抖自动保存相打），副本走 size+mtime 双因子 |
 

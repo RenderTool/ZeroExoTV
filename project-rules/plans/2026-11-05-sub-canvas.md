@@ -166,6 +166,20 @@
      渲染成上下两条线中间空段。
   2. 修改点：`left-side-toolbar.tsx` 的 `addNodeItems` 合并为一个分隔线；同步更正注释。
 
+- [x] **画布页签位置 + 单实例纠偏**（2026-11-06 用户纠偏：页签要挂在画布区顶部那一行、打开副本要和主画布完全一样、不要另写一套画布）
+  1. 问题定位：副本页签被塞进顶层固定槽位页签条；打开副本时另起 `CanvasWorkspace` **第二个引擎实例**
+     （自带迷你工具栏/新建菜单/自有空态），同一份「画布」出现两套界面 —— 方向错误。
+  2. 修改点：副本页签移到**画布区顶部第二层页签条**（`canvas-document-tabs.tsx`：主画布固定第一个不可关、
+     副本可 ×、可拖拽排序，仅存在副本时渲染）；副本改为**同一编辑器切换文档**
+     （`use-canvas-document-switch.ts`）：先落盘当前文档 → `commandQueue.replaceState(目标图)` → 恢复该文档视口；
+     副本期间 `PersistencePlugin.pause()` 暂停主画布自动保存，回主画布 `resume()`；
+     副本仍走 `canvas-store` 500ms 防抖 + size/mtime 乐观锁 + 冲突居中确认框。
+  3. 删除：`CanvasLayer.tsx` / `CanvasWorkspace.tsx`（第二个引擎实例与自有画布 UI）；
+     `canvas-tab-bar.tsx` 不再渲染副本；`PersistencePlugin` 新增 `pause()/resume()`
+     （暂停不写盘、恢复不触发写盘，避免把副本书写进主画布键）。
+  4. 验收断言：`sub-canvas-wiring.test.ts` 改写为「第二层页签 + 主画布固定 + 单实例切换」守卫；
+     画布页签/画布副本相关 15 个测试文件 217 例全绿；typecheck / build 通过。
+
 ## 替代方案
 
 无（首个方案）。已否决：子图内嵌 `node.data.graph`（`largeDataThreshold=2048` 会分片进 `.lf/`，MCP 不可读，违反 Plan#83 D1）——依据见 Spec §2。

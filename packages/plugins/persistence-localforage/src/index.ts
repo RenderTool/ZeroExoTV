@@ -147,20 +147,7 @@ export class PersistencePlugin implements Plugin {
   activate(): void {
     if (this.active || !this.context) return;
     this.active = true;
-
-    // 监听命令执行/撤销/重做 → 防抖保存
-    const onChange = (): void => {
-      this.scheduleSave();
-    };
-    this.context.eventBus.on(CommandEvents.EXECUTED, onChange);
-    this.context.eventBus.on(CommandEvents.UNDONE, onChange);
-    this.context.eventBus.on(CommandEvents.REDONE, onChange);
-
-    this.unsubscribers.push(() => {
-      this.context?.eventBus.off(CommandEvents.EXECUTED, onChange);
-      this.context?.eventBus.off(CommandEvents.UNDONE, onChange);
-      this.context?.eventBus.off(CommandEvents.REDONE, onChange);
-    });
+    this.subscribeChanges();
   }
 
   deactivate(): void {
@@ -177,6 +164,53 @@ export class PersistencePlugin implements Plugin {
     }
     // 保存当前数据并确保写入完成(不使用 fire-and-forget)
     this._savePromise = this._doSave(this.context!.commandQueue.getState());
+    this.unsubscribeChanges();
+  }
+
+  /**
+   * 暂停自动保存（**不写盘**）：同一编辑器切换到另一份文档时用。
+   * 调用方应先 `save()` 落盘当前文档，再 `pause()`，避免暂停时把新文档写进旧键。
+   */
+  pause(): void {
+    if (!this.active) return;
+    this.active = false;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.idleCallbackId !== null) {
+      cancelIdleCallback(this.idleCallbackId);
+      this.idleCallbackId = null;
+    }
+    this._suppressNextSave = false;
+    this.unsubscribeChanges();
+  }
+
+  /** 恢复自动保存（与 pause 配对；恢复动作本身不触发写盘） */
+  resume(): void {
+    if (this.active || !this.context) return;
+    this.active = true;
+    this._suppressNextSave = false;
+    this.subscribeChanges();
+  }
+
+  /** 订阅命令事件 → 防抖保存（activate/resume 共用） */
+  private subscribeChanges(): void {
+    if (!this.context) return;
+    const onChange = (): void => {
+      this.scheduleSave();
+    };
+    this.context.eventBus.on(CommandEvents.EXECUTED, onChange);
+    this.context.eventBus.on(CommandEvents.UNDONE, onChange);
+    this.context.eventBus.on(CommandEvents.REDONE, onChange);
+    this.unsubscribers.push(() => {
+      this.context?.eventBus.off(CommandEvents.EXECUTED, onChange);
+      this.context?.eventBus.off(CommandEvents.UNDONE, onChange);
+      this.context?.eventBus.off(CommandEvents.REDONE, onChange);
+    });
+  }
+
+  private unsubscribeChanges(): void {
     this.unsubscribers.forEach((unsub) => unsub());
     this.unsubscribers = [];
   }

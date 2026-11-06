@@ -69,7 +69,8 @@ import { getProject } from '@zeroexo/plugin-persistence';
 import { ConfirmDialog, NodeCreateMenu, AppearanceDialog, ShortcutsDialog, MobileNavDrawer, MobileNavButton, MobileNavFloatingWrapper, LanguageDialog, AssetDetailViewer, LoadingOverlay } from '@/shared/components/index.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 // Plan#84（征集#184）：副本画布挂载层（与 1 号并排的顶层标签激活时渲染另一块画布）
-import { CanvasLayer } from '@/features/sub-canvas/CanvasLayer.js';
+import { CanvasDocumentTabs } from '@/features/canvas-tabs/canvas-document-tabs.js';
+import { useCanvasDocumentSwitch, useRestoreCanvasTabs } from '@/features/canvas-tabs/use-canvas-document-switch.js';
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ImageDialogRenderer } from '@/features/image-editor/image-dialog-renderer.js';
@@ -148,6 +149,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const setTabContentHost = useCanvasTabStore((s) => s.setContentHost);
   const setCanvasHost = useCanvasTabStore((s) => s.setCanvasHost);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
+  // 画布级页签 = 同一编辑器切换文档：主画布（.lf）+ 副本（projects/<pid>/canvases/*.json）。
+  // 不再为副本创建第二个引擎实例，视图/工具栏/交互与主画布完全同一套。
+  useRestoreCanvasTabs(canvasId);
+  useCanvasDocumentSwitch({ projectId: canvasId, editor: state.editor });
   // 2026-11-04 单例槽位改造：四个固定页签（剧本/分镜/出片/画布）= 流水线槽位视图。
   // 分镜/出片槽位绑定由 use-editor-interactions 的图订阅解析写入；剧本绑定见下方 effect。
   const slotBindings = useCanvasTabStore((s) => s.slotBindings);
@@ -833,6 +838,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           {/* 2026-11-04 单例槽位改造（推翻 2026-09-01 "页签随画布走"）：
               四个固定页签已挪回 TopBar 水平居中，画布列不再自渲染页签行 */}
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {/* 画布级页签条（主画布固定 + 副本可关闭）：挂在画布区顶部，与线上版本活动页签同款。
+              只在画布模块激活时出现；剧本/导演台页签时隐藏。 */}
+          {(activeTabKey === CANVAS_TAB_KEY || isOpenCanvasTabKey(activeTabKey)) && <CanvasDocumentTabs />}
           {/* 画布区域(flex-1 自适应)
               Plan#50:页签激活时画布保持挂载与渲染(不可 display:none——CanvasView/ResizeObserver
               依赖可见尺寸,隐藏会导致视口/缩放异常),由覆盖层在画布之上承载页签内容 */}
@@ -841,7 +849,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           <div ref={containerRef} style={{
             ...canvasAreaStyle,
             backgroundColor: theme.mode === 'dark' ? '#202020' : '#f0f0f0ff',
-            pointerEvents: activeTabKey === CANVAS_TAB_KEY ? 'auto' : 'none',
+            pointerEvents: activeTabKey === CANVAS_TAB_KEY || isOpenCanvasTabKey(activeTabKey) ? 'auto' : 'none',
           }}>
             {/* 只读保护遮罩 — 已提取到 ReadOnlyCanvasOverlay */}
             <ReadOnlyCanvasOverlay
@@ -1119,13 +1127,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             ) : null}
           </div>
         )}
-
-        {/* Plan#84：副本画布层（未激活副本时自行返回 null）。与页签内容层同位：
-            盖在画布之上、主画布 pointer-events 已置 none，不会两套画布抢交互。 */}
-        <CanvasLayer
-          projectId={canvasId}
-          zIndex={TAB_CONTENT_Z}
-        />
 
         {/* 征集 #92 T26 验收修正二:画布底部「保存状态条」(CreationSyncBadge + 云端红点)已迁至顶栏标题旁(TopBar syncBadge) */}
 

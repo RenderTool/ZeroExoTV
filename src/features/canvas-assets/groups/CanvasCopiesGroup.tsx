@@ -24,7 +24,7 @@ import {
 } from '@/shared/components/index.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { resolveCoverUrl } from '@/platform/cover.js';
-import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { useCanvasTabStore, markCanvasDiscarded, unmarkCanvasDiscarded } from '@/features/canvas-tabs/canvas-tab-store.js';
 import {
   deleteCanvas,
   listCanvases,
@@ -144,12 +144,15 @@ export function CanvasCopiesGroup({ store, theme }: CanvasCopiesGroupProps) {
       okText: t('common.delete', '删除'),
       cancelText: t('common.cancel', '取消'),
       onOk: async () => {
+        // 先标记已删除：关页签会切回主画布并落盘当前副本，不能把刚删的文件写回来
+        markCanvasDiscarded(c.id);
         try {
           await deleteCanvas(projectId, c.id);
           closeCanvasTab(`canvas:${c.id}`);
           setRefreshKey((k) => k + 1);
           message.success(t('canvasCopy.deleted', '画布副本已删除'));
         } catch (err) {
+          unmarkCanvasDiscarded(c.id);
           console.error('[CanvasCopiesGroup] 删除失败:', err);
           message.error(t('canvasCopy.deleteFailed', '删除失败，请重试'));
         }
