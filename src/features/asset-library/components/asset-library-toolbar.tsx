@@ -1,4 +1,4 @@
-﻿/**
+/**
  * asset-library-toolbar - 资产库工具栏
  *
  * 包含：分类选择器（Tab）、搜索框、上传/新建按钮、多选按钮。
@@ -288,6 +288,7 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
       key: c.key === 'all' ? null : (c.key as string),
       label: c.label,
       selected: c.key === 'all' ? !activeChild : activeChild === c.key,
+      count: c.count,
     }));
   const activeChildLabel = childOptions.find((o) => o.selected)?.label ?? childOptions[0]?.label ?? '';
 
@@ -568,6 +569,9 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
               }}
             >
               {child.label}
+              {typeof child.count === 'number' && child.count > 0 && (
+                <span style={{ fontSize: 10, opacity: 0.6 }}>{child.count}</span>
+              )}
             </button>
           ))}
         </div>
