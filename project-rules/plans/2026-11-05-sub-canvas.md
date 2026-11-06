@@ -151,6 +151,21 @@
      `history-group`、`sub-canvas-wiring`、`mcp-settings-dialog`、`top-bar.mcp`、`hooks-order`、`store-guard`、
      `material-scope` 全绿；`pnpm typecheck` 0 错。
 
+- [x] **多选右键入口补齐**（2026-11-06 用户验收发现「选中节点右键没有『保存为画布副本』」）
+  1. 问题定位：右键菜单只有**组节点**分支会调 `getGroupTools`（组工具里含 `toCanvasCopy`）；
+     非组分支（单选/多选）从未接过这个入口 —— 用户框选节点后右键只看到通用节点操作，
+     属于「规格写了、代码漏接线」。
+  2. 修改点：`useNodeActionHooks` 新增 `onCreateCanvasCopy` 形参（宿主传唯一执行器，
+     少传直接编译报错）；非组节点右键追加「保存为画布副本」，取真实选区（点击节点不在选区内时只取它自己）；
+     组右键的 `getSelectedNodeIds` 改为真实选区 → 多选含组时复制整段，而不是只复制组壳。
+  3. 验收断言：`sub-canvas-wiring.test.ts` 新增「右键入口」用例（17 例全绿）；
+     胶囊磁贴 / 多选聚合 / 右键三处仍共用同一个 `handleCreateCanvasCopy`。
+
+- [x] **画布下方工具栏「+」菜单多出一条横线**（2026-11-06 用户反馈）
+  1. 根因：创作类节点（剧本/分镜/出片）新建入口下线时只删了菜单项，两个 `divider` 留在一起，
+     渲染成上下两条线中间空段。
+  2. 修改点：`left-side-toolbar.tsx` 的 `addNodeItems` 合并为一个分隔线；同步更正注释。
+
 ## 替代方案
 
 无（首个方案）。已否决：子图内嵌 `node.data.graph`（`largeDataThreshold=2048` 会分片进 `.lf/`，MCP 不可读，违反 Plan#83 D1）——依据见 Spec §2。
