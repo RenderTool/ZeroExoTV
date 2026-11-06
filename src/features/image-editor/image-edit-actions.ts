@@ -57,7 +57,48 @@ export async function applyCrop({ node, commandQueue, dataUrl, onGetNodeTitle, r
   );
 }
 
-/** 分割：按网格生成 N 个切片节点（行高取该行最大片，逐行累加避免重叠），并连边 */
+/** 分割切片布局：**同一缩放比例 + 累计边界取整**，保证非均匀切片也能严丝合缝拼回原图 */
+export interface SplitPieceDim { width: number; height: number }
+export interface SplitCellLayout { x: number; y: number; width: number; height: number }
+export const SPLIT_TARGET_TOTAL_WIDTH = 480;
+
+export function computeSplitLayout(
+  dims: SplitPieceDim[],
+  columns: number,
+  targetTotalWidth = SPLIT_TARGET_TOTAL_WIDTH,
+): { cells: SplitCellLayout[]; scale: number; totalWidth: number; totalHeight: number } {
+  if (columns < 1 || dims.length === 0) return { cells: [], scale: 1, totalWidth: 0, totalHeight: 0 };
+  const rows = Math.ceil(dims.length / columns);
+  // 列宽取首行每片、行高取首列每片（切分边界对整行/整列一致）
+  const colWidths: number[] = [];
+  for (let c = 0; c < columns; c++) colWidths.push(dims[c]?.width ?? 1);
+  const rowHeights: number[] = [];
+  for (let r = 0; r < rows; r++) rowHeights.push(dims[r * columns]?.height ?? 1);
+  const totalWidth = colWidths.reduce((a, b) => a + b, 0);
+  // 只缩小不放大：小图保持原始像素尺寸
+  const scale = totalWidth > 0 ? Math.min(1, targetTotalWidth / totalWidth) : 1;
+  // 累计边界分别取整 → 相邻切片共享同一个边界，宽度之和恒等于总宽（无缝、无叠）
+  const cumX: number[] = [0];
+  for (const w of colWidths) cumX.push(cumX[cumX.length - 1]! + w);
+  const cumY: number[] = [0];
+  for (const h of rowHeights) cumY.push(cumY[cumY.length - 1]! + h);
+  const edgeX = cumX.map((v) => Math.round(v * scale));
+  const edgeY = cumY.map((v) => Math.round(v * scale));
+  const cells: SplitCellLayout[] = [];
+  for (let i = 0; i < dims.length; i++) {
+    const r = Math.floor(i / columns);
+    const c = i % columns;
+    cells.push({
+      x: edgeX[c]!,
+      y: edgeY[r]!,
+      width: Math.max(1, edgeX[c + 1]! - edgeX[c]!),
+      height: Math.max(1, edgeY[r + 1]! - edgeY[r]!),
+    });
+  }
+  return { cells, scale, totalWidth: edgeX[edgeX.length - 1]!, totalHeight: edgeY[edgeY.length - 1]! };
+}
+
+/** 分割：按网格生成 N 个切片节点（同一缩放比例、零间距紧密拼合），并连边 */
 export async function applySplit({
   node, commandQueue, dataUrl, onGetNodeTitle, onNodesCreated, params,
 }: BaseInput & { params: SplitParams; onNodesCreated?: (nodeIds: string[]) => void }): Promise<void> {
@@ -68,32 +109,21 @@ export async function applySplit({
   // 计算切图前的同类型节点数量，确保标题编号不跳号
   const existingCount = commandQueue.getState().nodes.filter((n) => n.type === 'image').length;
   const childIds: string[] = [];
-  const cellW = 200;
-  const cellHeights: number[] = uploaded.map((img) => Math.round(cellW * (img.height / img.width)));
-  const rowHeights: number[] = [];
-  cellHeights.forEach((h, i) => {
-    const row = Math.floor(i / params.columns);
-    rowHeights[row] = Math.max(rowHeights[row] ?? 0, h);
-  });
-  const rowTop: number[] = [];
-  let accY = 0;
-  rowHeights.forEach((h, r) => {
-    rowTop[r] = accY;
-    accY += h + 20;
-  });
+  const layout = computeSplitLayout(
+    uploaded.map((img) => ({ width: img.width, height: img.height })),
+    params.columns,
+  );
   uploaded.forEach((img, i) => {
-    const row = Math.floor(i / params.columns);
-    const col = i % params.columns;
+    const cell = layout.cells[i] ?? { x: 0, y: 0, width: 200, height: 200 };
     const childId = `node-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
     childIds.push(childId);
-    const cellH = cellHeights[i] ?? 200;
     commandQueue.execute(
       new AddNodeCommand({
         id: childId,
         type: 'image',
         title: onGetNodeTitle?.('image', i, existingCount) ?? '',
-        position: { x: baseX + col * (cellW + 20), y: node.position.y + (rowTop[row] ?? 0) },
-        size: { width: cellW, height: cellH },
+        position: { x: baseX + cell.x, y: node.position.y + cell.y },
+        size: { width: cell.width, height: cell.height },
         // 切片节点去圆角：避免圆角裁掉图片四角导致拼合时角点空洞
         borderRadius: 0,
         data: {

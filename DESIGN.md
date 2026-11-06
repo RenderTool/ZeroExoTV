@@ -343,6 +343,9 @@ page container (height: 100%, flex column, overflow: hidden)
 - 只读 / 参数型操作（查看大图、详情、放大、多角度）仍走浮层；节点「详情」与主页资产一致，统一用 `MediaLightbox`。
 - 编辑器内容体**只有一份**：插件包对话框同时支持 `inline`，编辑页签直接复用。
 - 产物落图（子节点 + 连线）只有一份实现：`features/image-editor/image-edit-actions.ts`。
+- **编辑源 = 原图**：页面通过 storageKey 解析原图 blob；画布上的缩略/预览档只影响显示，不参与裁剪/分割计算。
+- **分割切片必须能严丝合缝拼回原图**：所有切片用同一缩放比例 + 累计边界取整 + 零间距排布；
+  禁止"每片固定宽度"（非均匀切片会因各自缩放比例不同而错位）。
 
 ### 弹窗（Modal）
 - **优先使用 antd Modal**，已通过 `AntdThemeProvider` 配置完整主题

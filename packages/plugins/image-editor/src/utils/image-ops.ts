@@ -9,18 +9,25 @@ import { loadImage } from './image-meta.js';
 
 /**
  * 裁剪图片(归一化比例)
+ * - 源始终是**原图**（调用方传入的 dataUrl 来自 storageKey 原图解析）；
+ * - 边界吸附到整数像素：drawImage 不做缩放/重采样，裁出来就是原图对应像素
  */
 export async function cropDataUrl(dataUrl: string, crop: CropRect): Promise<string> {
   const img = await loadImage(dataUrl);
-  const sx = crop.x * img.naturalWidth;
-  const sy = crop.y * img.naturalHeight;
-  const sw = crop.width * img.naturalWidth;
-  const sh = crop.height * img.naturalHeight;
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
+  const left = clamp(Math.round(crop.x * W), 0, W - 1);
+  const top = clamp(Math.round(crop.y * H), 0, H - 1);
+  const right = clamp(Math.round((crop.x + crop.width) * W), left + 1, W);
+  const bottom = clamp(Math.round((crop.y + crop.height) * H), top + 1, H);
+  const sw = right - left;
+  const sh = bottom - top;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(sw);
-  canvas.height = Math.round(sh);
+  canvas.width = sw;
+  canvas.height = sh;
   const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, left, top, sw, sh, 0, 0, sw, sh);
   return canvas.toDataURL('image/png');
 }
 
