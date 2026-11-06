@@ -570,7 +570,13 @@
     "cropFailed": "裁剪失败，请重试",
     "splitFailed": "分割失败，请重试",
     "maskBackendPending": "局部修改需要接入生成后端，本次未提交",
-    "nodeEditHint": "节点内编辑 · Esc 退出"
+    "nodeEditHint": "节点内编辑 · Esc 退出",
+    "toolCrop": "裁剪",
+    "toolSplit": "分割",
+    "toolMask": "局部遮罩",
+    "backToCanvas": "返回画布",
+    "tabTitle": "图片编辑",
+    "nodeMissing": "图片节点已不存在"
   },
   "sort": {
     "bringToFront": "置顶",

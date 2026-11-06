@@ -10,7 +10,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent, type ReactElement, type CSSProperties } from 'react';
 // 图标铁律（经验 #19）：播放语义图标一律走模块级 icons.ts Map，禁止散落内联 lucide
-import { Plus, Trash2, Pause, ChevronsLeft, ChevronsRight, MoreHorizontal, Download, Wand2 } from 'lucide-react';
+import { Plus, Trash2, Pause, ChevronsLeft, ChevronsRight, MoreHorizontal, Download, Wand2, Copy } from 'lucide-react';
 import { CANVAS_NODE_ICONS } from '../icons.js';
 import { resolveVideoDurationSec } from './storyboard-utils';
 import type { Asset } from '@/features/asset-picker/index.js';
@@ -620,6 +620,42 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     setContextMenu({ shotId, x: e.clientX, y: e.clientY });
   }, [multiSelectedIds, onSelectShot]);
 
+  /** 相对某片段插入空片段（插槽编号固定：只是在该位置插一格，其余顺序后移） */
+  const handleInsertRelative = useCallback((shotId: string, where: 'before' | 'after') => {
+    if (!onInsertAt) return;
+    const idx = shots.findIndex((s) => s.id === shotId);
+    if (idx < 0) return;
+    onInsertAt(shotId, { index: where === 'before' ? idx : idx + 1 });
+  }, [shots, onInsertAt]);
+
+  /** 复制插入：把该片段的媒体与时长原样复制一份，插在它后面（纯插入，不改原片段） */
+  const handleDuplicateClip = useCallback((shotId: string) => {
+    if (!onInsertAt) return;
+    const idx = shots.findIndex((s) => s.id === shotId);
+    const shot = shots[idx];
+    if (!shot) return;
+    onInsertAt(shotId, {
+      index: idx + 1,
+      title: shot.label,
+      durationSec: shot.duration,
+      storageKey: shot.videoKey,
+      coverUrl: shot.thumbnailUrl,
+      sourceDuration: shot.sourceDuration,
+    });
+  }, [shots, onInsertAt]);
+
+  /** 删除选中（右键）：多选则一次删多条 */
+  const handleDeleteSelection = useCallback((shotId: string) => {
+    const ids = new Set<string>(multiSelectedIds);
+    ids.add(shotId);
+    if (onDeleteShots && ids.size > 1) {
+      onDeleteShots([...ids]);
+      setMultiSelectedIds(new Set());
+      return;
+    }
+    onDeleteShot?.(shotId);
+  }, [multiSelectedIds, onDeleteShots, onDeleteShot]);
+
   // ===== trim（外部 handle） =====
   const handleTrimStart = useCallback((e: ReactMouseEvent<HTMLDivElement>, id: string, side: 'left' | 'right') => {
     e.preventDefault();
@@ -1073,17 +1109,23 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
           {playbackMode === 'clip' ? <Pause size={14} /> : <CANVAS_NODE_ICONS.playClip size={14} />}
         </button>
         <span style={{ width: 1, height: 16, background: C.border, flexShrink: 0, margin: '0 4px' }} />
-        {/* 编辑工具 */}
+        {/* 编辑组：插入 / 复制 / 删除（同一功能聚在一起） */}
         {onInsertAt && (
           <button type="button" onClick={() => onInsertAt(activeShotId ?? null)} style={{ ...toolBtnStyle, color: C.text }} title="在选中片段后插入新片段">
             <Plus size={15} />
           </button>
         )}
+        {onInsertAt && activeShotId && (
+          <button type="button" onClick={() => handleDuplicateClip(activeShotId)} style={{ ...toolBtnStyle, color: C.text }} title="复制选中片段并插入到其后">
+            <Copy size={14} />
+          </button>
+        )}
         {onDeleteShot && activeShotId && (
-          <button type="button" onClick={() => onDeleteShot(activeShotId)} style={{ ...toolBtnStyle, color: theme.toolbar.danger }} title="删除选中片段（Delete）">
+          <button type="button" onClick={() => handleDeleteSelection(activeShotId)} style={{ ...toolBtnStyle, color: theme.toolbar.danger }} title="删除选中片段（Delete）">
             <Trash2 size={15} />
           </button>
         )}
+        <span style={{ width: 1, height: 16, background: C.border, flexShrink: 0, margin: '0 4px' }} />
         {/* 导出 dropdown（inline 模式下隐藏） */}
         {!inline && (onExportAll || onExportSelected) && (
           <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -1301,6 +1343,49 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
             userSelect: 'none',
           }}
         >
+          {onInsertAt && contextMenu.shotId && (
+            <>
+              <button
+                type="button"
+                onClick={() => { handleInsertRelative(contextMenu.shotId, 'before'); setContextMenu(null); }}
+                style={{ display: 'block', width: '100%', padding: '6px 14px', border: 0, background: 'transparent', color: C.text, cursor: 'pointer', textAlign: 'left', fontSize: 12 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                向前插入
+              </button>
+              <button
+                type="button"
+                onClick={() => { handleInsertRelative(contextMenu.shotId, 'after'); setContextMenu(null); }}
+                style={{ display: 'block', width: '100%', padding: '6px 14px', border: 0, background: 'transparent', color: C.text, cursor: 'pointer', textAlign: 'left', fontSize: 12 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                向后插入
+              </button>
+              <button
+                type="button"
+                onClick={() => { handleDuplicateClip(contextMenu.shotId); setContextMenu(null); }}
+                style={{ display: 'block', width: '100%', padding: '6px 14px', border: 0, background: 'transparent', color: C.text, cursor: 'pointer', textAlign: 'left', fontSize: 12 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                复制插入
+              </button>
+              {(onDeleteShot || onDeleteShots) && (
+                <button
+                  type="button"
+                  onClick={() => { handleDeleteSelection(contextMenu.shotId); setContextMenu(null); }}
+                  style={{ display: 'block', width: '100%', padding: '6px 14px', border: 0, background: 'transparent', color: theme.toolbar.danger, cursor: 'pointer', textAlign: 'left', fontSize: 12 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  删除选中
+                </button>
+              )}
+              <div style={{ height: 1, background: C.border, margin: '4px 0' }} />
+            </>
+          )}
           {onExportShot && activeShotId && (
             <button
               type="button"

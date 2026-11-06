@@ -70,6 +70,8 @@ import { ConfirmDialog, NodeCreateMenu, AppearanceDialog, ShortcutsDialog, Mobil
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 // Plan#84（征集#184）：副本画布挂载层（与 1 号并排的顶层标签激活时渲染另一块画布）
 import { CanvasDocumentTabs } from '@/features/canvas-tabs/canvas-document-tabs.js';
+import { isImageTabKey, imageTabNodeId } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { ImageEditWorkspace } from '@/features/image-editor/image-edit-workspace.js';
 import { useCanvasDocumentSwitch, useRestoreCanvasTabs } from '@/features/canvas-tabs/use-canvas-document-switch.js';
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
@@ -145,6 +147,12 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
   // Plan#50:顶部页签——activeTabKey 决定画布显隐;setTabContentHost 注册页签内容层挂载点
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
+  const openImageTabs = useCanvasTabStore((s) => s.openImageTabs);
+  const closeImageTab = useCanvasTabStore((s) => s.closeImageTab);
+  // 图片编辑独立页签（Photoshop 式）：key = image:<nodeId>，页面自带工具栏
+  const editingImageNodeId = imageTabNodeId(activeTabKey);
+  const editingImageNode = editingImageNodeId && state.editor ? state.editor.store.getNode(editingImageNodeId) : null;
+  const editingImageMode = openImageTabs.find((tb) => tb.key === activeTabKey)?.mode;
   const setTabContentHost = useCanvasTabStore((s) => s.setContentHost);
   const setCanvasHost = useCanvasTabStore((s) => s.setCanvasHost);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
@@ -838,7 +846,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {/* 画布级页签条（主画布固定 + 副本可关闭）：挂在画布区顶部，与线上版本活动页签同款。
               只在画布模块激活时出现；剧本/导演台页签时隐藏。 */}
-          {(activeTabKey === CANVAS_TAB_KEY || isOpenCanvasTabKey(activeTabKey)) && <CanvasDocumentTabs />}
+          {(activeTabKey === CANVAS_TAB_KEY || isOpenCanvasTabKey(activeTabKey) || isImageTabKey(activeTabKey)) && <CanvasDocumentTabs />}
           {/* 画布区域(flex-1 自适应)
               Plan#50:页签激活时画布保持挂载与渲染(不可 display:none——CanvasView/ResizeObserver
               依赖可见尺寸,隐藏会导致视口/缩放异常),由覆盖层在画布之上承载页签内容 */}
@@ -1095,12 +1103,57 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           />
         ) : null}
 
+        {/* 图片编辑独立页签（Photoshop 式）：覆盖画布区，自带工具栏；关闭/输出后回画布 */}
+        {editingImageNodeId && (
+          <div
+            data-image-edit-host
+            style={{
+              position: 'absolute', inset: 0, zIndex: TAB_CONTENT_Z,
+              pointerEvents: 'auto', overflow: 'hidden', background: theme.canvas.background,
+            }}
+          >
+            {editingImageNode && state.editor ? (
+              <ImageEditWorkspace
+                node={editingImageNode}
+                initialMode={editingImageMode}
+                theme={theme}
+                commandQueue={state.editor.core.commandQueue}
+                onClose={() => closeImageTab(activeTabKey)}
+                onNodesCreated={(nodeIds: string[]) => {
+                  // 切图后自动成组：选中新节点 → 触发预览 → 确认成组
+                  if (!refs.store || !refs.groupPlugin || nodeIds.length < 2) return;
+                  const ctrl = refs.groupPlugin.getController();
+                  refs.store.setSelection({ selectedNodeIds: new Set(nodeIds), selectedEdgeIds: new Set() });
+                  if (ctrl.isPreviewing()) ctrl.confirmPreview(t('groupTools.defaultGroupName'));
+                }}
+                onGetNodeTitle={(type: string, batchIndex = 0, baseCount?: number) => {
+                  if (!refs.store) return '';
+                  const graph = refs.store.getGraph();
+                  // 2026-11-04 幽灵节点治理：编号只统计可见节点（墓碑不占号）
+                  const sameTypeCount = baseCount ?? filterVisibleNodes(graph.nodes).filter((n) => n.type === type).length;
+                  const baseNameKey =
+                    type === 'text' ? 'nodeTypes.text'
+                      : type === 'image' ? 'nodeTypes.ai.image'
+                        : type === 'video' ? 'nodeTypes.ai.video'
+                          : type === 'audio' ? 'nodeTypes.ai.audio'
+                            : 'nodes.generatorTitle';
+                  return `${t(baseNameKey)}${sameTypeCount + 1 + batchIndex}`;
+                }}
+              />
+            ) : (
+              <div style={{ padding: 48, textAlign: 'center', fontSize: 13, color: theme.toolbar.textMuted }}>
+                {t('imageEditor.nodeMissing', '图片节点已不存在')}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Plan#50:页签内容层挂载点——节点组件(剧本等)通过 createPortal 把子编辑器渲染到这里,
             数据/回调仍留在节点组件内;覆盖在画布之上,画布保持挂载渲染避免视口/WebGL 异常。
             2026-09-03 修改:去掉原左侧 1px 分隔线(不再需要区分画布区域)。
             2026-08-29 修复穿透:zIndex 30 低于画布内部浮层(只读遮罩 45 / 小地图 40 等),
             导致这些浮层盖在页签内容之上;提高到 100 确保页签内容位于最上层。 */}
-        {activeTabKey !== CANVAS_TAB_KEY && !isOpenCanvasTabKey(activeTabKey) && (
+        {activeTabKey !== CANVAS_TAB_KEY && !isOpenCanvasTabKey(activeTabKey) && !isImageTabKey(activeTabKey) && (
           <div
             ref={handleTabHostRef}
             style={{

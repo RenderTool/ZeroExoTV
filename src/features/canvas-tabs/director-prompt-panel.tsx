@@ -71,6 +71,8 @@ import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS.j
  * payload = { label, assetId }；label 以当前槽位映射为准（拖入时重查，防过期槽号）。
  */
 export const DIRECTOR_SLOT_DRAG_MIME = 'application/x-director-slot';
+/** 素材面板条目拖拽 MIME：拖到已占用的插槽格 = 就地替换该槽内容（槽号不变） */
+export const DIRECTOR_ASSET_DRAG_MIME = 'application/x-director-asset';
 
 function assetToDirectorRef(a: Asset): DirectorAssetRef | null {
   const kind = a.data.kind;
@@ -599,6 +601,13 @@ function AssetPickPanel({
                   type="button"
                   data-asset-panel-item={a.id}
                   data-asset-panel-active={selected || undefined}
+                  draggable={!!ref}
+                  onDragStart={(e) => {
+                    if (!ref) return;
+                    e.stopPropagation();
+                    e.dataTransfer.effectAllowed = 'copy';
+                    e.dataTransfer.setData(DIRECTOR_ASSET_DRAG_MIME, JSON.stringify(ref));
+                  }}
                   onClick={() => onPick(a)}
                   onMouseEnter={() => { setActiveIdx(idx); setDetail({ type: 'asset', asset: a }); }}
                   onFocus={() => { setActiveIdx(idx); setDetail({ type: 'asset', asset: a }); }}
@@ -1082,14 +1091,13 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   }, [insertRef]);
 
   /** 替换槽位：同位置替换（槽位号、顺序、所有 @ 引用自动跟新资产；pin 保留原槽号） */
-  const replaceSlotAsset = useCallback((newRef: DirectorAssetRef) => {
-    if (!replaceTarget) return;
+  const replaceSlotAssetAt = useCallback((targetId: string, newRef: DirectorAssetRef) => {
     const pinned: DirectorAssetRef = {
       ...newRef,
-      slotNo: newRef.slotNo ?? slotInfo.byAssetId[replaceTarget]?.slot,
+      slotNo: newRef.slotNo ?? slotInfo.byAssetId[targetId]?.slot,
     };
     const refs = [...(shot.references ?? [])];
-    const idx = refs.findIndex((r) => r.id === replaceTarget);
+    const idx = refs.findIndex((r) => r.id === targetId);
     if (idx >= 0) {
       const shotRef: WorkbenchShotReference = {
         id: pinned.id, kind: pinned.kind, title: pinned.title, storageKey: pinned.storageKey, url: pinned.url,
@@ -1101,7 +1109,13 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     }
     setReplaceTarget(null);
     setAssetPanelOpen(false);
-  }, [replaceTarget, slotInfo, shot.references, onShotChange]);
+  }, [slotInfo, shot.references, onShotChange]);
+
+  /** 点已填槽位 = 替换该槽（先在面板选新资产） */
+  const replaceSlotAsset = useCallback((newRef: DirectorAssetRef) => {
+    if (!replaceTarget) return;
+    replaceSlotAssetAt(replaceTarget, newRef);
+  }, [replaceTarget, replaceSlotAssetAt]);
 
   /** 槽位移除：只解引用（资产仍在项目库/公共库）；提示词 @ 块降级为纯文本；其余槽位靠 pin 保持原号 */
   const removeAsset = useCallback((assetId: string) => {
@@ -1177,6 +1191,22 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         data-slot={slot?.label}
         data-slot-filled={a.id}
         onClick={() => { setReplaceTarget(a.id); setAssetPanelOpen(true); }}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(DIRECTOR_ASSET_DRAG_MIME)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'copy';
+        }}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData(DIRECTOR_ASSET_DRAG_MIME);
+          if (!raw) return;
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            // 纯替换：槽位号固定不变，只换内容（@ 引用同步跟新资产）
+            replaceSlotAssetAt(a.id, JSON.parse(raw) as DirectorAssetRef);
+          } catch { /* 非法 payload 忽略 */ }
+        }}
         onMouseEnter={() => setHoverSlot(a.id)}
         onMouseLeave={() => setHoverSlot((cur) => (cur === a.id ? null : cur))}
         // 2026-11-05 用户指令：插槽可拖进提示词正文（落点自动补 @引用）；无槽号（异常态）不可拖
@@ -1295,7 +1325,11 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   const durationOverSec = shot ? durationOverCapSec(shot.duration, durationCtxFrames) : 0;
   const durationHardOver = shot ? durationExceedsFrameCap(shot.duration) : false;
   /** 时长文本：整数不带小数（5s），小数保留一位（6.8s）——滑动粒度 0.2s 下不会出现更长尾 */
-  const durationText = (sec: number): string => (Number.isInteger(sec) ? `${sec}` : sec.toFixed(1));
+  const durationText = (sec: number): string => {
+    // 统一到 0.1s 精度，去掉浮点噪声（5.300000000000001 → 5.3），避免文案宽度抖动
+    const rounded = Math.round(sec * 10) / 10;
+    return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+  };
 
   /** 提示词编辑（仅片段；公共提示词层已下线 2026-11-05） */
   const setPrompt = useCallback((v: string) => {
@@ -1523,6 +1557,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                       data-duration-value
                       style={{
                         fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
+                        display: 'inline-block', minWidth: 46, whiteSpace: 'nowrap',
                         color: durationOverSec > 0 ? palette.danger : palette.capsuleText,
                       }}
                     >
@@ -1549,7 +1584,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                     value={Math.min(shot.duration, durationSliderMax)}
                     data-over-cap={durationOverSec > 0 ? '1' : undefined}
                     onChange={(e) => {
-                      const n = Number(e.target.value);
+                      // 统一 0.1s 精度：避免浮点小数让下方警告文案忽长忽短、弹层高度跳动
+                      const n = Math.round(Number(e.target.value) * 10) / 10;
                       if (Number.isFinite(n)) onShotChange({ duration: Math.max(DURATION_SLIDER_MIN_SEC, n) });
                     }}
                     style={{ width: '100%', ['--dur-cap-pct' as string]: `${Math.min(100, (durationCapSec / durationSliderMax) * 100)}%` } as CSSProperties}
@@ -1559,10 +1595,10 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                     <span>{durationSliderMax}s</span>
                   </div>
                   {durationOverSec > 0 && (
-                    <div data-duration-warning style={{ fontSize: 11, lineHeight: 1.5, color: palette.danger }}>
+                    <div data-duration-warning style={{ fontSize: 11, lineHeight: 1.5, color: palette.danger, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {durationHardOver
                         ? t('director.durationOverFrameCap', '已超单段帧上限 {{max}} 帧（≈{{cap}}s），运行预检会报 frame-overflow', { max: MAX_GEN_FRAMES, cap: durationCapSec })
-                        : t('director.durationOverCap', '超出推荐时长 {{over}}s（单段建议 ≤{{cap}}s）', { over: durationOverSec, cap: durationCapSec })}
+                        : t('director.durationOverCap', '超出推荐时长 {{over}}s（单段建议 ≤{{cap}}s）', { over: Math.round(durationOverSec * 10) / 10, cap: durationCapSec })}
                     </div>
                   )}
                 </div>
@@ -1572,7 +1608,12 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                 type="button"
                 data-meta-duration
                 data-over-cap={durationOverSec > 0 ? '1' : undefined}
-                style={{ ...capsuleStyle, color: durationOverSec > 0 ? palette.danger : palette.capsuleText }}
+                style={{
+                  ...capsuleStyle,
+                  // 数值定宽 + 等宽数字：拖动时文案从 5s → 5.3s 不改变胶囊宽度，弹层锚点不漂
+                  minWidth: 56, justifyContent: 'center', fontVariantNumeric: 'tabular-nums',
+                  color: durationOverSec > 0 ? palette.danger : palette.capsuleText,
+                }}
                 title={durationOverSec > 0
                   ? t('director.durationOverCapTitle', '时长超出推荐 {{cap}}s，点开查看', { cap: durationCapSec })
                   : t('director.duration', '时长（秒）')}

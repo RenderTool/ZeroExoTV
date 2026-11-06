@@ -550,7 +550,13 @@
     "cropFailed": "切り抜きに失敗しました。再試行してください",
     "splitFailed": "分割に失敗しました。再試行してください",
     "maskBackendPending": "部分修正には生成バックエンドが必要です。今回は送信していません",
-    "nodeEditHint": "ノード内編集 · Esc で終了"
+    "nodeEditHint": "ノード内編集 · Esc で終了",
+    "toolCrop": "切り抜き",
+    "toolSplit": "分割",
+    "toolMask": "部分マスク",
+    "backToCanvas": "キャンバスに戻る",
+    "tabTitle": "画像編集",
+    "nodeMissing": "この画像ノードは存在しません"
   },
   "sort": {
     "bringToFront": "最前面へ",

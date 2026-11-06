@@ -334,6 +334,24 @@ page container (height: 100%, flex column, overflow: hidden)
 - 宽度规范：编辑类 680px，详情类 960px，确认类 520px，上传类 440px
 - 自研 `modal.tsx`（portal-based）仅用于极简场景（不需要 antd 依赖时，如 asset-picker 和 image-dialog-renderer）
 
+### 图片编辑（独立页签）
+- 裁剪 / 分割 / 局部遮罩在**独立的图片编辑页签**内完成（key = `image:<nodeId>`，挂在画布区文档页签条上）：
+  页面自带工具栏（裁剪 / 分割 / 局部遮罩 + 返回画布），不弹居中窗口、也不在节点卡片里塞编辑器；
+  **节点尺寸与状态永远不会因为编辑而改变**。
+- 节点胶囊只保留一个「编辑」入口；抽屉里的图片资产也有「编辑」——自动在画布建图片节点并打开该页签，
+  输出（裁剪/分割）落回画布成为子节点。
+- 只读 / 参数型操作（查看大图、详情、放大、多角度）仍走浮层；节点「详情」与主页资产一致，统一用 `MediaLightbox`。
+- 编辑器内容体**只有一份**：插件包对话框同时支持 `inline`，编辑页签直接复用。
+- 产物落图（子节点 + 连线）只有一份实现：`features/image-editor/image-edit-actions.ts`。
+
+### 弹窗（Modal）
+- **优先使用 antd Modal**，已通过 `AntdThemeProvider` 配置完整主题
+- 必须设置 `centered` 属性
+- 使用 `styles.body: { padding: 0 }` 取消默认 padding，由内部完全控制间距
+- 必须在 `styles.content` 中设置 `background` 和 `border`，确保明暗主题适配
+- 宽度规范：编辑类 680px，详情类 960px，确认类 520px，上传类 440px
+- 自研 `modal.tsx`（portal-based）仅用于极简场景（不需要 antd 依赖时，如 asset-picker 和 image-dialog-renderer）
+
 ### 图片节点编辑（节点卡片内）
 - 裁剪 / 分割 / 局部遮罩**在图片节点卡片内部完成**：进入编辑时节点临时放大到工作尺寸，
   图片区直接变成裁剪框 / 切分网格 / 蒙版画布，确认或取消后还原节点尺寸；**不弹居中窗口、也不额外浮一层面板**。

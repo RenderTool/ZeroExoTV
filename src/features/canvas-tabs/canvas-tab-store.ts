@@ -110,6 +110,35 @@ export function openCanvasTabCid(key: string): string | null {
   return isOpenCanvasTabKey(key) ? key.slice(CANVAS_TAB_PREFIX.length) : null;
 }
 
+/**
+ * 图片编辑页签（2026-11-06 用户定稿：像 Photoshop 一样用独立页签编辑该图）：
+ * key = `image:<nodeId>`，页面自带工具栏（裁剪/分割/局部遮罩），输出后回到画布。
+ */
+export interface OpenImageTab {
+  key: string;
+  nodeId: string;
+  title: string;
+  /** 打开时直接进入的工具（点节点胶囊哪个按钮就进哪个） */
+  mode?: 'crop' | 'split' | 'maskEdit';
+}
+
+export const IMAGE_TAB_PREFIX = 'image:';
+
+/** 图片编辑页签 key */
+export function imageTabKeyFor(nodeId: string): string {
+  return `${IMAGE_TAB_PREFIX}${nodeId}`;
+}
+
+/** 是否图片编辑页签 key */
+export function isImageTabKey(key: string): boolean {
+  return key.startsWith(IMAGE_TAB_PREFIX) && key.length > IMAGE_TAB_PREFIX.length;
+}
+
+/** 从图片编辑页签 key 取 nodeId（非图片页签返回 null） */
+export function imageTabNodeId(key: string): string | null {
+  return isImageTabKey(key) ? key.slice(IMAGE_TAB_PREFIX.length) : null;
+}
+
 function isCanvasCopyKey(key: string): boolean {
   return isOpenCanvasTabKey(key);
 }
@@ -210,6 +239,12 @@ export interface CanvasTabState {
   renameCanvasTab: (cid: string, title: string) => void;
   /** 进入项目时按 view-prefs 恢复打开集合（失效条目过滤由调用方负责） */
   restoreCanvasTabs: (tabs: OpenCanvasTab[]) => void;
+  /** 打开中的图片编辑页签（Photoshop 式文档页签，关掉即回画布） */
+  openImageTabs: OpenImageTab[];
+  /** 打开（或复用激活）图片编辑页签；同一 nodeId 幂等，只更新工具与标题 */
+  openImageTab: (input: { nodeId: string; title?: string; mode?: OpenImageTab['mode'] }) => void;
+  /** 关闭图片编辑页签：只关页签；关的是当前激活项 → 回画布 */
+  closeImageTab: (key: string) => void;
 }
 
 /** 把当前项目的副本画布打开集写进 view-prefs（无活跃项目则忽略） */
@@ -239,6 +274,7 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
   slotOrder: loadSlotOrder(),
   slotBindings: { script: null, storyboard: null, workbench: null },
   openCanvasTabs: [],
+  openImageTabs: [],
   contentHost: null,
   setContentHost: (el) => set({ contentHost: el }),
   canvasHost: null,
@@ -268,6 +304,12 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
     // 不写 lastSlotByProject——该记忆只存四个固定槽位（副本页签的恢复走 openCanvasesByProject）。
     if (isCanvasCopyKey(key)) {
       if (!get().openCanvasTabs.some((t) => t.key === key)) return;
+      if (activeTabKey !== key) set({ activeTabKey: key });
+      return;
+    }
+    // 图片编辑页签：只能激活已打开的项（关掉后不自动重开）
+    if (isImageTabKey(key)) {
+      if (!get().openImageTabs.some((t) => t.key === key)) return;
       if (activeTabKey !== key) set({ activeTabKey: key });
       return;
     }
@@ -301,6 +343,36 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
   },
 
   setSlotBindings: (patch) => set({ slotBindings: { ...get().slotBindings, ...patch } }),
+
+  openImageTab: ({ nodeId, title, mode }) => {
+    if (!nodeId) return;
+    const key = imageTabKeyFor(nodeId);
+    const existing = get().openImageTabs.find((t) => t.key === key);
+    if (existing) {
+      // 幂等：已打开 → 只激活；点不同工具进来时切到那个工具
+      set({
+        activeTabKey: key,
+        openImageTabs: get().openImageTabs.map((t) => (t.key === key
+          ? { ...t, title: title?.trim() || t.title, mode: mode ?? t.mode }
+          : t)),
+      });
+      return;
+    }
+    set({
+      openImageTabs: [...get().openImageTabs, { key, nodeId, title: title?.trim() || '图片编辑', mode }],
+      activeTabKey: key,
+    });
+  },
+
+  closeImageTab: (key) => {
+    const { openImageTabs, activeTabKey } = get();
+    if (!openImageTabs.some((t) => t.key === key)) return;
+    set({ openImageTabs: openImageTabs.filter((t) => t.key !== key) });
+    if (activeTabKey === key) {
+      set({ activeTabKey: CANVAS_TAB_KEY });
+      syncFocusCanvas();
+    }
+  },
 
   openCanvasTab: ({ cid, title }) => {
     if (!cid) return;
@@ -379,8 +451,9 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
       activeTabKey: CANVAS_TAB_KEY,
       slotBindings: { script: null, storyboard: null, workbench: null },
       activeProjectId: null,
-      // Spec：离开画布时副本页签也清空（打开集合已按项目写进 view-prefs，下次进入恢复）
+      // 离开画布时副本页签也清空（打开集合已按项目写进 view-prefs，下次进入恢复）；图片编辑页签一并清空
       openCanvasTabs: [],
+      openImageTabs: [],
     });
     syncFocusCanvas();
   },

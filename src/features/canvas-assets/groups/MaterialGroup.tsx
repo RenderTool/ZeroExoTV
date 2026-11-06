@@ -5,10 +5,11 @@
  * 卡片渲染复用主页素材卡片 AssetCardGrid（2026-08-30 约束：UI 组件可复用，禁止另起一套卡片样式）。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Input, Modal, Tooltip } from 'antd';
 import { CheckSquare, Download, FileSearch, Pencil, Square, Trash2, X } from 'lucide-react';
+import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { AssetCardGrid } from '@/features/asset-library/cards/asset-card.js';
 import { buildSendMenuItems, cardActionBtnStyle, SEND_ACTION_LABEL_KEYS } from '@/features/asset-library/cards/card-send-actions.js';
@@ -127,6 +128,21 @@ export function MaterialGroup({ store, theme }: {
     const saved = useViewPrefsStore.getState().canvasDrawer.materialScopeByProject[projectId];
     if (saved && saved !== store.materialScopeTab) store.setMaterialScopeTab(saved);
   }, [projectId, store.materialScopeTab, store.setMaterialScopeTab]);
+
+  /** 图片资产「编辑」：交给编辑器页在画布建节点并打开图片编辑页签（结果落回画布） */
+  const editImageAsset = useCallback((asset: Asset) => {
+    const d = (asset.data ?? {}) as { storageKey?: string; content?: string; naturalWidth?: number; naturalHeight?: number };
+    nodeActionBus.emit('imageEditAsset', {
+      // 抽屉资产不在画布节点上：nodeId 仅作事件形状占位，宿主按 assetId 建节点
+      nodeId: '',
+      assetId: asset.id,
+      title: asset.title,
+      storageKey: d.storageKey,
+      content: d.content,
+      naturalWidth: d.naturalWidth,
+      naturalHeight: d.naturalHeight,
+    });
+  }, []);
 
   const capsuleBar = (
     // 2026-11-04 约定（口径翻案）：「公共资产 N / 本项目 N」胶囊只放在这里——
@@ -272,6 +288,9 @@ export function MaterialGroup({ store, theme }: {
                       t,
                     }),
                     { key: 'open', icon: <FileSearch size={13} />, label: t('assetLibrary.open', { defaultValue: '打开' }), onClick: () => setAssetDetail(asset) },
+                    ...(asset.kind === 'image'
+                      ? [{ key: 'editImage', icon: <Pencil size={13} />, label: t('assetLibrary.editImage', '编辑'), onClick: () => editImageAsset(asset) }]
+                      : []),
                     { key: 'download', icon: <Download size={13} />, label: t('common.download'), onClick: () => void handleDownloadItem({ type: 'asset', data: asset }) },
                     { key: 'rename', icon: <Pencil size={13} />, label: t('assetLibrary.rename'), onClick: () => { setRenameItemTarget({ type: 'asset', id: asset.id, name: asset.title }); setRenameItemOpen(true); } },
                     { key: 'delete', icon: <Trash2 size={13} />, label: t('assetLibrary.delete'), danger: true, onClick: () => void handleDeleteAsset(asset) },
@@ -296,6 +315,7 @@ export function MaterialGroup({ store, theme }: {
                 showQuickActions={!assetMultiSelect}
                 onSendToCanvas={() => sendToCanvas({ type: 'asset', id: asset.id, data: asset })}
                 onSendToDirector={() => sendItemToDirector(asset)}
+                onEditImage={asset.kind === 'image' ? () => editImageAsset(asset) : undefined}
                 theme={theme}
                 t={t}
               />

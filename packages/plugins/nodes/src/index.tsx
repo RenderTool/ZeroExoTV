@@ -69,9 +69,6 @@ export type { IncomingReference, RawIncomingNode, CompatibilityOptions } from '.
 
 // 图片替换 — 上传文件 → 替换节点图片(支持撤销/重做)
 export { replaceNodeImage } from './utils/replace-node-image.js';
-// 图片节点内编辑 — 运行时状态（节点卡片内直接渲染裁剪/分割/蒙版编辑器）
-export { openImageNodeEdit, closeImageNodeEdit, getImageNodeEdit, useImageNodeEditMode } from './utils/image-edit-state.js';
-export type { ImageEditMode } from './utils/image-edit-state.js';
 // 媒体替换模型 — video/audio 替换命令化(视图只消费命令,支持撤销/重做)
 export { replaceNodeVideo, replaceNodeAudio, stripFileExtension, computeVideoReplaceSize, buildReplacePatches } from './utils/media-replace-model.js';
 export { convertToStack, createStackNode, resolveStackSpawnPosition } from './node-tools.js';

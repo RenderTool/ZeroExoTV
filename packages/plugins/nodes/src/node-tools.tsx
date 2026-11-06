@@ -14,8 +14,7 @@
 
 import {
   Settings2,
-  Brush, Scissors,
-  Grid2x2, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
+  Pencil, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
   Heading1, History,
 } from 'lucide-react';
 import { NODE_ICONS } from './icons.js';
@@ -273,42 +272,25 @@ function hasMediaContent(data: Record<string, unknown> | null | undefined): bool
   return Boolean(data?.['content'] || data?.['storageKey']);
 }
 
-/** 图片节点编辑工具(征集#45 H2:从「更多」子菜单拍平为胶囊独立按钮) */
+/**
+ * 图片节点编辑工具（2026-11-06 用户定稿：合并为一个「编辑」）
+ *
+ * 裁剪 / 分割 / 局部遮罩已收进独立的图片编辑页签（自带工具栏），
+ * 胶囊上不再摆三个入口，统一一个「编辑」打开该页签。
+ */
 function buildImageEditTools(): ToolDefinition[] {
   const visibleWithContent = (node: NodeRecord): boolean =>
     hasMediaContent(node.data as Record<string, unknown> | null | undefined);
   return [
     {
-      id: 'maskEdit',
-      label: '局部遮罩',
-      title: '局部遮罩',
-      icon: <Brush size={14} />,
+      id: 'edit',
+      label: '编辑',
+      title: '在图片编辑页签中编辑（裁剪 / 分割 / 局部遮罩）',
+      icon: <Pencil size={14} />,
       group: 'edit',
       visible: visibleWithContent,
       run: (node: NodeRecord, ctx: ToolContext) => {
-        ctx.openImageDialog?.(node, 'maskEdit');
-      },
-    },
-    {
-      id: 'crop',
-      label: '裁剪',
-      title: '裁剪',
-      icon: <Scissors size={14} />,
-      group: 'edit',
-      visible: visibleWithContent,
-      run: (node: NodeRecord, ctx: ToolContext) => {
-        ctx.openImageDialog?.(node, 'crop');
-      },
-    },
-    {
-      id: 'split',
-      label: '分割',
-      title: '分割',
-      icon: <Grid2x2 size={14} />,
-      group: 'edit',
-      visible: visibleWithContent,
-      run: (node: NodeRecord, ctx: ToolContext) => {
-        ctx.openImageDialog?.(node, 'split');
+        ctx.openImageDialog?.(node, 'edit');
       },
     },
   ];

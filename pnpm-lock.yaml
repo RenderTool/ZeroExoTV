@@ -541,9 +541,6 @@ importers:
       '@zeroexo/plugin-connection':
         specifier: workspace:*
         version: link:../connection
-      '@zeroexo/plugin-image-editor':
-        specifier: workspace:*
-        version: link:../image-editor
       '@zeroexo/plugin-node-registry':
         specifier: workspace:*
         version: link:../node-registry

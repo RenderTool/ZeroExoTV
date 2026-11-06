@@ -19,9 +19,6 @@ import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '.
 import { replaceNodeImage } from '../utils/replace-node-image.js';
 import { planOnloadResize } from '../utils/media-fit.js';
 import { IMAGE_DEFAULT_SIZE, IMAGE_LONG_SIDE, MEDIA_MIN_SIZE } from '../utils/node-contracts.js';
-import { useImageNodeEditMode, closeImageNodeEdit } from '../utils/image-edit-state.js';
-import { CropDialog, SplitDialog, MaskEditDialog } from '@zeroexo/plugin-image-editor';
-import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 import {
   cursorOriginPercent,
   nextContentScale,
@@ -251,104 +248,6 @@ export function ImageNodeView({
     }
   };
 
-  // ===== 节点内编辑（2026-11-06 用户纠偏）：裁剪 / 分割 / 局部遮罩在**节点卡片内部**完成 =====
-  const editMode = useImageNodeEditMode(node.id);
-  const editPrevSizeRef = useRef<{ width: number; height: number } | null>(null);
-  /** 编辑态工作尺寸（世界坐标）：足够放裁剪框/切分网格/蒙版画布 */
-  const EDIT_WORK_SIZE = { width: 960, height: 640 } as const;
-
-  useEffect(() => {
-    if (!commandQueue) return;
-    const cur = { width: node.size?.width ?? 340, height: node.size?.height ?? 240 };
-    const pos = node.position;
-    const resize = (from: { width: number; height: number }, to: { width: number; height: number }): void => {
-      commandQueue.execute(new ResizeNodeCommand(
-        node.id,
-        { x: pos.x, y: pos.y, width: from.width, height: from.height },
-        { x: pos.x, y: pos.y, width: to.width, height: to.height },
-      ));
-    };
-    if (editMode) {
-      if (!editPrevSizeRef.current) editPrevSizeRef.current = cur;
-      if (cur.width !== EDIT_WORK_SIZE.width || cur.height !== EDIT_WORK_SIZE.height) {
-        resize(cur, EDIT_WORK_SIZE);
-      }
-    } else if (editPrevSizeRef.current) {
-      const prev = editPrevSizeRef.current;
-      editPrevSizeRef.current = null;
-      if (cur.width !== prev.width || cur.height !== prev.height) resize(cur, prev);
-    }
-    // 只在进入/退出编辑时调整尺寸；node.size 变化由 ResizeNodeCommand 自己驱动
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode]);
-
-  // 编辑态：Esc 退出；拦住 Delete/Backspace 防止把正在编辑的节点删掉
-  useEffect(() => {
-    if (!editMode) return;
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const inField = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        closeImageNodeEdit(node.id);
-        return;
-      }
-      if (!inField && (e.key === 'Delete' || e.key === 'Backspace')) {
-        e.stopPropagation();
-        e.preventDefault();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, [editMode, node.id]);
-
-  const editLabel = editMode === 'crop' ? '裁剪' : editMode === 'split' ? '分割' : editMode === 'maskEdit' ? '局部遮罩' : '';
-  const stopEditPointer = (e: React.PointerEvent | React.MouseEvent): void => { e.stopPropagation(); };
-  const closeEdit = (): void => closeImageNodeEdit(node.id);
-  const applyEdit = (payload: { crop?: CropRect; params?: SplitParams }): void => {
-    nodeActionBus.emit('imageEditApply', {
-      nodeId: node.id,
-      mode: editMode,
-      dataUrl: hydratedContent || imgSrc || '',
-      ...payload,
-    });
-  };
-
-  const editContent = editMode ? (
-    <div
-      style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.toolbar.editorSurface, overflow: 'hidden' }}
-      onPointerDown={stopEditPointer}
-      onMouseDown={stopEditPointer}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 10px', borderBottom: `1px solid ${theme.toolbar.border}`, flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: theme.toolbar.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {editLabel} · {t('imageEditor.nodeEditHint', '节点内编辑 · Esc 退出')}
-        </span>
-        <button
-          type="button"
-          aria-label={t('common.close', '关闭')}
-          onClick={closeEdit}
-          style={{ border: 'none', background: 'transparent', color: theme.toolbar.textMuted, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: 2 }}
-        >
-          ✕
-        </button>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, padding: 8, display: 'flex', flexDirection: 'column' }}>
-        {imgSrc ? (
-          editMode === 'crop' ? (
-            <CropDialog dataUrl={imgSrc} open inline theme={theme} onClose={closeEdit} onConfirm={(crop) => applyEdit({ crop })} />
-          ) : editMode === 'split' ? (
-            <SplitDialog dataUrl={imgSrc} open inline theme={theme} onClose={closeEdit} onConfirm={(params) => applyEdit({ params })} />
-          ) : (
-            <MaskEditDialog dataUrl={imgSrc} open inline theme={theme} onClose={closeEdit} onConfirm={() => applyEdit({})} />
-          )
-        ) : (
-          <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: theme.toolbar.textMuted }}>{t('imageEditor.noContent', '图片内容尚未就绪')}</div>
-        )}
-      </div>
-    </div>
-  ) : null;
-
   // 问题5: 标题栏尺寸规格 — 优先用自然尺寸,回退到节点尺寸
   const titleSizeText = data.naturalWidth && data.naturalHeight
     ? `${data.naturalWidth} × ${data.naturalHeight}`
@@ -444,7 +343,6 @@ export function ImageNodeView({
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >
-        {editContent ?? (
         <div
           ref={mediaRef}
           style={{ ...mediaContainerStyle, background: 'transparent' }}
@@ -464,7 +362,6 @@ export function ImageNodeView({
             }}
           />
         </div>
-        )}
       </AIStateView>
       {/* Bug3: 隐藏文件选择器(空状态点击触发) */}
       <input

@@ -13,7 +13,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { X } from 'lucide-react';
+import { Image as ImageIcon, X } from 'lucide-react';
 import { CANVAS_TAB_ICONS } from './icons.js';
 import {
   CANVAS_TAB_KEY,
@@ -25,13 +25,15 @@ export function CanvasDocumentTabs(): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
   const copies = useCanvasTabStore((s) => s.openCanvasTabs);
+  const imageTabs = useCanvasTabStore((s) => s.openImageTabs);
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
   const closeCanvasTab = useCanvasTabStore((s) => s.closeCanvasTab);
   const reorderCanvasTabs = useCanvasTabStore((s) => s.reorderCanvasTabs);
+  const closeImageTab = useCanvasTabStore((s) => s.closeImageTab);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  if (copies.length === 0) return null;
+  if (copies.length === 0 && imageTabs.length === 0) return null;
 
   const activeCid = activeTabKey === CANVAS_TAB_KEY ? 'main' : openCanvasTabCid(activeTabKey);
   const MainIcon = CANVAS_TAB_ICONS.canvas;
@@ -143,6 +145,47 @@ export function CanvasDocumentTabs(): React.ReactElement | null {
                 onClick={(e) => { e.stopPropagation(); closeCanvasTab(tab.key); }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); closeCanvasTab(tab.key); }
+                }}
+              >
+                <X size={11} />
+              </span>
+              <span style={underlineStyle(active)} />
+            </button>
+          );
+        })}
+
+        {/* 图片编辑页签（Photoshop 式）：与画布文档同一条文档栏，关闭即回画布 */}
+        {imageTabs.length > 0 && (
+          <span style={{ alignSelf: 'center', width: 1, height: 16, margin: '0 4px', flexShrink: 0, background: theme.toolbar.border }} />
+        )}
+        {imageTabs.map((tab) => {
+          const active = activeTabKey === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-image-doc-tab={tab.nodeId}
+              onClick={() => activateTab(tab.key)}
+              style={tabStyle(active)}
+              title={tab.title}
+            >
+              <ImageIcon size={12} strokeWidth={active ? 2.2 : 1.8} />
+              <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{tab.title}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={t('canvasTab.close', '关闭页签')}
+                data-image-doc-close={tab.nodeId}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 16, height: 16, padding: 0, borderRadius: 4,
+                  color: 'inherit', cursor: 'pointer', opacity: 0.6, flexShrink: 0,
+                }}
+                onClick={(e) => { e.stopPropagation(); closeImageTab(tab.key); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); closeImageTab(tab.key); }
                 }}
               >
                 <X size={11} />

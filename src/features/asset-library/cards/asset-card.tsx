@@ -70,6 +70,7 @@ function AssetCardGrid({
   onContextMenu,
   onSendToCanvas,
   onSendToDirector,
+  onEditImage,
   showQuickActions,
   scopeView,
   theme,
@@ -303,6 +304,22 @@ function AssetCardGrid({
           <span style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}>
             {asset.title}
           </span>
+          {showQuickActions && onEditImage && asset.kind === 'image' && (
+            <button
+              type="button"
+              data-card-action="editImage"
+              aria-label={t('assetLibrary.editImage', '编辑')}
+              title={t('assetLibrary.editImage', '编辑')}
+              onClick={(e) => { e.stopPropagation(); onEditImage(); }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, padding: 0, border: 'none', borderRadius: 5,
+                background: 'transparent', color: theme.toolbar.textMuted, cursor: 'pointer', flexShrink: 0,
+              }}
+            >
+              <Pencil size={13} />
+            </button>
+          )}
           {showQuickActions && (
             <SendActionButtons
               onSendToCanvas={onSendToCanvas}

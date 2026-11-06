@@ -13,16 +13,13 @@ import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinitio
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 // Plan#84（征集#184）：选区→**另存为项目内画布副本**（复制，主画布不动），与 1 号平级并排
 import { createCanvasCopyFromSelection } from '@/features/sub-canvas/canvas-copy.js';
-import { nodeActionBus, createAssetNode, closeImageNodeEdit, openImageNodeEdit } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, createAssetNode } from '@zeroexo/plugin-nodes';
 import type { AssetNodePayload } from '@zeroexo/plugin-nodes';
 import { PREVIEW_GROUP_ID, getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 import { configToPinDefaults, configToNodeDefaults, configToGroupDefaults } from '@/features/top-bar/index.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { requestNodeDockPrompt } from '@/features/tools-dock/node-generate-dock.js';
-import { applyCrop, applySplit } from '@/features/image-editor/image-edit-actions.js';
-import { newNodeTitle } from '@/features/canvas-nodes/new-node.js';
-import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
@@ -1324,59 +1321,49 @@ export function useEditorInteractions({
       });
     });
 
-    // 图片节点内编辑 → 产物落图：裁剪/分割与只读浮层共用 image-edit-actions 单一实现
-    const unsubImageEdit = nodeActionBus.on('imageEditApply', (event) => {
+    // 抽屉图片资产「编辑」→ 先在画布建一个图片节点，再打开图片编辑页签（结果落回画布）
+    const unsubEditImageAsset = nodeActionBus.on('imageEditAsset', (event) => {
       const payload = event as unknown as {
-        nodeId: string;
-        mode: 'crop' | 'split' | 'maskEdit';
-        dataUrl: string;
-        crop?: CropRect;
-        params?: SplitParams;
+        assetId?: string;
+        title?: string;
+        storageKey?: string;
+        content?: string;
+        naturalWidth?: number;
+        naturalHeight?: number;
       };
-      const node = refs.store?.getGraph().nodes.find((n: any) => n.id === payload.nodeId);
+      const store = refs.store;
       const queue = refs.commandQueue;
-      if (!node || !queue) {
-        closeImageNodeEdit(payload.nodeId);
-        return;
-      }
-      const getNodeTitle = (type: string, batchIndex = 0, baseCount?: number): string => {
-        const count = baseCount
-          ?? (refs.store?.getGraph().nodes.filter((n: any) => n.type === type && !n._deleted).length ?? 0);
-        return newNodeTitle(type, count + batchIndex, t);
-      };
-      if (payload.mode === 'crop' && payload.crop && payload.dataUrl) {
-        void applyCrop({ node, commandQueue: queue, dataUrl: payload.dataUrl, rect: payload.crop, onGetNodeTitle: getNodeTitle })
-          .then(() => closeImageNodeEdit(payload.nodeId))
-          .catch((err) => {
-            console.error('[image-edit] crop failed:', err);
-            message.error(t('imageEditor.cropFailed', '裁剪失败，请重试'));
-          });
-        return;
-      }
-      if (payload.mode === 'split' && payload.params && payload.dataUrl) {
-        void applySplit({
-          node,
-          commandQueue: queue,
-          dataUrl: payload.dataUrl,
-          params: payload.params,
-          onGetNodeTitle: getNodeTitle,
-          onNodesCreated: (ids) => {
-            if (!refs.store || !refs.groupPlugin || ids.length < 2) return;
-            const ctrl = refs.groupPlugin.getController();
-            refs.store.setSelection({ selectedNodeIds: new Set(ids), selectedEdgeIds: new Set() });
-            if (ctrl.isPreviewing()) ctrl.confirmPreview(t('groupTools.defaultGroupName'));
-          },
-        })
-          .then(() => closeImageNodeEdit(payload.nodeId))
-          .catch((err) => {
-            console.error('[image-edit] split failed:', err);
-            message.error(t('imageEditor.splitFailed', '分割失败，请重试'));
-          });
-        return;
-      }
-      // 局部遮罩：生成后端未接入 → 明确告知，不假装成功
-      message.info(t('imageEditor.maskBackendPending', '局部修改需要接入生成后端，本次未提交'));
-      closeImageNodeEdit(payload.nodeId);
+      if (!store || !queue) return;
+      const vp = store.getViewport();
+      const el = containerRef.current;
+      const viewW = el?.clientWidth ?? 800;
+      const viewH = el?.clientHeight ?? 600;
+      const k = vp.k > 0 ? vp.k : 1;
+      const worldX = (viewW / 2 - vp.x) / k;
+      const worldY = (viewH / 2 - vp.y) / k;
+      const nodeW = 360;
+      const ratio = payload.naturalWidth && payload.naturalHeight
+        ? payload.naturalHeight / payload.naturalWidth
+        : 0.6;
+      const nodeH = Math.max(160, Math.round(nodeW * ratio));
+      const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const title = payload.title || '图片';
+      queue.execute(new AddNodeCommand({
+        id,
+        type: 'image',
+        title,
+        position: { x: Math.round(worldX - nodeW / 2), y: Math.round(worldY - nodeH / 2) },
+        size: { width: nodeW, height: nodeH },
+        data: {
+          content: payload.content,
+          storageKey: payload.storageKey,
+          status: 'success',
+          naturalWidth: payload.naturalWidth,
+          naturalHeight: payload.naturalHeight,
+        },
+      } as NodeRecord));
+      store.selectNodes([id], false);
+      useCanvasTabStore.getState().openImageTab({ nodeId: id, title });
     });
 
     // Plan#74 Phase D：存量长文本(assetId → text: 本地资源)一次性迁移（幂等，会话级按项目守卫）
@@ -1386,7 +1373,7 @@ export function useEditorInteractions({
       unsubRetry();
       unsubReplay();
       unsubCancel();
-      unsubImageEdit();
+      unsubEditImageAsset();
       unsubGenStory();
       unsubAssetSaved();
       unsubGenSb();
@@ -1455,8 +1442,11 @@ export function useEditorInteractions({
         }
         // 编辑类操作（裁剪/分割/局部遮罩）走**节点卡片内编辑**（2026-11-06 用户纠偏）：
         // 节点临时放大，图片区直接变成裁剪框/切分网格/蒙版画布；不弹窗口、不额外浮面板。
-        if (type === 'crop' || type === 'split' || type === 'maskEdit') {
-          openImageNodeEdit(node.id, type);
+        if (type === 'edit' || type === 'crop' || type === 'split' || type === 'maskEdit') {
+          // 图片编辑 = 独立页签（Photoshop 式）：自带工具栏，输出后回画布。
+          // 胶囊上只有一个「编辑」，具体用哪个工具进页面后由页面工具栏决定。
+          const mode = type === 'edit' ? 'crop' : type;
+          useCanvasTabStore.getState().openImageTab({ nodeId: node.id, title: node.title, mode });
           return;
         }
         // 只读/参数型操作：仍走浮层（查看大图 / 详情 / 放大 / 多角度）
