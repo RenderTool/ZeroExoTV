@@ -35,6 +35,38 @@ describe('导演台素材面板：视频封面与播放', () => {
   });
 });
 
+describe('导演台画布资产页签（只图片/视频/音频）', () => {
+  const panel = read('src/features/canvas-tabs/director-prompt-panel.tsx');
+
+  it('画布页签存在且只收媒体类型节点（文本/剧本等不列）', () => {
+    expect(panel).toContain("panelTab === 'canvas'");
+    expect(panel).toContain('data-canvas-media-item');
+    expect(panel).toContain("n.type === 'image' || n.type === 'video' || n.type === 'audio'");
+    expect(panel).toContain("d.kind === 'image' || d.kind === 'video' || d.kind === 'audio'");
+  });
+
+  it('画布条目点击 = 走同一插入路径（占槽 + @ 引用）', () => {
+    expect(panel).toContain('onPickCanvasMedia');
+    expect(panel).toContain('insertRef(ref)');
+  });
+});
+
+describe('@ 块：删除与悬停预览', () => {
+  const editor = read('src/features/canvas-tabs/mention-editor.tsx');
+
+  it('每个 @ 块有独立删除入口（文本模型删除一次引用）', () => {
+    expect(editor).toContain('data-mention-remove');
+    expect(editor).toContain('removeMention');
+    expect(editor).toContain('onChange(current.replace(re, \'\'), match.index)');
+  });
+
+  it('悬停 @ 块出大图/播放预览（portal + ThumbImage playable）', () => {
+    expect(editor).toContain('data-mention-preview');
+    expect(editor).toContain('createPortal');
+    expect(editor).toContain('mentionPreview.slot');
+  });
+});
+
 describe('主体库来源面板：预览与顶部上传', () => {
   const panel = read('src/features/canvas-nodes/storyboard/subject-media-source-panel.tsx');
 

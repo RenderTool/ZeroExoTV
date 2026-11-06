@@ -2829,7 +2829,9 @@
     "comfyStatusDisconnected": "Not connected",
     "comfyStatusConnecting": "Connecting",
     "comfyStatusFailed": "Connection failed",
-    "staleGeneratingDemoted": "The last run was interrupted; you can generate again"
+    "staleGeneratingDemoted": "The last run was interrupted; you can generate again",
+    "canvasTab": "Canvas",
+    "canvasMediaEmpty": "No image, video or audio nodes on the canvas"
   },
   "scriptImportModal": {
     "title": "Import script",

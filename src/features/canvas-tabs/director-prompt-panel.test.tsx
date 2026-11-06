@@ -1473,11 +1473,15 @@ describe('@ 面板放大（2026-11-05 任务三）：尺寸 / 行高 / 缩略图
     expect(list.style.maxHeight).toBe('');
   });
 
-  it('放大后三页签仍可完整切换（资产 → 主体 → 开源），底部导入入口保留', () => {
+  it('放大后四个页签完整切换（画布 / 资产 / 主体 / 开源），导入入口保留在列表顶部', () => {
     const { container } = renderPanel({});
     const panel = openPanel(container);
     const tabs = panel.querySelectorAll('[data-asset-panel-tab]');
-    expect(tabs.length).toBe(3);
+    expect(tabs.length).toBe(4);
+    // 画布页签只列图片/视频/音频（无画布媒体时为空态）
+    fireEvent.click(panel.querySelector('[data-asset-panel-tab="canvas"]') as Element);
+    expect(panel.querySelector('[data-canvas-media-list]')).toBeTruthy();
+    fireEvent.click(panel.querySelector('[data-asset-panel-tab="asset"]') as Element);
     expect(panel.querySelector('[data-asset-panel-item="a1"]')).toBeTruthy();
     // 主体
     fireEvent.click(panel.querySelector('[data-asset-panel-tab="subject"]') as Element);

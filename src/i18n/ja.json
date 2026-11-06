@@ -2807,7 +2807,9 @@
     "comfyStatusDisconnected": "未接続",
     "comfyStatusConnecting": "接続中",
     "comfyStatusFailed": "接続失敗",
-    "staleGeneratingDemoted": "前回の生成は中断されました。再生成できます"
+    "staleGeneratingDemoted": "前回の生成は中断されました。再生成できます",
+    "canvasTab": "キャンバス",
+    "canvasMediaEmpty": "キャンバスに画像/動画/音声ノードがありません"
   },
   "scriptImportModal": {
     "title": "脚本を読み込む",

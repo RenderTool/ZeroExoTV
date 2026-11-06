@@ -2840,7 +2840,9 @@
     "comfyStatusDisconnected": "未连接",
     "comfyStatusConnecting": "连接中",
     "comfyStatusFailed": "连接失败",
-    "staleGeneratingDemoted": "上次生成已中断，可重新生成"
+    "staleGeneratingDemoted": "上次生成已中断，可重新生成",
+    "canvasTab": "画布",
+    "canvasMediaEmpty": "画布上暂无图片/视频/音频节点"
   },
   "scriptImportModal": {
     "title": "导入剧本",

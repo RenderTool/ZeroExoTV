@@ -29,6 +29,7 @@ import {
   type ReactElement, type ClipboardEvent as ReactClipboardEvent,
   type CompositionEvent as ReactCompositionEvent, type DragEvent as ReactDragEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Film, Image as ImageIcon, Music } from 'lucide-react';
 import { ThumbImage } from './thumb-image.js';
 
@@ -258,6 +259,8 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
   valueRef.current = value;
   // epoch 重挂：key 变 → React 摘旧根（父级完好，必成功）挂新根（只含 React 子节点）
   const [domEpoch, setDomEpoch] = useState(0);
+  /** 悬停 @ 块的大图/播放预览（fixed 定位，避开 contentEditable 布局） */
+  const [mentionPreview, setMentionPreview] = useState<{ slot: MentionSlotView; x: number; y: number } | null>(null);
   const skipDetectOnceRef = useRef(false);
   const focusRestoreRef = useRef(false);
 
@@ -337,6 +340,17 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
   }, []);
 
   /** 在指定偏移插入文本（光标插入与拖入插入共用同一条文本模型路径，不直接动 DOM） */
+  /** 删除一个 @ 块：从纯文本里删掉一次「@label 」，chip 由 onChange 重建 */
+  const removeMention = useCallback((label: string) => {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`@${escaped} ?`);
+    const current = value ?? '';
+    const match = re.exec(current);
+    if (!match) return;
+    onChange(current.replace(re, ''), match.index);
+    setMentionPreview(null);
+  }, [value, onChange]);
+
   const insertAt = useCallback((text: string, caret: number) => {
     const base = valueRef.current;
     const at = Math.max(0, Math.min(base.length, caret));
@@ -526,9 +540,15 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
             data-mention-owned=""
             data-mention-label={seg.label}
             contentEditable={false}
+            onMouseEnter={(e) => {
+              if (!slot) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              setMentionPreview({ slot, x: rect.left + rect.width / 2, y: rect.top });
+            }}
+            onMouseLeave={() => setMentionPreview(null)}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 4, height: 20,
-              padding: '0 6px 0 2px', margin: '0 1px', borderRadius: 4,
+              padding: '0 2px 0 2px', margin: '0 1px', borderRadius: 4,
               background: 'rgba(255,255,255,0.08)', verticalAlign: '-4px',
               fontSize: 13, lineHeight: '20px', userSelect: 'none',
             }}
@@ -541,9 +561,58 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
               <Icon size={12} style={{ opacity: 0.75 }} />
             )}
             <span>@{slot?.title ?? seg.label}</span>
+            {/* 每个 @ 块单独可删：从纯文本里移除一次该引用 */}
+            <span
+              role="button"
+              tabIndex={-1}
+              data-mention-remove={seg.label}
+              aria-label="移除引用"
+              title="移除引用"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                removeMention(seg.label);
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; }}
+              style={{ cursor: 'pointer', opacity: 0.55, fontSize: 12, lineHeight: '20px', padding: '0 2px' }}
+            >
+              ×
+            </span>
           </span>
         );
       })}
+      {/* @ 块悬停大图/播放预览（fixed + portal，不参与 contentEditable 布局） */}
+      {mentionPreview && createPortal(
+        <div
+          data-mention-preview
+          style={{
+            position: 'fixed',
+            left: Math.max(8, mentionPreview.x - 92),
+            top: Math.max(8, mentionPreview.y - 170),
+            zIndex: 3000, padding: 6, borderRadius: 8,
+            background: 'rgba(20,20,22,0.96)', border: '1px solid rgba(255,255,255,0.18)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.5)', pointerEvents: 'none',
+            display: 'flex', flexDirection: 'column', gap: 4,
+          }}
+        >
+          <ThumbImage
+            kind={mentionPreview.slot.kind}
+            playable
+            storageKey={mentionPreview.slot.storageKey}
+            url={mentionPreview.slot.url}
+            width={184}
+            height={mentionPreview.slot.kind === 'audio' ? 40 : 120}
+            radius={6}
+            title={mentionPreview.slot.title}
+            icon={<ImageIcon size={24} style={{ opacity: 0.7 }} />}
+          />
+          <div style={{ fontSize: 11, color: '#fff', maxWidth: 184, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {mentionPreview.slot.title}
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }));

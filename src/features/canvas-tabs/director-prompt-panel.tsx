@@ -58,6 +58,8 @@ import type { ProductionItem, ProductionItemImage, ProductionItemKind } from '@/
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree, SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { MentionEditor, type MentionEditorHandle, type MentionSlotView } from './mention-editor.js';
+import { useContext } from 'react';
+import { ReactGraphStoreContext } from '@zeroexo/plugin-render-react';
 import { ThumbImage } from './thumb-image.js';
 import { OpenLibBrowser } from '@/features/open-library/open-lib-browser.js';
 import { useCasUpload } from '@/features/canvas-assets/use-cas-upload.js';
@@ -197,7 +199,7 @@ type SubjListRow =
 
 function AssetPickPanel({
   candidates, subjects, subjectTrees, pooledOrder, slotLabels, isDuplicate, isKindFull,
-  onPick, onPickSubject, onPickSubjectImage, onPickSubjectState, onClose, palette, t, episodeContext,
+  onPick, onPickSubject, onPickSubjectImage, onPickSubjectState, onPickCanvasMedia, onClose, palette, t, episodeContext,
   theme, onPickAssetFromOpenLib,
 }: {
   candidates: Asset[];
@@ -220,6 +222,8 @@ function AssetPickPanel({
   onPickSubjectImage: (item: ProductionItem, img: ProductionItemImage) => void;
   /** 主体状态级媒体的媒体行单击 = 按 `subject-state:<rootId>/<stateId>` 引用插入（走既有槽位规则） */
   onPickSubjectState: (ref: DirectorAssetRef) => void;
+  /** 画布媒体节点单击（仅图片/视频/音频；插入引用 + 占槽） */
+  onPickCanvasMedia: (ref: DirectorAssetRef) => void;
   onClose: () => void;
   palette: ReturnType<typeof useCardPalette>;
   /** react-i18next TFunction（直接用 useTranslation() 的 t；宽松签名以兼容 TFunction 返回类型） */
@@ -236,7 +240,7 @@ function AssetPickPanel({
   onPickAssetFromOpenLib: (a: Asset) => void;
 }): ReactElement {
   const [activeIdx, setActiveIdx] = useState(0);
-  const [panelTab, setPanelTab] = useState<'asset' | 'subject' | 'openlib'>('asset');
+  const [panelTab, setPanelTab] = useState<'canvas' | 'asset' | 'subject' | 'openlib'>('asset');
   const [subjectIdx, setSubjectIdx] = useState(0);
   /** 主体展开集合（chevron 独立命中区控制；点行本身只插入） */
   const [expandedSubjects, setExpandedSubjects] = useState<Set<string>>(new Set());
@@ -543,6 +547,36 @@ function AssetPickPanel({
     </div>
   );
 
+  const graphStore = useContext(ReactGraphStoreContext);
+  /** 画布上的媒体节点（仅 image / video / audio；文本等非媒体一律不列） */
+  const canvasMedia = useMemo<DirectorAssetRef[]>(() => {
+    const nodes = graphStore?.getGraph?.().nodes ?? [];
+    const out: DirectorAssetRef[] = [];
+    for (const n of nodes) {
+      const d = (n.data ?? {}) as { storageKey?: string; content?: string; url?: string; kind?: string };
+      const kind = n.type === 'image' || n.type === 'video' || n.type === 'audio'
+        ? n.type
+        : d.kind === 'image' || d.kind === 'video' || d.kind === 'audio' ? d.kind : null;
+      if (!kind) continue;
+      const storageKey = d.storageKey;
+      const url = d.content || d.url;
+      if (!storageKey && !url) continue;
+      out.push({
+        id: `canvas:${n.id}`,
+        kind,
+        title: n.title || `${kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}节点`,
+        storageKey,
+        url,
+        originScope: 'project',
+      });
+    }
+    return out;
+  }, [graphStore]);
+  const filteredCanvasMedia = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    return q ? canvasMedia.filter((m) => (m.title ?? '').toLowerCase().includes(q)) : canvasMedia;
+  }, [canvasMedia, searchQ]);
+
   let rowIdx = -1;
 
   return (
@@ -562,7 +596,7 @@ function AssetPickPanel({
       <div style={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Tab：资产 / 主体 / 开源（2026-11-05：开源复用 OpenLibBrowser 嵌入） */}
       <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 10, flexShrink: 0 }}>
-        {(['asset', 'subject', 'openlib'] as const).map((key) => {
+        {(['canvas', 'asset', 'subject', 'openlib'] as const).map((key) => {
           const active = panelTab === key;
           return (
             <button
@@ -576,11 +610,13 @@ function AssetPickPanel({
                 color: active ? palette.capsuleText : palette.sub,
               }}
             >
-              {key === 'asset'
-                ? t('director.assetTab', '资产')
-                : key === 'subject'
-                  ? t('director.subjectTab', '主体')
-                  : t('director.openlibTab', '开源')}
+              {key === 'canvas'
+                ? t('director.canvasTab', '画布')
+                : key === 'asset'
+                  ? t('director.assetTab', '资产')
+                  : key === 'subject'
+                    ? t('director.subjectTab', '主体')
+                    : t('director.openlibTab', '开源')}
             </button>
           );
         })}
@@ -600,6 +636,52 @@ function AssetPickPanel({
         }}
       />
       )}
+      {panelTab === 'canvas' && (
+        <div data-canvas-media-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {filteredCanvasMedia.length === 0 ? (
+            <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
+              {t('director.canvasMediaEmpty', '画布上暂无图片/视频/音频节点')}
+            </div>
+          ) : filteredCanvasMedia.map((ref) => {
+            const Icon = KIND_ICON[ref.kind];
+            const used = slotLabels[ref.id];
+            return (
+              <button
+                key={ref.id}
+                type="button"
+                data-canvas-media-item={ref.id}
+                onClick={() => onPickCanvasMedia(ref)}
+                onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
+                  padding: '0 10px', border: 'none', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                  background: 'transparent', color: palette.capsuleText, fontSize: 13, textAlign: 'left',
+                }}
+              >
+                <ThumbImage
+                  kind={ref.kind}
+                  storageKey={ref.storageKey}
+                  url={ref.url}
+                  prefer="thumb"
+                  width={ASSET_PICK_THUMB_SIZE}
+                  height={ASSET_PICK_THUMB_SIZE}
+                  radius={6}
+                  title={ref.title}
+                  icon={<Icon size={18} style={{ opacity: 0.7 }} />}
+                />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {ref.title}
+                </span>
+                <span style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
+                  {used ?? ASSET_KIND_NAME[ref.kind]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {panelTab === 'asset' && (
       <div data-asset-panel-list ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
         {/* 导入资产：列表顶部一行（2026-11-07 用户指令：导入类按钮统一放顶部，不再埋到底部） */}
@@ -1784,6 +1866,14 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                   replaceSlotAsset(ref);
                 } else {
                   pickSubjectImage(item, img);
+                }
+                setAssetPanelOpen(false);
+              }}
+              onPickCanvasMedia={(ref) => {
+                if (replaceTarget && slotInfo.byAssetId[replaceTarget]) {
+                  replaceSlotAssetAt(replaceTarget, ref);
+                } else {
+                  insertRef(ref);
                 }
                 setAssetPanelOpen(false);
               }}
