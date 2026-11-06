@@ -565,7 +565,6 @@
     "cropFailed": "Crop failed, please retry",
     "splitFailed": "Split failed, please retry",
     "maskBackendPending": "Local edits need the generation backend; nothing was submitted",
-    "nodeEditHint": "In-node editing · Esc to exit",
     "toolCrop": "Crop",
     "toolSplit": "Split",
     "toolMask": "Mask",

@@ -550,7 +550,6 @@
     "cropFailed": "切り抜きに失敗しました。再試行してください",
     "splitFailed": "分割に失敗しました。再試行してください",
     "maskBackendPending": "部分修正には生成バックエンドが必要です。今回は送信していません",
-    "nodeEditHint": "ノード内編集 · Esc で終了",
     "toolCrop": "切り抜き",
     "toolSplit": "分割",
     "toolMask": "部分マスク",

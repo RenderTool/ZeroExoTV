@@ -10,7 +10,7 @@
 | C-01 | 色卡节点（原 Plan#65） | done | [plans/2026-09-02-color-card-node.md](plans/2026-09-02-color-card-node.md) |
 | C-02 | zeroexo-comfyui 纯前端剥离版（原 Plan#83） | in-progress | [plans/2026-11-02-zeroexo-comfyui-standalone.md](plans/2026-11-02-zeroexo-comfyui-standalone.md) |
 | C-03 | 子画布 Sub-Canvas（原 Plan#84，含画布挂载模型） | in-progress | [plans/2026-11-05-sub-canvas.md](plans/2026-11-05-sub-canvas.md) |
-| C-04 | 图片编辑改为独立页签（裁剪/局部/分割） | in-progress | [plans/2026-11-06-image-edit-in-node.md](plans/2026-11-06-image-edit-in-node.md) |
+| C-04 | 图片编辑改为独立页签（裁剪/局部/分割） | in-progress | [plans/2026-11-06-image-edit-tab.md](plans/2026-11-06-image-edit-in-node.md) |
 
 状态：in-progress 3 / done 1 / 待拍板 0 / deprecated 0。
 
