@@ -205,6 +205,10 @@ export function MaterialGroup({ store, theme }: {
         </>
       ) : (
         <>
+      {/* 主操作统一放顶部（2026-11-06 用户指令：原来埋在最底下每次找半天） */}
+      <div style={{ padding: '0 20px 8px', flexShrink: 0 }}>
+        <AddTile label={t('assetLibrary.uploadMaterial', { defaultValue: '上传素材' })} onClick={() => fileInputRef.current?.click()} theme={theme} />
+      </div>
       <ToolbarRow>
         <CategoryChips
           items={kindOptions}
@@ -326,10 +330,6 @@ export function MaterialGroup({ store, theme }: {
             })}
           </MasonryGrid>
         )}
-      </div>
-
-      <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-        <AddTile label={t('assetLibrary.uploadMaterial', { defaultValue: '上传素材' })} onClick={() => fileInputRef.current?.click()} theme={theme} />
       </div>
 
       <input

@@ -1681,7 +1681,7 @@
     "operation": "操作",
     "undoableAfterRegen": "重新生成后，之前的修改将无法撤销",
     "subjectAll": "全部",
-    "subjectEmpty": "暂无主体，可让 Agent 生成主体占位提示词卡片",
+    "subjectEmpty": "还没有主体",
     "subjectPromptEmpty": "（该主体暂无提示词，可让 Agent 补全）",
     "previousStep": "上一步",
     "nextStep": "下一步",

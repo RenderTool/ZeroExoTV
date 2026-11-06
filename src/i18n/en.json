@@ -1670,7 +1670,7 @@
     "operation": "Action",
     "undoableAfterRegen": "After regeneration, previous changes cannot be undone",
     "subjectAll": "All",
-    "subjectEmpty": "No subjects yet. Ask Agent to generate placeholder prompt cards.",
+    "subjectEmpty": "No subjects yet",
     "subjectPromptEmpty": "（This subject has no prompt yet. Ask Agent to complete it.）",
     "previousStep": "Previous",
     "nextStep": "Next",

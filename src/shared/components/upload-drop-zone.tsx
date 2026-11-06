@@ -16,7 +16,7 @@
 
 import { useRef, useState } from 'react';
 import type { ThemeConfig } from '@zeroexo/shared';
-import { UploadCloud } from 'lucide-react';
+import { ArrowDownToLine } from 'lucide-react';
 
 export interface UploadDropZoneProps {
   /** 接收到的文件（与「点击导入」同一 CAS 上传链） */
@@ -143,7 +143,7 @@ export function UploadDropZone({
             fontSize: 12.5, fontWeight: 500, letterSpacing: 0.2,
             boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
           }}>
-            <UploadCloud size={14} />
+            <ArrowDownToLine size={14} />
             松开即可上传
           </div>
         </div>

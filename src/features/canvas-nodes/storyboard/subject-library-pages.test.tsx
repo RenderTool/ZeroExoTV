@@ -459,11 +459,11 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(card.querySelector('[data-state-ready]')).toBeTruthy();
   });
 
-  it('「添加状态」= 底端共享 AddTile（与资产「上传素材」同款同位）；页头无红色主按钮、无悬停提示文案', async () => {
+  it('「添加状态」= 顶部共享 AddTile（与资产「上传素材」同款同形）；页头无红色主按钮、无悬停提示文案', async () => {
     renderPages(makeTree());
     await openSubjectPage();
 
-    // 单一入口：底端整宽虚线格（格内 16:9 添加卡与页头主按钮均已下线）
+    // 单一入口：整宽虚线格（2026-11-06 起统一放顶部；格内 16:9 添加卡与页头主按钮均已下线）
     expect(document.querySelectorAll('[data-add-state]').length).toBe(1);
     const add = document.querySelector('[data-add-state]') as HTMLElement;
     expect(add.tagName).toBe('BUTTON');
@@ -714,7 +714,7 @@ describe('主体库入口归并：只保留资产抽屉内的主体分段', () =
 
 // 2026-11-05 用户指令（征集 #176）：抽屉内主体库「标题去掉 + 添加主体与上传素材同款同位、不用红色」
 describe('抽屉内（embedded）列表页页头下线与新建入口同位', () => {
-  it('无「主体库」面包屑标题与计数徽标；「添加主体」= 底端共享 AddTile（整宽虚线格、非 antd 主按钮、无红色底）', async () => {
+  it('无「主体库」面包屑标题与计数徽标；「添加主体」= 顶部共享 AddTile（整宽虚线格、非 antd 主按钮、无红色底）', async () => {
     const onAdd = vi.fn();
     renderPages(makeTree(), PID, vi.fn(), vi.fn(), { embedded: true, onAddSubject: onAdd });
     await waitFor(() => expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy());

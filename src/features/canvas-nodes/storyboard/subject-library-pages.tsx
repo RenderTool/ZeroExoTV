@@ -718,7 +718,7 @@ function StateGridCard({
  * 状态网格：固定列宽、行优先（列数按实测容器宽度取，960→3 / 1280→4 / 1920→6）
  *
  * 2026-11-05：原格内「添加新状态」卡（AddStateCard）已下线——新建入口统一到底端
- * 共享 AddTile（与资产「上传素材」同款同位、中性色，hover 不亮强调色边框）。
+ * 共享 AddTile（与资产「上传素材」同款同形、中性色，hover 不亮强调色边框；2026-11-06 起统一放顶部）。
  */
 function SubjectStateGrid({ children }: { children: ReactNode }): React.ReactElement {
   const ref = useRef<HTMLDivElement>(null);
@@ -1445,6 +1445,19 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           </SubjectPageHeader>
         )}
 
+        {/* 主操作统一放顶部（2026-11-06 用户指令：原来埋在最底下每次找半天） */}
+        {embedded && onAddSubject && (
+          <div style={{ padding: `0 ${pagePad}px 8px`, flexShrink: 0 }}>
+            <AddTile
+              label={t('storyboard.addSubject', '添加主体')}
+              icon={<Plus size={16} />}
+              onClick={onAddSubject}
+              theme={theme}
+              dataAttr={{ 'data-subject-add': '' }}
+            />
+          </div>
+        )}
+
         {/* 工具栏：抽屉内与素材分段逐行同源（共享 ToolbarRow：8/20/10 内距 + SearchBox 高 26）。
             2026-11-06 用户指出图1/图2 布局差异：旧版把 chips+搜索塞进一列、再把集筛选
             marginLeft:auto 挤在同一行右侧，窄抽屉里被右边缘裁成半截。现：chips 一行、
@@ -1570,19 +1583,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           </div>
         </div>
 
-        {/* 抽屉内「添加主体」= 与素材分段「上传素材」同款同位（2026-11-05 用户指令）：
-            底端整宽虚线格 + 中性色，不再用右上角红色主按钮（同一 AddTile 实现，零自造样式）。 */}
-        {embedded && onAddSubject && (
-          <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-            <AddTile
-              label={t('storyboard.addSubject', '添加主体')}
-              icon={<Plus size={16} />}
-              onClick={onAddSubject}
-              theme={theme}
-              dataAttr={{ 'data-subject-add': '' }}
-            />
-          </div>
-        )}
       </div>
     );
   } else if (!openTree) {
@@ -1620,6 +1620,16 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             {stateCountText}
           </span>
         </SubjectPageHeader>
+        {/* 主操作统一放顶部（2026-11-06 用户指令）：添加状态在页头下方，不再埋到列表底端 */}
+        <div style={{ padding: `0 ${pagePad}px 8px`, flexShrink: 0 }}>
+          <AddTile
+            label={t('subject.addState', '添加状态')}
+            icon={<Plus size={16} />}
+            onClick={addState}
+            theme={theme}
+            dataAttr={{ 'data-add-state': '' }}
+          />
+        </div>
         <div style={scrollStyle}>
           <div style={{ ...stateFrame.content, paddingTop: 16 }}>
             <SubjectStateGrid>
@@ -1658,18 +1668,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
               })}
             </SubjectStateGrid>
           </div>
-        </div>
-        {/* 2026-11-05 用户指令：「添加状态」与素材分段「上传素材」同款同位（底端整宽虚线格、中性色）；
-            页头红色主按钮与格内同名卡均已删除（单一入口，hover 不再亮强调色边框）。
-            data-add-state 标记沿用，宿主与单测定位不断。 */}
-        <div style={{ padding: `0 ${pagePad}px 12px`, flexShrink: 0 }}>
-          <AddTile
-            label={t('subject.addState', '添加状态')}
-            icon={<Plus size={16} />}
-            onClick={addState}
-            theme={theme}
-            dataAttr={{ 'data-add-state': '' }}
-          />
         </div>
       </div>
     );

@@ -1584,7 +1584,7 @@
     "operation": "操作",
     "undoableAfterRegen": "再生成後、以前の変更は元に戻せません",
     "subjectAll": "すべて",
-    "subjectEmpty": "主体はまだありません。Agent に占位提示詞カードの生成を依頼できます",
+    "subjectEmpty": "主体はまだありません",
     "subjectPromptEmpty": "（この主体はまだ提示詞がありません。Agent に補完を依頼できます）",
     "previousStep": "前へ",
     "nextStep": "次へ",
