@@ -206,6 +206,25 @@ const SUBJECTS = [
   },
 ] as unknown as ProductionItem[];
 
+/** 最小 DataTransfer（jsdom 没有原生实现）：只为拖拽用例提供 types/setData/getData */
+function makeDataTransfer(): DataTransfer {
+  const data: Record<string, string> = {};
+  const types: string[] = [];
+  return {
+    data,
+    types,
+    effectAllowed: '',
+    dropEffect: '',
+    setData(type: string, value: string) {
+      data[type] = value;
+      if (!types.includes(type)) types.push(type);
+    },
+    getData(type: string) {
+      return data[type] ?? '';
+    },
+  } as unknown as DataTransfer;
+}
+
 function renderPanel(overrides?: {
   shared?: WorkbenchSharedParams;
   shot?: WorkbenchShot;
@@ -680,6 +699,50 @@ describe('槽位池 + @ 入栈语义', () => {
     expect(refs[0]?.id).toBe('a2');
     // prompt 不被改写（仍是 @Picture1）
     expect(patches.some((p) => typeof p.imagePrompt === 'string')).toBe(false);
+  });
+
+  it('插槽拖拽互换：A 拖到 B = 内容互换、槽号固定', () => {
+    // 槽号是 pin 在引用上的（受控 props 里已有 slotNo）：互换后 pin 仍跟"格子"走
+    const refs = [
+      { id: 'a1', kind: 'image' as const, title: '图1', url: '', storageKey: 'k1', slotNo: 1 },
+      { id: 'a2', kind: 'image' as const, title: '图2', url: '', storageKey: 'k2', slotNo: 2 },
+    ];
+    const patches: Array<Partial<WorkbenchShot>> = [];
+    const { container } = renderPanel({ shot: makeShot({ references: refs }), onShotChange: (p) => patches.push(p) });
+    const source = container.querySelector('[data-slot-filled="a1"]') as HTMLElement;
+    const target = container.querySelector('[data-slot-filled="a2"]') as HTMLElement;
+    expect(source).toBeTruthy();
+    expect(target).toBeTruthy();
+    const dt = makeDataTransfer();
+    fireEvent.dragStart(source, { dataTransfer: dt });
+    // 拖到另一槽：dragover 允许 + drop 生效
+    fireEvent.dragOver(target, { dataTransfer: dt });
+    fireEvent.drop(target, { dataTransfer: dt });
+    const patch = patches.find((p) => Array.isArray(p.references));
+    const next = patch?.references as Array<{ id: string; slotNo?: number }>;
+    expect(next.map((r) => r.id)).toEqual(['a2', 'a1']);
+    // 槽号固定：a2 占 1 号槽、a1 占 2 号槽
+    expect(next[0]?.slotNo).toBe(1);
+    expect(next[1]?.slotNo).toBe(2);
+  });
+
+  it('素材面板条目拖到插槽 = 纯替换（槽号固定、不新增槽位）', () => {
+    const patches: Array<Partial<WorkbenchShot>> = [];
+    const { container } = renderPanel({ shot: shotWithA1(), onShotChange: (p) => patches.push(p) });
+    fireEvent.click(container.querySelector('[data-asset-add="segment"]') as Element);
+    const item = container.querySelector('[data-asset-panel-item="a2"]') as HTMLElement;
+    const slot = container.querySelector('[data-slot-filled="a1"]') as HTMLElement;
+    expect(item).toBeTruthy();
+    expect(slot).toBeTruthy();
+    const dt = makeDataTransfer();
+    fireEvent.dragStart(item, { dataTransfer: dt });
+    fireEvent.dragOver(slot, { dataTransfer: dt });
+    fireEvent.drop(slot, { dataTransfer: dt });
+    const patch = patches.find((p) => Array.isArray(p.references));
+    const refs = patch?.references as Array<{ id: string; slotNo?: number }>;
+    expect(refs.length).toBe(1);
+    expect(refs[0]?.id).toBe('a2');
+    expect(refs[0]?.slotNo).toBe(1);
   });
 
   it('主体 Tab：单击一级行 = 整主体占槽（subject:<id>）；chevron 展开后点状态图子行 = 精确插入（subject:<id>:<stateId>）；二级菜单残留 = 0', () => {

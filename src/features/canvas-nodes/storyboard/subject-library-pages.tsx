@@ -1447,7 +1447,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
 
         {/* 主操作统一放顶部（2026-11-06 用户指令：原来埋在最底下每次找半天） */}
         {embedded && onAddSubject && (
-          <div style={{ padding: `0 ${pagePad}px 8px`, flexShrink: 0 }}>
+          <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
             <AddTile
               label={t('storyboard.addSubject', '添加主体')}
               icon={<Plus size={16} />}
@@ -1621,7 +1621,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           </span>
         </SubjectPageHeader>
         {/* 主操作统一放顶部（2026-11-06 用户指令）：添加状态在页头下方，不再埋到列表底端 */}
-        <div style={{ padding: `0 ${pagePad}px 8px`, flexShrink: 0 }}>
+        <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
           <AddTile
             label={t('subject.addState', '添加状态')}
             icon={<Plus size={16} />}

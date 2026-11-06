@@ -244,6 +244,8 @@ function AssetPickPanel({
   const [searchQ, setSearchQ] = useState('');
   /** 详情面板目标（hover / 键盘高亮驱动；仅展示，不写入） */
   const [detail, setDetail] = useState<PickDetailTarget | null>(null);
+  /** 拖拽中：不更新/不显示详情浮层（否则拖拽经过行时详情弹出、面板尺寸变化会顶掉落点） */
+  const draggingRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   /** 2026-11-05 导入入口：空态主按钮 + 非空态列表底行，同一条 useCasUpload 链（不新写存储） */
   const uploadAssets = useCasUpload();
@@ -457,6 +459,9 @@ function AssetPickPanel({
         display: 'flex', flexDirection: 'column', gap: 8, height: '100%', minHeight: 0, overflowY: 'auto',
       }}
       onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDragEnd={() => { draggingRef.current = false; }}
+      onDrop={() => { draggingRef.current = false; }}
     >
       {!detail && (
         <div style={{ padding: '16px 8px', fontSize: 12, color: palette.sub }}>
@@ -605,11 +610,18 @@ function AssetPickPanel({
                   onDragStart={(e) => {
                     if (!ref) return;
                     e.stopPropagation();
+                    draggingRef.current = true;
+                    setDetail(null);
                     e.dataTransfer.effectAllowed = 'copy';
                     e.dataTransfer.setData(DIRECTOR_ASSET_DRAG_MIME, JSON.stringify(ref));
                   }}
+                  onDragEnd={() => { draggingRef.current = false; }}
                   onClick={() => onPick(a)}
-                  onMouseEnter={() => { setActiveIdx(idx); setDetail({ type: 'asset', asset: a }); }}
+                  onMouseEnter={() => {
+                    if (draggingRef.current) return;
+                    setActiveIdx(idx);
+                    setDetail({ type: 'asset', asset: a });
+                  }}
                   onFocus={() => { setActiveIdx(idx); setDetail({ type: 'asset', asset: a }); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
@@ -728,7 +740,7 @@ function AssetPickPanel({
                       data-subject-item={item.id}
                       data-asset-panel-active={selected || undefined}
                       onClick={() => onPickSubject(item)}
-                      onMouseEnter={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
+                      onMouseEnter={() => { if (draggingRef.current) return; setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
                       onFocus={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
@@ -787,7 +799,7 @@ function AssetPickPanel({
                       data-subject-state-row={img.storageKey}
                       data-asset-panel-active={selected || undefined}
                       onClick={() => onPickSubjectImage(item, img)}
-                      onMouseEnter={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
+                      onMouseEnter={() => { if (draggingRef.current) return; setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
                       onFocus={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: 38,
@@ -966,6 +978,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   /** 替换模式：点已填槽位 → 选定后替换该槽位内容（槽位号不变） */
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
   const [hoverSlot, setHoverSlot] = useState<string | null>(null);
+  /** 插槽拖拽中：不弹 hover 大图预览（拖拽经过别的槽位时预览会挡住落点） */
+  const draggingSlotRef = useRef(false);
   const { assets: allAssets } = useAssets();
   const palette = useCardPalette(theme, isDark);
   const editorRef = useRef<MentionEditorHandle>(null);
@@ -1213,6 +1227,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         data-slot={slot?.label}
         data-slot-filled={a.id}
         onClick={() => { setReplaceTarget(a.id); setAssetPanelOpen(true); }}
+        onPointerDown={(e) => e.stopPropagation()}
         onDragOver={(e) => {
           const canReplace = e.dataTransfer.types.includes(DIRECTOR_ASSET_DRAG_MIME);
           const canSwap = e.dataTransfer.types.includes(DIRECTOR_SLOT_DRAG_MIME);
@@ -1239,17 +1254,22 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
           try {
             replaceSlotAssetAt(a.id, JSON.parse(raw) as DirectorAssetRef);
           } catch { /* 非法 payload 忽略 */ }
+          draggingSlotRef.current = false;
         }}
-        onMouseEnter={() => setHoverSlot(a.id)}
+        onMouseEnter={() => { if (draggingSlotRef.current) return; setHoverSlot(a.id); }}
         onMouseLeave={() => setHoverSlot((cur) => (cur === a.id ? null : cur))}
         // 2026-11-05 用户指令：插槽可拖进提示词正文（落点自动补 @引用）；无槽号（异常态）不可拖
         draggable={!!slot}
         onDragStart={(e) => {
           if (!slot) return;
           e.stopPropagation();
-          e.dataTransfer.effectAllowed = 'copy';
+          draggingSlotRef.current = true;
+          setHoverSlot(null);
+          // copyMove：拖进提示词=copy、拖到另一个插槽=move（互换）；只允许 copy 会让 move 落点被浏览器拒绝
+          e.dataTransfer.effectAllowed = 'copyMove';
           e.dataTransfer.setData(DIRECTOR_SLOT_DRAG_MIME, JSON.stringify({ label: slot.label, assetId: a.id }));
         }}
+        onDragEnd={() => { draggingSlotRef.current = false; }}
         style={{
           position: 'relative', width: 64, height: 64, borderRadius: 8, flexShrink: 0,
           border: `1px solid ${palette.chipBorder}`, background: palette.chipBg,
