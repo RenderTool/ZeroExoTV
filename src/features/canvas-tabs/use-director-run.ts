@@ -305,7 +305,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           projectId,
           nodeId: shotId,
           kind: 'video',
-          title: meta?.title ?? `第 ${segIndex} 段生成`,
+          title: meta?.title ?? `片段 ${segIndex}`, 
           blob: videoBlob,
           mimeType: 'video/mp4',
           durationMs: meta ? Math.round(meta.duration * 1000) : undefined,

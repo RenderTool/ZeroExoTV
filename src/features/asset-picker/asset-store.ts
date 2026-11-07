@@ -10,12 +10,11 @@
  */
 
 import localforage from 'localforage';
-import { listProjects } from '@zeroexo/plugin-persistence';
 import { nanoid } from 'nanoid';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
-import { hasCasEntry, isCasStorageKey, registerCasRef, releaseCas, readCasIndex, casFilePath, casStorageKey } from '@/entities/cas-store.js';
-import { readFile as fsReadFile, writeFile as fsWriteFile, stat as fsStat, removeFile as fsRemoveFile, writeJson as fsWriteJson } from '@/platform/fs.js';
+import { hasCasEntry, isCasStorageKey, registerCasRef, releaseCas } from '@/entities/cas-store.js';
+import { readFile as fsReadFile, writeFile as fsWriteFile, removeFile as fsRemoveFile } from '@/platform/fs.js';
 import type { Asset, AssetKind, AssetScope } from './index.js';
 
 // ===== 类型定义 =====
@@ -69,7 +68,6 @@ const ASSETS_KEY = 'zeroexo:assets';
 const ASSETS_FILE_REL = `.lf/zeroexo/app_state/${encodeURIComponent(ASSETS_KEY)}.json`;
 
 /** CAS 自愈重建的清单（数据根 entities/ 下，与 cas_index 同级；不在 localforage 桶内） */
-const REBUILD_MANIFEST_REL = 'entities/asset-rebuild-manifest.json';
 
 // ===== 资产项目化：scope 迁移 / 默认值 / 写守卫（纯函数，可单测） =====
 
@@ -254,7 +252,6 @@ let legacyMergedOnce = false;
 /** CAS 自愈重建（每会话一次；仅磁盘可用时执行） */
 let casRebuiltOnce = false;
 
-const REBUILD_KIND_LABEL: Record<string, string> = { image: '图片', video: '视频', audio: '音频' };
 
 /**
  * CAS 自愈重建：cas_index 有引用、物理文件确实存在、但资产记录丢失（如 app_state 被清）时，
@@ -269,80 +266,11 @@ const REBUILD_KIND_LABEL: Record<string, string> = { image: '图片', video: '�
  *   归属项目已不在项目列表 → 一律归公共库，保证恢复的图立刻可见（id/storageKey 不变，
  *   既有节点引用不受影响）。
  */
-async function rebuildMissingAssetsFromCasIndex(existing: Asset[]): Promise<Asset[]> {
-  const index = await readCasIndex().catch(() => null);
-  if (!index) return [];
-  const knownProjectIds = new Set((await listProjects().catch(() => [])).map((p) => p.id));
-  const presentIds = new Set(existing.map((a) => a.id));
-  const presentKeys = new Set(existing.map(getStorageKeyOfAsset).filter(Boolean) as string[]);
-
-  const rebuilt: Asset[] = [];
-  const manifestItems: Array<{ id: string; hash: string; kind: string; projectId: string }> = [];
-  for (const [hash, entry] of Object.entries(index.entries)) {
-    // 主体状态图已持有该 CAS（同一内容有 subject-state 引用）→ 素材库不重建：
-    // 一张定妆/宫格图只能出现在主体库，复活到素材页 = 同一张图两处显示（2026-11-07 回归）。
-    const ownedBySubject = entry.refs.some((r) => r.assetId.startsWith('subject-state:'));
-    if (ownedBySubject) continue;
-    for (const ref of entry.refs) {
-      if (presentIds.has(ref.assetId)) continue;
-      if (ref.assetId.startsWith('openlib:')) continue; // 开源合成 id：设计上无记录，不得自愈复活
-      // 主体状态图引用（subject-state:<rootId>/<state>）不是素材库条目：
-      // 主体库自己展示它，自愈复活会把它同时塞进「素材」页（一张定妆图出现两次）
-      if (ref.assetId.startsWith('subject-state:')) continue;
-      if (!(ref.kind in REBUILD_KIND_LABEL)) continue; // 只重建有实体文件的媒体记录
-      // 归属项目已不存在（如项目被删/索引残留）→ 不重建：把孤儿资产塞进公共库会让
-      // 素材页出现一堆「恢复的图片·hash」垃圾（2026-11-07 用户指令：公共资产不允许这种残留）。
-      if (ref.projectId && ref.projectId !== 'library' && !knownProjectIds.has(ref.projectId)) continue;
-      const storageKey = casStorageKey(hash, entry.ext);
-      if (presentKeys.has(storageKey)) continue; // 同内容已有别的记录，不造孪生
-      // 铁律：只恢复物理文件确实存在的条目
-      let fileExists = false;
-      try {
-        fileExists = (await fsStat(casFilePath(hash, entry.ext))) !== null;
-      } catch {
-        fileExists = false;
-      }
-      if (!fileExists) continue;
-
-      const kindLabel = REBUILD_KIND_LABEL[ref.kind]!;
-      const base = {
-        id: ref.assetId,
-        cas: { hash, ext: entry.ext },
-        title: `恢复的${kindLabel}·${hash.slice(0, 8)}`,
-        kind: ref.kind as AssetKind,
-        tags: [],
-        createdAt: entry.createdAt ?? new Date().toISOString(),
-        bytes: entry.size ?? 0,
-        mimeType: entry.mime ?? '',
-        folderId: null,
-        favorite: false,
-        data: { kind: ref.kind, storageKey } as Asset['data'],
-      };
-      const keepProjectScope = ref.projectId !== 'library' && knownProjectIds.has(ref.projectId);
-      const record: Asset = keepProjectScope
-        ? ({ ...base, scope: 'project', projectId: ref.projectId } as Asset)
-        : ({ ...base, scope: 'library' } as Asset);
-      presentIds.add(record.id);
-      presentKeys.add(storageKey);
-      rebuilt.push(record);
-      manifestItems.push({ id: record.id, hash, kind: ref.kind, projectId: ref.projectId });
-    }
-  }
-
-  if (rebuilt.length > 0) {
-    // 重建清单先落盘（assets.json 尚不存在/记录缺失时的「备份/重建清单」要求），再写记录
-    try {
-      await fsWriteJson(REBUILD_MANIFEST_REL, {
-        rebuiltAt: new Date().toISOString(),
-        reason: '资产记录缺失，按 entities/cas_index.json 与 media/cas 实际文件重建',
-        priorRecords: existing.length,
-        items: manifestItems,
-      });
-    } catch (err) {
-      console.warn('[asset-store] 重建清单写入失败（不阻断记录重建）:', err);
-    }
-  }
-  return rebuilt;
+async function rebuildMissingAssetsFromCasIndex(_existing: Asset[]): Promise<Asset[]> {
+  // 2026-11-07 用户指令：彻底禁用「恢复的图片/视频·hash」自愈重建。
+  // 该路径会在 app_state 丢失时把 CAS 里的历史产物重新造回素材页，标题只能是垃圾 hash；
+  // 生成链路（autoLandGenerationBlob）本身已负责落记录，不依赖这里。
+  return [];
 }
 
 async function readAll(): Promise<Asset[]> {
@@ -388,9 +316,13 @@ async function readAll(): Promise<Asset[]> {
 
 /** 读取收尾：scope 迁移 + 地址清洗 + 变更写回（磁盘/旧通道由 writeAll 内部分派） */
 async function finalizeList(list: Asset[], changed: boolean): Promise<Asset[]> {
-  const migrated = migrateAssetScopes(list);
+  // 历史垃圾清理：清掉旧「恢复的图片/视频·hash」记录（只删记录，不动 CAS 文件）
+  const junkRe = /^恢复的(图片|视频|音频)[·\-]/;
+  const kept = list.filter((a) => !junkRe.test(String(a.title ?? '')));
+  const removedJunk = kept.length !== list.length;
+  const migrated = migrateAssetScopes(kept);
   const sanitized = sanitizeAssetsList(migrated.list);
-  if (changed || migrated.changed || sanitized.changed) {
+  if (changed || removedJunk || migrated.changed || sanitized.changed) {
     await writeAll(sanitized.list);
   }
   return [...sanitized.list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));

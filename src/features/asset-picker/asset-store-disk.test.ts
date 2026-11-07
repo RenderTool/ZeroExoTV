@@ -217,7 +217,7 @@ describe('写入链：addAssets → 磁盘权威文件（驱动兼容信封）',
   });
 });
 
-describe('自愈重建：按 cas_index + media/cas 实际文件重建丢失记录（幂等）', () => {
+describe.skip('自愈重建（2026-11-07 已禁用：不再生成「恢复的图片/视频·hash」垃圾）', () => {
   beforeEach(() => {
     mem.clear();
     texts.clear();
