@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { App, Dropdown } from 'antd';
 import { ExternalLink, ShieldAlert } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
+import { ThumbBadge } from '@/shared/ui/index.js';
 import {
   confirmAge,
   isAgeConfirmed,
@@ -240,13 +241,9 @@ function OpenLibEntryCard({ entry, theme, importing, canvasDisabled, onSendToCan
     >
       <OpenLibThumb entry={entry} theme={theme} />
       {/* 只读角标（开源库条目不可编辑/不可删除，仅此标注差异） */}
-      <span style={{
-        position: 'absolute', top: 6, left: 6, zIndex: 6,
-        fontSize: 10, lineHeight: '16px', padding: '0 6px', borderRadius: 4,
-        background: 'rgba(0,0,0,0.45)', color: 'rgba(255,255,255,0.85)',
-      }}>
+      <ThumbBadge style={{ position: 'absolute', top: 6, left: 6, zIndex: 6 }}>
         {t('openLib.readonlyBadge')}
-      </span>
+      </ThumbBadge>
       {onPick && importing ? (
         <span data-openlib-pick-hint style={{
           position: 'absolute', top: 6, right: 6, zIndex: 7,

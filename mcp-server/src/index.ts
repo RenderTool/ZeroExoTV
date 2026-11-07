@@ -17,6 +17,7 @@ import { startFileServer } from "./file-server.js";
 import { dataRoot, paths } from "./config.js";
 import { TOOL_REGISTRY, type Ctx } from "./tools/_register.js";
 import { SERVER_INSTRUCTIONS } from "./guides/instructions.js";
+import { buildStateOverview } from "./guides/state-overview.js";
 import { registerGuidePrompts, registerGuideResources } from "./guides/register.js";
 import { registerProjectTools } from "./tools/projects.js";
 import { registerScriptTools } from "./tools/script.js";
@@ -26,12 +27,36 @@ import { registerAssetTools } from "./tools/assets.js";
 import { registerWorkbenchTools } from "./tools/workbench.js";
 import { registerStoryboardIngestTools } from "./tools/storyboard-ingest.js";
 import { registerCanvasTools } from "./tools/canvases.js";
+import { registerPlanTools } from "./tools/plan.js";
 
-function buildServer(ctx: Ctx): McpServer {
+/**
+ * 连接即概览：把「当前数据状态」拼进 initialize 的 instructions。
+ * 新会话一连上就知道有哪些项目、做到哪步、缺什么，不用用户再讲一遍。
+ * 5s 缓存 + 3s 超时：数据根异常不阻断连接。
+ */
+let overviewCache: { at: number; text: string } | null = null;
+async function withOverview(): Promise<string> {
+  const now = Date.now();
+  if (overviewCache && now - overviewCache.at < 5000) {
+    return overviewCache.text ? `${SERVER_INSTRUCTIONS}\n\n${overviewCache.text}` : SERVER_INSTRUCTIONS;
+  }
+  try {
+    const text = await Promise.race([
+      buildStateOverview(dataRoot()),
+      new Promise<string>((resolve) => setTimeout(() => resolve(""), 3000)),
+    ]);
+    overviewCache = { at: now, text };
+    return text ? `${SERVER_INSTRUCTIONS}\n\n${text}` : SERVER_INSTRUCTIONS;
+  } catch {
+    return SERVER_INSTRUCTIONS;
+  }
+}
+
+async function buildServer(ctx: Ctx): Promise<McpServer> {
   // instructions 内置整套操作规则（零安装路径），细节规格经 guides 资源/prompts 按需取
   const server = new McpServer(
     { name: "zeroexo-mcp-server", version: "0.1.0" },
-    { instructions: SERVER_INSTRUCTIONS },
+    { instructions: await withOverview() },
   );
   registerGuideResources(server);
   registerGuidePrompts(server);
@@ -43,6 +68,7 @@ function buildServer(ctx: Ctx): McpServer {
   registerWorkbenchTools(server, ctx);
   registerStoryboardIngestTools(server, ctx);
   registerCanvasTools(server, ctx);
+  registerPlanTools(server, ctx);
   return server;
 }
 
@@ -93,7 +119,7 @@ function printHelp(): void {
 
 async function selfcheck(): Promise<void> {
   const ctx: Ctx = { getToken: () => process.env.ZEROEXO_MCP_TOKEN };
-  buildServer(ctx); // 触发注册
+  await buildServer(ctx); // 触发注册
   const bootstrapped = await bootstrapToken(dataRoot());
   await stampServerInfo(8787);
   const read = 9;
@@ -138,21 +164,58 @@ async function main(): Promise<void> {
     const portIdx = argv.indexOf("--port");
     const port = portIdx >= 0 ? Number(argv[portIdx + 1]) : 8787;
     await stampServerInfo(port);
-    // 每个请求独立 server+transport（无会话态），token 取 Authorization Bearer
-    let currentToken: string | undefined;
+    // 有会话态：initialize 建立 session，后续请求按 mcp-session-id 复用同一 server。
+    const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
+    const readBody = async (req: http.IncomingMessage): Promise<string> => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks).toString("utf8");
+    };
     const httpServer = http.createServer(async (req, res) => {
       if (req.url !== "/mcp") {
         res.writeHead(404).end("not found");
         return;
       }
       const auth = req.headers.authorization;
-      currentToken = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
-      const server = buildServer({ getToken: () => currentToken });
-      const transport = new StreamableHTTPServerTransport({
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
+      const sessionId = req.headers["mcp-session-id"];
+      const existing = typeof sessionId === "string" ? sessions.get(sessionId) : undefined;
+      if (existing) {
+        await existing.transport.handleRequest(req, res);
+        return;
+      }
+      if (req.method !== "POST") {
+        res.writeHead(400).end("Bad Request: No valid session ID provided");
+        return;
+      }
+      const bodyText = await readBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        res.writeHead(400).end("Bad Request: Invalid JSON");
+        return;
+      }
+      const messages = Array.isArray(parsed) ? parsed : [parsed];
+      const isInit = messages.some((m) => (m as { method?: string })?.method === "initialize");
+      if (!isInit) {
+        res.writeHead(400).end("Bad Request: Server not initialized");
+        return;
+      }
+      const server = await buildServer({ getToken: () => token });
+      const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
+        // 资产上传走 base64（真实定妆图 4-6MB），SDK 默认 4MiB 会让 upload_asset 直接 413
+        maxRequestBodySize: Number(process.env.ZEROEXO_MCP_MAX_BODY ?? 64 * 1024 * 1024),
+        onsessioninitialized: (sid: string) => {
+          sessions.set(sid, { server, transport });
+        },
       });
+      transport.onclose = () => {
+        if (transport.sessionId) sessions.delete(transport.sessionId);
+      };
       await server.connect(transport);
-      await transport.handleRequest(req, res);
+      await transport.handleRequest(req, res, parsed);
     });
     httpServer.listen(port, () => {
       process.stderr.write(`[zeroexo-mcp-server] StreamableHTTP listening on http://localhost:${port}/mcp\n`);
@@ -163,7 +226,7 @@ async function main(): Promise<void> {
   // stdio：token 来自 env
   await stampServerInfo(8787);
   const ctx: Ctx = { getToken: () => process.env.ZEROEXO_MCP_TOKEN };
-  const server = buildServer(ctx);
+  const server = await buildServer(ctx);
   await server.connect(new StdioServerTransport());
   process.stderr.write(`[zeroexo-mcp-server] stdio ready, tools=${TOOL_REGISTRY.length}, dataRoot=${dataRoot()}\n`);
 }

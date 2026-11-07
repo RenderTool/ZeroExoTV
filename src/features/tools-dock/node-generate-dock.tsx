@@ -41,6 +41,7 @@ import {
 import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
 import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
@@ -338,13 +339,18 @@ export function NodeGenerateDock({
 
   const modelOptions = useMemo(() => {
     const encoded = filterChannelModelsByCapability(channels, modeCapability(mode));
-    return encoded.map((enc) => {
+    const options = encoded.map((enc) => {
       const parts = enc.split('::');
       const modelName = parts[1] ?? enc;
       const ch = channels.find((c) => c.id === parts[0]);
       const iconKey = ch?.modelIcons?.[modelName] || ch?.provider || undefined;
       return { value: enc, label: ch ? `${modelName}(${ch.name})` : modelName, iconKey };
     });
+    // 本机 MiniMax H3：不是 AI 渠道，作为视频节点常驻选项（未连接 ComfyUI 时点生成会提示先连接）
+    if (mode === 'video') {
+      options.push({ value: LOCAL_VIDEO_MODEL_KEY, label: LOCAL_VIDEO_MODEL_LABEL, iconKey: 'zeroexo' });
+    }
+    return options;
   }, [channels, mode]);
 
   // ===== 连入参考素材(复用生成器 deriveIncomingReferences 归一化) =====
@@ -423,6 +429,8 @@ export function NodeGenerateDock({
   const currentModelValue = model ?? '';
   const supportedInputTypes = useMemo(() => {
     if (!currentModelValue) return ['text'];
+    // 本机 MiniMax H3：参考生视频（文本 + 一张参考图），与插件节点单参考槽一致
+    if (currentModelValue === LOCAL_VIDEO_MODEL_KEY) return ['text', 'image'];
     return getModelInputTypes(channels, currentModelValue);
   }, [channels, currentModelValue]);
 
@@ -932,7 +940,7 @@ export function NodeGenerateDock({
           isRunning={isRunning}
           hasText={hasText}
           textLength={prompt.length}
-          interruptible={mode === 'text'}
+          interruptible={mode === 'text' || model === LOCAL_VIDEO_MODEL_KEY}
           onAction={handleAction}
           onConfigChange={onConfigChange}
           onParamValuesChange={handleParamValuesChange}

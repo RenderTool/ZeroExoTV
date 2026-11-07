@@ -69,7 +69,6 @@ import { clearCurrentSubjectStateContext, getCurrentSubjectStateContext } from '
 import { createSubjectNode, createSubjectTree, type SubjectTree } from './subject-tree-types';
 import type { ProductionItem } from '../production-manager/production-manager-types';
 import {
-  UI_BADGE_FONT_SIZE,
   UI_CARD_BORDER_WIDTH,
   UI_CARD_RADIUS,
   uiCardBorder,
@@ -215,6 +214,29 @@ describe('三级导航与面包屑', () => {
     await waitFor(() => expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy());
   });
 
+  it('显式「返回上一级」按钮：状态页 → 主体页 → 列表页（一级页面不渲染返回）', async () => {
+    const tree = makeTree();
+    renderPages(tree);
+    // 列表页（一级）：无返回按钮
+    expect(document.querySelector('[data-subject-back]')).toBeNull();
+
+    fireEvent.click(document.querySelector('[data-subject-card="item-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
+    const backToLibrary = document.querySelector('[data-subject-back]') as HTMLButtonElement;
+    expect(backToLibrary).toBeTruthy();
+    expect(backToLibrary.getAttribute('aria-label')).toBe('返回上一级');
+
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+    // 状态页：返回 = 主体页
+    fireEvent.click(document.querySelector('[data-subject-back]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
+    expect(document.querySelector('[data-subject-page="state"]')).toBeNull();
+    // 主体页：返回 = 列表页
+    fireEvent.click(document.querySelector('[data-subject-back]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy());
+  });
+
   it('添加状态后主体页计数即时更新（1 → 2）', async () => {
     const tree = makeTree();
     renderPages(tree);
@@ -356,12 +378,11 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
 
     // 角标：shared/ui 中性徽标；类型不参与着色（角色/场景/道具统一中性灰）
     const badge = card.querySelector('[data-subject-card-badge]') as HTMLElement;
-    expect(badge.hasAttribute('data-ui-badge')).toBe(true);
-    expect(badge.getAttribute('data-badge-tone')).toBe('neutral');
-    expect(badge.style.borderRadius).toBe('999px');
-    expect(badge.style.fontSize).toBe(`${UI_BADGE_FONT_SIZE}px`);
-    expect(badge.style.background.replace(/\s/g, '')).toBe('rgba(255,255,255,0.08)');
-    expect(badge.style.color).toBe('rgb(136, 136, 136)');
+    expect(badge.hasAttribute('data-thumb-badge')).toBe(true);
+    expect(badge.style.borderRadius).toBe('4px');
+    expect(badge.style.fontSize).toBe('10px');
+    expect(badge.style.background.replace(/\s/g, '')).toBe('rgba(0,0,0,0.62)');
+    expect(badge.style.color).toBe('rgb(255, 255, 255)');
   });
 
   it('收色：整页唯一强调色 = 主题 accent，主体库零绿色', async () => {
@@ -387,8 +408,8 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
 
     // 类型角标：一律中性灰，不按类型上色
     const badge = card.querySelector('[data-subject-card-badge]') as HTMLElement;
-    expect(badge.style.background.replace(/\s/g, '')).toBe('rgba(255,255,255,0.08)');
-    expect(badge.style.color).toBe('rgb(136, 136, 136)');
+    expect(badge.style.background.replace(/\s/g, '')).toBe('rgba(0,0,0,0.62)');
+    expect(badge.style.color).toBe('rgb(255, 255, 255)');
 
     // 空封面：中性灰剪影（lucide svg）+ 中性灰文字，不再用彩色 emoji
     const cover = card.querySelector('[data-subject-card-cover]') as HTMLElement;
@@ -591,8 +612,8 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
     expect(document.querySelector('[data-open-media-panel]')).toBeNull();
     expect(document.querySelector('[data-remove-media]')).toBeNull();
     expect(document.querySelector('[data-base-upload]')).toBeNull();
-    // 入口单一：返回靠面包屑，删除归外层状态卡
-    expect(document.querySelector('[data-back-subject]')).toBeNull();
+    // 返回入口 = 显式「返回上一级」按钮 + 面包屑（2026-11-07 用户指令）
+    expect(document.querySelector('[data-subject-back]')).toBeTruthy();
     expect(document.querySelector('[data-delete-state]')).toBeNull();
     expect(document.querySelector('[data-subject-crumb="subject"]')).toBeTruthy();
   });

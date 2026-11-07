@@ -1117,6 +1117,7 @@
     "sendToDirector": "发送到导演台当前片段",
     "filterMaterial": "素材",
     "filterHistory": "历史",
+    "filterScriptMeta": "本剧信息",
     "historyTabImage": "图片产出",
     "historyTabVideo": "视频生成",
     "historyEmptyImage": "还没有图片生成记录，在画布上调用 API 生成图片后自动收录",
@@ -1572,6 +1573,7 @@
     "startGeneration": "开始生成"
   },
   "storyboard": {
+    "switchEpisode": "切换集数",
     "statusIdle": "未生成",
     "statusGenerating": "生成中",
     "livePreviewBadge": "实时预览中",
@@ -2397,6 +2399,7 @@
   },
   "subject": {
     "untitled": "未命名主体",
+    "backToParent": "返回上一级",
     "stateCount": "{{n}} 状态",
     "generatePrompt": "生成提示词",
     "detail": "详情",
@@ -2455,7 +2458,7 @@
     "imageOrdinal": "图 {{n}}",
     "promptReady": "含提示词",
     "promptEmpty": "无提示词",
-    "copyPrompt": "复制提示词",
+    "copyPrompt": "复制",
     "noImageSelected": "未选择图片",
     "aiGenerateImage": "AI 生成形象图",
     "aiGenerateImageDesc": "根据主体描述与当前状态备注生成定妆参考图",
@@ -2580,7 +2583,9 @@
     "linkedToast": "已发送到 {{subject}} · {{state}}",
     "replacedToast": "已替换 {{subject}} · {{state}} 的内容",
     "undo": "撤销",
-    "undoDone": "已撤销，恢复原内容"
+    "undoDone": "已撤销，恢复原内容",
+    "promptCopied": "已复制完整提示词",
+    "copyFailed": "复制失败，请手动选择复制"
   },
   "episode": {
     "pending": "等待中",
@@ -2609,7 +2614,15 @@
     "collapse": "收起",
     "generate": "生成",
     "removeRef": "移除参考素材",
-    "placeholder": "输入提示词... 连入的素材会自动作为输入源(堆叠节点需 @ 内部资源)"
+    "placeholder": "输入提示词... 连入的素材会自动作为输入源(堆叠节点需 @ 内部资源)",
+    "h3Duration": "时长（秒）",
+    "h3DurationHint": "1–30 秒",
+    "h3Size": "画面尺寸",
+    "h3Steps": "步数",
+    "h3StepsHint": "默认 8 步（本机 LoRA 为 8 步档）",
+    "h3Seed": "随机种子",
+    "h3SeedPlaceholder": "留空 = 每次随机",
+    "h3RefHint": "连入本节点的第一张图片会自动作为参考图（本机节点单参考槽）。"
   },
   "entity": {
     "character": "角色",
@@ -2658,7 +2671,30 @@
     "mergePrev": "合并到上一集",
     "delete": "删除剧集",
     "episodesCount": "{{count}} 集",
-    "pageCount": "{{count}}页"
+    "pageCount": "{{count}}页",
+    "metaTitle": "本剧信息",
+    "metaOpen": "本剧信息",
+    "metaLogline": "一句话概述",
+    "metaTags": "推荐标签",
+    "metaPublishNote": "发布建议",
+    "metaLoglinePlaceholder": "一句话说清整部剧讲了什么",
+    "metaTagsPlaceholder": "输入后回车，或用逗号分隔",
+    "metaPublishNotePlaceholder": "发布时机、封面、标题侧重点等",
+    "metaEmpty": "暂无本集信息（一句话介绍 / 推荐标签 / 发布建议）",
+    "metaStats": "{{scenes}} 场 · 约 {{minutes}} 分钟",
+    "metaSaved": "本剧信息已保存",
+    "metaNoProject": "打开一个剧本页后在此维护本剧信息",
+    "scriptMetaTitle": "本剧信息",
+    "scriptLoglinePlaceholder": "一句话说清整部剧讲了什么",
+    "scriptTitleLabel": "剧名",
+    "scriptTitlePlaceholder": "这部剧的名字"
+  },
+  "assetPick": {
+    "current": "当前资源",
+    "remove": "移除当前资源",
+    "removeShort": "移除",
+    "close": "关闭",
+    "upload": "上传图片/语音"
   },
   "scriptReader": {
     "readingMode": "阅读模式",
@@ -2807,11 +2843,11 @@
     "durationOverCapTitle": "时长超出推荐 {{cap}}s，点开查看",
     "undo": "撤销",
     "dryRunBack": "返回",
-    "dryRunConfirm": "确认运行（提交到 ComfyUI 真实生成）",
-    "dryRunNote": "预检通过后点「确认运行」：将组装导演包提交到 ComfyUI 真实生成",
+    "dryRunConfirm": "开始生成",
+    "dryRunNote": "本次将生成 {{count}} 个片段，共约 {{seconds}} 秒。点「开始生成」提交到本机 ComfyUI 真实生成。",
     "dryRunGap": "确认后组装导演包 zip（pack.json + timeline.json + 槽位媒体）提交 ComfyUI：/zeroexo/h3/pack → /run → 3s 轮询逐段落库。",
     "dryRunDisconnectTitle": "本次运行断开的衔接（不改持久设置）",
-    "dryRunDisconnectItem": "片段 {{from}} ↔ 片段 {{to}} 不相邻，本次运行断开引导",
+    "dryRunDisconnectItem": "片段 {{from}} 与片段 {{to}} 不相邻，本次不启用衔接",
     "viewLastWorkflow": "查看本次工作流",
     "viewWorkflowTitle": "本次提交给 ComfyUI 的工作流（Prompt JSON）",
     "workflowHint": "在 ComfyUI 界面里把该 JSON 拖入/加载即可看到真实节点图（API 格式节点清单：{{nodes}}）",
@@ -2842,7 +2878,9 @@
     "comfyStatusFailed": "连接失败",
     "staleGeneratingDemoted": "上次生成已中断，可重新生成",
     "canvasTab": "画布",
-    "canvasMediaEmpty": "画布上暂无图片/视频/音频节点"
+    "canvasMediaEmpty": "画布上暂无图片/视频/音频节点",
+    "dryRunTitle": "确认生成",
+    "dryRunIssues": "还有 {{count}} 项没准备好"
   },
   "scriptImportModal": {
     "title": "导入剧本",

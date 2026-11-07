@@ -12,7 +12,6 @@ import { pushProjectMeta } from '@/services/sync/sync-service.js';
 import { copyCanvasScript, createCanvasScript, bindCanvasScript } from '@/services/canvas-script.js';
 import { openCanvasTab } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
-import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import { toInsertPayload } from '@/features/asset-picker/components/picker-card.js';
 import type { NavProjectAction } from '@/shared/components/index.js';
 import type { Asset } from '@/features/asset-picker/index.js';
@@ -132,7 +131,6 @@ export function useEditorDialogs({
   const [mobileShortcutsOpen, setMobileShortcutsOpen] = useState(false);
 
   // ===== 图片编辑对话框 =====
-  const [imageDialog, setImageDialog] = useState<ImageDialogState | null>(null);
 
   // ===== 连线释放菜单 =====
   const [connectionDrop, setConnectionDrop] = useState<{
@@ -485,8 +483,6 @@ export function useEditorDialogs({
     setMobileShortcutsOpen,
 
     // 图片只读/参数型浮层（裁剪/分割/局部遮罩已改为节点卡片内编辑，不走这里）
-    imageDialog,
-    setImageDialog,
 
     // 连线释放菜单
     connectionDrop,

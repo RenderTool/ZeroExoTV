@@ -34,6 +34,16 @@ export interface ScriptSegment {
   sourceRange?: string;
 }
 
+/**
+ * 本集信息卡（剧本页右侧抽屉）：一句话介绍 / 推荐标签 / 发布建议。
+ * 由 MCP set_episode_meta 或编辑器写入；缺省 = 空态一行提示。
+ */
+export interface ScriptEpisodeMeta {
+  logline?: string;
+  tags?: string[];
+  publishNote?: string;
+}
+
 export interface ScriptEpisode {
   id: string;
   number: number;
@@ -42,6 +52,19 @@ export interface ScriptEpisode {
   content: string;
   status: string;
   segments?: ScriptSegment[];
+  /** 本集信息卡（一句话介绍 / 推荐标签 / 发布建议） */
+  meta?: ScriptEpisodeMeta;
+}
+
+/**
+ * 本剧信息（整个剧本/剧集的一句话概述 + 推荐标签）。
+ * 2026-11-07 用户澄清：信息卡是「本剧」级，不是「本集」级。
+ */
+export interface ScriptMeta {
+  /** 一句话概述（整部剧/这一季） */
+  logline?: string;
+  /** 推荐标签 */
+  tags?: string[];
 }
 
 export interface ScriptEntity {
@@ -51,6 +74,8 @@ export interface ScriptEntity {
   title: string;
   activeEpisodeId: string;
   episodes: ScriptEpisode[];
+  /** 本剧信息（一句话概述 / 推荐标签） */
+  meta?: ScriptMeta;
   sourceInfo: {
     origin: 'created' | 'imported';
     createdBy: 'editor-page' | 'mcp' | 'migration';
@@ -65,6 +90,8 @@ export interface ScriptPatch {
   title?: string;
   activeEpisodeId?: string;
   episodes?: ScriptEpisode[];
+  /** 本剧信息 */
+  meta?: ScriptMeta;
   sourceInfo?: ScriptEntity['sourceInfo'];
 }
 
@@ -134,6 +161,7 @@ async function writeScriptLocked(projectId: string, patch: ScriptPatch): Promise
       title: patch.title ?? '剧本',
       activeEpisodeId: patch.activeEpisodeId ?? '',
       episodes: patch.episodes ?? [],
+      ...(patch.meta ? { meta: patch.meta } : {}),
       sourceInfo: patch.sourceInfo ?? { origin: 'created', createdBy: 'editor-page' },
       updatedAt: now,
     };
@@ -150,6 +178,7 @@ async function writeScriptLocked(projectId: string, patch: ScriptPatch): Promise
     title: patch.title ?? current.title,
     activeEpisodeId: patch.activeEpisodeId ?? current.activeEpisodeId,
     episodes: patch.episodes ?? current.episodes,
+    meta: patch.meta ?? current.meta,
     version: current.version + 1,
     updatedAt: now,
   };
@@ -193,6 +222,7 @@ export async function restoreScriptSnapshot(
       title: entity.title,
       activeEpisodeId: entity.activeEpisodeId,
       episodes: entity.episodes,
+      meta: entity.meta,
     }),
   });
 }
@@ -324,6 +354,12 @@ export function planEpisodeTitleRepair(episodes: ReadonlyArray<{ id: string; num
  */
 export function isEpisodeBlank(content: string | null | undefined): boolean {
   return normalizeScriptText(content).replace(/\s/g, '').length === 0;
+}
+
+/** 场次统计（信息卡用）：数 <p class="script-scene-heading"> 块，与编辑器块类型同口径 */
+export function countScriptScenes(content: string | null | undefined): number {
+  if (!content) return 0;
+  return (content.match(/<p[^>]*script-scene-heading[^>]*>/gi) ?? []).length;
 }
 
 // ---------- watchScript：会话内即时推送 + 轮询捕捉外部（MCP）写入 ----------

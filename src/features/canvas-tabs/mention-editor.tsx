@@ -35,21 +35,58 @@ import { ThumbImage } from './thumb-image.js';
 
 // ===== 解析 / 序列化（纯函数，可单测） =====
 
-export type MentionSegment = { type: 'text'; text: string } | { type: 'mention'; label: string };
+/**
+ * 提示词 token 类型（2026-11-07 高亮版式）：
+ * - mention  `@PictureN `：槽位引用块（chip，可删、悬停预览）
+ * - subject  `<Subject N>`：官方四段式的主体定义标记（原子块）
+ * - shot     `[Shot N]`：官方四段式的镜头段落标记（原子块）
+ * - dialogue `<d>…</d>`：台词段（可编辑，内文参与模型）
+ * - heading  `subject_definitions:` 等四段式标签（行首小标题样式）
+ */
+export type MentionSegment =
+  | { type: 'text'; text: string }
+  | { type: 'mention'; label: string }
+  | { type: 'subject'; text: string; n: number }
+  | { type: 'shot'; text: string; n: number }
+  | { type: 'dialogue'; text: string }
+  | { type: 'heading'; text: string };
+
+/** 官方四段式小节标签（行首独占一行时按小标题渲染，正文/序列化不变） */
+export const PROMPT_SECTION_LABELS = [
+  'subject_definitions',
+  'detailed_description',
+  'overall_soundscape',
+  'non_diegetic_music',
+] as const;
 
 // mention 序列化形态为 `@Label `（尾空格归入 mention）：parse 必须消耗这个空格，
 // 否则 serialize(parse(x)) 每轮多漏一个空格（chip 后每次输入空格递增，2026-11-04 单测暴露）。
-const MENTION_RE = /@(Picture|Audio|Video)(\d+) ?/g;
+// 单次左到右扫描覆盖四类 token：台词段先整体吃掉内部内容，避免把 `<d>` 里的 @ 拆成独立 chip。
+const PROMPT_TOKEN_RE = new RegExp(
+  [
+    '@(Picture|Audio|Video)(\\d+) ?',
+    '<d>[\\s\\S]*?</d>',
+    '<Subject\\s+(\\d+)>',
+    '\\[Shot\\s+(\\d+)\\]',
+    `^(?:${PROMPT_SECTION_LABELS.join('|')}):`,
+  ].join('|'),
+  'gm',
+);
 
-/** 纯文本 → 段序列（`@Picture1 ` 形态识别为 mention 段；不认识的 @文本 原样保留） */
+/** 纯文本 → 段序列（五类 token 识别；不认识的 @文本 / 尖括号原样保留为 text） */
 export function parsePromptSegments(text: string): MentionSegment[] {
   const segs: MentionSegment[] = [];
   let last = 0;
-  MENTION_RE.lastIndex = 0;
-  for (let m = MENTION_RE.exec(text); m; m = MENTION_RE.exec(text)) {
+  PROMPT_TOKEN_RE.lastIndex = 0;
+  for (let m = PROMPT_TOKEN_RE.exec(text); m; m = PROMPT_TOKEN_RE.exec(text)) {
     if (m.index > last) segs.push({ type: 'text', text: text.slice(last, m.index) });
-    segs.push({ type: 'mention', label: `${m[1]}${m[2]}` });
-    last = m.index + m[0].length;
+    const raw = m[0];
+    if (m[1]) segs.push({ type: 'mention', label: `${m[1]}${m[2]}` });
+    else if (raw.startsWith('<d>')) segs.push({ type: 'dialogue', text: raw });
+    else if (raw.startsWith('<Subject')) segs.push({ type: 'subject', text: raw, n: Number(m[3]) });
+    else if (raw.startsWith('[Shot')) segs.push({ type: 'shot', text: raw, n: Number(m[4]) });
+    else segs.push({ type: 'heading', text: raw });
+    last = m.index + raw.length;
   }
   if (last < text.length) segs.push({ type: 'text', text: text.slice(last) });
   return segs;
@@ -58,11 +95,15 @@ export function parsePromptSegments(text: string): MentionSegment[] {
 /** 段序列 → 纯文本（epoch 自愈判据的「期望值」：渲染产物序列化后必然等于它） */
 export function serializeSegments(segs: MentionSegment[]): string {
   let out = '';
-  for (const s of segs) out += s.type === 'text' ? s.text : `@${s.label} `;
+  for (const s of segs) {
+    if (s.type === 'text') out += s.text;
+    else if (s.type === 'mention') out += `@${s.label} `;
+    else out += s.text;
+  }
   return out;
 }
 
-/** DOM → 纯文本（chip 元素取 data-mention-label 还原 `@Label `，文本节点取 nodeValue；只读，不改 DOM） */
+/** DOM → 纯文本（chip 元素取 data-mention-label 还原 `@Label `；原子 token 取 data-token-text；只读，不改 DOM） */
 export function serializePromptDom(root: HTMLElement): string {
   let out = '';
   const walk = (node: Node) => {
@@ -70,6 +111,8 @@ export function serializePromptDom(root: HTMLElement): string {
     if (node instanceof HTMLElement) {
       const label = node.dataset?.mentionLabel;
       if (label) { out += `@${label} `; return; }
+      const token = node.dataset?.tokenText;
+      if (token !== undefined) { out += token; return; }
       if (node.tagName === 'BR') { out += '\n'; return; }
       node.childNodes.forEach(walk);
     }
@@ -98,6 +141,7 @@ function caretToTextOffset(root: HTMLElement, node: Node, offset: number): numbe
     }
     if (n.nodeType === Node.TEXT_NODE) { pos += (n.nodeValue ?? '').length; return; }
     if (n instanceof HTMLElement && n.dataset?.mentionLabel) { pos += `@${n.dataset.mentionLabel} `.length; return; }
+    if (n instanceof HTMLElement && n.dataset?.tokenText !== undefined) { pos += n.dataset.tokenText.length; return; }
     n.childNodes.forEach(walk);
   };
   walk(root);
@@ -107,6 +151,7 @@ function caretToTextOffset(root: HTMLElement, node: Node, offset: number): numbe
 function nodeTextLength(n: Node): number {
   if (n.nodeType === Node.TEXT_NODE) return (n.nodeValue ?? '').length;
   if (n instanceof HTMLElement && n.dataset?.mentionLabel) return `@${n.dataset.mentionLabel} `.length;
+  if (n instanceof HTMLElement && n.dataset?.tokenText !== undefined) return n.dataset.tokenText.length;
   let len = 0;
   n.childNodes.forEach((c) => { len += nodeTextLength(c); });
   return len;
@@ -132,6 +177,10 @@ function setCaretByTextOffset(root: HTMLElement, textOffset: number): void {
     }
     if (n instanceof HTMLElement && n.dataset?.mentionLabel) {
       pos += `@${n.dataset.mentionLabel} `.length;
+      return;
+    }
+    if (n instanceof HTMLElement && n.dataset?.tokenText !== undefined) {
+      pos += n.dataset.tokenText.length;
       return;
     }
     n.childNodes.forEach(walk);
@@ -264,7 +313,69 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
   const skipDetectOnceRef = useRef(false);
   const focusRestoreRef = useRef(false);
 
+  /**
+   * 撤销/重做栈（2026-11-07 用户反馈：提示词里删主体 / 删文本后无法撤销）。
+   * 浏览器原生 undo 被 beforeinput 拦截（它会结构性回滚 React 拥有的节点），
+   * 所以这里在文本模型上维护自己的历史：顶 = 当前值；700ms 内的连续输入合并为一步。
+   */
+  const historyRef = useRef<{ stack: Array<{ text: string; caret: number }>; future: Array<{ text: string; caret: number }>; lastAt: number }>({
+    stack: [{ text: value, caret: value.length }], future: [], lastAt: 0,
+  });
+
   useEffect(() => { ensurePlaceholderStyle(); }, []);
+
+  /** 唯一提交入口：记录历史 → 通知宿主（所有编辑路径都走这里，撤销才覆盖得到） */
+  const emitChange = useCallback((next: string, caret: number) => {
+    const h = historyRef.current;
+    const top = h.stack[h.stack.length - 1];
+    if (top && top.text === next) {
+      onChange(next, caret);
+      return;
+    }
+    const now = Date.now();
+    h.future = [];
+    if (h.stack.length > 1 && now - h.lastAt < 700) {
+      // 连续输入合并：只更新当前步，撤销回到这段输入之前
+      h.stack[h.stack.length - 1] = { text: next, caret };
+    } else {
+      h.stack.push({ text: next, caret });
+      if (h.stack.length > 200) h.stack.shift();
+    }
+    h.lastAt = now;
+    onChange(next, caret);
+  }, [onChange]);
+
+  const undo = useCallback(() => {
+    const h = historyRef.current;
+    if (h.stack.length <= 1) return;
+    const current = h.stack.pop()!;
+    h.future.push(current);
+    h.lastAt = 0;
+    const prev = h.stack[h.stack.length - 1]!;
+    caretRef.current = prev.caret;
+    onChange(prev.text, prev.caret);
+  }, [onChange]);
+
+  const redo = useCallback(() => {
+    const h = historyRef.current;
+    const next = h.future.pop();
+    if (!next) return;
+    h.stack.push(next);
+    h.lastAt = 0;
+    caretRef.current = next.caret;
+    onChange(next.text, next.caret);
+  }, [onChange]);
+
+  // 外部改动（面板插入 @ / 槽位降级 / 宿主重置）也入历史：撤销能回到上一次内容
+  useEffect(() => {
+    const h = historyRef.current;
+    const top = h.stack[h.stack.length - 1];
+    if (top?.text === value) return;
+    h.stack.push({ text: value, caret: value.length });
+    if (h.stack.length > 200) h.stack.shift();
+    h.future = [];
+    h.lastAt = 0;
+  }, [value]);
 
   const commitFromDom = useCallback((): boolean => {
     const root = rootRef.current;
@@ -278,12 +389,12 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
     }
     caretRef.current = caret;
     if (text !== valueRef.current) {
-      onChange(text, caret);
+      emitChange(text, caret);
       if (text.slice(0, caret).endsWith('@')) onMentionTrigger?.();
       return true;
     }
     return false;
-  }, [onChange, onMentionTrigger]);
+  }, [emitChange, onMentionTrigger]);
 
   /**
    * DOM 损伤检测 + epoch 重挂自愈。判据：
@@ -347,17 +458,17 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
     const current = value ?? '';
     const match = re.exec(current);
     if (!match) return;
-    onChange(current.replace(re, ''), match.index);
+    emitChange(current.replace(re, ''), match.index);
     setMentionPreview(null);
-  }, [value, onChange]);
+  }, [value, emitChange]);
 
   const insertAt = useCallback((text: string, caret: number) => {
     const base = valueRef.current;
     const at = Math.max(0, Math.min(base.length, caret));
     const next = `${base.slice(0, at)}${text}${base.slice(at)}`;
     caretRef.current = at + text.length;
-    onChange(next, at + text.length);
-  }, [onChange]);
+    emitChange(next, at + text.length);
+  }, [emitChange]);
 
   /**
    * 拖拽落区（2026-11-05 用户指令：导演台插槽拖进提示词区自动填入 @内容）：
@@ -446,9 +557,9 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
       caret = from;
     }
     caretRef.current = caret;
-    if (next !== valueRef.current) onChange(next, caret);
+    if (next !== valueRef.current) emitChange(next, caret);
     if (next.slice(0, caret).endsWith('@')) onMentionTrigger?.();
-  }, [onChange, onMentionTrigger]);
+  }, [emitChange, onMentionTrigger]);
 
   // 原生监听（React 18 合成 onBeforeInput 是 polyfill，不可用）；ref 转发最新 handler，domEpoch 重挂后重绑
   const beforeInputRef = useRef(handleBeforeInput);
@@ -476,7 +587,7 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
     }
     const next = `${base.slice(0, caret)}${text}${base.slice(caret)}`;
     caretRef.current = caret + text.length;
-    onChange(next, caret + text.length);
+    emitChange(next, caret + text.length);
   }, [onChange]);
 
   const handleCompositionStart = useCallback((_e: ReactCompositionEvent<HTMLDivElement>) => {
@@ -501,6 +612,19 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
       data-placeholder={placeholder}
       onInput={() => { if (!composingRef.current) commitFromDom(); }}
       onPaste={handlePaste}
+      onKeyDown={(e) => {
+        // 2026-11-07 用户指令：删主体 / 删文本要能撤销。
+        // 浏览器原生 undo 已被 beforeinput 拦截（会结构回滚 React 节点），这里走文本模型历史栈。
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) redo(); else undo();
+        } else if (key === 'y') {
+          e.preventDefault();
+          redo();
+        }
+      }}
       onCompositionStart={handleCompositionStart}
       onCompositionEnd={handleCompositionEnd}
       onDragOver={(e) => {
@@ -532,6 +656,72 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
     >
       {segments.map((seg, i) => {
         if (seg.type === 'text') return <span key={i} data-mention-owned="">{seg.text}</span>;
+        // `<Subject N>`：官方四段式的主体定义标记，原子块（序列化按 data-token-text 原样还原）
+        if (seg.type === 'subject') {
+          return (
+            <span
+              key={i}
+              data-mention-owned=""
+              data-prompt-token="subject"
+              data-prompt-subject={seg.n}
+              data-token-text={seg.text}
+              contentEditable={false}
+              style={{
+                display: 'inline-block', padding: '0 4px', margin: '0 1px', borderRadius: 4,
+                background: 'rgba(59,130,246,0.14)', color: '#3b82f6',
+                fontSize: 12, lineHeight: '18px', verticalAlign: '-3px', whiteSpace: 'nowrap', userSelect: 'none',
+              }}
+            >
+              {seg.text}
+            </span>
+          );
+        }
+        // `[Shot N]`：官方四段式的镜头段落标记，原子块（序列化按 data-token-text 原样还原）
+        if (seg.type === 'shot') {
+          return (
+            <span
+              key={i}
+              data-mention-owned=""
+              data-prompt-token="shot"
+              data-prompt-shot={seg.n}
+              data-token-text={seg.text}
+              contentEditable={false}
+              style={{
+                display: 'inline-block', padding: '0 4px', margin: '0 1px', borderRadius: 4,
+                background: 'rgba(139,92,246,0.16)', color: '#8b5cf6',
+                fontSize: 12, lineHeight: '18px', verticalAlign: '-3px', whiteSpace: 'nowrap', userSelect: 'none',
+              }}
+            >
+              {seg.text}
+            </span>
+          );
+        }
+        // `<d>…</d>`：台词段整体着色，内文仍可编辑（参与文本模型）
+        if (seg.type === 'dialogue') {          return (
+            <span
+              key={i}
+              data-mention-owned=""
+              data-prompt-token="dialogue"
+              style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981', borderRadius: 3, padding: '0 1px' }}
+            >
+              {seg.text}
+            </span>
+          );
+        }
+        // 四段式小节标签：行首小标题样式（文字仍是正文，序列化不变）
+        if (seg.type === 'heading') {
+          return (
+            <span
+              key={i}
+              data-mention-owned=""
+              data-prompt-token="heading"
+              data-prompt-heading={seg.text}
+              style={{ fontWeight: 600, fontSize: 12, letterSpacing: '0.4px', opacity: 0.9 }}
+            >
+              {seg.text}
+            </span>
+          );
+        }
         const slot = resolveSlot(seg.label);
         const Icon = slot ? KIND_ICON[slot.kind] : ImageIcon;
         return (

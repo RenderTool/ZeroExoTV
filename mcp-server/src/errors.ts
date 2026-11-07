@@ -44,3 +44,13 @@ export function okResult(data: unknown) {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
   };
 }
+
+/** MCP 原生图片内容块（模型可直接看到图片，而不是一串 base64 文本）。 */
+export interface McpImageResult {
+  __mcpContent: true;
+  content: Array<{ type: "image"; data: string; mimeType: string }>;
+}
+
+export function imageResult(data: string, mimeType: string): McpImageResult {
+  return { __mcpContent: true, content: [{ type: "image", data, mimeType }] };
+}

@@ -11,13 +11,14 @@ import type { NodeRecord, NodeTypeExtension } from '@zeroexo/core';
 import type { ImageNodeData, VideoNodeData, AudioNodeData } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview } from '@zeroexo/plugin-nodes';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, assembleGeneratorPrompt, collectGeneratorTextSources, contentToDataUrl, buildTemplateParams } from './ai-generation-utils.js';
 import { CanvasOpExecutor } from './canvas-op-executor.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
+import { LOCAL_VIDEO_MODEL_KEY, generateLocalMiniMaxVideo } from './local-minimax-video.js';
 // 本地版（Plan#83）：生成任务原本走后端 Agent 调度（agentClient.send + SSE）。
 // 直接负本地渠道（ComfyUI / 外接 API）的提交链路属 Phase 2 T2.4，尚未接入；
 import type { AgentTaskHandlers } from '../agent-client-types.js';
@@ -250,6 +251,31 @@ export function useAiGeneration({
   const triggerAutoLayoutAndFocusRef = useRef(triggerAutoLayoutAndFocus);
   triggerAutoLayoutAndFocusRef.current = triggerAutoLayoutAndFocus;
 
+  // 2026-11-07 旧数据清理：早期走外部渠道失败时，把「请先配置 API Key / 连续多次失败」写进了
+  // node.data.errorDetails 并持久化，改代码后节点仍显示旧错误。打开画布时清掉这类线上遗留错误。
+  useEffect(() => {
+    const store = refs.store;
+    const queue = refs.commandQueue;
+    if (!store || !queue) return;
+    const clean = (): void => {
+      for (const node of store.getGraph().nodes) {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        if (data.status !== 'error') continue;
+        const details = typeof data.errorDetails === 'string' ? data.errorDetails : '';
+        const stale = details.includes('请先配置 API Key') || details.includes('AI 渠道检查 API Key') || details.includes('连续多次失败');
+        if (!stale) continue;
+        queue.execute(new UpdateNodeDataCommand(node.id, {
+          status: 'idle',
+          errorDetails: undefined,
+          errorType: undefined,
+        } as Record<string, unknown>));
+      }
+    };
+    clean(); // 图可能异步恢复：挂载时先清一次，之后每次图变化再清（清完即无命中）
+    const unsub = store.subscribeGraph(clean);
+    return unsub;
+  }, [refs.store, refs.commandQueue]);
+
   const handlePromptGenerate = useCallback(
     async (nodeId: string, mode: GenerationMode, prompt: string): Promise<void> => {
       const provider = refs.aiProvider;
@@ -263,6 +289,10 @@ export function useAiGeneration({
       const nodeRec = refs.store.getGraph().nodes.find((n: any) => n.id === nodeId);
       const nodeData = (nodeRec?.data ?? {}) as Partial<ImageNodeData> & Partial<VideoNodeData> & Partial<AudioNodeData>;
       const modelValue = (nodeData?.model as string) ?? '';
+      const isLocalVideoModel = modelValue === LOCAL_VIDEO_MODEL_KEY
+        || modelValue.startsWith('zeroexo:')
+        // 没选模型（无 AI 渠道时下拉可能只展示本机项）也走本机，避免落到外部 provider 报「请先配置 API Key」
+        || (!modelValue && mode === 'video');
       const taskLabel = modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined;
 
       // G11: 使用 buildPrompt 拼接完整提示词(包含引用资源和节点配置)
@@ -289,6 +319,8 @@ export function useAiGeneration({
           taskLabel,
         } as Record<string, unknown>),
       );
+      // 新一次生成：先清掉上一次的实时预览帧
+      clearGeneratingPreview(nodeId);
       try {
         // 连线自动参考图(征集#51):连入本节点的图片自动作为参考图(图生图/图生视频),无需手动 @
         const refImages: string[] = [];
@@ -391,20 +423,38 @@ export function useAiGeneration({
           triggerAutoLayoutAndFocusRef.current([nodeId]);
         } else if (mode === 'video') {
           const data = nodeData;
-          const result = await provider.generateVideo({
-            prompt: fullPrompt,
-            model: (data?.model as string) ?? 'sora-2',
-            params,
-            size: fallback.size,
-            seconds: fallback.seconds!,
-            vquality: fallback.vquality!,
-            generateAudio: fallback.generateAudio!,
-            watermark: fallback.watermark!,
-            returnLastFrame: fallback.returnLastFrame!,
-            referenceImages: refImages.length > 0 ? refImages : undefined,
-            inputs: inputRefs,
-            signal: ctl.signal,
-          });
+          // 本机 MiniMax H3：不走 OpenAI 渠道，直接提交 /zeroexo/v1/jobs（单段参考生视频）
+          const result = isLocalVideoModel
+            ? await generateLocalMiniMaxVideo({
+                prompt: fullPrompt,
+                referenceImages: refImages.length > 0 ? refImages : undefined,
+                size: fallback.size,
+                seconds: fallback.seconds ?? 5,
+                params,
+                nodeId,
+                onPreview: (frame) => {
+                  if (frame.image) setGeneratingPreview(nodeId, frame.image);
+                },
+                signal: ctl.signal,
+              }).catch((err: unknown) => {
+                // 本机链路失败不归类成「服务商」：连接/执行问题统一按网络错误呈现
+                if (err instanceof Error && err.name === 'AbortError') throw err;
+                throw new AiError('NETWORK_ERROR', err instanceof Error ? err.message : String(err));
+              })
+            : await provider.generateVideo({
+                prompt: fullPrompt,
+                model: (data?.model as string) ?? 'sora-2',
+                params,
+                size: fallback.size,
+                seconds: fallback.seconds!,
+                vquality: fallback.vquality!,
+                generateAudio: fallback.generateAudio!,
+                watermark: fallback.watermark!,
+                returnLastFrame: fallback.returnLastFrame!,
+                referenceImages: refImages.length > 0 ? refImages : undefined,
+                inputs: inputRefs,
+                signal: ctl.signal,
+              });
           const url = URL.createObjectURL(result.blob);
           refs.commandQueue.execute(
             new UpdateNodeDataCommand(nodeId, {
@@ -536,12 +586,6 @@ export function useAiGeneration({
           ? err.errorType
           : classifyError(err);
         let message = err instanceof Error ? err.message : String(err);
-        // 连续失败计数 + 提示
-        const failCount = (nodeFailureCountRef.current.get(nodeId) ?? 0) + 1;
-        nodeFailureCountRef.current.set(nodeId, failCount);
-        if (failCount >= 3) {
-          message = `${message}\n\n${t('nodes.checkApiKeyHint')}`;
-        }
         refs.commandQueue.execute(
           new UpdateNodeDataCommand(nodeId, {
             status: 'error',
@@ -550,6 +594,8 @@ export function useAiGeneration({
           } as Record<string, unknown>),
         );
       } finally {
+        // 生成结束（成功/失败/取消）：清掉实时预览帧，节点回到成品或错误态
+        clearGeneratingPreview(nodeId);
         // 清理 AbortController(仅当仍是当前这个)
         if (nodeAbortControllersRef.current.get(nodeId) === ctl) {
           nodeAbortControllersRef.current.delete(nodeId);

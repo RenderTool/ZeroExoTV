@@ -71,6 +71,7 @@ const RUNNING_STATUS = {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  window.sessionStorage.clear(); // 刷新续接用 sessionStorage：用例之间必须隔离
   mockedStart.mockResolvedValue({ jobId: 'job-1', segmentShotIds: ['s1', 's2', 's3'], totalFrames: 90, warnings: [] });
   mockedStatus.mockResolvedValue(RUNNING_STATUS);
   mockedCancel.mockResolvedValue();
@@ -79,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
+  window.sessionStorage.clear();
 });
 
 async function startAndWaitRunning(callbacks: DirectorRunCallbacks) {
@@ -171,5 +173,72 @@ describe('取消路径：段状态回写', () => {
     });
 
     expect(hook.result.current.phase).toBe('canceled');
+  });
+});
+
+describe('刷新续接：生成中刷新页面不丢作业', () => {  const KEY = 'zeroexo.directorRun.active';
+
+  it('mount 时读到进行中的作业 → 恢复 running 并继续轮询（不重新提交）', async () => {
+    window.sessionStorage.setItem(KEY, JSON.stringify({
+      mode: 'openai', jobId: 'job-1', segmentShotIds: ['s1', 's2', 's3'], projectId: 'p1', at: Date.now(),
+    }));
+    mockedStatus.mockResolvedValue(RUNNING_STATUS);
+    const cbs = makeCallbacks();
+    const hook = renderHook(() => useDirectorRun({
+      getBridgeConfig: () => ({ mode: 'openai', channel: CHANNEL }),
+      callbacks: cbs,
+      pollIntervalMs: 50,
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(120); });
+
+    expect(mockedStart).not.toHaveBeenCalled(); // 只恢复跟踪，不重新提交
+    expect(mockedStatus).toHaveBeenCalled();
+    expect(hook.result.current.phase).toBe('running');
+    expect(hook.result.current.totalCount).toBe(3);
+    expect(hook.result.current.segmentShotIds).toEqual(['s1', 's2', 's3']);
+  });
+
+  it('过期记录（>6h）不恢复，并清掉', async () => {
+    window.sessionStorage.setItem(KEY, JSON.stringify({
+      mode: 'openai', jobId: 'job-old', segmentShotIds: ['s1'], projectId: 'p1', at: Date.now() - 7 * 3600_000,
+    }));
+    const hook = renderHook(() => useDirectorRun({
+      getBridgeConfig: () => ({ mode: 'openai', channel: CHANNEL }),
+      callbacks: makeCallbacks(),
+      pollIntervalMs: 50,
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); });
+    expect(hook.result.current.phase).toBe('idle');
+    expect(mockedStatus).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('取消后清掉续接记录（下次刷新不再复活）', async () => {
+    const cbs = makeCallbacks();
+    const hook = await startAndWaitRunning(cbs);
+    expect(window.sessionStorage.getItem(KEY)).toBeTruthy();
+    await act(async () => { await hook.result.current.cancel(); });
+    expect(window.sessionStorage.getItem(KEY)).toBeNull();
+  });
+});
+
+describe('任务中断：作业不存在（ComfyUI 重启/队列清空）', () => {
+  it('状态查询 404 → 未完成段回写 interrupted，整单落 error，不再停在生成中', async () => {
+    mockedStatus.mockRejectedValue(new Error('HTTP 404: Unknown jobId: job-1'));
+    const cbs = makeCallbacks();
+    const hook = await startAndWaitRunning(cbs);
+
+    // 未完成段全部降级为 interrupted（已完成段不受影响）
+    const interrupted = cbs.onSegmentState.mock.calls.filter(([, s]) => s === 'interrupted').map(([id]) => id);
+    expect(interrupted.sort()).toEqual(['s1', 's2', 's3']);
+    expect(hook.result.current.phase).toBe('error');
+    expect(String(hook.result.current.error)).toContain('任务已中断');
+
+    // 轮询已停：继续推进时间不再发查询
+    const callsAfter = mockedStatus.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(mockedStatus.mock.calls.length).toBe(callsAfter);
+    // 续接记录被清掉，刷新后不会复活一个死作业
+    expect(window.sessionStorage.getItem('zeroexo.directorRun.active')).toBeNull();
   });
 });

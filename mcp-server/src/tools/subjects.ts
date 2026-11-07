@@ -87,6 +87,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       shotId: z.string(),
       subjectId: z.string().optional(),
       matchByName: z.string().optional(),
+      /** 指定主体的状态图（stateTag，如「美艳」「恶鬼」）；缺省用封面图 */
+      state: z.string().optional(),
       dryRun: z.boolean().optional(),
     },
     handler: async (args) => {
@@ -101,8 +103,13 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       const res = await linkSubjectToShot(dataRoot(), args.projectId, {
         baseVersion: args.baseVersion,
         shotId: args.shotId,
-        subjectId: args.subjectId,
-        subjectName: subject.name,
+        subject: {
+          id: subject.id,
+          name: subject.name,
+          images: subject.images ?? [],
+          coverKey: subject.coverKey,
+        },
+        state: args.state,
         dryRun: args.dryRun,
       });
       return { written: res.written, version: res.after.version, ref: res.ref };

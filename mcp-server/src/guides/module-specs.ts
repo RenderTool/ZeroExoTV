@@ -120,13 +120,15 @@ export const MODULE_SPECS: ModuleSpec[] = [
       "episodeId（读取指定剧集；缺省读 activeEpisodeId）",
       "title（新剧集标题；缺省「第N集」，number 自动 = max+1）",
       "content（初始正文；正文一般不手写，走 script 模块导入）",
+      "logline / tags / publishNote（set_episode_meta 写本集信息卡：一句话介绍 / 推荐标签 / 发布建议）",
     ],
     order: 2,
     stage: 2,
-    mcpTools: ["list_episodes", "get_script", "create_episode"],
+    mcpTools: ["list_episodes", "get_script", "create_episode", "update_episode", "patch_episode", "merge_episode", "set_episode_meta", "set_script_meta"],
     caveats: [
       "前置阶段2 转剧本：get_script 的 version 是剧本写操作 baseVersion 的唯一来源（gate：mode 未确认不得 import）",
       "剧本正文优先走 script 模块（normalize_script / import_script）导入，不手敲 HTML",
+      "本集信息卡（set_episode_meta）是剧本页右侧抽屉展示的发布信息，不写进正文",
     ],
   },
   {
@@ -170,7 +172,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     optionalInputs: [
       "aliases 别名数组（剧本内多个称呼归并到同一主体）",
       "episodeIds 关联剧集",
-      "状态图：先 upload_asset 拿 storageKey，再 set_subject_image 挂 images[]（stateTag=状态名，如「定妆」）",
+      "状态图：先 upload_asset 拿 storageKey，再 set_subject_image 挂 images[]（stateTag=状态名，如「定妆」）；画布里的图先 import_media_to_cas 转 CAS",
     ],
     order: 4,
     stage: 3,
@@ -200,7 +202,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     ],
     order: 5,
     stage: 3,
-    mcpTools: ["list_assets", "upload_asset", "attach_asset_to_slot", "ingest_storyboard_images"],
+    mcpTools: ["list_assets", "upload_asset", "attach_asset_to_slot", "read_asset", "import_media_to_cas", "ingest_storyboard_images"],
     caveats: [
       "前置阶段3 提主体 / 阶段4 拆分镜：状态图挂主体属阶段3（用户补图确认后），槽位挂片段属阶段4（拆分镜落盘后）；gate：无 storageKey 不得挂",
       "upload_asset 返回 storageKey='cas:<hash>.<ext>'，是 set_subject_image / attach_asset_to_slot 的唯一钥匙",

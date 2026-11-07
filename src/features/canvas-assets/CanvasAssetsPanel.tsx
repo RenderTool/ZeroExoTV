@@ -12,7 +12,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { History, Layers, Package, PackageOpen } from 'lucide-react';
+import { History, Layers, Package, PackageOpen, FileText } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { GroupPlugin } from '@zeroexo/plugin-group';
@@ -24,6 +24,7 @@ import { MaterialGroup } from './groups/MaterialGroup.js';
 import { HistoryGroup } from './groups/HistoryGroup.js';
 import { HierarchyGroup } from './groups/HierarchyGroup.js';
 import { CanvasCopiesGroup } from './groups/CanvasCopiesGroup.js';
+import { ScriptMetaGroup } from './groups/ScriptMetaGroup.js';
 import { CANVAS_COPY_TAB_ICON } from '@/features/canvas-tabs/icons.js';
 import type { SendToCanvasItem } from './store.js';
 
@@ -51,6 +52,8 @@ const TAB_ICONS: Record<(typeof DRAWER_TAB_DEFS)[number]['key'], { icon: React.R
   material: { icon: <Package size={18} />, activeIcon: <PackageOpen size={18} /> },
   // 画布分组（征集#184）：画中画图标与顶部副本标签、工作区同一语义
   canvases: { icon: <CANVAS_COPY_TAB_ICON size={18} /> },
+  // 本剧信息（2026-11-07）：整部剧的一句话概述 + 标签，仅剧本/导演台模块挂载
+  scriptMeta: { icon: <FileText size={18} /> },
 };
 
 export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAssetsPanelProps): React.ReactElement {
@@ -98,6 +101,9 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
         ) : store.activeGroup === 'canvases' ? (
           // 项目下的画布列表（1 号主画布 + N 份副本），卡片形式复用主页 ProjectCard
           <CanvasCopiesGroup store={store} theme={theme} />
+        ) : store.activeGroup === 'scriptMeta' ? (
+          // 本剧信息（2026-11-07 用户指令）：整部剧一句话概述 + 推荐标签
+          <ScriptMetaGroup theme={theme} />
         ) : null}
       </div>
 

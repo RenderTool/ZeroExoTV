@@ -26,6 +26,7 @@ import type { Asset } from '@/features/asset-picker/index.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
 import { CategoryChips, EmptyState, PaginationBar, SCROLL_AREA_STYLE, ToolbarRow } from '../components/common.js';
+import { ThumbBadge } from '@/shared/ui/index.js';
 import {
   HISTORY_PAGE_SIZE,
   filterHistoryAssets,
@@ -181,20 +182,11 @@ function HistoryCard({ asset, visible, libraryHashes, onLocate, onPromote, onDow
             {isVideo ? <Film size={22} /> : <ImageIcon size={22} />}
           </div>
         )}
-        {/* 类型标签（左上角） */}
-        <span
-          style={{
-            position: 'absolute', top: 6, left: 6, zIndex: 2,
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            padding: '2px 6px', borderRadius: 6,
-            fontSize: 10, lineHeight: '14px',
-            background: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.9)',
-            color: isDark ? '#fff' : '#374151',
-          }}
-        >
+        {/* 类型标签（左上角）：与开源库/主体卡统一用 ThumbBadge（深色底白字） */}
+        <ThumbBadge style={{ position: 'absolute', top: 6, left: 6, zIndex: 2 }}>
           {isVideo ? <Film size={10} /> : <ImageIcon size={10} />}
           {isVideo ? t('assetLibrary.filterVideo', { defaultValue: '视频' }) : t('assetLibrary.filterImage', { defaultValue: '图片' })}
-        </span>
+        </ThumbBadge>
         {/* hover 操作（右下角）：定位 / 加入资产库 / 下载 */}
         <div
           style={{

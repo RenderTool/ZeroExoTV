@@ -36,17 +36,23 @@ export interface AutoLandInput {
   frames?: number;
 }
 
-export async function autoLandGenerationOutput(input: AutoLandInput): Promise<void> {
-  const projectId = getCurrentCanvasId();
-  if (!projectId || !input.content) return;
-  const res = await fetch(input.content);
-  if (!res.ok) return;
-  const blob = await res.blob();
-  if (!blob.size) return;
-  const staged = await stageCasUpload(blob, input.kind, { projectId });
+export interface AutoLandBlobInput extends Omit<AutoLandInput, 'content'> {
+  /** 产物 Blob（生成链路已拿到字节时直接落库，不经 blob URL） */
+  blob: Blob;
+  /** 归属项目（缺省取当前画布 id） */
+  projectId?: string;
+}
+
+/**
+ * 生成产物直接落库（Blob 版）：导演台每段落库后调用，历史分组才能看到「生成历史」。
+ * 与 autoLandGenerationOutput 同一套 CAS/资产记录纪律（origin='generation' 唯一判据）。
+ */
+export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<void> {
+  const projectId = input.projectId ?? getCurrentCanvasId();
+  if (!projectId || !input.blob.size) return;
+  const staged = await stageCasUpload(input.blob, input.kind, { projectId });
   // 同内容已有资产记录（用户已保存到素材 / 重复生成同一产物）→ 不重复建记录
   if (staged.dedupedExistingAsset) return;
-  // 来源自证标记：历史分组唯一判据 data.origin='generation'（手动上传路径永不写入）
   const generation = {
     jobId: input.jobId,
     provider: input.provider,
@@ -74,4 +80,14 @@ export async function autoLandGenerationOutput(input: AutoLandInput): Promise<vo
     },
     { source: 'autoland' },
   );
+}
+
+export async function autoLandGenerationOutput(input: AutoLandInput): Promise<void> {
+  const projectId = getCurrentCanvasId();
+  if (!projectId || !input.content) return;
+  const res = await fetch(input.content);
+  if (!res.ok) return;
+  const blob = await res.blob();
+  if (!blob.size) return;
+  await autoLandGenerationBlob({ ...input, blob, projectId });
 }

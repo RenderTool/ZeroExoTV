@@ -5,7 +5,7 @@
  * 从 use-editor-interactions.ts 按功能域拆分
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   AddNodeCommand,
   AddEdgeCommand,
@@ -16,9 +16,11 @@ import {
 } from '@zeroexo/core';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, type ReferenceItem } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, type ReferenceItem } from '@zeroexo/plugin-nodes';
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { generateLocalMiniMaxVideo } from '../interactions/local-minimax-video.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
@@ -66,6 +68,26 @@ export function useAgentBridgeHooks(
   nodeFailureCountRef: React.MutableRefObject<Map<string, number>>,
 ) {
   const { refs, aiConfig, addAssetToStore, t } = params;
+
+  // 清理旧数据：早期走外部渠道失败把「请先配置 API Key」写进 node.data，改成本机后仍会显示旧错误。
+  useEffect(() => {
+    const store = refs.store;
+    const queue = refs.commandQueue;
+    if (!store || !queue) return;
+    const clean = (): void => {
+      for (const node of store.getGraph().nodes) {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        if (data.status !== 'error') continue;
+        const details = typeof data.errorDetails === 'string' ? data.errorDetails : '';
+        if (!details.includes('请先配置 API Key') && !details.includes('AI 渠道检查 API Key') && !details.includes('连续多次失败')) continue;
+        queue.execute(new UpdateNodeDataCommand(node.id, {
+          status: 'idle', errorDetails: '', errorType: undefined,
+        } as Record<string, unknown>));
+      }
+    };
+    clean();
+    return store.subscribeGraph(clean);
+  }, [refs.store, refs.commandQueue]);
 
   /** 保存节点到素材库 */
   const handleSaveNodeAsset = useCallback(async (node: NodeRecord) => {
@@ -260,10 +282,15 @@ export function useAgentBridgeHooks(
       };
 
       const modelValue = (nodeData?.model as string) ?? '';
-      const taskLabel = modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined;
+      // 本机 H3ZeroExo：视频节点不经过外部 provider（否则没 API Key 就报「请先配置 API Key」）
+      const isLocalVideoModel = modelValue === LOCAL_VIDEO_MODEL_KEY
+        || modelValue.startsWith('zeroexo:')
+        || (!modelValue && mode === 'video');
+      const taskLabel = isLocalVideoModel ? LOCAL_VIDEO_MODEL_LABEL : (modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined);
       refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, {
         prompt, status: 'loading', errorDetails: undefined, errorType: undefined, taskLabel,
       } as any));
+      clearGeneratingPreview(nodeId);
 
       try {
         const { refImages, refVideos, refAudios, effectivePrompt } = await collectInputReferences(mentionedRefs, prompt);
@@ -327,7 +354,26 @@ export function useAgentBridgeHooks(
         } else if (mode === 'video') {
           const data = nodeData;
           const sizeStr = fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined;
-          const result = await provider.generateVideo({ prompt: effectivePrompt, model: (data?.model as string) ?? 'sora-2', params, size: sizeStr, seconds: fallback.seconds ?? 5, vquality: String(fallback.vquality ?? 5), generateAudio: fallback.generateAudio ?? true, watermark: false, returnLastFrame: params.returnLastFrame as boolean ?? true, referenceImages: refImages.length > 0 ? refImages : undefined, referenceVideos: refVideos.length > 0 ? refVideos : undefined, referenceAudios: refAudios.length > 0 ? refAudios : undefined, inputs: inputRefs, signal: ctl.signal });
+          // 本机链路：先用参考图垫底显示，随后被引擎推送的采样帧替换（首帧预览不空白）
+          if (isLocalVideoModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!);
+          const result = isLocalVideoModel
+            ? await generateLocalMiniMaxVideo({
+                prompt: effectivePrompt,
+                referenceImages: refImages.length > 0 ? refImages : undefined,
+                size: sizeStr,
+                seconds: fallback.seconds ?? 5,
+                params,
+                nodeId,
+                onPreview: (frame) => {
+                  if (frame.image) setGeneratingPreview(nodeId, frame.image);
+                },
+                signal: ctl.signal,
+              }).catch((err: unknown) => {
+                // 本机链路失败按网络错误呈现，不再归到「服务商/API Key」
+                if (err instanceof Error && err.name === 'AbortError') throw err;
+                throw new AiError('NETWORK_ERROR', err instanceof Error ? err.message : String(err));
+              })
+            : await provider.generateVideo({ prompt: effectivePrompt, model: (data?.model as string) ?? 'sora-2', params, size: sizeStr, seconds: fallback.seconds ?? 5, vquality: String(fallback.vquality ?? 5), generateAudio: fallback.generateAudio ?? true, watermark: false, returnLastFrame: params.returnLastFrame as boolean ?? true, referenceImages: refImages.length > 0 ? refImages : undefined, referenceVideos: refVideos.length > 0 ? refVideos : undefined, referenceAudios: refAudios.length > 0 ? refAudios : undefined, inputs: inputRefs, signal: ctl.signal });
           const url = URL.createObjectURL(result.blob);
           applyResult({ content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height, durationMs: result.durationMs, mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId, errorDetails: undefined, errorType: undefined } as any, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
           // Plan#69: 产物已由后端自动落 Asset 素材库,事件仅通知抽屉刷新产出历史(不再传 blob URL)
@@ -381,12 +427,10 @@ export function useAgentBridgeHooks(
           return;
         }
         const errorType: AiErrorType = err instanceof AiError ? err.errorType : classifyError(err);
-        let msg = err instanceof Error ? err.message : String(err);
-        const failCount = (nodeFailureCountRef.current.get(nodeId) ?? 0) + 1;
-        nodeFailureCountRef.current.set(nodeId, failCount);
-        if (failCount >= 3) msg = `${msg}\n\n${t('nodes.checkApiKeyHint')}`;
+        const msg = err instanceof Error ? err.message : String(err);
         refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'error', errorDetails: msg, errorType } as any));
       } finally {
+        clearGeneratingPreview(nodeId);
         if (nodeAbortControllersRef.current.get(nodeId) === ctl) nodeAbortControllersRef.current.delete(nodeId);
       }
     },

@@ -279,10 +279,20 @@ async function rebuildMissingAssetsFromCasIndex(existing: Asset[]): Promise<Asse
   const rebuilt: Asset[] = [];
   const manifestItems: Array<{ id: string; hash: string; kind: string; projectId: string }> = [];
   for (const [hash, entry] of Object.entries(index.entries)) {
+    // 主体状态图已持有该 CAS（同一内容有 subject-state 引用）→ 素材库不重建：
+    // 一张定妆/宫格图只能出现在主体库，复活到素材页 = 同一张图两处显示（2026-11-07 回归）。
+    const ownedBySubject = entry.refs.some((r) => r.assetId.startsWith('subject-state:'));
+    if (ownedBySubject) continue;
     for (const ref of entry.refs) {
       if (presentIds.has(ref.assetId)) continue;
       if (ref.assetId.startsWith('openlib:')) continue; // 开源合成 id：设计上无记录，不得自愈复活
+      // 主体状态图引用（subject-state:<rootId>/<state>）不是素材库条目：
+      // 主体库自己展示它，自愈复活会把它同时塞进「素材」页（一张定妆图出现两次）
+      if (ref.assetId.startsWith('subject-state:')) continue;
       if (!(ref.kind in REBUILD_KIND_LABEL)) continue; // 只重建有实体文件的媒体记录
+      // 归属项目已不存在（如项目被删/索引残留）→ 不重建：把孤儿资产塞进公共库会让
+      // 素材页出现一堆「恢复的图片·hash」垃圾（2026-11-07 用户指令：公共资产不允许这种残留）。
+      if (ref.projectId && ref.projectId !== 'library' && !knownProjectIds.has(ref.projectId)) continue;
       const storageKey = casStorageKey(hash, entry.ext);
       if (presentKeys.has(storageKey)) continue; // 同内容已有别的记录，不造孪生
       // 铁律：只恢复物理文件确实存在的条目

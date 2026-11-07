@@ -28,6 +28,7 @@ import {
   statusBgColor,
   type TimelineClipData,
 } from './timeline-constants.js';
+import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS.js';
 
 // 2026-11-05 导演台卡片：generating 亮度脉冲 + 六态徽标绿点脉冲 + 播放键 hover 提亮
 // （模块级注入一次；不碰 transform/boxShadow，避免与选中/拖拽样式冲突）
@@ -289,7 +290,8 @@ export const TimelineClip = memo(function TimelineClip({
         top: TRACK_CLIP_TOP - (isSelected ? 2 : 0),
         width: clip.width,
         height: cardHeight,
-        borderRadius: CLIP_BORDER_RADIUS,
+        // 2026-11-07 用户指令：导演台卡片圆角与画布/提示词面板同一个 WORKSPACE_SURFACE_RADIUS
+        borderRadius: WORKSPACE_SURFACE_RADIUS,
         border: `1px solid ${isSelected ? tone.selectedBorder : hovered ? tone.cardHoverBorder : tone.cardBorder}`,
         // 选中 = 细亮描边（outline 内缩 1px，避免贴边被滚动容器裁切）+ 柔和外发光 + 2px 抬高
         outline: isSelected ? `1px solid ${tone.selectedOutline}` : 'none',

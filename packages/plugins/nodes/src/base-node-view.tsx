@@ -243,6 +243,8 @@ export interface AIStateViewProps {
   onCancel?: () => void;
   /** 生成中骨架类型: media(图片/视频/音频)/text(文本)——视觉已统一为分镜同款骨架（脉冲点+阶段文案+shimmer 行） */
   skeleton?: 'media' | 'text';
+  /** 生成中实时预览帧（dataURL；有则铺在骨架上，弱化后作为「带预览的生成中」） */
+  previewImage?: string;
   /** 骨架阶段文案类型（与生成物一致；禁止用分镜文案渲染图片/视频生成） */
   skeletonKind?: GenLoaderKind;
   /** 成功状态内容(由派生节点提供) */
@@ -389,6 +391,7 @@ export function AIStateView({
   onRetry,
   onCancel,
   skeleton,
+  previewImage,
   skeletonKind,
   children,
 }: AIStateViewProps): React.ReactElement {
@@ -398,6 +401,24 @@ export function AIStateView({
     const spinId = `ze-ai-spin-${accentColor.replace('#', '')}`;
     return (
       <div style={{ ...aiContainerStyle, background: backgroundColor, gap: 10, position: 'relative' }}>
+        {/* 实时预览：把采样中的帧铺满节点，骨架叠在上面（弱化但不遮死） */}
+        {previewImage ? (
+          <img
+            src={previewImage}
+            alt=""
+            data-generating-preview
+            draggable={false}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              opacity: 0.9,
+              pointerEvents: 'none',
+            }}
+          />
+        ) : null}
         {/* 半透明遮罩,弱化旧内容,强调生成中 */}
         <div
           style={{

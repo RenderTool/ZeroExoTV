@@ -48,6 +48,11 @@ export async function applyConnectionResult(
     return { bridgeMissing: false };
   }
   ep.markTested(result.address, result.backend, result.models);
+  if (result.backend === 'zeroexo') {
+    // 重写版插件（/zeroexo/v1/jobs）：不依赖桥接模型四件套，直接视为可运行
+    prefs.setConnected(true);
+    return { bridgeMissing: false };
+  }
   if (result.backend !== 'direct') {
     prefs.setConnected(false); // 兼容口模式不启用直连运行态
     return { bridgeMissing: false };

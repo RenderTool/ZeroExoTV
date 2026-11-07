@@ -9,6 +9,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { paths } from "../config.js";
+import { appendAssetRecord, assetTitleFromFilename } from "./asset-library.js";
 import { readJsonIfExists, updateUnversionedJson } from "./fs-node.js";
 
 export interface CasRef {
@@ -53,11 +54,22 @@ export interface UploadResult {
   size: number;
   dedup: boolean;
   refCount: number;
+  assetId: string;
 }
 
 export async function uploadToCas(
   root: string,
-  input: { projectId: string; filename: string; dataBase64: string; mime: string },
+  input: {
+    projectId: string;
+    filename: string;
+    dataBase64: string;
+    mime: string;
+    title?: string;
+    /** 进素材库（素材页可见）。默认 false：主体状态图只落 CAS，由主体库引用 */
+    toLibrary?: boolean;
+    /** CAS 记账的 ref 身份（主体图传 subject-state:<subjectId>/<state>，与前端一致） */
+    refId?: string;
+  },
 ): Promise<UploadResult> {
   const buf = Buffer.from(input.dataBase64, "base64");
   const hash = crypto.createHash("sha256").update(buf).digest("hex");
@@ -73,7 +85,7 @@ export async function uploadToCas(
     await fs.writeFile(absPath, buf);
   }
 
-  const assetId = `asset-${crypto.randomBytes(6).toString("hex")}`;
+  const assetId = input.refId ?? `asset-${crypto.randomBytes(6).toString("hex")}`;
   await updateUnversionedJson<CasIndex>(paths.casIndex(root), {
     mutate: (idx) => {
       const next: CasIndex = idx ?? { schemaVersion: 1, entries: {} };
@@ -96,6 +108,27 @@ export async function uploadToCas(
     },
   });
 
+  // 素材页读的是资产记录：只有显式 toLibrary 才建记录。
+  // 主体状态图只落 CAS + subject-state ref（与前端 subject-state-media 同口径），
+  // 否则同一张定妆图会在「主体库」和「素材」里各出现一次。
+  if (input.toLibrary) {
+    await appendAssetRecord(root, {
+      id: assetId,
+      title: input.title?.trim() || assetTitleFromFilename(input.filename),
+      kind: input.mime.split("/")[0] ?? "image",
+      tags: [],
+      bytes: buf.length,
+      mimeType: input.mime,
+      createdAt: new Date().toISOString(),
+      data: { kind: input.mime.split("/")[0] ?? "image", storageKey: `cas:${hash}.${ext}` },
+      cas: { hash, ext },
+      folderId: null,
+      favorite: false,
+      scope: "project",
+      projectId: input.projectId,
+    });
+  }
+
   const after = await readCasIndex(root);
   return {
     hash,
@@ -103,6 +136,7 @@ export async function uploadToCas(
     size: buf.length,
     dedup,
     refCount: after.entries[hash]?.refCount ?? 1,
+    assetId,
   };
 }
 

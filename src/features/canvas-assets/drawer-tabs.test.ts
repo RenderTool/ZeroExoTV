@@ -16,23 +16,28 @@ import { DRAWER_TAB_DEFS, DRAWER_MODULE_GROUPS, resolveDrawerModule } from './ta
 const readSrc = (rel: string): string => readFileSync(resolve(process.cwd(), rel), 'utf-8');
 
 describe('抽屉页签顺序（资产置顶）', () => {
-  it('顺序固定为 资产 → 历史 → 层级 → 画布', () => {
-    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'history', 'hierarchy', 'canvases']);
+  it('顺序固定为 资产 → 历史 → 层级 → 画布 → 本剧信息', () => {
+    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'history', 'hierarchy', 'canvases', 'scriptMeta']);
   });
 });
 
 describe('按模块独立挂载（层级/子画布只在画布模块）', () => {
-  it('画布模块含全部分组（副本画布页签同属画布模块）', () => {
+  it('画布模块含画布专属分组，不含本剧信息', () => {
     expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['material', 'history', 'hierarchy', 'canvases']);
     expect(resolveDrawerModule('canvas')).toBe('canvas');
     expect(resolveDrawerModule('canvas:sc123')).toBe('canvas');
   });
 
-  it('剧本/主体库/导演台模块只有 资产/历史', () => {
-    for (const key of ['script:p1', 'script', 'storyboard:node-1', 'storyboard', 'workbench:node-2', 'workbench']) {
+  it('剧本/导演台模块 = 资产/历史/本剧信息（项目级信息，两个阶段共用）', () => {
+    for (const key of ['script:p1', 'script', 'workbench:node-2', 'workbench']) {
       const module = resolveDrawerModule(key);
-      expect(module).not.toBe('canvas');
-      expect([...DRAWER_MODULE_GROUPS[module]]).toEqual(['material', 'history']);
+      expect([...DRAWER_MODULE_GROUPS[module]]).toEqual(['material', 'history', 'scriptMeta']);
+    }
+  });
+
+  it('主体库（storyboard）模块只有 资产/历史（不挂本剧信息）', () => {
+    for (const key of ['storyboard:node-1', 'storyboard']) {
+      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['material', 'history']);
     }
   });
 

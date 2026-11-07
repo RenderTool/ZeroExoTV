@@ -1084,6 +1084,7 @@
     "dimensions": "サイズ",
     "filterMaterial": "素材",
     "filterHistory": "履歴",
+    "filterScriptMeta": "本作の情報",
     "historyTabImage": "画像产出",
     "historyTabVideo": "動画生成",
     "historyEmptyImage": "画像の生成記録はまだありません。キャンバスで API 生成すると自動収録されます",
@@ -1477,6 +1478,7 @@
     "startGeneration": "生成を開始"
   },
   "storyboard": {
+    "switchEpisode": "エピソード切替",
     "statusIdle": "未生成",
     "statusGenerating": "生成中",
     "livePreviewBadge": "ライブプレビュー中",
@@ -2364,6 +2366,7 @@
   },
   "subject": {
     "untitled": "名前なし主体",
+    "backToParent": "前の階層へ戻る",
     "stateCount": "{{n}} 状態",
     "generatePrompt": "プロンプト生成",
     "detail": "詳細",
@@ -2422,7 +2425,7 @@
     "imageOrdinal": "画像 {{n}}",
     "promptReady": "プロンプトあり",
     "promptEmpty": "プロンプトなし",
-    "copyPrompt": "プロンプトをコピー",
+    "copyPrompt": "コピー",
     "noImageSelected": "画像未選択",
     "aiGenerateImage": "AI イメージ生成",
     "aiGenerateImageDesc": "主体の説明と状態メモから定装参考図を生成します",
@@ -2547,7 +2550,9 @@
     "linkedToast": "{{subject}} · {{state}} に送信しました",
     "replacedToast": "{{subject}} · {{state}} の内容を置き換えました",
     "undo": "元に戻す",
-    "undoDone": "元に戻しました。元の内容を復元"
+    "undoDone": "元に戻しました。元の内容を復元",
+    "promptCopied": "プロンプトをコピーしました",
+    "copyFailed": "コピーに失敗しました。手動で選択してコピーしてください"
   },
   "episode": {
     "pending": "待機中",
@@ -2576,7 +2581,15 @@
     "collapse": "閉じる",
     "generate": "生成",
     "removeRef": "参照素材を削除",
-    "placeholder": "プロンプトを入力... 接続した素材は自動で入力ソースになります（スタックは @ 参照が必要）"
+    "placeholder": "プロンプトを入力... 接続した素材は自動で入力ソースになります（スタックは @ 参照が必要）",
+    "h3Duration": "長さ（秒）",
+    "h3DurationHint": "1〜30 秒",
+    "h3Size": "画面サイズ",
+    "h3Steps": "ステップ数",
+    "h3StepsHint": "既定 8 ステップ（ローカル LoRA は 8 ステップ用）",
+    "h3Seed": "ランダムシード",
+    "h3SeedPlaceholder": "空欄 = 毎回ランダム",
+    "h3RefHint": "接続された最初の画像が参照画像になります（単一スロット）。"
   },
   "entity": {
     "character": "キャラクター",
@@ -2625,7 +2638,30 @@
     "mergePrev": "前のエピソードにマージ",
     "delete": "エピソードを削除",
     "episodesCount": "{{count}} 話",
-    "pageCount": "{{count}}ページ"
+    "pageCount": "{{count}}ページ",
+    "metaTitle": "本作の情報",
+    "metaOpen": "本作の情報",
+    "metaLogline": "あらすじ",
+    "metaTags": "おすすめタグ",
+    "metaPublishNote": "公開の提案",
+    "metaLoglinePlaceholder": "作品全体の内容を一文で",
+    "metaTagsPlaceholder": "入力して Enter、またはカンマ区切り",
+    "metaPublishNotePlaceholder": "公開時期、カバー、タイトルの重点など",
+    "metaEmpty": "本作の情報はまだありません（あらすじ / おすすめタグ）",
+    "metaStats": "{{scenes}} 場面 · 約 {{minutes}} 分",
+    "metaSaved": "本作の情報を保存しました",
+    "metaNoProject": "台本ページを開くとここで本作情報を編集できます",
+    "scriptMetaTitle": "本作の情報",
+    "scriptLoglinePlaceholder": "作品全体の内容を一文で",
+    "scriptTitleLabel": "タイトル",
+    "scriptTitlePlaceholder": "作品のタイトル"
+  },
+  "assetPick": {
+    "current": "現在の素材",
+    "remove": "現在の素材を削除",
+    "removeShort": "削除",
+    "close": "閉じる",
+    "upload": "画像・音声をアップロード"
   },
   "scriptReader": {
     "readingMode": "読み取りモード",
@@ -2774,11 +2810,11 @@
     "durationOverCapTitle": "長さが推奨 {{cap}}s を超過 — クリックして確認",
     "undo": "元に戻す",
     "dryRunBack": "戻る",
-    "dryRunConfirm": "実行を確定（ComfyUI へ送信して実際に生成します）",
-    "dryRunNote": "事前チェック通過後に「実行を確定」を押すと、ディレクターパックを ComfyUI へ実際の生成として送信します",
+    "dryRunConfirm": "生成を開始",
+    "dryRunNote": "この実行では {{count}} 個のクリップを合計約 {{seconds}} 秒生成します。「生成を開始」でローカル ComfyUI に送信します。",
     "dryRunGap": "確定後、ディレクターパック zip（pack.json + timeline.json + スロット媒体）を ComfyUI へ送信：/zeroexo/h3/pack → /run → 3 秒ポーリングでセグメントごとに保存。",
     "dryRunDisconnectTitle": "今回の実行で解除される連結（永続設定は変更しません）",
-    "dryRunDisconnectItem": "クリップ {{from}} ↔ クリップ {{to}} は隣接していないため、今回の実行ではガイドを解除します",
+    "dryRunDisconnectItem": "クリップ {{from}} とクリップ {{to}} は隣接していないため、今回の連続生成は無効です。",
     "viewLastWorkflow": "今回のワークフローを表示",
     "viewWorkflowTitle": "ComfyUI に送信したワークフロー（Prompt JSON）",
     "workflowHint": "この JSON を ComfyUI にドラッグ／読み込みすると実際のノードグラフを確認できます（API ノード一覧: {{nodes}}）",
@@ -2809,7 +2845,9 @@
     "comfyStatusFailed": "接続失敗",
     "staleGeneratingDemoted": "前回の生成は中断されました。再生成できます",
     "canvasTab": "キャンバス",
-    "canvasMediaEmpty": "キャンバスに画像/動画/音声ノードがありません"
+    "canvasMediaEmpty": "キャンバスに画像/動画/音声ノードがありません",
+    "dryRunTitle": "生成の確認",
+    "dryRunIssues": "まだ {{count}} 件の準備が必要です"
   },
   "scriptImportModal": {
     "title": "脚本を読み込む",

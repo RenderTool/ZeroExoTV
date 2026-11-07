@@ -22,6 +22,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { CSSProperties, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Tooltip } from 'antd';
 import {
+  ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
   Shapes, Square, Star, Trash2, UserRound,
 } from 'lucide-react';
@@ -41,6 +42,7 @@ import {
   UI_CARD_INFO_PADDING_X,
   uiCardMetaStyle,
   uiCardNameStyle,
+  ThumbBadge,
 } from '@/shared/ui/index.js';
 // 2026-11-05 用户指令：主体列表与资产列表共用同一套弹性排列规则（列数 = 实测容器宽度取断点，
 // 封面高度 = 列宽 / 真实宽高比并夹在 [0.75, 1.9]×列宽）——直接复用共享瀑布流，不再自写网格。
@@ -205,6 +207,8 @@ function SubjectPageHeader({
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flexShrink: 0,
         width: '100%', maxWidth, margin: '0 auto', boxSizing: 'border-box',
         padding: `24px ${pad} 0`,
+        // 右侧给抽屉「收起」按钮留出安全距离：面包屑不钻到按钮底下（2026-11-07）
+        paddingRight: 44,
       }}
     >
       {children}
@@ -237,74 +241,118 @@ function SubjectBreadcrumb({
 }): React.ReactElement {
   const { t } = useTranslation();
   const muted = theme.toolbar.textMuted;
+  const isDark = theme.mode === 'dark';
+  /** 当前层级 → 上一级（返回按钮的唯一落点；一级页面不渲染返回） */
+  const onBack = stateName ? onSubject : subjectName ? onLibrary : undefined;
   const titleStyle: CSSProperties = {
     border: 'none', background: 'transparent', padding: 0, borderRadius: 0,
-    fontSize: 16, fontWeight: 600, lineHeight: 1.4, letterSpacing: -0.2,
+    fontSize: 15, fontWeight: 600, lineHeight: 1.4, letterSpacing: -0.2,
     cursor: 'pointer', fontFamily: 'inherit', color: theme.toolbar.text,
     maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   };
   const ancestorStyle: CSSProperties = {
-    border: 'none', background: 'transparent', padding: 0, borderRadius: 2,
-    fontSize: 11, fontWeight: 500, lineHeight: 1.5,
+    border: 'none', background: 'transparent', padding: '1px 5px', borderRadius: 5,
+    fontSize: 11, fontWeight: 500, lineHeight: 1.6,
     cursor: 'pointer', fontFamily: 'inherit', color: muted,
     maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    transition: 'background 0.12s, color 0.12s',
   };
-  const divider = <ChevronRight size={10} color={muted} style={{ flexShrink: 0, opacity: 0.7 }} />;
+  const divider = <ChevronRight size={10} color={muted} style={{ flexShrink: 0, opacity: 0.55 }} />;
   return (
-    <nav aria-label="主体库导航" data-subject-breadcrumb style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
-      <button
-        type="button"
-        data-subject-crumb="library"
-        aria-current={subjectName ? undefined : 'page'}
-        onClick={onLibrary}
-        style={subjectName ? ancestorStyle : titleStyle}
-        onMouseEnter={(e) => { if (subjectName) e.currentTarget.style.color = theme.toolbar.text; }}
-        onMouseLeave={(e) => { if (subjectName) e.currentTarget.style.color = muted; }}
-      >
-        {t('subject.library', '主体库')}
-      </button>
-      {subjectName && (!compact || !stateName) && (
-        <>
-          {divider}
-          <button
-            type="button"
-            data-subject-crumb="subject"
-            aria-current={stateName ? undefined : 'page'}
-            onClick={onSubject}
-            style={stateName ? ancestorStyle : titleStyle}
-            onMouseEnter={(e) => { if (stateName) e.currentTarget.style.color = theme.toolbar.text; }}
-            onMouseLeave={(e) => { if (stateName) e.currentTarget.style.color = muted; }}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '1 1 auto' }}>
+      {/* 2026-11-07 用户指令：显式「返回上一级」按钮（不再只靠面包屑，避免误触抽屉关闭）。
+          用全站统一 IconButton（ghost），不另造方框按钮。 */}
+      {onBack && (
+        <Tooltip title={t('subject.backToParent', '返回上一级')}>
+          <IconButton
+            theme={theme}
+            size="md"
+            data-subject-back
+            aria-label={t('subject.backToParent', '返回上一级')}
+            onClick={onBack}
+            style={{ flexShrink: 0, color: theme.toolbar.text, marginLeft: -4 }}
           >
-            {subjectName}
-          </button>
-        </>
+            <ArrowLeft size={16} strokeWidth={2} />
+          </IconButton>
+        </Tooltip>
       )}
-      {compact && subjectName && stateName && (
-        <>
-          {divider}
-          <button
-            type="button"
-            data-subject-crumb="subject-collapsed"
-            aria-label={subjectName}
-            title={subjectName}
-            onClick={onSubject}
-            style={ancestorStyle}
-            onMouseEnter={(e) => { e.currentTarget.style.color = theme.toolbar.text; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = muted; }}
-          >
-            …
-          </button>
-        </>
-      )}
-      {subjectName && stateName && (
-        <>
-          {divider}
-          <span data-subject-crumb="state" aria-current="page" style={{ ...titleStyle, cursor: 'default', maxWidth: 360 }}>
-            {stateName}
-          </span>
-        </>
-      )}
-    </nav>
+      <nav aria-label="主体库导航" data-subject-breadcrumb style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flexWrap: 'nowrap', overflow: 'hidden' }}>
+        <button
+          type="button"
+          data-subject-crumb="library"
+          aria-current={subjectName ? undefined : 'page'}
+          onClick={onLibrary}
+          style={subjectName ? ancestorStyle : titleStyle}
+          onMouseEnter={(e) => {
+            if (!subjectName) return;
+            e.currentTarget.style.color = theme.toolbar.text;
+            e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
+          }}
+          onMouseLeave={(e) => {
+            if (!subjectName) return;
+            e.currentTarget.style.color = muted;
+            e.currentTarget.style.background = 'transparent';
+          }}
+        >
+          {t('subject.library', '主体库')}
+        </button>
+        {subjectName && (!compact || !stateName) && (
+          <>
+            {divider}
+            <button
+              type="button"
+              data-subject-crumb="subject"
+              aria-current={stateName ? undefined : 'page'}
+              onClick={onSubject}
+              style={stateName ? ancestorStyle : titleStyle}
+              onMouseEnter={(e) => {
+                if (!stateName) return;
+                e.currentTarget.style.color = theme.toolbar.text;
+                e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
+              }}
+              onMouseLeave={(e) => {
+                if (!stateName) return;
+                e.currentTarget.style.color = muted;
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              {subjectName}
+            </button>
+          </>
+        )}
+        {compact && subjectName && stateName && (
+          <>
+            {divider}
+            <button
+              type="button"
+              data-subject-crumb="subject-collapsed"
+              aria-label={subjectName}
+              title={subjectName}
+              onClick={onSubject}
+              style={ancestorStyle}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = theme.toolbar.text;
+                e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = muted;
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              …
+            </button>
+          </>
+        )}
+        {subjectName && stateName && (
+          <>
+            {divider}
+            <span data-subject-crumb="state" aria-current="page" style={{ ...titleStyle, cursor: 'default', maxWidth: 360 }}>
+              {stateName}
+            </span>
+          </>
+        )}
+      </nav>
+    </div>
   );
 }
 
@@ -502,14 +550,12 @@ function SubjectGridCard({
             accentColor={theme.toolbar.accent}
           />
         )}
-        <Badge
-          theme={theme}
-          tone="neutral"
+        <ThumbBadge
           data-subject-card-badge
           style={{ position: 'absolute', top: 6, left: multiSelect ? 34 : 6, zIndex: 2 }}
         >
           {kindLabel}
-        </Badge>
+        </ThumbBadge>
         <div style={{
           position: 'absolute', inset: 0, background: UI_CARD_HOVER_OVERLAY,
           opacity: hovered ? 1 : 0, transition: 'opacity .3s', pointerEvents: 'none',
@@ -635,9 +681,9 @@ function StateGridCard({
           emptyLabel={emptyLabel}
         />
         {isCover && (
-          <Badge theme={theme} tone="neutral" data-state-cover-badge style={{ position: 'absolute', top: 6, left: 6, zIndex: 3 }}>
+          <ThumbBadge data-state-cover-badge style={{ position: 'absolute', top: 6, left: 6, zIndex: 3 }}>
             {t('subject.coverBadge', '封面')}
-          </Badge>
+          </ThumbBadge>
         )}
         <div style={{
           position: 'absolute', inset: 0, background: UI_CARD_HOVER_OVERLAY,
@@ -1701,13 +1747,12 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       };
       content = (
         <div data-subject-page="state" data-root-id={openTree.rootId} data-state-id={level.stateId} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {/* 页头只留面包屑（2026-11-06 用户指令）：「返回主体」与面包屑同级入口重复，
-              「删除状态」归给外层状态卡动作——单一入口，不在详情里再放一份。 */}
+          {/* 页头只留面包屑（2026-11-06 用户指令）：右侧「修改即时保存」提示已删
+              （2026-11-07 用户指令：去掉右边提示，别再挤到抽屉收起按钮上）。 */}
           <SubjectPageHeader
             theme={theme}
             maxWidth={maxWidthFor(LIST_MAX_WIDTH)}
             pad={pagePad}
-            hint={t('subject.autosaveHint', '修改即时保存')}
           >
             <SubjectBreadcrumb theme={theme} subjectName={openTree.name} stateName={openStateName} compact={compactBreadcrumb} onLibrary={goLibrary} onSubject={goSubject} />
           </SubjectPageHeader>
@@ -1775,8 +1820,30 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     </div>
 
                     <div>
-                      <div style={labelStyle} title={t('subject.stateRemarkHint', '给 AI 的补充说明')}>
-                        {isBase ? t('subject.basePrompt', '完整提示词') : t('subject.stateRemark', '备注')}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <div style={labelStyle} title={t('subject.stateRemarkHint', '给 AI 的补充说明')}>
+                          {isBase ? t('subject.basePrompt', '完整提示词') : t('subject.stateRemark', '备注')}
+                        </div>
+                        {isBase && (
+                          <Button
+                            size="small"
+                            type="text"
+                            data-copy-base-prompt
+                            disabled={!promptValue.trim()}
+                            onClick={() => {
+                              if (!navigator.clipboard) {
+                                antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
+                                return;
+                              }
+                              void navigator.clipboard.writeText(promptValue).then(
+                                () => antdMessage.success(t('subject.promptCopied', '已复制完整提示词')),
+                                () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
+                              );
+                            }}
+                          >
+                            {t('subject.copyPrompt', '复制')}
+                          </Button>
+                        )}
                       </div>
                       <Input.TextArea
                         data-field="prompt"

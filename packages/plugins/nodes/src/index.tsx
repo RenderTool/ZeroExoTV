@@ -37,6 +37,11 @@ import type {
 // 基类组件
 import { nodeActionBus } from './base-node-view.js';
 export { BaseNodeView, AIStateView, createPinHandlers, nodeActionBus } from './base-node-view.js';
+export {
+  useGeneratingPreviewStore,
+  setGeneratingPreview,
+  clearGeneratingPreview,
+} from './generating-preview-store.js';
 export type { BaseNodeViewProps, AIStateViewProps, PinHandlers, NodeActionEvent } from './base-node-view.js';
 export { NODE_ICONS } from './icons.js';
 

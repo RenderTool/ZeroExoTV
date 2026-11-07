@@ -38,6 +38,7 @@ import {
   type WorkbenchSharedParams,
 } from '@/entities/slot-containers.js';
 import {
+  DIRECTOR_FPS,
   DIRECTOR_PRESETS,
   buildPackSummary,
   rebaseShotsForSharedChange,
@@ -68,7 +69,7 @@ import { DirectorPromptPanel } from './director-prompt-panel.jsx';
 import { DirectorParamsButton, DirectorRunButton } from './director-run-params-row.js';
 import { useDirectorRun } from './use-director-run.js';
 import { getRunConfigFromEndpoint, useComfyuiEndpointStore } from './comfyui-endpoint.js';
-import { fetchBridgeLastPrompt, normalizeBaseUrl } from './comfyui-bridge-client.js';
+import { normalizeBaseUrl } from './comfyui-bridge-client.js';
 import { reconcileStaleGenerating } from './workbench-stale-generating.js';
 import { NAVIGATE_FOCUS_SHOT_EVENT, takePendingNavigateFocus, type NavigateFocusPayload } from './navigate-to-view.js';
 
@@ -198,13 +199,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [episodeContext, setEpisodeContext] = useState<{ activeEpisodeId: string | null; numberById: Record<string, number> }>({ activeEpisodeId: null, numberById: {} });
   /** dry-run 预检弹层：片段表 + pack 摘要 + 本次运行断开的衔接列表（执行按钮保留 dry-run 语义，不发起真实生成） */
   const [dryRun, setDryRun] = useState<{ summary: PackSummary; disconnects: Array<{ fromNo: number; toNo: number }>; selectedIds: string[]; continuationOff: ReadonlySet<string> } | null>(null);
-  /** 2026-11-05 「查看本次工作流」：最近一次提交的完整 prompt JSON（null = 弹层关闭） */
-  const [workflowView, setWorkflowView] = useState<{
-    json: string;
-    template?: string;
-    assembledAtIso?: string;
-    nodes: Array<{ id: string; classType: string }>;
-  } | null>(null);
   const dirtyRef = useRef(false);
   const shotsRef = useRef<WorkbenchShot[]>([]);
   shotsRef.current = shots;
@@ -622,6 +616,24 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const runPhaseActive =
     comfyRun.phase === 'submitting' || comfyRun.phase === 'queued' || comfyRun.phase === 'running';
 
+  /**
+   * 实时预览跟段（2026-11-07 用户反馈：预览只出现在轨道卡片、右侧预览窗没有）：
+   * 预览帧自带 1 基段号 → 自动把选中片段切到正在生成的那段，右侧预览窗用同一帧渲染。
+   * 还没有实时帧时退回「当前生成段」（status.currentSegment）也能让右侧跟到进度。
+   */
+  const livePreviewShotId = comfyRun.preview?.segmentIndex
+    ? comfyRun.segmentShotIds[comfyRun.preview.segmentIndex - 1] ?? null
+    : null;
+  const runningShotId = comfyRun.currentSegment
+    ? comfyRun.segmentShotIds[comfyRun.currentSegment - 1] ?? null
+    : null;
+  const followShotId = livePreviewShotId ?? runningShotId;
+  useEffect(() => {
+    if (!followShotId) return;
+    if (comfyRun.phase !== 'running' && comfyRun.phase !== 'queued') return;
+    setActiveShotId((cur) => (cur === followShotId ? cur : followShotId));
+  }, [followShotId, comfyRun.phase]);
+
   // 2026-11-05 自愈对账（workbench-stale-generating）：上次旧包/异常退出把段留在 generating，
   // 刷新后卡片照旧「生成中」而后端队列是空的（用户被假状态连骗数次）。
   // 实体加载完成后对账一次：无本页运行 + 队列无任务 → 残留段降级「已中断」（interrupted）并落盘 +
@@ -713,35 +725,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (trackMode === 'batch') exitBatchMode();
   }, [dryRun, comfyRun, subjects, projectId, trackMode, exitBatchMode]);
 
-  /* 2026-11-05 「查看本次工作流」：读桥接 last-prompt（按本次 jobId；无 jobId 取最新一份）。
-     桥接无外部模板，图由 graph_build.py 代码组装；弹层展示完整 prompt JSON，可复制/下载。 */
-  const viewLastWorkflow = useCallback(async () => {
-    const ep = useComfyuiEndpointStore.getState();
-    try {
-      const r = await fetchBridgeLastPrompt(ep.address, comfyRun.jobId);
-      setWorkflowView({
-        json: JSON.stringify(r.prompt ?? {}, null, 2),
-        template: r.template,
-        assembledAtIso: r.assembledAtIso,
-        nodes: r.nodeSummary ?? [],
-      });
-    } catch (err) {
-      message.warning(err instanceof Error ? err.message : String(err));
-    }
-  }, [comfyRun.jobId, message]);
-
-  const downloadWorkflowJson = useCallback(() => {
-    if (!workflowView) return;
-    const blob = new Blob([workflowView.json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `comfyui-prompt-${comfyRun.jobId ?? 'latest'}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [workflowView, comfyRun.jobId]);
-
-  /** 2026-11-04 拖拽 hover 高亮配套：导演台单轨 drop = 重排（落点判定与 hover 同为 computeInsertIndex） */
+  /* 2026-11-04 拖拽 hover 高亮配套：导演台单轨 drop = 重排（落点判定与 hover 同为 computeInsertIndex） */
   const handleMoveShotBetweenTracks = useCallback(
     (_fromTrackId: string, _toTrackId: string, insertIndex: number, shotId: string) => {
       const current = shotsRef.current;
@@ -1248,21 +1232,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           // 2026-11-05 用户指令：所有弹层屏幕居中（antd Modal 默认 top:100px）
           centered
           width={680}
-          title={t('director.dryRunTitle', '运行预检')}
+          title={t('director.dryRunTitle', '确认生成')}
           footer={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              {/* 2026-11-05 「查看本次工作流」：小文字入口，不新增大按钮 */}
-              <button
-                type="button"
-                data-view-last-workflow
-                onClick={viewLastWorkflow}
-                style={{
-                  border: 'none', background: 'transparent', padding: 0, fontSize: 12,
-                  color: '#60a5fa', cursor: 'pointer', textDecoration: 'underline',
-                }}
-              >
-                {t('director.viewLastWorkflow', '查看本次工作流')}
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                 type="button"
@@ -1285,155 +1257,61 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   border: 'none', background: '#00c758', color: '#fff', fontWeight: 600,
                 }}
               >
-                {t('director.dryRunConfirm', '确认运行')}
+                {t('director.dryRunConfirm', '开始生成')}
               </button>
               </div>
             </div>
           }
         >
           {dryRun && (
-            <div data-director-dry-run style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* 2026-11-04：dry-run 语义保留，从按钮移至正文信息条（标题下方一行说明） */}
-              <div data-dry-run-note style={{ padding: '6px 8px', borderRadius: 8, background: 'rgba(96,165,250,0.10)', border: '1px solid rgba(96,165,250,0.30)', color: 'inherit' }}>
-                {t('director.dryRunNote', '预检通过后点「确认运行」：将组装导演包提交到 ComfyUI 真实生成')}
+            <div data-director-dry-run style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* 客户向文案：只说「生成几个片段、共多少秒、点了会发生什么」，不暴露 pack/timeline/槽位/帧预算 */}
+              <div data-dry-run-note style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(96,165,250,0.10)', border: '1px solid rgba(96,165,250,0.30)', color: 'inherit' }}>
+                {t('director.dryRunNote', {
+                  count: dryRun.summary.segments.length,
+                  seconds: Math.max(1, Math.round(dryRun.summary.segments.reduce((sum, seg) => sum + seg.frames, 0) / DIRECTOR_FPS)),
+                  defaultValue: '本次将生成 {{count}} 个片段，共约 {{seconds}} 秒。点「开始生成」提交到本机 ComfyUI 真实生成。',
+                })}
               </div>
               {dryRun.summary.issues.length > 0 && (
                 <div data-dry-run-issues style={{ padding: 8, borderRadius: 8, background: 'rgba(250,173,20,0.10)', border: '1px solid rgba(250,173,20,0.35)' }}>
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                    {t('director.dryRunIssues', '就绪校验未通过（{{count}} 项）', { count: dryRun.summary.issues.length })}
+                    {t('director.dryRunIssues', '还有 {{count}} 项没准备好', { count: dryRun.summary.issues.length })}
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18 }}>
                     {dryRun.summary.issues.map((issue, i) => <li key={i}>{issue.message}</li>)}
                   </ul>
                 </div>
               )}
-              {/* 2026-11-04 要求4：不连续勾选且开启引导时，显式列出本次被断开的衔接处（仅本次运行，不改持久值） */}
+              {/* 不连续勾选且开启引导时：只说明本次哪两段不衔接，不改持久设置 */}
               {dryRun.disconnects.length > 0 && (
                 <div data-dry-run-disconnect style={{ padding: 8, borderRadius: 8, background: 'rgba(0,199,88,0.08)', border: '1px solid rgba(0,199,88,0.30)' }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                    {t('director.dryRunDisconnectTitle', '本次运行断开的衔接（不改持久设置）')}
-                  </div>
                   <ul style={{ margin: 0, paddingLeft: 18 }}>
                     {dryRun.disconnects.map((d) => (
                       <li key={`${d.fromNo}-${d.toNo}`} data-dry-run-disconnect-item>
-                        {t('director.dryRunDisconnectItem', '片段 {{from}} ↔ 片段 {{to}} 不相邻，本次运行断开引导', { from: d.fromNo, to: d.toNo })}
+                        {t('director.dryRunDisconnectItem', '片段 {{from}} 与片段 {{to}} 不相邻，本次不启用衔接', { from: d.fromNo, to: d.toNo })}
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('director.dryRunSharedSlots', '公共槽位')}</div>
-                {dryRun.summary.sharedSlots.length === 0 ? (
-                  <span style={{ opacity: 0.6 }}>{t('director.dryRunNoShared', '（无公共素材）')}</span>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {dryRun.summary.sharedSlots.map((s) => (
-                      <span key={s.assetId} style={{ padding: '1px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.06)', fontSize: 11 }}>
-                        {s.label}
-                      </span>
-                    ))}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {dryRun.summary.segments.map((seg) => (
+                  <div
+                    key={seg.id}
+                    data-dry-run-segment
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(128,128,128,0.25)',
+                    }}
+                  >
+                    <span>{t('director.dryRunSegmentRow', '片段 {{n}}', { n: seg.number })}</span>
+                    <span style={{ opacity: 0.65, fontVariantNumeric: 'tabular-nums' }}>
+                      {t('director.dryRunSeconds', '{{seconds}} 秒', { seconds: Math.max(0.2, Math.round((seg.frames / DIRECTOR_FPS) * 10) / 10) })}
+                    </span>
                   </div>
-                )}
+                ))}
               </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', opacity: 0.7 }}>
-                    <th style={{ padding: '3px 6px' }}>{t('director.colSegment', '片段')}</th>
-                    <th style={{ padding: '3px 6px' }}>{t('director.colFrames', '可见帧')}</th>
-                    <th style={{ padding: '3px 6px' }}>{t('director.colCtx', '延续上下文')}</th>
-                    <th style={{ padding: '3px 6px' }}>{t('director.colBudget', '采样预算')}</th>
-                    <th style={{ padding: '3px 6px' }}>{t('director.colContinuity', '延续前段')}</th>
-                    <th style={{ padding: '3px 6px' }}>{t('director.colSlots', '槽位')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dryRun.summary.segments.map((seg) => (
-                    <tr key={seg.id} style={{ borderTop: '1px solid rgba(128,128,128,0.2)' }}>
-                      <td style={{ padding: '3px 6px' }}>#{seg.number}</td>
-                      <td style={{ padding: '3px 6px', fontVariantNumeric: 'tabular-nums' }}>{seg.frames}</td>
-                      <td style={{ padding: '3px 6px', fontVariantNumeric: 'tabular-nums' }}>{seg.ctxFrames}</td>
-                      <td style={{ padding: '3px 6px', fontVariantNumeric: 'tabular-nums' }}>{seg.budgetFrames}</td>
-                      <td style={{ padding: '3px 6px' }}>{seg.continuityFromPrev ? '✓' : '—'}</td>
-                      <td style={{ padding: '3px 6px' }}>{seg.slots.map((s) => s.label).join(' ') || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div style={{ opacity: 0.7 }}>
-                {t('director.dryRunTotal', '合计 {{frames}} 帧 · pack={{format}} v{{ver}} · 档位 {{tier}}', {
-                  frames: dryRun.summary.totalFrames, format: dryRun.summary.format, ver: dryRun.summary.formatVersion, tier: dryRun.summary.tier,
-                })}
-              </div>
-              <div style={{ opacity: 0.55, fontSize: 11 }}>
-                {t('director.dryRunGap', '确认后组装导演包 zip（pack.json + timeline.json + 槽位媒体）提交 ComfyUI：/zeroexo/h3/pack → /run → 3s 轮询逐段落库。')}
-              </div>
-            </div>
-          )}
-        </Modal>
-        {/* 2026-11-05 「查看本次工作流」弹层：完整 prompt JSON（可复制 / 下载 .json） */}
-        <Modal
-          open={workflowView !== null}
-          onCancel={() => setWorkflowView(null)}
-          centered
-          width={820}
-          title={t('director.viewWorkflowTitle', '本次提交给 ComfyUI 的工作流（Prompt JSON）')}
-          footer={
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                data-workflow-copy
-                onClick={() => {
-                  if (!workflowView) return;
-                  void navigator.clipboard?.writeText(workflowView.json).then(
-                    () => message.success(t('director.workflowCopied', '已复制 JSON')),
-                    () => message.warning(t('director.workflowCopyFailed', '复制失败，请手动全选复制')),
-                  );
-                }}
-                style={{
-                  height: 28, padding: '0 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                  border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit',
-                }}
-              >
-                {t('director.workflowCopy', '复制 JSON')}
-              </button>
-              <button
-                type="button"
-                data-workflow-download
-                onClick={downloadWorkflowJson}
-                style={{
-                  height: 28, padding: '0 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                  border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit',
-                }}
-              >
-                {t('director.workflowDownload', '下载 .json')}
-              </button>
-            </div>
-          }
-        >
-          {workflowView && (
-            <div data-workflow-view style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
-              <div style={{ padding: '6px 8px', borderRadius: 8, background: 'rgba(96,165,250,0.10)', border: '1px solid rgba(96,165,250,0.30)' }}>
-                {t('director.workflowHint', '在 ComfyUI 界面里把该 JSON 拖入/加载即可看到真实节点图（API 格式节点清单：{{nodes}}）', {
-                  nodes: workflowView.nodes.map((n) => `${n.id}:${n.classType}`).join(' · '),
-                })}
-              </div>
-              {workflowView.template && (
-                <div style={{ opacity: 0.7, wordBreak: 'break-all' }}>
-                  {t('director.workflowTemplate', '图由代码组装：{{path}}', { path: workflowView.template })}
-                </div>
-              )}
-              <textarea
-                readOnly
-                data-workflow-json
-                spellCheck={false}
-                value={workflowView.json}
-                style={{
-                  width: '100%', height: 380, fontFamily: 'ui-monospace, monospace', fontSize: 11,
-                  borderRadius: 8, padding: 8, resize: 'vertical',
-                  border: '1px solid rgba(128,128,128,0.35)', background: 'rgba(0,0,0,0.04)', color: 'inherit',
-                }}
-              />
             </div>
           )}
         </Modal>

@@ -23,8 +23,7 @@
 
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Divider, Input, Popover, Space, Tooltip, Typography } from 'antd';
-import { WorkflowConfigDialog } from '@/features/comfyui-workflows/index.js';
+import { Button, Input, Popover, Space, Tooltip, Typography } from 'antd';
 import { TopBarIcon, topBarButtonStyle } from '@/shared/components/topbar-icon-button.js';
 import {
   applyConnectionResult,
@@ -47,7 +46,6 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false }: { autoProbeD
   const ep = useComfyuiEndpointStore();
   const autoState = useComfyuiAutoConnectStore();
   const [open, setOpen] = useState(false);
-  const [workflowsOpen, setWorkflowsOpen] = useState(false);
   const [draft, setDraft] = useState(ep.address);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<EndpointTestResult | null>(null);
@@ -89,7 +87,9 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false }: { autoProbeD
     ? null
     : ep.backend === 'direct'
       ? t('director.endpointStatusDirect')
-      : t('director.endpointStatusOpenai');
+      : ep.backend === 'zeroexo'
+        ? t('director.endpointStatusZeroexo', '已连接 · 插件')
+        : t('director.endpointStatusOpenai');
 
   const connectionState = ep.connected
     ? 'connected'
@@ -132,7 +132,7 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false }: { autoProbeD
         <Button data-testid="comfyui-save-btn" size="small" onClick={save}>
           {t('director.endpointSave')}
         </Button>
-        {ep.connected && (
+        {ep.connected && testResult?.kind !== 'ok' && (
           <span data-testid="comfyui-status">
             <span
               aria-hidden
@@ -154,7 +154,9 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false }: { autoProbeD
         <Text type="success" style={{ fontSize: 12 }} data-testid="comfyui-test-ok">
           {testResult.backend === 'direct'
             ? t('director.endpointStatusDirect')
-            : t('director.endpointStatusOpenai')}
+            : testResult.backend === 'zeroexo'
+              ? t('director.endpointStatusZeroexo', '已连接 · 插件')
+              : t('director.endpointStatusOpenai')}
         </Text>
       )}
       {testResult?.kind === 'fail' && (
@@ -189,17 +191,6 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false }: { autoProbeD
           {t('director.autoConnectStopped')}
         </Text>
       )}
-      <Divider style={{ margin: '2px 0' }} />
-      <Button
-        size="small"
-        data-testid="comfyui-workflows-btn"
-        onClick={() => {
-          setOpen(false);
-          setWorkflowsOpen(true);
-        }}
-      >
-        工作流配置
-      </Button>
     </div>
   );
 
@@ -251,7 +242,6 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false }: { autoProbeD
         </Button>
       </Tooltip>
     </Popover>
-    <WorkflowConfigDialog open={workflowsOpen} onClose={() => setWorkflowsOpen(false)} />
     </>
   );
 }

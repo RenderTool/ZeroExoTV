@@ -43,6 +43,37 @@ export interface GeneratorPromptEditorHandle {
   getPlainText: () => string | null;
 }
 
+
+/**
+ * 读取编辑器纯文本：只认显式换行（顶层 <br> / <div> 块），不把「软换行」写进值。
+ * 旧实现用 innerText：badge 是 inline-flex，窄面板里被浏览器换行后 innerText 会插入 \n，
+ * 导致「@ 引用后下次打开多一个换行」。导演台编辑器就是 DOM 序列化，这里与之对齐。
+ */
+function readEditorText(root: HTMLElement): string {
+  let out = '';
+  const walk = (node: Node, insideBlock = false): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.nodeValue ?? '';
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    if (el.tagName === 'BR') {
+      if (!insideBlock) out += '\n';
+      return;
+    }
+    const block = el.tagName === 'DIV' || el.tagName === 'P';
+    if (block) {
+      el.childNodes.forEach((child) => walk(child, true));
+      if (out && !out.endsWith('\n')) out += '\n';
+      return;
+    }
+    el.childNodes.forEach((child) => walk(child, insideBlock));
+  };
+  root.childNodes.forEach((child) => walk(child));
+  return out;
+}
+
 export interface GeneratorPromptEditorProps {
   /** 提示词文本（受控） */
   value: string;
@@ -260,7 +291,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
             sel.removeAllRanges();
             sel.addRange(range);
           }
-          const newText = curEditor.innerText || '';
+          const newText = readEditorText(curEditor);
           promptTextRef.current = newText;
           onChangeRef.current(newText);
           onLengthChange?.(newText.length);
@@ -333,7 +364,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           const textNode = document.createTextNode(`@${target.name} `);
           badge.parentNode?.replaceChild(textNode, badge);
         });
-        const newText = el.innerText || '';
+        const newText = readEditorText(el);
         promptTextRef.current = newText;
         onChangeRef.current(newText);
         onLengthChange?.(newText.length);
@@ -403,7 +434,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       const el = promptInputRef.current;
       if (!el || readOnly) return;
       if (!references.length) return;
-      const plain = el.innerText || '';
+      const plain = readEditorText(el);
       if (!plain.includes('@')) return;
       const missing = references.filter(
         (r) =>
@@ -438,7 +469,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           badge.remove();
           const el = promptInputRef.current;
           if (el) {
-            const newText = el.innerText || '';
+            const newText = readEditorText(el);
             promptTextRef.current = newText;
             onChangeRef.current(newText);
             onLengthChange?.(newText.length);
@@ -460,7 +491,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
             const inputE = e.nativeEvent as InputEvent;
             const inputEle = e.target as HTMLDivElement;
             const s = ceStateRef.current;
-            const text = inputEle.innerText || '';
+            const text = readEditorText(inputEle);
             if (text !== promptTextRef.current) {
               promptTextRef.current = text;
               s.setPrompt(text);
@@ -527,7 +558,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                   const prevEl = previousNode as HTMLElement;
                   if (prevEl.hasAttribute('data-ref-id')) {
                     prevEl.remove();
-                    const newText = inputEle.innerText || '';
+                    const newText = readEditorText(inputEle);
                     promptTextRef.current = newText;
                     s.setPrompt(newText);
                     onLengthChange?.(newText.length);

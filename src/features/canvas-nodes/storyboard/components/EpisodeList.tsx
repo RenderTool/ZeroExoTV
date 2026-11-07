@@ -10,6 +10,9 @@
  * │ 总页数: 30页 · ≈30分钟 │
  * └──────────────────────┘
  * 行操作：⋮ 更多（重命名、复制、拆分、合并到上一集、删除）
+ *
+ * 本集信息（一句话介绍 / 推荐标签 / 发布建议）不在本侧栏：按 2026-11-07 用户指令，
+ * 它挂在画布左侧资产抽屉的「本集信息」分组（canvas-assets/groups/EpisodeMetaGroup）。
  */
 import { useState, useRef, useEffect, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import {
@@ -364,5 +367,3 @@ const editInputStyle = (accent: string, isDark: boolean): CSSProperties => ({
   fontSize: 12,
   outline: 'none',
 });
-
-

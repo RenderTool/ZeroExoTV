@@ -129,18 +129,23 @@ describe("import_script mode 契约", () => {
 
   it("standard：落库内容 = 规范化文本（与 normalize_script 同一函数）", async () => {
     const res = await call("import_script", {
-      projectId: pid, baseVersion: 0, content: CONTRACT_FIXTURE,
+      projectId: pid, baseVersion: 0, content: CONTRACT_EXPECTED,
       mode: "standard", strategy: "new_episode", title: "规范化集", confirm: true,
     });
     expect(res.isError, `standard 落库失败: ${res.raw}`).toBe(false);
     const script = await readScript(root, pid);
     expect(script.episodes.length).toBe(1);
     const stored = script.episodes[0].content ?? "";
-    // HTML 入库（script content 为编辑器 HTML），剥离标签后应含规范化文本的关键行
+    // HTML 入库（script content 为编辑器 HTML），剥离标签后应含规范化文本的关键行；
+    // 集名不是正文块（2026-11-05 契约）：标题进 Episode.title，正文从第一场开始
     const plain = stored.replace(/<[^>]+>/g, "\n");
-    expect(plain).toContain("第1集：夜宿");
-    expect(plain).toContain("第1场：莱州官道");
-    expect(plain).not.toContain("引子，一个落魄书生的故事。"); // discarded 不写入
+    expect(plain).not.toContain("第1集：夜宿");
+    // 显式 title 优先（调用方传了「规范化集」）
+    expect(script.episodes[0].title).toBe("规范化集");
+    // 场次标题入库转成编辑器 HTML 块（INT. 地点 - 时间）
+    expect(plain).toContain("莱州官道");
+    expect(plain).toContain("INT.");
+    expect(plain).not.toContain("引子，一个落魄书生的故事。"); // 规范化稿里已丢弃
   });
 
   it("raw：原样入库（丢弃段也在）", async () => {

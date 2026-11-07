@@ -306,40 +306,42 @@ export interface DirectorRailTone {
 export function directorRailTone(isDark: boolean): DirectorRailTone {
   return isDark
     ? {
-        cardSurface: 'linear-gradient(135deg, #1b1c1f 0%, #141518 100%)',
-        cardBorder: 'rgba(255,255,255,0.10)',
-        cardHoverBorder: 'rgba(255,255,255,0.18)',
-        selectedBorder: 'rgba(226,232,240,0.60)',
-        selectedOutline: 'rgba(226,232,240,0.88)',
-        selectedShadow: '0 0 0 1px rgba(226,232,240,0.20), 0 2px 8px rgba(0,0,0,0.45), 0 8px 20px rgba(0,0,0,0.30)',
+        // 2026-11-07 用户指令（原话）：跟画布导轨同底色、只留细描边。
+        // 卡片不填色（transparent = 导轨底色），只靠 1px 中性描边区分；不压暗、不渐变、不自造色。
+        cardSurface: 'transparent',
+        cardBorder: 'rgba(255,255,255,0.14)',
+        cardHoverBorder: 'rgba(255,255,255,0.26)',
+        selectedBorder: 'rgba(245,245,244,0.70)',
+        selectedOutline: 'rgba(245,245,244,0.90)',
+        selectedShadow: '0 0 0 1px rgba(245,245,244,0.16), 0 2px 8px rgba(0,0,0,0.45)',
         hoverShadow: '0 2px 8px rgba(0,0,0,0.35)',
-        text: '#e6e7e9',
-        thumbSurface: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.10) 100%)',
+        text: '#f5f5f4',
+        thumbSurface: 'rgba(255,255,255,0.04)',
         thumbIcon: '#a8a29e',
         playBg: 'rgba(0,0,0,0.55)',
         playIcon: '#ffffff',
         durationBg: 'rgba(0,0,0,0.62)',
         durationText: '#ffffff',
-        opacityRest: 0.62,
-        opacityHover: 0.85,
+        opacityRest: 1,
+        opacityHover: 1,
       }
     : {
-        cardSurface: 'linear-gradient(135deg, #ffffff 0%, #f4f4f5 100%)',
-        cardBorder: 'rgba(15,23,42,0.10)',
-        cardHoverBorder: 'rgba(15,23,42,0.18)',
-        selectedBorder: 'rgba(68,64,60,0.50)',
-        selectedOutline: 'rgba(68,64,60,0.80)',
-        selectedShadow: '0 0 0 1px rgba(68,64,60,0.16), 2px 4px 10px rgba(15,23,42,0.10), 0 6px 16px rgba(15,23,42,0.12)',
+        cardSurface: 'transparent',
+        cardBorder: 'rgba(0,0,0,0.12)',
+        cardHoverBorder: 'rgba(0,0,0,0.22)',
+        selectedBorder: 'rgba(68,64,60,0.55)',
+        selectedOutline: 'rgba(68,64,60,0.85)',
+        selectedShadow: '0 0 0 1px rgba(68,64,60,0.14), 2px 4px 10px rgba(15,23,42,0.10)',
         hoverShadow: '0 1px 2px rgba(15,23,42,0.06), 0 4px 10px rgba(15,23,42,0.08)',
         text: '#1c1917',
-        thumbSurface: 'linear-gradient(135deg, #f4f4f5 0%, #e7e5e4 100%)',
+        thumbSurface: 'rgba(0,0,0,0.03)',
         thumbIcon: '#78716c',
         playBg: 'rgba(17,24,39,0.55)',
         playIcon: '#ffffff',
         durationBg: 'rgba(17,24,39,0.62)',
         durationText: '#ffffff',
-        opacityRest: 0.62,
-        opacityHover: 0.85,
+        opacityRest: 1,
+        opacityHover: 1,
       };
 }
 
@@ -366,7 +368,7 @@ export function directorBadgeTone(
       case 'cancelled':
       case 'interrupted':
         return { text: '#cbd5e1', dot: '#94a3b8', bg: 'rgba(148,163,184,0.10)', border: 'rgba(148,163,184,0.40)', dashed: true };
-      default: return { text: '#d6d3d1', dot: '#a8a29e', bg: 'rgba(255,255,255,0.06)', border: 'rgba(255,255,255,0.14)' };
+      default: return { text: '#c7c7c7', dot: '#8a8a8a', bg: 'rgba(255,255,255,0.06)', border: '#333333' };
     }
   }
   switch (status) {
@@ -408,8 +410,9 @@ export function directorArrowTone(isDark: boolean): DirectorArrowTone {
     ? {
         glyph: '#00c758',
         opacityRest: 0.86,
-        surface: 'rgba(28,29,32,0.92)',
-        border: 'rgba(255,255,255,0.14)',
+        // 与 @ 素材面板同款中性深灰胶囊（不再用偏蓝/偏棕自造色）
+        surface: 'rgba(32,32,32,0.94)',
+        border: '#333333',
         hoverBorder: 'rgba(0,199,88,0.50)',
         shadow: '0 2px 8px rgba(0,0,0,0.45)',
         hoverShadow: '0 0 0 1px rgba(0,199,88,0.18), 0 4px 14px rgba(0,0,0,0.55)',
@@ -418,7 +421,7 @@ export function directorArrowTone(isDark: boolean): DirectorArrowTone {
         glyph: '#0a8a43',
         opacityRest: 0.62,
         surface: 'rgba(255,255,255,0.94)',
-        border: 'rgba(15,23,42,0.12)',
+        border: 'rgba(0,0,0,0.10)',
         hoverBorder: 'rgba(10,138,67,0.45)',
         shadow: '0 1px 3px rgba(15,23,42,0.10)',
         hoverShadow: '0 0 0 1px rgba(10,138,67,0.14), 0 3px 10px rgba(15,23,42,0.14)',

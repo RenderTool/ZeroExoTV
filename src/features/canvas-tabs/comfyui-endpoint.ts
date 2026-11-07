@@ -129,7 +129,7 @@ export function saveComfyuiEndpoint(prefs: ComfyuiEndpointPrefs): void {
 
 // ===== 测试连接（自动判定后端类型；三态：连通 / 不可达 / 跨域被拒，其余归入 rejected 附原因） =====
 
-export type EndpointBackend = 'direct' | 'openai';
+export type EndpointBackend = 'direct' | 'openai' | 'zeroexo';
 
 export type EndpointTestResult =
   | { kind: 'ok'; backend: EndpointBackend; address: string; version?: string; models: string[] }
@@ -148,7 +148,7 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
     };
   }
   let sawResponse = false; // 是否见到过任何真实 HTTP 响应（区分「跨域被拦」与「地址不对」）
-  // 2) 桥接健康检查（/zeroexo/h3/health）：桥接插件自带 CORS，浏览器可直读 → 判定 direct
+  // 2) 桥接健康检查（/zeroexo/h3/health）：完整的导演包流程（多参考图 / 延续 / 引导预览），优先
   try {
     const res = await fetch(`${base}/zeroexo/h3/health`);
     sawResponse = true;
@@ -159,8 +159,20 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
         return { kind: 'ok', backend: 'direct', address: base, version, models: [] };
       }
     }
-  } catch { /* 桥接未装/旧版未开 CORS → 继续探测 /system_stats */ }
-  // 3) 直连探测：ComfyUI 原生 /system_stats（旧插件或同源场景）
+  } catch { /* 桥接未装/旧版未开 CORS → 继续探测 */ }
+  // 3) ZeroExo 插件作业协议（/zeroexo/v1/health）：只装了重写版插件时的回退通道
+  try {
+    const res = await fetch(`${base}/zeroexo/v1/health`);
+    sawResponse = true;
+    if (res.ok) {
+      const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (body && body.ok === true && typeof body.plugin === 'string') {
+        const version = typeof body.version === 'string' ? body.version : undefined;
+        return { kind: 'ok', backend: 'zeroexo', address: base, version, models: [] };
+      }
+    }
+  } catch { /* 未装插件 / 未开 CORS → 继续探测 */ }
+  // 4) 直连探测：ComfyUI 原生 /system_stats（旧插件或同源场景）
   try {
     const res = await fetch(`${base}/system_stats`);
     sawResponse = true;
@@ -258,6 +270,8 @@ export function getRunConfigFromEndpoint(): DirectorBridgeConfig | null {
   const ep = useComfyuiEndpointStore.getState();
   if (!ep.connected || !ep.backend) return null;
   const base = normalizeBaseUrl(ep.address);
+  // ZeroExo 插件（完全重写的作业协议）：不需要桥接插件，也不需要模型四件套
+  if (ep.backend === 'zeroexo') return { mode: 'zeroexo', baseUrl: base };
   if (ep.backend === 'openai') {
     const model = ep.models[0] ?? '';
     if (!model) return null; // 兼容口未回模型清单 → 运行不可用（重新测试连接）

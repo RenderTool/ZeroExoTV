@@ -11,6 +11,8 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { LoaderCircle, Lock, Sparkles } from 'lucide-react';
 import { StyledSelect, type StyledSelectOption } from './styled-select.js';
 import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
+import { LOCAL_VIDEO_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LocalH3ParamForm } from './local-h3-param-form.js';
 import type { GenerationMode } from './node-generate-dock.js';
 
 export const DockFooterBar = memo(function DockFooterBar({
@@ -82,14 +84,18 @@ export const DockFooterBar = memo(function DockFooterBar({
         />
       )}
       {onConfigChange && mode !== 'text' && modelOptions.length > 0 ? (
-        <DynamicParamForm
-          model={model}
-          generationMode={mode}
-          paramValues={paramValues}
-          onChange={(patch) => onParamValuesChange(patch)}
-          theme={theme}
-          onConstraintsReady={onConstraintsReady}
-        />
+        mode === 'video' && model === LOCAL_VIDEO_MODEL_KEY ? (
+          <LocalH3ParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} />
+        ) : (
+          <DynamicParamForm
+            model={model}
+            generationMode={mode}
+            paramValues={paramValues}
+            onChange={(patch) => onParamValuesChange(patch)}
+            theme={theme}
+            onConstraintsReady={onConstraintsReady}
+          />
+        )
       ) : null}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1, pointerEvents: 'none', whiteSpace: 'nowrap' }}>

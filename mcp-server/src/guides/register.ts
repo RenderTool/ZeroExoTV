@@ -17,6 +17,13 @@ import {
   guidesIndexText,
   moduleSpecText,
 } from "./module-specs.js";
+import {
+  PRODUCTION_SKILLS,
+  SKILL_INDEX_URI,
+  SKILL_URI_PREFIX,
+  skillsIndexText,
+  skillsPipelineText,
+} from "./skills.js";
 
 export function registerGuideResources(server: McpServer): void {
   server.registerResource(
@@ -43,6 +50,48 @@ export function registerGuideResources(server: McpServer): void {
       },
       (uri) => ({
         contents: [{ uri: uri.toString(), mimeType: "application/json", text: moduleSpecText(spec) }],
+      }),
+    );
+  }
+
+  // ===== 生产技能（怎么做）=====
+  server.registerResource(
+    "zeroexo-skills-index",
+    SKILL_INDEX_URI,
+    {
+      title: "ZeroExo 生产技能索引",
+      description: "剧本/主体/分镜提示词/参数四个技能的用途与加载时机；开工前先读。",
+      mimeType: "text/markdown",
+    },
+    (uri) => ({
+      contents: [{ uri: uri.toString(), mimeType: "text/markdown", text: skillsIndexText() }],
+    }),
+  );
+
+  server.registerResource(
+    "zeroexo-skills-pipeline",
+    `${SKILL_URI_PREFIX}pipeline`,
+    {
+      title: "ZeroExo 生产流水线（技能合订本）",
+      description: "收料 → 剧本 → 主体 → 分镜与提示词 → 参数 → 出片，含每一步的硬停止点。",
+      mimeType: "text/markdown",
+    },
+    (uri) => ({
+      contents: [{ uri: uri.toString(), mimeType: "text/markdown", text: skillsPipelineText() }],
+    }),
+  );
+
+  for (const skill of PRODUCTION_SKILLS) {
+    server.registerResource(
+      `zeroexo-skill-${skill.key}`,
+      `${SKILL_URI_PREFIX}${skill.key}`,
+      {
+        title: skill.name,
+        description: `${skill.summary}（何时读：${skill.whenToUse}）`,
+        mimeType: "text/markdown",
+      },
+      (uri) => ({
+        contents: [{ uri: uri.toString(), mimeType: "text/markdown", text: skill.body }],
       }),
     );
   }
@@ -117,6 +166,18 @@ export function registerGuidePrompts(server: McpServer): void {
     () => ({
       description: "ZeroExoTV 新用户冷启动引导（五阶段流水线 + 最少需要问的问题清单）",
       messages: [{ role: "user", content: { type: "text", text: GET_STARTED_TEXT } }],
+    }),
+  );
+
+  server.registerPrompt(
+    "produce_episode",
+    {
+      title: "生产一集：剧本 → 主体 → 分镜提示词 → 参数",
+      description: "按生产技能合订本推进，每一步都有硬停止点；写提示词与参数前先读对应技能。",
+    },
+    () => ({
+      description: "ZeroExo 生产流水线（技能合订本）",
+      messages: [{ role: "user", content: { type: "text", text: skillsPipelineText() } }],
     }),
   );
 

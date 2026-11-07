@@ -19,8 +19,8 @@
  */
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CircleX, FileUp, Eye, EyeOff, ArrowUpDown, GripVertical, Undo2, Redo2, History } from 'lucide-react';
-import { App, Button, ConfigProvider, Tooltip, Input, Modal } from 'antd';
+import { CircleX, FileUp, Eye, EyeOff, ArrowUpDown, GripVertical, Undo2, Redo2, History, ChevronDown } from 'lucide-react';
+import { App, Button, ConfigProvider, Tooltip, Input, Modal, Dropdown } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
@@ -30,6 +30,7 @@ import { ScriptStructuredEditor } from '@/features/canvas-nodes/script-editor/sc
 import type { ScriptHistoryControls } from '@/features/canvas-nodes/script-editor/script-history.js';
 import { ScriptSnapshotPanel } from './script-snapshot-panel.js';
 import type { ScriptSnapshot } from '@/entities/script-store.js';
+import { displayEpisodeTitle } from '@/entities/script-store.js';
 import { EpisodeList } from './components/EpisodeList.js';
 import { getEpisodePageCount, splitContentIntoPages } from './hooks/use-episode-manager.js';
 import type { Episode } from './script-types.js';
@@ -374,7 +375,9 @@ export function ScriptFullscreenEditor({
     };
     const next = episodes
       .filter((e) => e.id !== cur.id)
-      .map((e) => (e.id === prev.id ? merged : e));
+      .map((e) => (e.id === prev.id ? merged : e))
+      // 与删除集同一编号规则：合并后重排 1..N（与 MCP merge_episode 一致）
+      .map((e, i) => ({ ...e, number: i + 1 }));
     onEpisodesAndActiveChange(next, prev.id);
   }, [episodes, onEpisodesAndActiveChange]);
 
@@ -454,12 +457,44 @@ export function ScriptFullscreenEditor({
             </Button>
           </Tooltip>
           <div style={{ width: 1, height: 20, background: cardBorder, margin: '0 4px', flexShrink: 0 }} />
-          <span style={{
-            fontWeight: 600, fontSize: 14, color: textColor,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {activeEpisode ? activeEpisode.title : t('storyboard.untitled')}
-          </span>
+          {/* 2026-11-07 用户指令：标题处支持下拉切换集数（不用再去右侧列表点） */}
+          <Dropdown
+            trigger={['click']}
+            placement="bottomLeft"
+            menu={{
+              items: normalizedEpisodes.map((ep) => ({
+                key: ep.id,
+                label: (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <span>{displayEpisodeTitle(ep.title, ep.number)}</span>
+                    <span style={{ fontSize: 10, opacity: 0.6 }}>{t('episodeList.pageCount', { count: ep.pageCount ?? 0 })}</span>
+                  </span>
+                ),
+              })),
+              selectedKeys: [activeEpisodeId],
+              onClick: ({ key }) => { if (key !== activeEpisodeId) onActiveEpisodeChange(key); },
+            }}
+          >
+            <button
+              type="button"
+              data-script-episode-switch
+              aria-label={t('storyboard.switchEpisode', '切换集数')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 320,
+                padding: '2px 4px', marginLeft: -4, border: 'none', borderRadius: 6,
+                background: 'transparent', color: textColor, cursor: 'pointer', fontFamily: 'inherit',
+                fontWeight: 600, fontSize: 14, lineHeight: 1.4,
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {activeEpisode ? displayEpisodeTitle(activeEpisode.title, activeEpisode.number) : t('storyboard.untitled')}
+              </span>
+              <ChevronDown size={13} style={{ opacity: 0.6, flexShrink: 0 }} />
+            </button>
+          </Dropdown>
         </div>
 
         {/* 右侧：统计信息（2026-11-04 右对齐；跳转按钮已移入剧集列表标题行） */}

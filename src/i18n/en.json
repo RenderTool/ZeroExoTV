@@ -1106,6 +1106,7 @@
     "sendToDirector": "Send to Director Stage (current shot)",
     "filterMaterial": "Materials",
     "filterHistory": "History",
+    "filterScriptMeta": "Script info",
     "historyTabImage": "Image Outputs",
     "historyTabVideo": "Video Generations",
     "historyEmptyImage": "No image generations yet. Images generated via API on the canvas are recorded automatically.",
@@ -1561,6 +1562,7 @@
     "startGeneration": "Start Generation"
   },
   "storyboard": {
+    "switchEpisode": "Switch episode",
     "statusIdle": "Not generated",
     "statusGenerating": "Generating",
     "livePreviewBadge": "Live preview",
@@ -2386,6 +2388,7 @@
   },
   "subject": {
     "untitled": "Untitled Subject",
+    "backToParent": "Back",
     "stateCount": "{{n}} states",
     "generatePrompt": "Generate Prompt",
     "detail": "Detail",
@@ -2444,7 +2447,7 @@
     "imageOrdinal": "Image {{n}}",
     "promptReady": "Has prompt",
     "promptEmpty": "No prompt",
-    "copyPrompt": "Copy prompt",
+    "copyPrompt": "Copy",
     "noImageSelected": "No image selected",
     "aiGenerateImage": "AI Generate Look",
     "aiGenerateImageDesc": "Generate a costume reference image from the subject description and state note",
@@ -2569,7 +2572,9 @@
     "linkedToast": "Sent to {{subject}} · {{state}}",
     "replacedToast": "Replaced content of {{subject}} · {{state}}",
     "undo": "Undo",
-    "undoDone": "Undone, original content restored"
+    "undoDone": "Undone, original content restored",
+    "promptCopied": "Full prompt copied",
+    "copyFailed": "Copy failed, please select and copy manually"
   },
   "episode": {
     "pending": "Pending",
@@ -2598,7 +2603,15 @@
     "collapse": "Collapse",
     "generate": "Generate",
     "removeRef": "Remove reference",
-    "placeholder": "Enter prompt... Connected assets are auto-used as input (stacked nodes need @ reference)"
+    "placeholder": "Enter prompt... Connected assets are auto-used as input (stacked nodes need @ reference)",
+    "h3Duration": "Duration (s)",
+    "h3DurationHint": "1–30 seconds",
+    "h3Size": "Frame size",
+    "h3Steps": "Steps",
+    "h3StepsHint": "Default 8 steps (local LoRA is an 8-step model)",
+    "h3Seed": "Random seed",
+    "h3SeedPlaceholder": "Empty = random each run",
+    "h3RefHint": "The first connected image is used as the reference (single slot)."
   },
   "entity": {
     "character": "Character",
@@ -2647,7 +2660,30 @@
     "mergePrev": "Merge to previous",
     "delete": "Delete episode",
     "episodesCount": "{{count}} episodes",
-    "pageCount": "{{count}}p"
+    "pageCount": "{{count}}p",
+    "metaTitle": "Script info",
+    "metaOpen": "Script info",
+    "metaLogline": "Overview",
+    "metaTags": "Suggested tags",
+    "metaPublishNote": "Publishing note",
+    "metaLoglinePlaceholder": "One sentence on what the whole show is about",
+    "metaTagsPlaceholder": "Type and press Enter, or separate with commas",
+    "metaPublishNotePlaceholder": "Release timing, cover, title focus…",
+    "metaEmpty": "No script info yet (overview / suggested tags)",
+    "metaStats": "{{scenes}} scenes · ~{{minutes}} min",
+    "metaSaved": "Script info saved",
+    "metaNoProject": "Open a script tab to maintain script info here",
+    "scriptMetaTitle": "Script info",
+    "scriptLoglinePlaceholder": "One sentence on what the whole show is about",
+    "scriptTitleLabel": "Title",
+    "scriptTitlePlaceholder": "Name of the show"
+  },
+  "assetPick": {
+    "current": "Current media",
+    "remove": "Remove current media",
+    "removeShort": "Remove",
+    "close": "Close",
+    "upload": "Upload image or voice"
   },
   "scriptReader": {
     "readingMode": "Reading Mode",
@@ -2796,11 +2832,11 @@
     "durationOverCapTitle": "Duration exceeds the suggested {{cap}}s — click to review",
     "undo": "Undo",
     "dryRunBack": "Back",
-    "dryRunConfirm": "Confirm run (submits to ComfyUI for real generation)",
-    "dryRunNote": "After preflight passes, click \"Confirm run\": the director pack is assembled and submitted to ComfyUI for real generation",
+    "dryRunConfirm": "Start generation",
+    "dryRunNote": "This run will generate {{count}} clip(s), about {{seconds}}s in total. Click \"Start generation\" to submit to local ComfyUI.",
     "dryRunGap": "On confirm, a director pack zip (pack.json + timeline.json + slot media) is submitted to ComfyUI: /zeroexo/h3/pack → /run → 3s polling with per-segment download.",
     "dryRunDisconnectTitle": "Links disconnected for this run (persistent settings unchanged)",
-    "dryRunDisconnectItem": "Clip {{from}} ↔ clip {{to}} are not adjacent; guide disconnected for this run",
+    "dryRunDisconnectItem": "Clip {{from}} and clip {{to}} are not adjacent; continuity is off for this run.",
     "viewLastWorkflow": "View submitted workflow",
     "viewWorkflowTitle": "Workflow submitted to ComfyUI (Prompt JSON)",
     "workflowHint": "Drag/load this JSON into the ComfyUI UI to see the real node graph (API node list: {{nodes}})",
@@ -2831,7 +2867,9 @@
     "comfyStatusFailed": "Connection failed",
     "staleGeneratingDemoted": "The last run was interrupted; you can generate again",
     "canvasTab": "Canvas",
-    "canvasMediaEmpty": "No image, video or audio nodes on the canvas"
+    "canvasMediaEmpty": "No image, video or audio nodes on the canvas",
+    "dryRunTitle": "Confirm generation",
+    "dryRunIssues": "{{count}} item(s) still need attention"
   },
   "scriptImportModal": {
     "title": "Import script",

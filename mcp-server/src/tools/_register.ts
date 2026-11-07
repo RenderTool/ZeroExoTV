@@ -45,6 +45,10 @@ export function defTool<S extends z.ZodRawShape>(server: McpServer, ctx: Ctx, de
           tool: def.name, tokenId, projectId,
           argsSummary: summarizeArgs(raw), result: "ok", durationMs: Date.now() - started,
         });
+        // 原生 image 内容块（read_asset 等）：直接透传，不包成文本 JSON
+        if (out && typeof out === "object" && (out as { __mcpContent?: unknown }).__mcpContent === true) {
+          return { content: (out as { content: unknown }).content as never };
+        }
         return okResult(out);
       } catch (err) {
         const code = err instanceof McpError ? err.code : "IO_ERROR";

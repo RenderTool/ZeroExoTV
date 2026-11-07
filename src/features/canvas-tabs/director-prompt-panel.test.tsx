@@ -1,4 +1,4 @@
-﻿/**
+/**
  * DirectorPromptPanel — 2026-11-04 线上版式对齐 + 槽位池 + @ 高亮 + 主体 Tab 验收
  *
  * 覆盖：
@@ -25,7 +25,7 @@ import {
   ASSET_PICK_PANEL_WIDTH,
   ASSET_PICK_ROW_HEIGHT,
   ASSET_PICK_THUMB_SIZE,
-} from './director-prompt-panel.js';
+} from '@/shared/components/asset-pick-panel.js';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({

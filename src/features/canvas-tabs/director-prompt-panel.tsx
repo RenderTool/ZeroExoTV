@@ -27,10 +27,10 @@
  * 冻结成果保留：唯一槽位函数 assignAssetSlots、帧数学、clampScaleFactor/resolveVideoSize、
  * 提示词内 @ 一律以槽位号引用（`@PictureN`），同资产可重复 @，删除槽位同步移除引用文本。
  */
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Checkbox, InputNumber, Popover, Select } from 'antd';
-import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, User, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, X } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
   CONTINUITY_OVERLAP_OPTIONS,
@@ -54,15 +54,19 @@ import type { WorkbenchSharedParams } from '@/entities/slot-containers.js';
 import { useAssets } from '@/features/asset-picker/use-assets.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import type { WorkbenchShot, WorkbenchShotReference } from '@/features/canvas-nodes/storyboard/workbench-types.js';
-import type { ProductionItem, ProductionItemImage, ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
+import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import type { SubjectTree, SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { MentionEditor, type MentionEditorHandle, type MentionSlotView } from './mention-editor.js';
 import { useContext } from 'react';
 import { ReactGraphStoreContext } from '@zeroexo/plugin-render-react';
 import { ThumbImage } from './thumb-image.js';
-import { OpenLibBrowser } from '@/features/open-library/open-lib-browser.js';
 import { useCasUpload } from '@/features/canvas-assets/use-cas-upload.js';
+import {
+  AssetPickPanel,
+  DIRECTOR_ASSET_DRAG_MIME,
+  useCardPalette,
+} from '@/shared/components/asset-pick-panel.js';
 import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS.js';
 
 // ===== 资产 → 导演台素材（不变） =====
@@ -73,8 +77,6 @@ import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS.j
  * payload = { label, assetId }；label 以当前槽位映射为准（拖入时重查，防过期槽号）。
  */
 export const DIRECTOR_SLOT_DRAG_MIME = 'application/x-director-slot';
-/** 素材面板条目拖拽 MIME：拖到已占用的插槽格 = 就地替换该槽内容（槽号不变） */
-export const DIRECTOR_ASSET_DRAG_MIME = 'application/x-director-asset';
 
 function assetToDirectorRef(a: Asset): DirectorAssetRef | null {
   const kind = a.data.kind;
@@ -144,878 +146,6 @@ export function resolveRefVisual(
 /** 提示词框最小固定高度：内容超出走 overflow-y 滚动，不自动长高、不挤压素材区/预览区 */
 export const DIRECTOR_PROMPT_MIN_HEIGHT = 180;
 
-// ===== 深色卡片色板（截图逐像素量取；浅色主题回退到 theme token） =====
-function useCardPalette(theme: ThemeConfig, isDark: boolean) {
-  return useMemo(() => ({
-    title: isDark ? '#d4d4d4' : theme.toolbar.text,
-    sub: isDark ? '#8a8a8a' : theme.toolbar.textMuted,
-    divider: isDark ? '#2a2a2a' : 'rgba(0,0,0,0.08)',
-    chipBg: isDark ? '#262626' : 'rgba(0,0,0,0.05)',
-    chipBorder: isDark ? '#333333' : 'rgba(0,0,0,0.10)',
-    chipText: isDark ? '#c7c7c7' : theme.toolbar.text,
-    capsuleBg: isDark ? '#2b2b2b' : 'rgba(0,0,0,0.06)',
-    capsuleText: isDark ? '#cfcfcf' : theme.toolbar.text,
-    sep: isDark ? '#6b6b6b' : theme.toolbar.textMuted,
-    textareaBorder: isDark ? '#2c2c2c' : 'rgba(0,0,0,0.10)',
-    textareaText: isDark ? '#d0d0d0' : theme.toolbar.text,
-    placeholder: '#6b6b6b',
-    popBg: isDark ? '#202020' : '#ffffff',
-    popBorder: isDark ? '#333333' : 'rgba(0,0,0,0.10)',
-    popHover: isDark ? '#2b2b2b' : 'rgba(0,0,0,0.05)',
-    scrollThumb: isDark ? '#3a3a3a' : 'rgba(0,0,0,0.20)',
-    brand: '#e94560',
-    brandHover: '#f25772',
-    danger: '#ef4444',
-  }), [theme, isDark]);
-}
-
-// ===== @ 资产面板（锚定触发元素下方；Tab = 资产/主体；2026-11-04 第四条：单击即写入，无二级菜单） =====
-// 2026-11-04 第四条约定：
-// - 一级条目（资产/主体）单击即写入引用（有空槽占槽+插入 @ 块；满槽走既有超限提示）；
-// - 原「点一级 → 弹二级列表勾选」两步交互删除（残留 = 0）；
-// - 右侧为只读详情面板（hover / ↑↓ 高亮即更新，不承担选中职责）；
-//   主体详情里的状态图缩略图仅预览，点单张 = 精确插入 `subject:<id>:<stateId>`（详情区内显式动作，不算二级菜单）；
-// - 无图主体可点可占槽：引用 = `subject:<id>`，补图后经 resolveSubjectCover 自动解析为封面。
-
-const SUBJECT_KIND_NAME: Record<ProductionItemKind, string> = { character: '角色', scene: '场景', prop: '道具' };
-const ASSET_KIND_NAME: Record<DirectorAssetRef['kind'], string> = { image: '图片', video: '视频', audio: '音频' };
-
-/** 2026-11-05 @ 素材面板放大：面板尺寸 + 条目规格（视口夹取见 AssetPickPanel 内 useLayoutEffect） */
-export const ASSET_PICK_PANEL_WIDTH = 'min(560px, 92vw)';
-export const ASSET_PICK_PANEL_HEIGHT = 'min(440px, 80vh)';
-export const ASSET_PICK_ROW_HEIGHT = 44;
-export const ASSET_PICK_THUMB_SIZE = 36;
-export const ASSET_PICK_DETAIL_WIDTH = 216;
-
-type PickDetailTarget =
-  | { type: 'asset'; asset: Asset }
-  | { type: 'subject'; subject: ProductionItem };
-
-/** 主体 Tab 扁平化行（2026-11-04 第四条更正：主体 = 文件夹语义，可展开状态图子行） */
-type SubjListRow =
-  | { type: 'subject'; item: ProductionItem }
-  | { type: 'state'; item: ProductionItem; img: ProductionItemImage }
-  | { type: 'hint'; item: ProductionItem };
-
-function AssetPickPanel({
-  candidates, subjects, subjectTrees, pooledOrder, slotLabels, isDuplicate, isKindFull,
-  onPick, onPickSubject, onPickSubjectImage, onPickSubjectState, onPickCanvasMedia, onClose, palette, t, episodeContext,
-  theme, onPickAssetFromOpenLib,
-}: {
-  candidates: Asset[];
-  /** 主体库条目（ProductionItem，images=剧照集/状态图，stateTag=状态名；production-manager-types.ts L20-52） */
-  subjects: ProductionItem[];
-  /** 主体树（状态级媒体 = 图片/音频；候选来源独立于插槽，2026-11-05） */
-  subjectTrees: SubjectTree[];
-  /** 已占槽资产 id（槽位顺序 = 公共 1..K → 片段 K+1 续排） */
-  pooledOrder: string[];
-  /** 资产/主体引用 id → 槽位标签（详情面板「已占用 PictureN」展示用） */
-  slotLabels: Record<string, string>;
-  isDuplicate: (assetId: string) => boolean;
-  /** 该类型槽位是否已满（h3 图9/音3/视3；满则禁止新增占位，仅可替换） */
-  isKindFull: (kind: DirectorAssetRef['kind']) => boolean;
-  /** 单击资产条目即写入（占槽+插 @ 块；替换模式由调用方分流） */
-  onPick: (a: Asset) => void;
-  /** 单击主体一级行即写入：整主体占槽，引用 `subject:<id>`（无图主体同样可占槽） */
-  onPickSubject: (item: ProductionItem) => void;
-  /** 展开的状态图子行单击 = 精确插入某张状态图（`subject:<id>:<stateId>`，占一个图片槽位） */
-  onPickSubjectImage: (item: ProductionItem, img: ProductionItemImage) => void;
-  /** 主体状态级媒体的媒体行单击 = 按 `subject-state:<rootId>/<stateId>` 引用插入（走既有槽位规则） */
-  onPickSubjectState: (ref: DirectorAssetRef) => void;
-  /** 画布媒体节点单击（仅图片/视频/音频；插入引用 + 占槽） */
-  onPickCanvasMedia: (ref: DirectorAssetRef) => void;
-  onClose: () => void;
-  palette: ReturnType<typeof useCardPalette>;
-  /** react-i18next TFunction（直接用 useTranslation() 的 t；宽松签名以兼容 TFunction 返回类型） */
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string;
-  /**
-   * 2026-11-05 方案 C（主体列表按「出现集数」排序）：剧本集上下文——
-   * activeEpisodeId 取不到（null）= 不重排不加标签（退回原顺序，绝不硬编码）；
-   * numberById = 剧集 id → 集号（「标注为第 N 集」小字用）。
-   */
-  episodeContext?: { activeEpisodeId: string | null; numberById: Record<string, number> };
-  /** 2026-11-05 开源页签（OpenLibBrowser 嵌入）用 */
-  theme: ThemeConfig;
-  /** 开源条目「入库后插入」回调（与 onPick 同一执行路径：占槽 + 插 @PictureN 块） */
-  onPickAssetFromOpenLib: (a: Asset) => void;
-}): ReactElement {
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [panelTab, setPanelTab] = useState<'canvas' | 'asset' | 'subject' | 'openlib'>('asset');
-  const [subjectIdx, setSubjectIdx] = useState(0);
-  /** 主体展开集合（chevron 独立命中区控制；点行本身只插入） */
-  const [expandedSubjects, setExpandedSubjects] = useState<Set<string>>(new Set());
-  /** 搜索：资产按标题；主体按名称/状态图名（命中子状态图 → 自动展开父组） */
-  const [searchQ, setSearchQ] = useState('');
-  /** 详情面板目标（hover / 键盘高亮驱动；仅展示，不写入） */
-  const [detail, setDetail] = useState<PickDetailTarget | null>(null);
-  /** 拖拽中：不更新/不显示详情浮层（否则拖拽经过行时详情弹出、面板尺寸变化会顶掉落点） */
-  const draggingRef = useRef(false);
-  const listRef = useRef<HTMLDivElement>(null);
-  /** 2026-11-05 导入入口：空态主按钮 + 非空态列表底行，同一条 useCasUpload 链（不新写存储） */
-  const uploadAssets = useCasUpload();
-  const importInputRef = useRef<HTMLInputElement>(null);
-  /** 视口夹取用（锚点定位不变，仅尺寸放大后按实测矩形平移，避免贴边被裁切） */
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  /**
-   * 视口夹取：面板仍锚定触发元素（top:100%/left:0），仅当实测矩形溢出视口时才平移回来。
-   * jsdom 无布局（矩形全 0）→ 直接跳过，不影响单测与既有行为。
-   */
-  useLayoutEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return;
-    const margin = 8;
-    let dx = 0;
-    let dy = 0;
-    if (r.right > window.innerWidth - margin) dx = window.innerWidth - margin - r.right;
-    if (r.left + dx < margin) dx = margin - r.left;
-    if (r.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - r.bottom;
-    if (r.top + dy < margin) dy = margin - r.top;
-    el.style.transform = dx || dy ? `translate(${dx}px, ${dy}px)` : '';
-  }, [panelTab]);
-
-  const query = searchQ.trim().toLowerCase();
-
-  const groups = useMemo(() => {
-    const pool = query ? candidates.filter((a) => a.title.toLowerCase().includes(query)) : candidates;
-    const byId = new Map(pool.map((a) => [a.id, a]));
-    const pooled = pooledOrder.map((id) => byId.get(id)).filter((a): a is Asset => !!a);
-    const pooledSet = new Set(pooledOrder);
-    const rest = pool.filter((a) => !pooledSet.has(a.id));
-    const project = rest.filter((a) => a.scope === 'project');
-    const library = rest.filter((a) => a.scope !== 'project');
-    const g: Array<{ name: string; items: Asset[] }> = [];
-    if (pooled.length > 0) g.push({ name: t('director.groupPooled', '已入槽'), items: pooled });
-    if (project.length > 0) g.push({ name: t('director.groupProject', '项目资产'), items: project });
-    if (library.length > 0) g.push({ name: t('director.groupLibrary', '全局'), items: library });
-    return g;
-  }, [candidates, pooledOrder, query, t]);
-
-  const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
-
-  /**
-   * 2026-11-05 方案 C（约定）：主体列表按「出现集数」排序——不过滤、
-   * 命中本集或未标注排前、标注为其它集的排后（组内稳定排序，display-only）。
-   * activeEpisodeId 取不到 = 不重排（与主体库 StoryboardSubjectTree 同一口径）。
-   */
-  const subjectEpisodeRank = useCallback((item: ProductionItem): 0 | 1 => {
-    const active = episodeContext?.activeEpisodeId ?? null;
-    if (!active) return 0;
-    const eps = item.episodeIds ?? [];
-    if (eps.length === 0) return 0; // 未标注 = 通用
-    return eps.includes(active) ? 0 : 1;
-  }, [episodeContext]);
-
-  /** 主体 Tab：按 kind 分组（角色/场景/道具；无内容不渲染）；组内按方案 C 相关性排序 */
-  const subjectGroups = useMemo(() => {
-    const g: Array<{ name: string; items: ProductionItem[] }> = [];
-    for (const kind of ['character', 'scene', 'prop'] as const) {
-      const items = subjects.filter((s) => s.kind === kind);
-      if (items.length > 0) {
-        const sorted = items
-          .map((s, i) => ({ s, i, r: subjectEpisodeRank(s) }))
-          .sort((a, b) => a.r - b.r || a.i - b.i)
-          .map((x) => x.s);
-        g.push({ name: SUBJECT_KIND_NAME[kind], items: sorted });
-      }
-    }
-    return g;
-  }, [subjects, subjectEpisodeRank]);
-
-  /** 主体扁平化行：父行 +（展开时）状态图子行/无图提示行；搜索命中子状态图自动展开父组 */
-  const subjRows = useMemo(() => {
-    const rows: SubjListRow[] = [];
-    for (const g of subjectGroups) {
-      for (const item of g.items) {
-        const nameHit = item.name.toLowerCase().includes(query);
-        const stateHits = query
-          ? item.images.filter((img) => (img.stateTag ?? img.tags[0] ?? '').toLowerCase().includes(query))
-          : [];
-        if (query && !nameHit && stateHits.length === 0) continue;
-        rows.push({ type: 'subject', item });
-        const expanded = expandedSubjects.has(item.id) || (query.length > 0 && stateHits.length > 0);
-        if (!expanded) continue;
-        if (item.images.length === 0) { rows.push({ type: 'hint', item }); continue; }
-        for (const img of item.images) {
-          if (query && !nameHit && !stateHits.includes(img)) continue;
-          rows.push({ type: 'state', item, img });
-        }
-      }
-    }
-    return rows;
-  }, [subjectGroups, expandedSubjects, query]);
-
-  /**
-   * 主体「状态级媒体」行（2026-11-05）：主体树 → 状态 → 媒体（图/音频/视频）。
-   * 数据源是主体树本身，与片段插槽分配完全无关（没有插槽也能查到并引用）；
-   * 无媒体的状态同样列出（禁用 + 「无素材」），避免用户点到才报错。
-   */
-  const stateGroups = useMemo(() => {
-    const out: Array<{ tree: SubjectTree; rows: Array<{ stateId: string; stateName: string; media: SubjectNodeMediaRef | null }> }> = [];
-    for (const tree of subjectTrees ?? []) {
-      const treeHit = tree.name.toLowerCase().includes(query);
-      const rows = (tree.states ?? [])
-        .filter((st) => !query || treeHit || (st.state ?? '').toLowerCase().includes(query))
-        .map((st) => ({
-          stateId: st.id,
-          stateName: st.state || t('director.subjectStateFallback', '剧照'),
-          media: (st.media ?? []).find((m) => m.type === 'image' || m.type === 'audio' || m.type === 'video') ?? null,
-        }));
-      if (rows.length > 0) out.push({ tree, rows });
-    }
-    return out;
-  }, [subjectTrees, query, t]);
-
-  const toggleSubject = useCallback((id: string) => {
-    setExpandedSubjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
-      // 搜索框内：←→ 留给光标移动，只接管 ↑↓/Enter
-      const inSearch = e.target instanceof HTMLInputElement;
-      if (panelTab === 'asset') {
-        if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx((i) => Math.min(i + 1, flat.length - 1)); }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx((i) => Math.max(i - 1, 0)); }
-        else if (e.key === 'Enter' && !inSearch) {
-          e.preventDefault();
-          const a = flat[activeIdx];
-          if (a) onPick(a);
-        }
-      } else {
-        const row = subjRows[subjectIdx];
-        if (e.key === 'ArrowDown') { e.preventDefault(); setSubjectIdx((i) => Math.min(i + 1, subjRows.length - 1)); }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); setSubjectIdx((i) => Math.max(i - 1, 0)); }
-        else if (e.key === 'ArrowRight' && !inSearch) {
-          // → 展开当前父组
-          if (row?.type === 'subject' && !expandedSubjects.has(row.item.id)) {
-            e.preventDefault();
-            toggleSubject(row.item.id);
-          }
-        } else if (e.key === 'ArrowLeft' && !inSearch) {
-          // ← 收起父组；子行/提示行 → 跳回父行
-          if (row?.type === 'subject' && expandedSubjects.has(row.item.id)) {
-            e.preventDefault();
-            toggleSubject(row.item.id);
-          } else if (row && row.type !== 'subject') {
-            e.preventDefault();
-            const parentIdx = subjRows.findIndex((r) => r.type === 'subject' && r.item.id === row.item.id);
-            if (parentIdx >= 0) setSubjectIdx(parentIdx);
-          }
-        } else if (e.key === 'Enter' && !inSearch) {
-          // Enter = 插入当前高亮行（子行则插该状态图；提示行无动作）
-          e.preventDefault();
-          if (row?.type === 'subject') onPickSubject(row.item);
-          else if (row?.type === 'state') onPickSubjectImage(row.item, row.img);
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [flat, subjRows, expandedSubjects, activeIdx, subjectIdx, panelTab, onPick, onPickSubject, onPickSubjectImage, toggleSubject, onClose]);
-
-  /** 键盘高亮移动 → 详情面板同步（不承担选中职责）；Tab 无条目 → 空态 */
-  useEffect(() => {
-    if (panelTab === 'asset') {
-      const a = flat[activeIdx];
-      setDetail(a ? { type: 'asset', asset: a } : null);
-    }
-  }, [activeIdx, flat, panelTab]);
-  useEffect(() => {
-    if (panelTab === 'subject') {
-      const row = subjRows[subjectIdx];
-      setDetail(row && row.type !== 'hint' ? { type: 'subject', subject: row.item } : null);
-    }
-  }, [subjectIdx, subjRows, panelTab]);
-
-  const detailRow = (label: string, value: string, dataKey: string, multiline = false) => (
-    <div data-detail-row={dataKey} style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: '20px', alignItems: 'flex-start' }}>
-      <span style={{ width: 60, flexShrink: 0, color: palette.sub }}>{label}</span>
-      <span
-        style={multiline
-          /* 名称可两行截断（放大后详情区变宽，长名称不再一行硬截） */
-          ? {
-            flex: 1, minWidth: 0, color: palette.capsuleText, overflow: 'hidden',
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-all',
-          }
-          : {
-            flex: 1, minWidth: 0, color: palette.capsuleText,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}
-      >{value}</span>
-    </div>
-  );
-
-  /** 右侧只读详情面板（hover / ↑↓ 高亮驱动；不承担选中职责；空态给中性提示，不留空白砖） */
-  const detailPanel = (
-    <div
-      data-asset-detail
-      style={{
-        width: ASSET_PICK_DETAIL_WIDTH, flexShrink: 0, borderLeft: `1px solid ${palette.popBorder}`, paddingLeft: 12,
-        display: 'flex', flexDirection: 'column', gap: 8, height: '100%', minHeight: 0, overflowY: 'auto',
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onDragEnd={() => { draggingRef.current = false; }}
-      onDrop={() => { draggingRef.current = false; }}
-    >
-      {!detail && (
-        <div style={{ padding: '16px 8px', fontSize: 12, color: palette.sub }}>
-          {t('director.detailEmpty', '悬停或用 ↑↓ 选择条目查看详情')}
-        </div>
-      )}
-      {detail?.type === 'asset' && (() => {
-        const a = detail.asset;
-        const ref = assetToDirectorRef(a);
-        const inSlot = slotLabels[a.id];
-        return (
-          <>
-            {ref ? (
-              /* 详情预览：图片取 preview 档；视频取原文件可播（muted loop，点击播放/暂停）；音频给播放器 */
-              <ThumbImage
-                kind={ref.kind}
-                playable={ref.kind !== 'image'}
-                storageKey={ref.storageKey}
-                url={ref.url}
-                prefer="preview"
-                width="100%"
-                height={ref.kind === 'audio' ? 40 : 120}
-                radius={8}
-                title={a.title}
-                icon={<ImageIcon size={20} style={{ opacity: 0.6 }} />}
-              />
-            ) : null}
-            {detailRow(t('director.detailName', '名称'), a.title, 'name', true)}
-            {detailRow(t('director.detailKind', '类型'), ref ? ASSET_KIND_NAME[ref.kind] : '-', 'kind')}
-            {detailRow(t('director.detailScope', '范围'), a.scope === 'project' ? t('director.scopeProject', '本项目') : t('director.scopeLibrary', '公共'), 'scope')}
-            {detailRow(
-              t('director.detailSlot', '槽位'),
-              inSlot ? t('director.detailInSlot', '已占用 {{label}}', { label: inSlot }) : t('director.detailNotPooled', '未占用'),
-              'slot',
-            )}
-            {detailRow(t('director.detailSource', '来源'), ref?.storageKey ?? ref?.url ?? '-', 'source')}
-          </>
-        );
-      })()}
-      {detail?.type === 'subject' && (() => {
-        const item = detail.subject;
-        const coverKey = resolveSubjectCover(item).key;
-        const inSlot = slotLabels[`subject:${item.id}`];
-        return (
-          <>
-            {coverKey ? (
-              <ThumbImage storageKey={coverKey} prefer="preview" width="100%" height={120} radius={8} title={item.name} icon={<User size={20} style={{ opacity: 0.6 }} />} />
-            ) : (
-              <span style={{ width: '100%', height: 80, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <User size={20} style={{ opacity: 0.6 }} />
-              </span>
-            )}
-            {detailRow(t('director.detailName', '名称'), item.name, 'name', true)}
-            {detailRow(t('director.detailKind', '类型'), SUBJECT_KIND_NAME[item.kind], 'kind')}
-            {detailRow(t('director.detailScope', '范围'), t('director.scopeProject', '本项目'), 'scope')}
-            {detailRow(
-              t('director.detailSlot', '槽位'),
-              inSlot ? t('director.detailInSlot', '已占用 {{label}}', { label: inSlot }) : t('director.detailNotPooled', '未占用'),
-              'slot',
-            )}
-            {detailRow(t('director.detailImages', '状态图'), t('director.detailImageCount', '{{count}} 张', { count: item.images.length }), 'images')}
-            {item.images.length > 0 && (
-              /* 状态图集合 = 只读预览（2026-11-04 第四条更正 req6：插入只在左侧子行发生） */
-              <div data-subject-detail-images style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
-                {item.images.map((img) => (
-                  <span
-                    key={img.storageKey}
-                    data-subject-detail-image={img.storageKey}
-                    style={{ display: 'inline-block', border: `1px solid ${palette.popBorder}`, borderRadius: 6 }}
-                  >
-                    <ThumbImage storageKey={img.storageKey} width={36} height={36} radius={6} title={img.stateTag ?? img.tags[0]} icon={<ImageIcon size={14} style={{ opacity: 0.6 }} />} />
-                  </span>
-                ))}
-              </div>
-            )}
-          </>
-        );
-      })()}
-    </div>
-  );
-
-  const graphStore = useContext(ReactGraphStoreContext);
-  /** 画布上的媒体节点（仅 image / video / audio；文本等非媒体一律不列） */
-  const canvasMedia = useMemo<DirectorAssetRef[]>(() => {
-    const nodes = graphStore?.getGraph?.().nodes ?? [];
-    const out: DirectorAssetRef[] = [];
-    for (const n of nodes) {
-      const d = (n.data ?? {}) as { storageKey?: string; content?: string; url?: string; kind?: string };
-      const kind = n.type === 'image' || n.type === 'video' || n.type === 'audio'
-        ? n.type
-        : d.kind === 'image' || d.kind === 'video' || d.kind === 'audio' ? d.kind : null;
-      if (!kind) continue;
-      const storageKey = d.storageKey;
-      const url = d.content || d.url;
-      if (!storageKey && !url) continue;
-      out.push({
-        id: `canvas:${n.id}`,
-        kind,
-        title: n.title || `${kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}节点`,
-        storageKey,
-        url,
-        originScope: 'project',
-      });
-    }
-    return out;
-  }, [graphStore]);
-  const filteredCanvasMedia = useMemo(() => {
-    const q = searchQ.trim().toLowerCase();
-    return q ? canvasMedia.filter((m) => (m.title ?? '').toLowerCase().includes(q)) : canvasMedia;
-  }, [canvasMedia, searchQ]);
-
-  let rowIdx = -1;
-
-  return (
-    <div
-      ref={panelRef}
-      data-director-asset-panel
-      style={{
-        position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 30,
-        /* 2026-11-05 放大：固定尺寸（视口夹取 92vw / 80vh），高度不自适应跳动 */
-        width: ASSET_PICK_PANEL_WIDTH, height: ASSET_PICK_PANEL_HEIGHT, boxSizing: 'border-box',
-        background: palette.popBg, border: `1px solid ${palette.popBorder}`,
-        borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', padding: 12,
-        display: 'flex', gap: 10,
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <div style={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Tab：资产 / 主体 / 开源（2026-11-05：开源复用 OpenLibBrowser 嵌入） */}
-      <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 10, flexShrink: 0 }}>
-        {(['canvas', 'asset', 'subject', 'openlib'] as const).map((key) => {
-          const active = panelTab === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              data-asset-panel-tab={key}
-              onClick={() => setPanelTab(key)}
-              style={{
-                padding: '6px 14px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
-                background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
-                color: active ? palette.capsuleText : palette.sub,
-              }}
-            >
-              {key === 'canvas'
-                ? t('director.canvasTab', '画布')
-                : key === 'asset'
-                  ? t('director.assetTab', '资产')
-                  : key === 'subject'
-                    ? t('director.subjectTab', '主体')
-                    : t('director.openlibTab', '开源')}
-            </button>
-          );
-        })}
-      </div>
-      {/* 搜索（2026-11-04 第四条更正 req8）：资产按标题；主体按名称/状态图名（命中子状态图自动展开父组）。
-          开源页签不渲染（OpenLibBrowser 自带分类/搜索） */}
-      {panelTab !== 'openlib' && (
-      <input
-        data-asset-panel-search
-        value={searchQ}
-        onChange={(e) => { setSearchQ(e.target.value); setActiveIdx(0); setSubjectIdx(0); }}
-        placeholder={t('director.searchPlaceholder', '搜索资产 / 主体 / 状态图')}
-        style={{
-          width: '100%', height: 34, marginBottom: 10, padding: '0 10px', fontSize: 12, borderRadius: 8,
-          border: `1px solid ${palette.popBorder}`, background: 'rgba(255,255,255,0.04)',
-          color: palette.capsuleText, outline: 'none', boxSizing: 'border-box', flexShrink: 0,
-        }}
-      />
-      )}
-      {panelTab === 'canvas' && (
-        <div data-canvas-media-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {filteredCanvasMedia.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
-              {t('director.canvasMediaEmpty', '画布上暂无图片/视频/音频节点')}
-            </div>
-          ) : filteredCanvasMedia.map((ref) => {
-            const Icon = KIND_ICON[ref.kind];
-            const used = slotLabels[ref.id];
-            return (
-              <button
-                key={ref.id}
-                type="button"
-                data-canvas-media-item={ref.id}
-                onClick={() => onPickCanvasMedia(ref)}
-                onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
-                  padding: '0 10px', border: 'none', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-                  background: 'transparent', color: palette.capsuleText, fontSize: 13, textAlign: 'left',
-                }}
-              >
-                <ThumbImage
-                  kind={ref.kind}
-                  storageKey={ref.storageKey}
-                  url={ref.url}
-                  prefer="thumb"
-                  width={ASSET_PICK_THUMB_SIZE}
-                  height={ASSET_PICK_THUMB_SIZE}
-                  radius={6}
-                  title={ref.title}
-                  icon={<Icon size={18} style={{ opacity: 0.7 }} />}
-                />
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {ref.title}
-                </span>
-                <span style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
-                  {used ?? ASSET_KIND_NAME[ref.kind]}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {panelTab === 'asset' && (
-      <div data-asset-panel-list ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* 导入资产：列表顶部一行（2026-11-07 用户指令：导入类按钮统一放顶部，不再埋到底部） */}
-        {flat.length > 0 && (
-          <button
-            type="button"
-            data-asset-import
-            onClick={() => importInputRef.current?.click()}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%',
-              height: 34, border: `1px dashed ${palette.popBorder}`, borderRadius: 8, cursor: 'pointer',
-              fontFamily: 'inherit', background: 'transparent', color: palette.sub, fontSize: 12, flexShrink: 0, marginBottom: 4,
-            }}
-          >
-            <Plus size={14} />
-            {t('director.importAsset', '导入资产')}
-          </button>
-        )}
-        {groups.map((g) => (
-          <div key={g.name}>
-            <div style={{ fontSize: 11, color: palette.sub, padding: '8px 8px 4px' }}>{g.name}</div>
-            {g.items.map((a) => {
-              rowIdx += 1;
-              const idx = rowIdx;
-              const ref = assetToDirectorRef(a);
-              const Icon = ref ? KIND_ICON[ref.kind] : ImageIcon;
-              const selected = idx === activeIdx;
-              const inUse = isDuplicate(a.id);
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  data-asset-panel-item={a.id}
-                  data-asset-panel-active={selected || undefined}
-                  draggable={!!ref}
-                  onDragStart={(e) => {
-                    if (!ref) return;
-                    e.stopPropagation();
-                    draggingRef.current = true;
-                    setDetail(null);
-                    e.dataTransfer.effectAllowed = 'copy';
-                    e.dataTransfer.setData(DIRECTOR_ASSET_DRAG_MIME, JSON.stringify(ref));
-                  }}
-                  onDragEnd={() => { draggingRef.current = false; }}
-                  onClick={() => onPick(a)}
-                  onMouseEnter={() => {
-                    if (draggingRef.current) return;
-                    setActiveIdx(idx);
-                    setDetail({ type: 'asset', asset: a });
-                  }}
-                  onFocus={() => { setActiveIdx(idx); setDetail({ type: 'asset', asset: a }); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
-                    padding: '0 10px', border: 'none', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-                    background: selected ? palette.popHover : 'transparent',
-                    color: palette.capsuleText, fontSize: 13, textAlign: 'left',
-                  }}
-                >
-                  {ref ? (
-                    /* 视频也走缩略图（poster 优先、取不到用 video 首帧）；音频仍是图标 */
-                    <ThumbImage
-                      kind={ref.kind}
-                      storageKey={ref.storageKey}
-                      url={ref.url}
-                      prefer="thumb"
-                      width={ASSET_PICK_THUMB_SIZE}
-                      height={ASSET_PICK_THUMB_SIZE}
-                      radius={6}
-                      title={a.title}
-                      icon={<Icon size={18} style={{ opacity: 0.7 }} />}
-                    />
-                  ) : (
-                    <span style={{ width: ASSET_PICK_THUMB_SIZE, height: ASSET_PICK_THUMB_SIZE, borderRadius: 6, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icon size={18} style={{ opacity: 0.7 }} />
-                    </span>
-                  )}
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {a.title}
-                  </span>
-                  {inUse && (
-                    <span data-asset-panel-inuse style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
-                      {slotLabels[a.id] ?? t('director.assetInUse', '已引用')}
-                    </span>
-                  )}
-                  {!inUse && (a.data.kind === 'image' || a.data.kind === 'audio' || a.data.kind === 'video') && isKindFull(a.data.kind) && (
-                    <span data-kind-full style={{ fontSize: 10, color: palette.danger, flexShrink: 0 }}>
-                      {t('director.kindFull', '已满')}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-        {flat.length === 0 && (
-          /* 2026-11-05 空态给出口：不只留一句「暂无可引用资产」——导入按钮走
-             useCasUpload（与素材抽屉同一条 CAS 链，不新写存储），导入后面板经
-             useAssets 订阅自动刷新 */
-          <div data-asset-panel-import-empty style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            <div style={{ fontSize: 13, color: palette.sub, textAlign: 'center' }}>
-              {t('director.assetEmpty', '暂无可引用资产')}
-            </div>
-            <button
-              type="button"
-              data-asset-import
-              onClick={() => importInputRef.current?.click()}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 16px',
-                borderRadius: 8, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-                border: `1px solid ${palette.popBorder}`, background: 'rgba(255,255,255,0.08)',
-                color: palette.capsuleText,
-              }}
-            >
-              <Plus size={14} />
-              {t('director.importAsset', '导入资产')}
-            </button>
-          </div>
-        )}
-      </div>
-      )}
-      {/* 隐藏导入输入（同一条 useCasUpload 链；导入后 useAssets 订阅刷新列表） */}
-      <input
-        ref={importInputRef}
-        type="file"
-        multiple
-        accept="image/*,video/*,audio/*"
-        data-asset-import-input
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          const files = e.target.files;
-          if (files && files.length > 0) void uploadAssets(files);
-          e.target.value = '';
-        }}
-      />
-
-      {/* 主体 Tab（2026-11-04 第四条更正：文件夹语义 1 对 N）：
-          - 一级行单击 = 插入整主体引用 subject:<id>（无图主体同可占槽）；
-          - 行左侧 chevron 独立命中区（≥20px）= 展开/收起，与行点击互不误触；
-          - 展开后状态图子行缩进呈现，单击子行 = 精确插入 subject:<id>:<stateId>；
-          - 无状态图主体展开后给中性提示行（不可点） */}
-      {panelTab === 'subject' && (
-        <div data-asset-panel-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {subjRows.map((row, idx) => {
-            const showHeader = row.type === 'subject'
-              && (idx === 0 || subjRows[idx - 1]!.item.kind !== row.item.kind);
-            return (
-              <div key={row.type === 'state' ? `state:${row.img.storageKey}` : `${row.type}:${row.item.id}`}>
-                {showHeader && (
-                  <div style={{ fontSize: 11, color: palette.sub, padding: '8px 8px 4px' }}>{SUBJECT_KIND_NAME[row.item.kind]}</div>
-                )}
-                {row.type === 'subject' && (() => {
-                  const item = row.item;
-                  const selected = idx === subjectIdx;
-                  const inSlot = slotLabels[`subject:${item.id}`];
-                  const expanded = expandedSubjects.has(item.id)
-                    || (query.length > 0 && item.images.some((img) => (img.stateTag ?? img.tags[0] ?? '').toLowerCase().includes(query)));
-                  const coverKey = resolveSubjectCover(item).key;
-                  return (
-                    <button
-                      type="button"
-                      data-subject-item={item.id}
-                      data-asset-panel-active={selected || undefined}
-                      onClick={() => onPickSubject(item)}
-                      onMouseEnter={() => { if (draggingRef.current) return; setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
-                      onFocus={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
-                        padding: '0 10px 0 4px', border: 'none', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-                        background: selected ? palette.popHover : 'transparent',
-                        color: palette.capsuleText, fontSize: 13, textAlign: 'left',
-                      }}
-                    >
-                      {/* chevron 独立命中区（≥20px）：点箭头才展开/收起，点行只插入 */}
-                      <span
-                        data-subject-chevron={item.id}
-                        role="button"
-                        aria-label={expanded ? t('director.collapse', '收起') : t('director.expand', '展开')}
-                        onClick={(e) => { e.stopPropagation(); toggleSubject(item.id); }}
-                        style={{ width: 24, height: 24, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 4 }}
-                      >
-                        <ChevronDown size={14} style={{ opacity: 0.7, transform: expanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.12s' }} />
-                      </span>
-                      {coverKey ? (
-                        <ThumbImage storageKey={coverKey} width={ASSET_PICK_THUMB_SIZE} height={ASSET_PICK_THUMB_SIZE} radius={6} title={item.name} icon={<User size={18} style={{ opacity: 0.7 }} />} />
-                      ) : (
-                        <span style={{ width: ASSET_PICK_THUMB_SIZE, height: ASSET_PICK_THUMB_SIZE, borderRadius: 6, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <User size={18} style={{ opacity: 0.7 }} />
-                        </span>
-                      )}
-                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.name}
-                      </span>
-                      {/* 2026-11-05 方案 C：标注为其它集的主体 → 小字「标注为第 N 集」
-                          （不过滤不禁点，仍可正常选择；未标注/命中本集不显示） */}
-                      {subjectEpisodeRank(item) === 1 && (() => {
-                        const nums = (item.episodeIds ?? [])
-                          .map((epId) => episodeContext?.numberById[epId])
-                          .filter((n): n is number => typeof n === 'number');
-                        return nums.length > 0 ? (
-                          <span data-subject-tagged-episodes style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
-                            {t('director.taggedEpisodes', '标注为第 {{list}} 集', { list: nums.join('、') })}
-                          </span>
-                        ) : null;
-                      })()}
-                      {inSlot && (
-                        <span data-asset-panel-inuse style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>{inSlot}</span>
-                      )}
-                      <span style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>{item.images.length} 图</span>
-                    </button>
-                  );
-                })()}
-                {row.type === 'state' && (() => {
-                  const { item, img } = row;
-                  const selected = idx === subjectIdx;
-                  const stateName = img.stateTag ?? img.tags[0] ?? t('director.subjectStateFallback', '剧照');
-                  const childInSlot = slotLabels[`subject:${item.id}:${img.storageKey}`];
-                  return (
-                    <button
-                      type="button"
-                      data-subject-state-row={img.storageKey}
-                      data-asset-panel-active={selected || undefined}
-                      onClick={() => onPickSubjectImage(item, img)}
-                      onMouseEnter={() => { if (draggingRef.current) return; setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
-                      onFocus={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: 38,
-                        padding: '0 10px 0 40px', border: 'none', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-                        background: selected ? palette.popHover : 'transparent',
-                        color: selected ? palette.capsuleText : palette.sub, fontSize: 12, textAlign: 'left',
-                      }}
-                    >
-                      <ThumbImage storageKey={img.storageKey} width={28} height={28} radius={5} title={`${item.name}·${stateName}`} icon={<ImageIcon size={14} style={{ opacity: 0.6 }} />} />
-                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.name}·{stateName}
-                      </span>
-                      {childInSlot && (
-                        <span data-asset-panel-inuse style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>{childInSlot}</span>
-                      )}
-                    </button>
-                  );
-                })()}
-                {row.type === 'hint' && (
-                  <div
-                    data-subject-empty-hint={row.item.id}
-                    style={{ padding: '6px 10px 6px 40px', fontSize: 12, color: palette.sub, opacity: 0.8 }}
-                  >
-                    {t('director.subjectNoImagesHint', '该主体尚未录入状态图')}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {stateGroups.length > 0 && (
-            <>
-              <div style={{ fontSize: 11, color: palette.sub, padding: '10px 8px 4px' }}>
-                {t('director.subjectStateAssets', '主体状态素材')}
-              </div>
-              {stateGroups.map(({ tree, rows }) => (
-                <div key={`ss:${tree.rootId}`}>
-                  <div
-                    data-subject-state-tree={tree.rootId}
-                    style={{ fontSize: 12, color: palette.sub, padding: '6px 8px 2px 12px', opacity: 0.85 }}
-                  >
-                    {tree.name}
-                  </div>
-                  {rows.map(({ stateId, stateName, media }) => {
-                    const ref = media ? subjectStateMediaToRef(tree, stateId, stateName, media) : null;
-                    const inSlot = ref ? slotLabels[ref.id] : undefined;
-                    const Icon = media?.type === 'audio' ? Music : media?.type === 'video' ? Film : ImageIcon;
-                    return (
-                      <button
-                        key={`${tree.rootId}/${stateId}`}
-                        type="button"
-                        disabled={!ref}
-                        data-subject-state-asset={ref ? ref.id : undefined}
-                        data-subject-state-empty={ref ? undefined : `${tree.rootId}/${stateId}`}
-                        onClick={() => { if (ref) onPickSubjectState(ref); }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: 38,
-                          padding: '0 10px 0 40px', border: 'none', borderRadius: 8,
-                          cursor: ref ? 'pointer' : 'default', flexShrink: 0,
-                          background: 'transparent', opacity: ref ? 1 : 0.55,
-                          color: palette.sub, fontSize: 12, textAlign: 'left',
-                        }}
-                      >
-                        {ref ? (
-                          <ThumbImage storageKey={ref.storageKey} width={28} height={28} radius={5} title={ref.title} icon={<Icon size={14} style={{ opacity: 0.6 }} />} />
-                        ) : (
-                          <span style={{ width: 28, height: 28, borderRadius: 5, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <Icon size={14} style={{ opacity: 0.45 }} />
-                          </span>
-                        )}
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {tree.name}·{stateName}
-                        </span>
-                        {!ref && (
-                          <span data-subject-state-no-media style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
-                            {t('director.subjectStateNoMedia', '无素材')}
-                          </span>
-                        )}
-                        {inSlot && (
-                          <span data-asset-panel-inuse style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>{inSlot}</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </>
-          )}
-          {subjRows.length === 0 && stateGroups.length === 0 && (
-            <div style={{ padding: 20, fontSize: 13, color: palette.sub, textAlign: 'center' }}>
-              {t('director.subjectEmpty', '主体库暂无条目')}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 开源 Tab（2026-11-05）：复用 OpenLibBrowser 单一定义源（分类/搜索/分页/18+ 门控），
-          点击条目 = importOpenLibEntry 入库 → onPickAssetFromOpenLib（与资产条目同一
-          「占槽 + 插 @PictureN 」执行路径）。不复制第二份卡片实现。 */}
-      {panelTab === 'openlib' && (
-        <div
-          data-asset-panel-openlib
-          style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}
-        >
-          <OpenLibBrowser theme={theme} onPickAsset={onPickAssetFromOpenLib} />
-        </div>
-      )}
-      </div>
-      {panelTab !== 'openlib' && detailPanel}
-    </div>
-  );
-}
 
 // ===== 面板主体 =====
 
@@ -1045,22 +175,6 @@ export interface DirectorPromptPanelProps {
   /* 2026-11-04 参数合并：参数收进导轨「参数」浮层面板 + 独立「运行」按钮（DirectorParamsButton/DirectorRunButton，经 multitrack paramsButton/runButton 注入），本面板不再渲染参数控件。 */
 }
 
-/**
- * 主体「状态级媒体」→ 导演台素材引用（2026-11-05 扩展）。
- * 稳定身份沿用 CAS 记账键 `subject-state:<rootId>/<stateId>`（subject-state-media.ts L46），
- * 不新造第二套 id；候选来源 = 主体树状态媒体，与片段是否已分配插槽无关。
- */
-function subjectStateMediaToRef(tree: SubjectTree, stateId: string, stateName: string, media: SubjectNodeMediaRef): DirectorAssetRef {
-  const kind = media.type === 'audio' || media.type === 'video' ? media.type : 'image';
-  return {
-    id: `subject-state:${tree.rootId}/${stateId}`,
-    kind,
-    title: `${tree.name}·${stateName}`,
-    storageKey: media.key,
-    originScope: 'project',
-  };
-}
-
 /** 主体状态图 → 图片素材（占一个图片槽位，走 assignAssetSlots 唯一编号路径） */
 function subjectImageToRef(item: ProductionItem, img: ProductionItemImage): DirectorAssetRef {
   const stateName = img.stateTag ?? img.tags[0] ?? '剧照';
@@ -1088,6 +202,34 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   const { assets: allAssets } = useAssets();
   const palette = useCardPalette(theme, isDark);
   const editorRef = useRef<MentionEditorHandle>(null);
+  /** @ 面板「导入资产」：与素材抽屉同一条 CAS 链（只落 CAS，导入后 useAssets 订阅自动刷新） */
+  const uploadAssets = useCasUpload();
+
+  /** 画布上的媒体节点（仅 image / video / audio；文本等非媒体一律不列） */
+  const graphStore = useContext(ReactGraphStoreContext);
+  const canvasMedia = useMemo<DirectorAssetRef[]>(() => {
+    const nodes = graphStore?.getGraph?.().nodes ?? [];
+    const out: DirectorAssetRef[] = [];
+    for (const n of nodes) {
+      const d = (n.data ?? {}) as { storageKey?: string; content?: string; url?: string; kind?: string };
+      const kind = n.type === 'image' || n.type === 'video' || n.type === 'audio'
+        ? n.type
+        : d.kind === 'image' || d.kind === 'video' || d.kind === 'audio' ? d.kind : null;
+      if (!kind) continue;
+      const storageKey = d.storageKey;
+      const url = d.content || d.url;
+      if (!storageKey && !url) continue;
+      out.push({
+        id: `canvas:${n.id}`,
+        kind,
+        title: n.title || `${kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}节点`,
+        storageKey,
+        url,
+        originScope: 'project',
+      });
+    }
+    return out;
+  }, [graphStore]);
 
   const tier: DirectorModelTier = shared.presetId;
   const caps = DIRECTOR_ASSET_CAPS[tier];
@@ -1190,25 +332,6 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     }
   }, [segmentAssets, tier, slotInfo, kindUsed, caps, persistRef, message, t]);
 
-  const pickFromPanel = useCallback((a: Asset) => {
-    const ref = assetToDirectorRef(a);
-    if (ref) insertRef(ref);
-  }, [insertRef]);
-
-  const pickSubjectImage = useCallback((item: ProductionItem, img: ProductionItemImage) => {
-    insertRef(subjectImageToRef(item, img));
-  }, [insertRef]);
-
-  /** 主体状态级媒体（`subject-state:<rootId>/<stateId>`）：与已分配插槽无关，插入走同一 insertRef */
-  const pickSubjectState = useCallback((ref: DirectorAssetRef) => {
-    insertRef(ref);
-  }, [insertRef]);
-
-  /** 整主体占槽（`subject:<id>`，无图主体同样可占；补图后经 resolveSubjectCover 自动解析封面） */
-  const pickSubject = useCallback((item: ProductionItem) => {
-    insertRef(subjectToRef(item));
-  }, [insertRef]);
-
   /** 替换槽位：同位置替换（槽位号、顺序、所有 @ 引用自动跟新资产；pin 保留原槽号） */
   const replaceSlotAssetAt = useCallback((targetId: string, newRef: DirectorAssetRef) => {
     const pinned: DirectorAssetRef = {
@@ -1235,6 +358,23 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     if (!replaceTarget) return;
     replaceSlotAssetAt(replaceTarget, newRef);
   }, [replaceTarget, replaceSlotAssetAt]);
+
+  /**
+   * 面板选中 → 写入（唯一落库分流点）：
+   * 替换模式 = 同位置替换（重复引用先拦下），否则走 insertRef（占槽 + 插 @ 引用）；面板统一关闭。
+   */
+  const handlePanelPick = useCallback((ref: DirectorAssetRef) => {
+    if (replaceTarget) {
+      if (slotInfo.byAssetId[ref.id]) {
+        message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
+        return;
+      }
+      replaceSlotAsset(ref);
+    } else {
+      insertRef(ref);
+    }
+    setAssetPanelOpen(false);
+  }, [replaceTarget, slotInfo, message, t, replaceSlotAsset, insertRef]);
 
   /** 槽位移除：只解引用（资产仍在项目库/公共库）；提示词 @ 块降级为纯文本；其余槽位靠 pin 保持原号 */
   const removeAsset = useCallback((assetId: string) => {
@@ -1625,12 +765,17 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     color: 'inherit', cursor: 'pointer', flexShrink: 0,
   } as const;
 
+  /** @ 面板资产候选：资产库 → 素材引用（唯一映射）；替换模式只列同类型且未在其它槽位的资产 */
+  const candidateRefs = useMemo(
+    () => mentionCandidates.map(assetToDirectorRef).filter((r): r is DirectorAssetRef => r !== null),
+    [mentionCandidates],
+  );
   const pickerCandidates = useMemo(() => {
-    if (!replaceTarget) return mentionCandidates;
+    if (!replaceTarget) return candidateRefs;
     const target = segmentAssets.find((a) => a.id === replaceTarget);
-    if (!target) return mentionCandidates;
-    return mentionCandidates.filter((a) => a.data.kind === target.kind && !isDuplicate(a.id));
-  }, [replaceTarget, mentionCandidates, segmentAssets, isDuplicate]);
+    if (!target) return candidateRefs;
+    return candidateRefs.filter((r) => r.kind === target.kind && !isDuplicate(r.id));
+  }, [replaceTarget, candidateRefs, segmentAssets, isDuplicate]);
 
   return (
     <div
@@ -1822,6 +967,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
             <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onMouseDown={() => setAssetPanelOpen(false)} />
             <AssetPickPanel
               candidates={pickerCandidates}
+              canvasMedia={canvasMedia}
+              initialTab="asset"
               subjects={subjects ?? []}
               subjectTrees={subjectTrees ?? []}
               episodeContext={episodeContext}
@@ -1829,84 +976,20 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
               slotLabels={slotLabels}
               isDuplicate={isDuplicate}
               isKindFull={isKindFull}
-              onPick={(a) => {
-                const ref = assetToDirectorRef(a);
-                if (!ref) return;
-                if (replaceTarget) {
-                  if (slotInfo.byAssetId[ref.id]) {
-                    message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
-                    return;
-                  }
-                  replaceSlotAsset(ref);
-                } else {
-                  pickFromPanel(a);
-                }
-                setAssetPanelOpen(false);
-              }}
-              onPickSubject={(item) => {
-                const ref = subjectToRef(item);
-                if (replaceTarget) {
-                  if (slotInfo.byAssetId[ref.id]) {
-                    message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
-                    return;
-                  }
-                  replaceSlotAsset(ref);
-                } else {
-                  pickSubject(item);
-                }
-                setAssetPanelOpen(false);
-              }}
-              onPickSubjectImage={(item, img) => {
-                const ref = subjectImageToRef(item, img);
-                if (replaceTarget) {
-                  if (slotInfo.byAssetId[ref.id]) {
-                    message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
-                    return;
-                  }
-                  replaceSlotAsset(ref);
-                } else {
-                  pickSubjectImage(item, img);
-                }
-                setAssetPanelOpen(false);
-              }}
-              onPickCanvasMedia={(ref) => {
-                if (replaceTarget && slotInfo.byAssetId[replaceTarget]) {
-                  replaceSlotAssetAt(replaceTarget, ref);
-                } else {
-                  insertRef(ref);
-                }
-                setAssetPanelOpen(false);
-              }}
-              onPickSubjectState={(ref) => {
-                if (replaceTarget) {
-                  if (slotInfo.byAssetId[ref.id]) {
-                    message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
-                    return;
-                  }
-                  replaceSlotAsset(ref);
-                } else {
-                  pickSubjectState(ref);
-                }
-                setAssetPanelOpen(false);
-              }}
+              onPickAsset={handlePanelPick}
+              onPickCanvasMedia={handlePanelPick}
+              onPickSubject={(item) => handlePanelPick(subjectToRef(item))}
+              onPickSubjectImage={(item, img) => handlePanelPick(subjectImageToRef(item, img))}
+              onPickSubjectState={handlePanelPick}
               onClose={() => setAssetPanelOpen(false)}
+              onUploadFiles={(files) => { void uploadAssets(files); }}
               palette={palette}
               t={(key, fallback, opts) => t(key, fallback ?? key, opts)}
               theme={theme}
               onPickAssetFromOpenLib={(a) => {
-                /* 开源条目「入库后插入」：与资产条目 onPick 同一执行路径（占槽 + 插 @PictureN 块） */
+                /* 开源条目「入库后插入」：与资产条目同一执行路径（占槽 + 插 @PictureN 块） */
                 const ref = assetToDirectorRef(a);
-                if (!ref) return;
-                if (replaceTarget) {
-                  if (slotInfo.byAssetId[ref.id]) {
-                    message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
-                    return;
-                  }
-                  replaceSlotAsset(ref);
-                } else {
-                  pickFromPanel(a);
-                }
-                setAssetPanelOpen(false);
+                if (ref) handlePanelPick(ref);
               }}
             />
           </>

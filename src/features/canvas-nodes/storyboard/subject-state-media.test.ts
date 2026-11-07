@@ -381,38 +381,44 @@ describe('releaseSubjectStateMediaRefs（删除状态/树防孤儿）', () => {
   });
 });
 
-describe('来源面板 @ 形态契约（fs 断言，2026-11-05 约定）', () => {
+describe('来源面板 @ 形态契约（fs 断言，2026-11-05 约定；2026-11-07 统一到共享面板）', () => {
   const read = (rel: string) => readFileSync(path.resolve(here, rel), 'utf8');
+  const panelSrc = () => read('subject-media-source-panel.tsx');
+  const sharedSrc = () => read('../../../shared/components/asset-pick-panel.tsx');
 
-  it('四分区 tab 顺序 = 画布/公共/本项目/手动上传（TAB_ORDER 字面量顺序）', () => {
-    const src = read('subject-media-source-panel.tsx');
-    const order = src.match(/TAB_ORDER: SourceTab\[\] = \[([^\]]+)\]/)?.[1] ?? '';
-    expect(order).toBe("'canvas', 'library', 'project', 'upload'");
+  it('页签 = 画布 / 资产（项目+公共）/ 手动上传（共享面板同一实现，不另做一套）', () => {
+    const src = panelSrc();
+    const tabs = src.match(/const TABS: AssetPickTab\[\] = \[([^\]]+)\]/)?.[1] ?? '';
+    expect(tabs.replace(/\s/g, '')).toBe("'canvas','asset','upload'");
+    // 面板只注入数据与回调，UI 全部来自共享实现
+    expect(src).toContain("from '@/shared/components/asset-pick-panel.js'");
+    expect(src).toContain('<AssetPickPanel');
   });
 
   it('手动上传不污染全局库：面板不调用 addAsset/createAsset（只 uploadAsset 落 CAS）', () => {
-    const src = read('subject-media-source-panel.tsx');
+    const src = panelSrc();
     expect(src).toContain("from '@/features/asset-picker/services/upload-asset.js'");
     expect(src).not.toMatch(/addAsset|createAsset/);
   });
 
   it('@ 面板形态要素：分区 tab + 搜索框 + Esc 关闭 + popover data 标识', () => {
-    const src = read('subject-media-source-panel.tsx');
-    expect(src).toContain('data-subject-media-panel');
-    expect(src).toContain('data-subject-media-tab');
-    expect(src).toContain('data-subject-media-search');
-    expect(src).toMatch(/Escape/);
-    expect(src).not.toMatch(/from 'antd'[^]*Modal/); // 不再用 Modal 皮肤
+    const shared = sharedSrc();
+    expect(shared).toContain('data-asset-pick-panel');
+    expect(shared).toContain('data-asset-pick-tab');
+    expect(shared).toContain('data-asset-panel-search');
+    expect(shared).toMatch(/Escape/);
+    expect(shared).not.toMatch(/from 'antd'[^]*Modal/); // 不用 Modal 皮肤
   });
 
   it('可见关闭按钮（2026-11-05 修复）：常驻 header、aria-label、点击不写入、Esc 仍可用', () => {
-    const src = read('subject-media-source-panel.tsx');
-    // 存在 × 按钮，带可访问性 label（三语 key subject.panelClose）
-    expect(src).toContain('data-subject-media-close');
-    expect(src).toMatch(/aria-label=\{t\('subject\.panelClose'/);
-    // 关闭按钮渲染在 TAB 分区行之前（常驻 header → 四个分区 tab 下都在）
-    expect(src.indexOf('data-subject-media-close')).toBeLessThan(src.indexOf('data-subject-media-tab'));
-    // 三条退出路径（× / Esc / 点外部）都收口 closeWithFocus —— 该函数只聚焦+onClose，不调 onPick（不写入）
+    const shared = sharedSrc();
+    const src = panelSrc();
+    // 共享面板：常驻 × 按钮，带可访问性 label
+    expect(shared).toContain('data-asset-pick-close');
+    expect(shared).toMatch(/aria-label=\{t\('assetPick\.close'/);
+    // 关闭按钮与页签同一行（页签下所有分区都在）
+    expect(shared.indexOf('data-asset-pick-close')).toBeGreaterThan(shared.indexOf('data-asset-pick-tab'));
+    // 三条退出路径（× / Esc / 点外部）在主体面板收口 closeWithFocus —— 只聚焦+onClose，不调 onPick（不写入）
     const closeBody = src.slice(src.indexOf('closeWithFocus = useCallback'), src.indexOf('doPick = useCallback'));
     expect(closeBody).toContain('anchorEl?.focus?.()');
     expect(closeBody).toContain('onClose()');

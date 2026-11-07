@@ -1,4 +1,4 @@
-/**
+﻿/**
  * use-director-run — 导演台真实运行编排（上传/提交 → 轮询 → 逐段落库 → 取消/引导）
  *
  * 状态机：idle → submitting → queued → running → success / error / canceled
@@ -36,7 +36,16 @@ import {
   fetchProtocolVideoStatus,
   startProtocolDirectorRun,
 } from './openai-protocol-client.js';
-import { buildDirectorPack, buildRunOverrides, type RefMediaResolver } from './director-pack-builder.js';
+import { buildDirectorPack, buildRunOverrides, createDefaultRefMediaResolver, type RefMediaResolver } from './director-pack-builder.js';
+import { durationToFrames } from '@/entities/director-params.js';
+import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
+import {
+  cancelZeroexoJob,
+  fetchZeroexoJob,
+  submitZeroexoJob,
+  uploadZeroexoReference,
+  zeroexoOutputViewUrl,
+} from './zeroexo-jobs-client.js';
 import { createPreviewClientId, DirectorPreviewSocket, type DirectorPreviewFrame } from './comfyui-ws-client.js';
 import { newMediaKey, putMedia, resolveMediaUrl } from '@/platform/media.js';
 import { isAuthorized } from '@/platform/fs.js';
@@ -44,14 +53,16 @@ import type { DirectorModelTier, RunShotLike, SharedParamsLike, SubjectCoverOf }
 
 export type DirectorRunPhase = 'idle' | 'submitting' | 'queued' | 'running' | 'success' | 'error' | 'canceled';
 
-/** 双传输模式配置（渠道面板产物）：openai 主路径 / direct 高级直连 */
+/** 双传输模式配置（渠道面板产物）：openai 主路径 / direct 高级直连 / zeroexo 本机插件作业协议 */
 export type DirectorBridgeConfig =
   | { mode: 'openai'; channel: OpenaiChannelCredentials }
-  | { mode: 'direct'; baseUrl: string; token?: string; models: BridgeRunModels };
+  | { mode: 'direct'; baseUrl: string; token?: string; models: BridgeRunModels }
+  /** 本机 ComfyUI_ZeroExoNodes 重写版：一个片段一个 /zeroexo/v1/jobs 作业 */
+  | { mode: 'zeroexo'; baseUrl: string };
 
 export interface DirectorRunCallbacks {
   /** 段状态变化（选中段进入生成 / 完成 / 失败 / 已取消） */
-  onSegmentState(shotId: string, state: 'generating' | 'done' | 'failed' | 'cancelled'): void;
+  onSegmentState(shotId: string, state: 'generating' | 'done' | 'failed' | 'cancelled' | 'interrupted'): void;
   /** 段完成并已落库（视频 storageKey + 首帧缩略） */
   onSegmentDone(shotId: string, payload: { videoStorageKey: string; firstFrameKey?: string; firstFrameUrl?: string }): void;
   /** 预览区自动跟随最新完成段 */
@@ -118,6 +129,37 @@ const INITIAL_STATE: DirectorRunState = {
   preview: null,
   livePreviewSupported: false,
 };
+
+// ===== 刷新续接（2026-11-07 用户反馈：生成中刷新页面不能丢作业） =====
+// 进行中的作业写 sessionStorage；刷新后 mount 自动恢复 activeJob 并继续轮询（作业本身在 ComfyUI 侧不受影响）。
+const RUN_RESUME_KEY = 'zeroexo.directorRun.active';
+
+interface ResumedRun {
+  mode: 'openai' | 'direct' | 'zeroexo';
+  jobId?: string;
+  jobs?: Array<{ segIndex: number; jobId: string; shotId: string }>;
+  segmentShotIds: string[];
+  projectId: string;
+  at: number;
+}
+
+function saveResumableRun(run: ResumedRun): void {
+  try { window.sessionStorage.setItem(RUN_RESUME_KEY, JSON.stringify(run)); } catch { /* 隐私模式 */ }
+}
+
+function clearResumableRun(): void {
+  try { window.sessionStorage.removeItem(RUN_RESUME_KEY); } catch { /* ignore */ }
+}
+
+function readResumableRun(): ResumedRun | null {
+  try {
+    const raw = window.sessionStorage.getItem(RUN_RESUME_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as ResumedRun;
+  } catch {
+    return null;
+  }
+}
 
 // ===== 主线程截帧（串行队列：同一时刻只解码一个视频） =====
 
@@ -204,7 +246,16 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
   const doneIndexes = useRef<Set<number>>(new Set());
   const guidanceRequested = useRef<Set<number>>(new Set());
   const canceled = useRef(false);
-  const activeJob = useRef<{ mode: 'openai' | 'direct'; jobId: string; segmentShotIds: string[]; projectId: string } | null>(null);
+  const activeJob = useRef<{
+    mode: 'openai' | 'direct' | 'zeroexo';
+    jobId: string;
+    segmentShotIds: string[];
+    projectId: string;
+  } | null>(null);
+  /** zeroexo 模式：段号(1 基) → 该段的 ComfyUI 作业 id */
+  const zeroexoJobs = useRef<Map<number, { jobId: string; shotId: string }>>(new Map());
+  /** 段元数据（标题/提示词/时长）：落历史分组时给资产记录用 */
+  const shotMeta = useRef<Map<string, { title: string; prompt: string; duration: number }>>(new Map());
   const cfgRef = useRef(args.getBridgeConfig);
   const cbRef = useRef(args.callbacks);
   const pollMs = args.pollIntervalMs ?? 3000;
@@ -240,10 +291,27 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         const videoBlob =
           cfg?.mode === 'openai'
             ? await downloadProtocolVideo(cfg.channel, downloadUrl)
-            : await downloadBridgeSegment(cfg?.baseUrl ?? '', downloadUrl, cfg?.token);
+            : cfg?.mode === 'zeroexo'
+              ? await (await fetch(downloadUrl)).blob()
+              : await downloadBridgeSegment(cfg?.baseUrl ?? '', downloadUrl, cfg?.token);
         if (!isAuthorized()) throw new Error('本地资产库未授权（登录后才能把生成结果存入项目资产）');
         const videoKey = newMediaKey('video', projectId, 'video/mp4');
         await putMedia(videoKey.storageKey, videoBlob, 'video/mp4');
+        // 历史分组（抽屉「历史」）：生成产物必须落成项目资产（origin='generation'），
+        // 只 putMedia 不会进资产库 —— 这是「完成的在抽屉里看不到」的根因。
+        const meta = shotMeta.current.get(shotId);
+        await autoLandGenerationBlob({
+          projectId,
+          nodeId: shotId,
+          kind: 'video',
+          title: meta?.title ?? `第 ${segIndex} 段生成`,
+          blob: videoBlob,
+          mimeType: 'video/mp4',
+          durationMs: meta ? Math.round(meta.duration * 1000) : undefined,
+          jobId: activeJob.current?.jobId || undefined,
+          provider: cfg?.mode === 'openai' ? 'openai' : cfg?.mode === 'zeroexo' ? 'zeroexo' : 'comfyui-direct',
+          prompt: meta?.prompt,
+        }).catch(() => undefined);
         let firstFrameKey: string | undefined;
         let firstFrameUrl: string | undefined;
         const frame = await extractFirstFrame(videoBlob);
@@ -280,10 +348,95 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     setState((s) => ({ ...s, guidance: { ...s.guidance, [segment]: { image: g?.image ?? null } } }));
   }, []);
 
+  /** zeroexo 模式轮询：逐段查 /zeroexo/v1/jobs/{id}，每段 success 立即下载落库 */
+  /** 连续状态查询失败计数：404（作业已不存在）/ 连续 3 次 → 判定任务中断 */
+  const statusFailures = useRef(0);
+
+  /**
+   * 任务中断（ComfyUI 重启/作业被清空/网络长断）：不能一直停在「生成中」。
+   * 把未完成的段回写 interrupted，整单落 error，并清掉刷新续接记录。
+   */
+  const markInterrupted = useCallback((reason: string) => {
+    const job = activeJob.current;
+    job?.segmentShotIds.forEach((shotId, i) => {
+      if (!doneIndexes.current.has(i + 1)) cbRef.current.onSegmentState(shotId, 'interrupted');
+    });
+    cbRef.current.onNotice('error', `任务已中断：${reason}（可重新运行）`);
+    stopPolling();
+    stopPreview();
+    activeJob.current = null;
+    zeroexoJobs.current = new Map();
+    clearResumableRun();
+    setState((s) => ({ ...s, phase: 'error', error: `任务已中断：${reason}`, preview: null }));
+  }, [stopPolling, stopPreview]);
+
+  /** zeroexo 模式轮询：逐段查 /zeroexo/v1/jobs/{id}，每段 success 立即下载落库 */
+  const pollZeroexoTick = useCallback(async () => {
+    const job = activeJob.current;
+    const cfg = cfgRef.current();
+    if (!job || !cfg || cfg.mode !== 'zeroexo' || canceled.current) return;
+    const entries = [...zeroexoJobs.current.entries()];
+    let doneCount = 0;
+    let currentSegment: number | null = null;
+    let failure: string | null = null;
+    for (const [segIndex, item] of entries) {
+      let status;
+      try {
+        status = await fetchZeroexoJob(cfg.baseUrl, item.jobId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        statusFailures.current += 1;
+        // 404 = 作业已不存在（ComfyUI 重启/队列被清）；连续 3 次 = 后端长时间不可用
+        if (/404|not found|不存在/i.test(msg) || statusFailures.current >= 3) {
+          markInterrupted(msg);
+          return;
+        }
+        cbRef.current.onNotice('warning', `第 ${segIndex} 段状态查询失败：${msg}，将继续重试`);
+        continue;
+      }
+      if (canceled.current) return;
+      if (status.state === 'success') {
+        doneCount += 1;
+        if (!doneIndexes.current.has(segIndex)) {
+          doneIndexes.current.add(segIndex);
+          const out = (status.outputs ?? []).find((o) => o.kind === 'video') ?? status.outputs?.[0];
+          const url = out ? zeroexoOutputViewUrl(cfg.baseUrl, out.path) : null;
+          if (url) void processDoneSegment(segIndex, item.shotId, url, job.projectId);
+          else cbRef.current.onNotice('error', `第 ${segIndex} 段已完成，但插件没返回可取的视频路径`);
+        }
+      } else if (status.state === 'error') {
+        failure = status.error || '上游执行失败（详见 ComfyUI 侧日志）';
+      } else if (status.state === 'running') {
+        if (currentSegment === null) currentSegment = segIndex;
+      }
+    }
+    patch({ doneCount, currentSegment });
+    statusFailures.current = 0;
+    if (failure) {
+      patch({ phase: 'error', error: failure });
+    } else if (doneCount >= entries.length && entries.length > 0) {
+      patch({ phase: 'success' });
+    } else {
+      patch({ phase: 'running' });
+    }
+    if (failure || (doneCount >= entries.length && entries.length > 0)) {
+      stopPolling();
+      stopPreview();
+      setState((s) => ({ ...s, preview: null }));
+      activeJob.current = null;
+      clearResumableRun();
+      zeroexoJobs.current = new Map();
+    }
+  }, [patch, processDoneSegment, stopPolling, stopPreview, markInterrupted]);
+
   const pollTick = useCallback(async () => {
     const job = activeJob.current;
     const cfg = cfgRef.current();
     if (!job || !cfg || canceled.current) return;
+    if (cfg.mode === 'zeroexo') {
+      await pollZeroexoTick();
+      return;
+    }
     let status;
     try {
       status =
@@ -291,10 +444,17 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           ? await fetchProtocolVideoStatus(cfg.channel, job.jobId, job.segmentShotIds.length)
           : await fetchBridgeStatus(cfg.baseUrl, job.jobId, cfg.token);
     } catch (err) {
-      // 网络抖动：保持轮询，只在连续失败时提示（简化：直接 notice，不计数）
-      cbRef.current.onNotice('warning', `状态查询失败：${err instanceof Error ? err.message : String(err)}，将继续重试`);
+      // 网络抖动：连续失败/404 才判定中断；偶发一次继续轮询
+      const msg = err instanceof Error ? err.message : String(err);
+      statusFailures.current += 1;
+      if (/404|not found|不存在/i.test(msg) || statusFailures.current >= 3) {
+        markInterrupted(msg);
+        return;
+      }
+      cbRef.current.onNotice('warning', `状态查询失败：${msg}，将继续重试`);
       return;
     }
+    statusFailures.current = 0;
     if (canceled.current) return; // 取消发生在 await 期间：丢弃本次结果，别把 phase 改回 running
     const segs = status.segments ?? [];
     // 完成段（不等全部跑完，逐段落库）
@@ -330,8 +490,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       stopPreview(); // 结束即清实时帧，预览区切回成品/占位
       setState((s) => ({ ...s, preview: null }));
       activeJob.current = null;
+      clearResumableRun();
     }
-  }, [patch, processDoneSegment, requestGuidance, stopPolling, stopPreview]);
+  }, [patch, processDoneSegment, requestGuidance, stopPolling, stopPreview, markInterrupted]);
 
   const startRun = useCallback(
     async (runArgs: StartRunArgs): Promise<boolean> => {
@@ -348,6 +509,13 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       stopPreview();
       doneIndexes.current = new Set();
       guidanceRequested.current = new Set();
+      zeroexoJobs.current = new Map();
+      shotMeta.current = new Map(runArgs.shots.map((s) => [s.id, {
+        title: `片段 ${s.number} · ${s.duration}s`,
+        prompt: s.imagePrompt ?? '',
+        duration: s.duration,
+      }]));
+      statusFailures.current = 0;
       canceled.current = false;
       activeJob.current = null;
       setState({
@@ -360,7 +528,54 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         let jobId: string;
         let queueNumber: number | null = null;
         let segmentShotIds: string[];
-        if (cfg.mode === 'openai') {
+        if (cfg.mode === 'zeroexo') {
+          // 本机插件（重写版）：一个片段 = 一个 /zeroexo/v1/jobs 作业；参考图先传 ComfyUI input。
+          const selected = runArgs.shots.filter((s) => runArgs.selectedIds.includes(s.id));
+          const resolver = runArgs.resolveMedia ?? createDefaultRefMediaResolver(runArgs.subjectCoverOf);
+          const p = (runArgs.shared.params ?? {}) as Record<string, unknown>;
+          const num = (k: string, d: number): number => {
+            const n = Number(p[k]);
+            return Number.isFinite(n) ? n : d;
+          };
+          const continuityOn = p.continuityEnabled === true;
+          const submitted: Array<{ jobId: string; shotId: string }> = [];
+          for (const [i, shot] of selected.entries()) {
+            // 参考图：插件节点只收一张 → 取该片段第一张图片参考（其余槽位生成本身不支持）
+            const firstImage = (shot.references ?? []).find((r) => r.kind === 'image');
+            let referenceImage = '';
+            if (firstImage) {
+              const media = await resolver(firstImage).catch(() => null);
+              if (media) {
+                referenceImage = (await uploadZeroexoReference(
+                  cfg.baseUrl, media.blob, `zeroexo_${shot.id}.${media.ext || 'png'}`,
+                )) ?? '';
+              }
+            }
+            const job = await submitZeroexoJob(cfg.baseUrl, {
+              clientJobId: `zx_${runArgs.projectId}_${shot.id}_${Date.now()}`,
+              project: runArgs.projectId,
+              episode: runArgs.episode,
+              params: {
+                prompt: (shot.imagePrompt ?? '').trim() || `第 ${i + 1} 段`,
+                negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ''),
+                width: runArgs.width,
+                height: runArgs.height,
+                frames: durationToFrames(shot.duration),
+                steps: num('steps', 25),
+                cfg: num('cfg', 1),
+                seed: num('seed', 0),
+                frame_rate: 24,
+                guide_frames: num('continuityOverlapFrames', 22),
+                use_prev_guide: continuityOn && i > 0,
+                reference_image: referenceImage,
+              },
+            });
+            submitted.push({ jobId: job.jobId, shotId: shot.id });
+          }
+          zeroexoJobs.current = new Map(submitted.map((j, i) => [i + 1, j]));
+          segmentShotIds = selected.map((s) => s.id);
+          jobId = submitted.map((j) => j.jobId).join(',');
+        } else if (cfg.mode === 'openai') {
           // 主路径：OpenAI 兼容协议（媒体内联 dataURL，无 zip 上传环节；参数映射唯一表 director-protocol-map）
           const started = await startProtocolDirectorRun(cfg.channel, {
             shots: runArgs.shots,
@@ -416,6 +631,17 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           segmentShotIds = built.segmentShotIds;
         }
         activeJob.current = { mode: cfg.mode, jobId, segmentShotIds, projectId: runArgs.projectId };
+        // 刷新续接：记录本次运行（作业 id + 段映射），刷新后 mount 自动恢复轮询
+        saveResumableRun({
+          mode: cfg.mode,
+          jobId: cfg.mode === 'zeroexo' ? undefined : jobId,
+          jobs: cfg.mode === 'zeroexo'
+            ? [...zeroexoJobs.current.entries()].map(([segIndex, v]) => ({ segIndex, jobId: v.jobId, shotId: v.shotId }))
+            : undefined,
+          segmentShotIds,
+          projectId: runArgs.projectId,
+          at: Date.now(),
+        });
         patch({
           phase: 'queued',
           jobId,
@@ -446,6 +672,12 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         await cancelProtocolVideoJob(cfg.channel, job.jobId);
       } else if (cfg.mode === 'direct' && job.mode === 'direct') {
         await cancelBridgeJob(cfg.baseUrl, job.jobId, cfg.token);
+      } else if (cfg.mode === 'zeroexo' && job.mode === 'zeroexo') {
+        // 一段一个作业：逐段取消（失败不阻断，本地仍落「已取消」）
+        for (const item of zeroexoJobs.current.values()) {
+          await cancelZeroexoJob(cfg.baseUrl, item.jobId).catch(() => undefined);
+        }
+        zeroexoJobs.current = new Map();
       }
     } catch (err) {
       // 取消请求本身失败（ComfyUI 不响应/404）也不能停在「生成中」：本地仍落到确定状态
@@ -463,6 +695,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     stopPolling(); // 停轮询
     stopPreview(); // 停 WS 预览订阅，不再收帧
     activeJob.current = null;
+    clearResumableRun();
     setState((s) => ({ ...s, phase: 'canceled', canceledKept: doneIndexes.current.size, preview: null }));
   }, [stopPolling, stopPreview]);
 
@@ -471,10 +704,42 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     stopPreview();
     canceled.current = false;
     activeJob.current = null;
+    clearResumableRun();
+    zeroexoJobs.current = new Map();
     doneIndexes.current = new Set();
     guidanceRequested.current = new Set();
     setState(INITIAL_STATE);
   }, [stopPolling, stopPreview]);
+
+  // 刷新续接：mount 时若 sessionStorage 里有进行中的作业，恢复 activeJob 并继续轮询
+  // （作业在 ComfyUI 侧不受页面刷新影响；这里只恢复前端跟踪，不重新提交）
+  useEffect(() => {
+    if (activeJob.current) return;
+    const saved = readResumableRun();
+    if (!saved) return;
+    if (Date.now() - saved.at > 6 * 60 * 60 * 1000) { clearResumableRun(); return; }
+    statusFailures.current = 0;
+    if (saved.mode === 'zeroexo' && saved.jobs?.length) {
+      zeroexoJobs.current = new Map(saved.jobs.map((j) => [j.segIndex, { jobId: j.jobId, shotId: j.shotId }]));
+    }
+    activeJob.current = {
+      mode: saved.mode,
+      jobId: saved.jobId ?? '',
+      segmentShotIds: saved.segmentShotIds,
+      projectId: saved.projectId,
+    };
+    setState({
+      ...INITIAL_STATE,
+      phase: 'running',
+      jobId: saved.jobId ?? null,
+      totalCount: saved.segmentShotIds.length,
+      segmentShotIds: saved.segmentShotIds,
+      livePreviewSupported: false, // 刷新后 WS clientId 已失效，不再假装能收实时帧
+    });
+    pollTimer.current = window.setInterval(() => void pollTick(), pollMs);
+    void pollTick();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { ...state, startRun, cancel, reset };
 }

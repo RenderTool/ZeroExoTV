@@ -245,7 +245,7 @@ export function HierarchyPanelSidebar({
             type="button"
             onClick={onClose}
             aria-label={t('hierarchy.collapse', '收起')}
-            title={t('hierarchy.collapse', '收起')}
+            // 2026-11-07 用户指令：去掉右侧按钮的悬浮提示（提示会盖住抽屉面包屑/误触）
             style={{
               position: 'absolute', top: 8, right: 8, zIndex: 20,
               width: 28, height: 28, border: 'none', background: 'transparent',

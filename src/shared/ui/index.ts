@@ -4,6 +4,7 @@
 
 export * from './tokens.js';
 export * from './badge.js';
+export * from './thumb-badge.js';
 export * from './card-shell.js';
 export * from './buttons.js';
 export * from './input.js';

@@ -118,13 +118,4 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(mask).toContain('ZoomIn');
   });
 
-  it('居中渲染器只保留只读/参数型 case', () => {
-    const renderer = read('src/features/image-editor/image-dialog-renderer.tsx');
-    for (const gone of ["case 'crop'", "case 'split'", "case 'maskEdit'"]) {
-      expect(renderer).not.toContain(gone);
-    }
-    for (const kept of ["case 'upscale'", "case 'angle'", "case 'view'", "case 'info'"]) {
-      expect(renderer).toContain(kept);
-    }
-  });
 });

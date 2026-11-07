@@ -41,7 +41,6 @@ export interface UseEditorInteractionsParams {
   nodeCreateMenuPos: { x: number; y: number } | null;
   setContextMenuItems: React.Dispatch<React.SetStateAction<ContextMenuItem[] | null | undefined>>;
   setConnectionDrop: React.Dispatch<React.SetStateAction<any>>;
-  setImageDialog: React.Dispatch<React.SetStateAction<any>>;
   setDetailNode: React.Dispatch<React.SetStateAction<NodeRecord | null>>;
   setAssetPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setReplaceNodeId: React.Dispatch<React.SetStateAction<string | null>>;

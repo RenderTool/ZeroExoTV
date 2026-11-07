@@ -109,6 +109,8 @@ const H1 = 'a'.repeat(64);
 const H2 = 'b'.repeat(64);
 const H3 = 'c'.repeat(64);
 const H4 = 'd'.repeat(64);
+/** 主体状态图持有的内容（有 subject-state ref）→ 素材库不得重建 */
+const H5 = 'e'.repeat(64);
 
 function seedCasFile(hash: string, bytes = [1, 2, 3]): void {
   fsMock.writeFileBlob(`media/cas/${hash}.png`, new Uint8Array(bytes), 'image/png');
@@ -223,11 +225,14 @@ describe('自愈重建：按 cas_index + media/cas 实际文件重建丢失记�
     // 索引：h1/h3 文件在（可重建）；h2 文件缺失（绝不造记录）；h4 是 openlib 合成 id（跳过）
     seedCasFile(H1);
     seedCasFile(H3);
+    seedCasFile(H5);
     seedCasIndex({
       [H1]: { path: `media/cas/${H1}.png`, size: 3, mime: 'image/png', ext: 'png', refCount: 1, createdAt: '2026-11-05T07:31:16.000Z', refs: [{ assetId: 'ReG0xI5J59vOc0VlVcWNz', projectId: 'proj-live', kind: 'image' }] },
       [H2]: { path: `media/cas/${H2}.png`, size: 3, mime: 'image/png', ext: 'png', refCount: 1, createdAt: '2026-11-05T07:33:53.000Z', refs: [{ assetId: 'knHuHiEKMCvjm-gecCcVl', projectId: 'proj-live', kind: 'image' }] },
       [H3]: { path: `media/cas/${H3}.png`, size: 3, mime: 'image/png', ext: 'png', refCount: 1, createdAt: '2026-11-05T07:20:00.000Z', refs: [{ assetId: 'lib-asset-1', projectId: 'library', kind: 'image' }] },
       [H4]: { path: `media/cas/${H4}.png`, size: 3, mime: 'image/png', ext: 'png', refCount: 1, createdAt: '2026-11-05T07:10:00.000Z', refs: [{ assetId: 'openlib:e9', projectId: 'library', kind: 'image' }] },
+      // 主体状态图：同一 CAS 已被 subject-state 引用（素材库不得再重建一条）
+      [H5]: { path: `media/cas/${H5}.png`, size: 3, mime: 'image/png', ext: 'png', refCount: 1, createdAt: '2026-11-06T19:01:35.000Z', refs: [{ assetId: 'subject-state:item-1/定妆', projectId: 'proj-live', kind: 'image' }] },
     });
   });
 
@@ -258,12 +263,19 @@ describe('自愈重建：按 cas_index + media/cas 实际文件重建丢失记�
     expect(manifest.items.map((i) => i.id).sort()).toEqual(['ReG0xI5J59vOc0VlVcWNz', 'lib-asset-1']);
   });
 
-  it('项目索引也被删：恢复记录归公共库（否则资产页永远显示「还没有资产」）', async () => {
+  it('主体状态图占用的内容：素材库不重建（一张定妆图不能两处出现）', async () => {
+    const list = await listAssets();
+    expect(list.some((a) => a.cas?.hash === H5)).toBe(false);
+    // 其它可重建项不受影响
+    expect(list.map((a) => a.id).sort()).toEqual(['ReG0xI5J59vOc0VlVcWNz', 'lib-asset-1']);
+  });
+
+  it('归属项目已不存在：不重建（不再把孤儿资产塞进公共库）', async () => {
     listProjectsMock.mockResolvedValue([]);
     const list = await listAssets();
-    const rebuilt = list.find((a) => a.id === 'ReG0xI5J59vOc0VlVcWNz')!;
-    expect(rebuilt.scope).toBe('library');
-    expect((rebuilt.data as Record<string, unknown>).storageKey).toBe(`cas:${H1}.png`);
+    // h1 的 ref.projectId=proj-live 已不在项目列表 → 跳过；h3 明确 projectId=library → 仍重建
+    expect(list.map((a) => a.id)).toEqual(['lib-asset-1']);
+    expect(list.find((a) => a.id === 'ReG0xI5J59vOc0VlVcWNz')).toBeUndefined();
   });
 
   it('幂等：再次 listAssets 不重复重建、不覆盖既有记录', async () => {

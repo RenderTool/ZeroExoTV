@@ -75,7 +75,6 @@ import { ImageEditWorkspace } from '@/features/image-editor/image-edit-workspace
 import { useCanvasDocumentSwitch, useRestoreCanvasTabs } from '@/features/canvas-tabs/use-canvas-document-switch.js';
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
-import { ImageDialogRenderer } from '@/features/image-editor/image-dialog-renderer.js';
 import { useCanvasHandlers } from '@/features/canvas-interaction/use-canvas-handlers.js';
 import { useDropHandler } from '@/features/canvas-interaction/drop-handler.js';
 import { UploadQueueOverlay } from '@/features/upload-queue/index.js';
@@ -445,7 +444,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     nodeCreateMenuPos,
     setContextMenuItems,
     setConnectionDrop: dialogs.setConnectionDrop,
-    setImageDialog: dialogs.setImageDialog,
     setDetailNode: dialogs.setDetailNode,
     setAssetPickerOpen: dialogs.setAssetPickerOpen,
     setReplaceNodeId: dialogs.setReplaceNodeId,
@@ -1208,12 +1206,22 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         {dialogs.detailNode && (() => {
           const n = dialogs.detailNode as unknown as {
             id: string;
+            type?: string;
             title?: string;
             data?: { kind?: string; storageKey?: string; url?: string; content?: string; title?: string };
           };
           const d = n.data ?? {};
-          const kind = d.kind === 'image' || d.kind === 'video' || d.kind === 'text' ? d.kind : null;
-          const hasMedia = !!kind && !!(d.storageKey || d.url || (kind === 'text' && d.content));
+          // 画布节点的 kind 在 node.type 上，data.kind 只是兼容字段；缺一不可，否则会掉回旧详情面板
+          const nodeType = n.type;
+          const kind: 'image' | 'video' | 'text' | null =
+            d.kind === 'image' || d.kind === 'video' || d.kind === 'text'
+              ? d.kind
+              : nodeType === 'image' || nodeType === 'video' || nodeType === 'text'
+                ? nodeType
+                : null;
+          const rawContent = typeof d.content === 'string' ? d.content : undefined;
+          const directUrl = d.url ?? (rawContent && /^(blob:|data:|https?:)/.test(rawContent) ? rawContent : undefined);
+          const hasMedia = !!kind && !!(d.storageKey || directUrl || (kind === 'text' && rawContent));
           if (kind && hasMedia) {
             return (
               <MediaLightbox
@@ -1222,8 +1230,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
                   title: n.title ?? d.title ?? '画布节点',
                   kind,
                   storageKey: d.storageKey,
-                  url: d.url,
-                  content: kind === 'text' ? d.content : undefined,
+                  url: directUrl,
+                  content: kind === 'text' ? rawContent : undefined,
                   source: '画布节点',
                 }]}
                 index={0}
@@ -1262,16 +1270,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           挂在应用树内以获得 antd App 上下文(message 3 秒可撤销轻提示)与主题 */}
       <SubjectLinkDialogHost />
 
-      {/* 图片只读/参数型浮层（查看大图 / 详情 / 放大 / 多角度）；
-          编辑类（裁剪/分割/局部遮罩）在图片节点卡片内部完成（见 image-node-view） */}
-      {dialogs.imageDialog && refs.commandQueue ? (
-        <ImageDialogRenderer
-          state={dialogs.imageDialog}
-          commandQueue={refs.commandQueue}
-          theme={theme}
-          onClose={() => dialogs.setImageDialog(null)}
-        />
-      ) : null}
 
 
       {/* P2.1 ② replace 图片/视频/音频:隐藏文件输入(由 replace 工具触发 click) */}

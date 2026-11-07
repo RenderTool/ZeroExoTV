@@ -173,6 +173,25 @@ describe('parsePromptSegments（纯文本 → 段序列）', () => {
     expect(segs[0]).toEqual({ type: 'text', text: '@张三 看向 ' });
     expect(segs[1]).toEqual({ type: 'mention', label: 'Picture9' });
   });
+
+  it('官方四段式：行首小节标签 → heading；<Subject N> → subject；[Shot N] → shot；<d>…</d> → dialogue', () => {
+    const text = 'subject_definitions:\n<Subject 1> 是本段场景，取自 @Picture1 （宫格图）。\n\ndetailed_description:\n[Shot 1] 他说：<d>[Chinese] 快走。</d>';
+    const segs = parsePromptSegments(text);
+    expect(segs.map((s) => s.type)).toEqual([
+      'heading', 'text', 'subject', 'text', 'mention', 'text', 'heading', 'text', 'shot', 'text', 'dialogue',
+    ]);
+    expect(segs[0]).toEqual({ type: 'heading', text: 'subject_definitions:' });
+    expect(segs[2]).toEqual({ type: 'subject', text: '<Subject 1>', n: 1 });
+    expect(segs[8]).toEqual({ type: 'shot', text: '[Shot 1]', n: 1 });
+    expect(segs[10]).toEqual({ type: 'dialogue', text: '<d>[Chinese] 快走。</d>' });
+    // 舍入无损：序列化回原文
+    expect(serializeSegments(segs)).toBe(text);
+  });
+
+  it('小节标签只在行首识别（正文里的同名文字不误判）', () => {
+    const segs = parsePromptSegments('画面说明：本段写 subject_definitions: 不换行');
+    expect(segs.every((s) => s.type === 'text')).toBe(true);
+  });
 });
 
 describe('serializePromptDom / serializeSegments roundtrip', () => {
@@ -194,6 +213,34 @@ describe('serializePromptDom / serializeSegments roundtrip', () => {
     expect(root.matches(':empty')).toBe(true);
     expect(root.getAttribute('data-placeholder')).toBe('请输入提示词');
     expect(serializePromptDom(root)).toBe('');
+  });
+
+  it('三类 token 渲染 + 序列化无损：小节标签小标题、<Subject N> 原子块、<d>…</d> 台词着色', () => {
+    const value = 'subject_definitions:\n<Subject 1> 是本段场景，取自 @Picture1 （宫格图）。\n\ndetailed_description:\n[Shot 1] 他说：<d>[Chinese] 快走。</d>';
+    const { container } = renderEditor({ value });
+    const root = getRoot(container);
+    // 序列化与原文逐字一致（epoch 自愈判据不会死循环）
+    expect(serializePromptDom(root)).toBe(value);
+    expect(serializeSegments(parsePromptSegments(value))).toBe(value);
+    // 小节标签：行首小标题（加粗、字号 12）
+    const heads = root.querySelectorAll('[data-prompt-token="heading"]');
+    expect(heads.length).toBe(2);
+    expect((heads[0] as HTMLElement).style.fontWeight).toBe('600');
+    expect(heads[0]?.textContent).toBe('subject_definitions:');
+    // <Subject N>：原子块（不可编辑、带底色/蓝字）
+    const subject = root.querySelector('[data-prompt-token="subject"]') as HTMLElement;
+    expect(subject.textContent).toBe('<Subject 1>');
+    expect(subject.getAttribute('contenteditable')).toBe('false');
+    expect(subject.style.color).toBe('rgb(59, 130, 246)');
+    // [Shot N]：原子块（不可编辑、带底色/紫字）
+    const shot = root.querySelector('[data-prompt-token="shot"]') as HTMLElement;
+    expect(shot.textContent).toBe('[Shot 1]');
+    expect(shot.getAttribute('contenteditable')).toBe('false');
+    expect(shot.style.color).toBe('rgb(139, 92, 246)');
+    // <d>…</d>：台词段整体着色，内文可编辑（不设 contentEditable=false）
+    const dialogue = root.querySelector('[data-prompt-token="dialogue"]') as HTMLElement;
+    expect(dialogue.textContent).toBe('<d>[Chinese] 快走。</d>');
+    expect(dialogue.hasAttribute('contenteditable')).toBe(false);
   });
 });
 
@@ -659,5 +706,46 @@ describe('拖入正文（dropMimeTypes / onDropPayload）', () => {
     expect(drop.defaultPrevented).toBe(false);
     expect(onDropPayload).not.toHaveBeenCalled();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('撤销 / 重做（2026-11-07 用户指令：删主体/删文本要能撤销）', () => {
+  it('打字后 Ctrl+Z 回到上一步；Ctrl+Shift+Z 重做', () => {
+    const utils = render(<ControlledEditor initial="一位老人回头" />);
+    const root = getRoot(utils.container);
+    caretEnd(root);
+    expect(dispatchBeforeInput(root, 'insertText', '，快步走')).toBe(false);
+    expect(serializePromptDom(root)).toBe('一位老人回头，快步走');
+
+    fireEvent.keyDown(root, { key: 'z', ctrlKey: true });
+    expect(serializePromptDom(root)).toBe('一位老人回头');
+    fireEvent.keyDown(root, { key: 'z', ctrlKey: true, shiftKey: true });
+    expect(serializePromptDom(root)).toBe('一位老人回头，快步走');
+  });
+
+  it('点 @ 块「×」删除主体后 Ctrl+Z：整块引用恢复（可撤销删除主体）', () => {
+    const slot: MentionSlotView = { label: 'Picture1', title: '主角图', kind: 'image', url: 'data:image/png;base64,x' };
+    const utils = render(<ControlledEditor initial="@Picture1 回头" resolveSlot={() => slot} />);
+    const root = getRoot(utils.container);
+    expect(root.querySelectorAll('[data-mention-label]').length).toBe(1);
+    fireEvent.click(root.querySelector('[data-mention-remove="Picture1"]') as HTMLElement);
+    expect(root.querySelectorAll('[data-mention-label]').length).toBe(0);
+    expect(serializePromptDom(root)).toBe('回头');
+
+    fireEvent.keyDown(root, { key: 'z', ctrlKey: true });
+    expect(serializePromptDom(root)).toBe('@Picture1 回头');
+    expect(root.querySelectorAll('[data-mention-label]').length).toBe(1);
+  });
+
+  it('退格整块删除 @ 后同样可撤销（键盘删除路径）', () => {
+    const slot: MentionSlotView = { label: 'Picture1', title: '主角图', kind: 'image', url: 'data:image/png;base64,x' };
+    const utils = render(<ControlledEditor initial="看 @Picture1" resolveSlot={() => slot} />);
+    const root = getRoot(utils.container);
+    caretEnd(root);
+    expect(dispatchBeforeInput(root, 'deleteContentBackward')).toBe(false);
+    expect(root.querySelectorAll('[data-mention-label]').length).toBe(0);
+    fireEvent.keyDown(root, { key: 'z', ctrlKey: true });
+    expect(root.querySelectorAll('[data-mention-label]').length).toBe(1);
+    expect(serializePromptDom(root)).toBe('看 @Picture1 ');
   });
 });

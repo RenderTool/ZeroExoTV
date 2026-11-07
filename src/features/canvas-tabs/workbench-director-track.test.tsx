@@ -129,6 +129,7 @@ import { WorkbenchTabContent, resolveClipStatus } from './workbench-tab-content'
 import { WorkbenchMultiTrack } from '@/features/canvas-nodes/storyboard/workbench-multitrack';
 import { TimelineClip } from '@/features/canvas-nodes/storyboard/timeline-clip';
 import { pickDirectorCardWidth, directorCardHeight, DIRECTOR_RAIL_HEIGHT, DIRECTOR_ARROW_SIZE, directorRailTone, directorBadgeTone } from '@/features/canvas-nodes/storyboard/timeline-constants';
+import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS';
 import { DirectorParamsButton, DirectorParamsPanel, DirectorRunButton } from './director-run-params-row';
 import type { WorkbenchSharedParams } from '@/entities/slot-containers';
 import type { StoryboardTimelineProps } from '@/features/canvas-nodes/storyboard/storyboard-timeline';
@@ -247,14 +248,14 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
     expect(path.getAttribute('stroke-linecap')).toBe('round');
     expect(path.getAttribute('fill')).toBe('none');
 
-    // 绿色拼合缝残留 = 0：所有片段边框无 #00c758、圆角恒 4px（白缝 + 正常圆角已恢复）
+    // 绿色拼合缝残留 = 0：所有片段边框无 #00c758、圆角 = 画布同源 WORKSPACE_SURFACE_RADIUS（2026-11-07）
     const clip1 = container.querySelector('[data-clip-id="seg-1"]') as HTMLElement;
     const clip2 = container.querySelector('[data-clip-id="seg-2"]') as HTMLElement;
     const clip3 = container.querySelector('[data-clip-id="seg-3"]') as HTMLElement;
     for (const c of [clip1, clip2, clip3]) {
       expect(c.style.borderLeftColor).not.toBe(ARROW_GREEN);
       expect(c.style.borderRightColor).not.toBe(ARROW_GREEN);
-      expect(c.style.borderRadius).toBe('4px');
+      expect(c.style.borderRadius).toBe(`${WORKSPACE_SURFACE_RADIUS}px`);
     }
 
     // 2026-11-05 固定宽度片段卡片（220px 基准修订）：等宽卡片 220px、间距 6px（left = 下标×226），不随时长/缩放变化
@@ -281,10 +282,10 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
     clickClip(container.querySelector('[data-clip-id="seg-2"]') as HTMLElement, 100);
     expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(1);
 
-    // 全程无绿缝：圆角恒 4px、边框无绿
+    // 全程无绿缝：圆角 = 画布同源半径、边框无绿
     for (const id of ['seg-1', 'seg-2', 'seg-3']) {
       const c = container.querySelector(`[data-clip-id="${id}"]`) as HTMLElement;
-      expect(c.style.borderRadius).toBe('4px');
+      expect(c.style.borderRadius).toBe(`${WORKSPACE_SURFACE_RADIUS}px`);
       expect(c.style.borderLeftColor).not.toBe(ARROW_GREEN);
       expect(c.style.borderRightColor).not.toBe(ARROW_GREEN);
     }
@@ -456,7 +457,7 @@ describe('批量运行界面 = 复用现有 dry-run 预检', () => {
     expect(document.querySelectorAll('[data-director-dry-run]').length).toBe(1);
     // 主按钮只写「确认运行」（不含 dry-run 字样，也无图标/伪元素偷塞）
     const confirmBtn = modal.querySelector('[data-dry-run-confirm]') as HTMLElement;
-    expect(confirmBtn.textContent).toBe('确认运行');
+    expect(confirmBtn.textContent).toBe('开始生成');
     expect(confirmBtn.textContent).not.toContain('dry-run');
     expect(confirmBtn.textContent).not.toContain('不发起真实生成');
     // 2026-11-05 语义升级：确认 = 组装导演包提交到 ComfyUI 真实生成（预检说明同步）
@@ -466,10 +467,10 @@ describe('批量运行界面 = 复用现有 dry-run 预检', () => {
     // 预检页内无「完成」措辞
     expect(modal.textContent).not.toContain('完成');
     // 按时间线顺序列出勾选片段（执行 = 只运行这些片段）
-    const rows = Array.from(dryRun.querySelectorAll('tbody tr'));
+    const rows = Array.from(dryRun.querySelectorAll('[data-dry-run-segment]'));
     expect(rows.length).toBe(2);
-    expect(rows[0]!.querySelector('td')!.textContent).toBe('#1');
-    expect(rows[1]!.querySelector('td')!.textContent).toBe('#3');
+    expect(rows[0]!.textContent).toContain('片段 1');
+    expect(rows[1]!.textContent).toContain('片段 3');
     expect(dryRun.querySelector('[data-dry-run-disconnect]')).toBeNull();
 
     // 预检页「确认运行」→ 关闭 + 清勾选 + 退出批量模式（不残留）
@@ -488,17 +489,16 @@ describe('批量运行界面 = 复用现有 dry-run 预检', () => {
     fireEvent.click(container.querySelector('[data-select-mode-done]') as Element);
 
     const dryRun = document.querySelector('[data-director-dry-run]') as HTMLElement;
-    const rows = Array.from(dryRun.querySelectorAll('tbody tr'));
+    const rows = Array.from(dryRun.querySelectorAll('[data-dry-run-segment]'));
     expect(rows.length).toBe(1);
-    expect(rows[0]!.querySelector('td')!.textContent).toBe('#2');
+    expect(rows[0]!.textContent).toContain('片段 2');
     // 显式列出断开的衔接处
     const list = dryRun.querySelector('[data-dry-run-disconnect]') as HTMLElement;
     expect(list).toBeTruthy();
     expect(list.querySelector('[data-dry-run-disconnect-item]')?.textContent)
-      .toBe('片段 1 ↔ 片段 2 不相邻，本次运行断开引导');
-    // 本次运行参数：延续前段强制断开（—）
-    expect(Array.from(rows[0]!.querySelectorAll('td'))[4]!.textContent).toBe('—');
-    // 持久值不变：段2 衔接箭头仍在（断开只投影到本次运行参数）
+      .toBe('片段 1 与片段 2 不相邻，本次不启用衔接');
+    // 本次运行只列选中的片段（不再有逐帧/槽位列）
+    expect(rows[0]!.querySelectorAll('td').length).toBe(0);
     expect(container.querySelector('[data-continuity-arrow="seg-2"]')).toBeTruthy();
 
     // 返回（取消预检）→ 模式与勾选仍在，可继续调整
@@ -757,19 +757,13 @@ describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 =
       expect(el).toBeTruthy();
       return el;
     });
-    expect(panel.querySelector('[data-param-key="aspect"]')).toBeTruthy();
+    expect(panel.querySelector('[data-aspect-picker]')).toBeTruthy();
+    expect(panel.querySelector('[data-aspect-option="16:9"]')).toBeTruthy();
     expect(panel.querySelector('[data-param-key="scaleFactor"]')).toBeTruthy();
     expect((panel.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480');
 
     // 面板改比例 16:9 → 9:16：chip 与预览标签实时联动
-    fireEvent.mouseDown(panel.querySelector('[data-param-key="aspect"] .ant-select-content') as Element);
-    const opt = await waitFor(() => {
-      const el = Array.from(document.querySelectorAll<HTMLElement>('.ant-select-item-option'))
-        .find((o) => o.textContent === '9:16');
-      expect(el).toBeTruthy();
-      return el!;
-    });
-    fireEvent.click(opt);
+    fireEvent.click(panel.querySelector('[data-aspect-option="9:16"]') as Element);
     await waitFor(() =>
       expect((document.querySelector('[data-params-panel] [data-resolved-size]') as HTMLElement).textContent).toBe('480×864'));
     await waitFor(() =>
@@ -814,14 +808,7 @@ describe('DirectorParamsButton/RunButton/Panel 单测（比例/系数/运行链�
   it('比例切换 16:9 → 9:16：onSharedChange 收到 params.aspect，换算尺寸 chip 联动 864×480 → 480×864', async () => {
     const { onSharedChange } = renderGroup();
     expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480');
-    fireEvent.mouseDown(panel().querySelector('[data-param-key="aspect"] .ant-select-content') as Element);
-    const opt = await waitFor(() => {
-      const el = Array.from(document.querySelectorAll<HTMLElement>('.ant-select-item-option'))
-        .find((o) => o.textContent === '9:16');
-      expect(el).toBeTruthy();
-      return el!;
-    });
-    fireEvent.click(opt);
+    fireEvent.click(panel().querySelector('[data-aspect-option="9:16"]') as Element);
     expect(onSharedChange).toHaveBeenLastCalledWith({ params: { aspect: '9:16' } });
     await waitFor(() =>
       expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('480×864'));
@@ -863,12 +850,14 @@ describe('DirectorParamsButton/RunButton/Panel 单测（比例/系数/运行链�
     expect(onRun2).not.toHaveBeenCalled();
   });
 
-  it('DirectorParamsPanel 独立渲染：三类控件齐备（比例/×系数/换算尺寸 chip）', () => {
+  it('DirectorParamsPanel 独立渲染：比例/×系数/换算尺寸/步数/种子 齐备', () => {
     const { container } = render(
       <DirectorParamsPanel shared={baseShared as never} onSharedChange={() => {}} subColor="#888888" />,
     );
-    expect(container.querySelector('[data-param-key="aspect"]')).toBeTruthy();
+    expect(container.querySelector('[data-aspect-picker]')).toBeTruthy();
     expect(container.querySelector('[data-param-key="scaleFactor"]')).toBeTruthy();
+    expect(container.querySelector('[data-param-key="steps"]')).toBeTruthy();
+    expect(container.querySelector('[data-param-key="seed"]')).toBeTruthy();
     expect((container.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480');
   });
 });
@@ -978,7 +967,9 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
     // 无产物（seg-2 pending）中性占位：状态底色渐变、无真实帧图
     const seg2 = container.querySelector('[data-clip-id="seg-2"]') as HTMLElement;
     expect(seg2.querySelector('[data-auth-img]')).toBeNull();
-    expect(seg2.style.background).toContain('linear-gradient');
+    // 卡片不填色（跟画布导轨同底色）+ 只留细描边（2026-11-07 用户指令）
+    expect(seg2.style.background).toBe('transparent');
+    expect(seg2.style.borderWidth).toBe('1px');
     // 状态徽标：done=完成 / idle=未生成 / failed=失败，颜色区分
     const badgeOf = (id: string) => container.querySelector(`[data-clip-id="${id}"] [data-clip-badge]`) as HTMLElement;
     expect(badgeOf('seg-1').getAttribute('data-clip-badge')).toBe('done');
@@ -1235,7 +1226,7 @@ describe('2026-11-05 参考图修订：卡片结构 + 选中态 + 六态角标 +
     expect(selected.style.borderLeftColor).not.toBe('rgb(0, 0, 0)');
     // 细亮描边 = 中性亮色（outline 内缩 1px，子元素缩略框 overflow:hidden 不可压住）
     expect(selected.style.outline).toContain('1px');
-    expect(selected.style.outline).toMatch(/rgba\((226,232,240|68,64,60)/);
+    expect(selected.style.outline).toMatch(/rgba\((245,245,244|68,64,60)/);
     // 选中态零绿色残留（#00c758 / rgba(0,199,88,*) 只允许出现在衔接箭头 SVG 上）
     expect(selected.style.outline).not.toMatch(/0,\s*199,\s*88|#00c758/i);
     expect(selected.style.outlineOffset).toBe('-1px');
@@ -1245,20 +1236,18 @@ describe('2026-11-05 参考图修订：卡片结构 + 选中态 + 六态角标 +
     expect(selected.style.transform).toBe('none');
     expect(selected.style.zIndex).toBe('2');
     expect((selected.querySelector('[data-director-thumb]') as HTMLElement).style.overflow).toBe('hidden');
-    // 未选中压暗 / hover 回亮 / 选中全亮
+    // 卡片不填色、不压暗：所有卡片同一底色（导轨底），仅描边区分（2026-11-07 用户指令）
     expect(selected.style.opacity).toBe('1');
-    expect(rest.style.opacity).toBe('0.62');
-    fireEvent.mouseEnter(rest);
-    await waitFor(() => expect(rest.style.opacity).toBe('0.85'));
-    fireEvent.mouseLeave(rest);
-    await waitFor(() => expect(rest.style.opacity).toBe('0.62'));
-    // 深色主题选中描边也是中性亮色，不是纯黑也不是绿色（light 取值由 token 单测覆盖）
+    expect(rest.style.opacity).toBe('1');
+    expect(selected.style.background).toBe('transparent');
+    expect(rest.style.background).toBe('transparent');
+    // 选中描边是中性亮色/中性灰，不是纯黑也不是绿色
     const lightTone = directorRailTone(false);
-    expect(lightTone.selectedOutline).toBe('rgba(68,64,60,0.80)');
+    expect(lightTone.selectedOutline).toBe('rgba(68,64,60,0.85)');
     expect(lightTone.selectedOutline).not.toMatch(/0,\s*199,\s*88|#00c758/i);
     expect(lightTone.selectedBorder).not.toMatch(/#000/);
     const darkTone = directorRailTone(true);
-    expect(darkTone.selectedOutline).toBe('rgba(226,232,240,0.88)');
+    expect(darkTone.selectedOutline).toBe('rgba(245,245,244,0.90)');
     expect(darkTone.selectedShadow).not.toMatch(/0,\s*199,\s*88/);
   });
 
@@ -1290,7 +1279,7 @@ describe('2026-11-05 参考图修订：卡片结构 + 选中态 + 六态角标 +
       expect(tone).toBeTruthy();
     }
     const cases: Array<[string, boolean, string]> = [
-      ['idle', true, 'rgb(214, 211, 209)'],
+      ['idle', true, 'rgb(199, 199, 199)'],
       ['queued', true, 'rgb(147, 197, 253)'],
       ['generating', true, 'rgb(134, 239, 172)'],
       ['done', true, 'rgb(134, 239, 172)'],
@@ -1330,7 +1319,7 @@ describe('2026-11-05 参考图修订：卡片结构 + 选中态 + 六态角标 +
     const statuses = ['idle', 'queued', 'generating', 'done', 'failed', 'cancelled'] as const;
     for (const status of statuses) {
       expect(contrast(directorBadgeTone(status, false).text, '#ffffff')).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(directorBadgeTone(status, true).text, '#1b1c1f')).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(directorBadgeTone(status, true).text, '#161412')).toBeGreaterThanOrEqual(4.5);
     }
   });
 

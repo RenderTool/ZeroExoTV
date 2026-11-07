@@ -30,9 +30,11 @@ describe('导演台时长滑块不抖动', () => {
 
 describe('导演台插槽拖动替换（槽号固定）', () => {
   const panel = read('src/features/canvas-tabs/director-prompt-panel.tsx');
+  // @ 面板已抽到共享实现（导演台与主体状态媒体共用），面板侧断言改读该文件
+  const pickPanel = read('src/shared/components/asset-pick-panel.tsx');
 
   it('拖拽替换 MIME + 插槽接收 drop + 原位替换实现', () => {
-    expect(panel).toContain("DIRECTOR_ASSET_DRAG_MIME = 'application/x-director-asset'");
+    expect(pickPanel).toContain("DIRECTOR_ASSET_DRAG_MIME = 'application/x-director-asset'");
     expect(panel).toContain('onDrop={(e) => {');
     expect(panel).toContain('replaceSlotAssetAt(a.id');
     expect(panel).toContain('replaceSlotAssetAt(replaceTarget, newRef)');
@@ -48,8 +50,8 @@ describe('导演台插槽拖动替换（槽号固定）', () => {
   });
 
   it('素材面板条目可拖拽（拖到插槽格替换）', () => {
-    expect(panel).toContain('draggable={!!ref}');
-    expect(panel).toContain('setData(DIRECTOR_ASSET_DRAG_MIME');
+    expect(pickPanel).toContain('draggable');
+    expect(pickPanel).toContain('setData(DIRECTOR_ASSET_DRAG_MIME');
   });
 });
 

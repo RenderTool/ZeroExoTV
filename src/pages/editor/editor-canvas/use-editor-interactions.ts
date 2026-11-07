@@ -23,7 +23,6 @@ import { requestNodeDockPrompt } from '@/features/tools-dock/node-generate-dock.
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
-import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import type { AgentTaskHandlers } from './agent-client-types.js';
 // 本地版（Plan#83）：Agent 会话/任务调度不在前端；下列局部 stub 仅使模块可加载，调用即报错
 const agentClient = {
@@ -135,7 +134,6 @@ export function useEditorInteractions({
   nodeCreateMenuPos,
   setContextMenuItems,
   setConnectionDrop,
-  setImageDialog,
   setDetailNode,
   setAssetPickerOpen,
   setReplaceNodeId,
@@ -171,7 +169,6 @@ export function useEditorInteractions({
   nodeCreateMenuPos: { x: number; y: number } | null;
   setContextMenuItems: React.Dispatch<React.SetStateAction<ContextMenuItem[] | null | undefined>>;
   setConnectionDrop: React.Dispatch<React.SetStateAction<any>>;
-  setImageDialog: React.Dispatch<React.SetStateAction<ImageDialogState | null>>;
   setDetailNode: React.Dispatch<React.SetStateAction<NodeRecord | null>>;
   setAssetPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setReplaceNodeId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -1429,8 +1426,8 @@ export function useEditorInteractions({
           useCanvasTabStore.getState().openImageTab({ nodeId: node.id, title: node.title, mode });
           return;
         }
-        // 只读/参数型操作：仍走浮层（查看大图 / 详情 / 放大 / 多角度）
-        setImageDialog({ node, type });
+        // 查看/详情/放大/多角度：统一走资产同款 MediaLightbox（旧版 ImageDialogRenderer 已移除）
+        setDetailNode(node);
       },
     };
   }, [refs.commandQueue, refs.store, state.editor, handleSaveNodeAsset, handleReversePrompt, containerRef]);

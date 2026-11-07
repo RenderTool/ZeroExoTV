@@ -18,8 +18,9 @@ import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { InputNumber, Popover, Select } from 'antd';
 import { Play, SlidersHorizontal } from 'lucide-react';
+import { useTheme } from '@zeroexo/plugin-theme';
+import { AspectRatioPicker } from '@/features/generator-settings/aspect-ratio-picker.js';
 import {
-  DIRECTOR_ASPECT_OPTIONS,
   REF_IMAGE_SIZE_OPTIONS,
   SCALE_FACTOR_MAX,
   SCALE_FACTOR_MIN,
@@ -34,37 +35,37 @@ export interface DirectorParamsPanelProps {
   subColor: string;
 }
 
-/** 「参数」浮层面板内容：比例 16:9 下拉 + ×系数（0.1–2 非法回退）+ 换算尺寸只读 chip（实时联动） */
-export const DirectorParamsPanel = memo(function DirectorParamsPanel({
-  shared,
-  onSharedChange,
-  subColor,
-}: DirectorParamsPanelProps) {
+export interface DirectorParamsControlsProps {
+  /** aspect / scaleFactor / steps / seed / refImageSize */
+  params: Record<string, unknown>;
+  onChange: (patch: Record<string, unknown>) => void;
+  subColor: string;
+}
+
+/**
+ * 参数控件本体：比例九宫格 + 尺寸系数 + 换算尺寸 + 采样步数 + 种子 + 参考图尺寸。
+ * 导演台「参数」面板与画布视频节点参数面板共用这一份（用户要求两处一致）。
+ */
+export function DirectorParamsControls({ params, onChange, subColor }: DirectorParamsControlsProps) {
   const { t } = useTranslation();
-  const aspect = String(shared.params['aspect'] ?? '16:9');
-  const scaleFactor = Number(shared.params['scaleFactor'] ?? 1);
+  const { theme } = useTheme();
+  const aspect = String(params['aspect'] ?? '16:9');
+  const scaleFactor = Number(params['scaleFactor'] ?? 1);
   const resolvedSize = resolveVideoSize(aspect, scaleFactor);
 
-  const setParam = (key: string, v: unknown) =>
-    onSharedChange({ params: { ...shared.params, [key]: v } });
+  const setParam = (key: string, v: unknown) => onChange({ [key]: v });
 
   const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 } as const;
   const labelStyle = { fontSize: 11, color: subColor, flexShrink: 0 } as const;
 
   return (
-    <div data-params-panel style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 0', minWidth: 208 }}>
-      <div style={rowStyle}>
+    <>
+      <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
         <span style={labelStyle}>{t('director.aspect', '视频比例')}</span>
-        <Select
-          data-param-key="aspect"
-          aria-label={t('director.aspect', '视频比例')}
-          size="small"
+        <AspectRatioPicker
           value={aspect}
+          theme={theme}
           onChange={(v) => setParam('aspect', v)}
-          options={DIRECTOR_ASPECT_OPTIONS.map((a) => ({ value: a, label: a }))}
-          className="director-select"
-          popupClassName="director-select-popup"
-          style={{ width: 120, height: 25 }}
         />
       </div>
       <div style={rowStyle}>
@@ -94,9 +95,6 @@ export const DirectorParamsPanel = memo(function DirectorParamsPanel({
           {resolvedSize.width}×{resolvedSize.height}
         </span>
       </div>
-      {/* 2026-11-05 调整：参数面板补 steps（采样步数，shared.params.steps，1-200 默认 25）
-          与「参考图尺寸」模式下拉（shared.params.refImageSize，默认 match）——
-          键名/默认值/选项与上游插件 schema 一致（director-params.ts verified 项） */}
       <div style={rowStyle}>
         <span style={labelStyle}>{t('director.steps', '采样步数')}</span>
         <InputNumber
@@ -106,8 +104,24 @@ export const DirectorParamsPanel = memo(function DirectorParamsPanel({
           min={1}
           max={200}
           step={1}
-          value={Number(shared.params['steps'] ?? 25)}
+          value={Number(params['steps'] ?? 25)}
           onChange={(v) => { if (typeof v === 'number' && Number.isFinite(v)) setParam('steps', Math.min(200, Math.max(1, Math.round(v)))); }}
+          className="director-input-number"
+          style={{ width: 120, height: 25 }}
+        />
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>{t('director.seed', '种子')}</span>
+        <InputNumber
+          data-param-key="seed"
+          aria-label={t('director.seed', '种子')}
+          size="small"
+          min={0}
+          max={0x7fffffff}
+          step={1}
+          precision={0}
+          value={Number(params['seed'] ?? 0)}
+          onChange={(v) => { if (typeof v === 'number' && Number.isFinite(v)) setParam('seed', Math.max(0, Math.round(v))); }}
           className="director-input-number"
           style={{ width: 120, height: 25 }}
         />
@@ -118,7 +132,7 @@ export const DirectorParamsPanel = memo(function DirectorParamsPanel({
           data-param-key="refImageSize"
           aria-label={t('director.refImageSize', '参考图尺寸')}
           size="small"
-          value={String(shared.params['refImageSize'] ?? 'match')}
+          value={String(params['refImageSize'] ?? 'match')}
           onChange={(v) => setParam('refImageSize', v)}
           options={REF_IMAGE_SIZE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
           className="director-select"
@@ -126,6 +140,23 @@ export const DirectorParamsPanel = memo(function DirectorParamsPanel({
           style={{ width: 160, height: 25 }}
         />
       </div>
+    </>
+  );
+}
+
+/** 「参数」浮层面板（导演台）：把 shared.params 接到共用控件上 */
+export const DirectorParamsPanel = memo(function DirectorParamsPanel({
+  shared,
+  onSharedChange,
+  subColor,
+}: DirectorParamsPanelProps) {
+  return (
+    <div data-params-panel style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 0', minWidth: 280 }}>
+      <DirectorParamsControls
+        params={shared.params}
+        onChange={(patch) => onSharedChange({ params: { ...shared.params, ...patch } })}
+        subColor={subColor}
+      />
     </div>
   );
 });

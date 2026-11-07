@@ -34,12 +34,17 @@ export interface EpisodeAnalysis {
 /** 剧集状态 */
 export type EpisodeStatus = 'draft' | 'reviewing' | 'complete';
 
+/** 本集信息卡（一句话介绍 / 推荐标签 / 发布建议）：实体同源类型，避免两处定义漂移 */
+export type EpisodeMeta = import('@/entities/script-store.js').ScriptEpisodeMeta;
+
 /** 剧集 */
 export interface Episode {
   id: string;
   number: number;
   title: string;
   content: string;
+  /** 本集信息卡（一句话介绍 / 推荐标签 / 发布建议） */
+  meta?: EpisodeMeta;
   analysis?: EpisodeAnalysis;
   sourceEpisode?: {
     versionId: string;

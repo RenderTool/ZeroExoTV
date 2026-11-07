@@ -111,7 +111,11 @@ describe("剧本工具 mode 语义", () => {
     expect(payload.hint ?? "").toContain("normalize_script");
     const script = await readScript(root, PROJECT_ID);
     expect(script?.version).toBe(2);
-    expect(script?.episodes[1]?.content).toContain("来客");
+    // 标题不是正文块（2026-11-05 契约）：剧名 → title，集名 → Episode.title；
+    // 这份 raw 内容只有标题没有正文，落库正文为空是预期结果
+    expect(script?.title).toBe("雨夜");
+    expect(script?.episodes[1]?.title).toContain("来客");
+    expect(script?.episodes[1]?.content).toBe("");
   });
 
   it("import_script(mode:standard) 直接入库", async () => {
