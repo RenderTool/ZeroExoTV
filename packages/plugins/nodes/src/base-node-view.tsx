@@ -487,6 +487,23 @@ export function AIStateView({
           </span>
         ) : null}
         {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
+        {/* 生成中显式取消：用户可能把提示词 dock 收起了，节点上必须能直接取消 */}
+        {onCancel ? (
+          <button
+            type="button"
+            data-generating-cancel
+            onClick={(e) => { e.stopPropagation(); onCancel(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative', zIndex: 3, marginTop: 2, height: 24, padding: '0 12px',
+              borderRadius: 999, fontSize: 11, cursor: 'pointer',
+              border: '1px solid rgba(255,255,255,0.28)',
+              background: 'rgba(0,0,0,0.45)', color: '#fff',
+            }}
+          >
+            {t('common.cancel', '取消')}
+          </button>
+        ) : null}
       </div>
     );
   }
