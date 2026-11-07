@@ -520,8 +520,8 @@ export function NodeCapsuleToolbar({
         </div>
       ) : null}
       {showArrangeAgg ? renderAggButton('arrange', <LayoutGrid size={16} />, t('toolbar.arrange')) : null}
-      {/* Plan#84 入口 A2：框选多个节点（未先成组）也能直接另存为画布副本，与成组按钮同排同尺寸 */}
-      {showGroupAgg && onCreateCanvasCopy ? (
+      {/* Plan#84 入口 A2：多选/单选节点都能直接另存为画布副本（组走 getGroupTools 的同名工具，不重复） */}
+      {(showGroupAgg || (showNodeTools && !isGroupNode)) && onCreateCanvasCopy ? (
         <div style={{ position: 'relative' }}>
           <button
             type="button"
