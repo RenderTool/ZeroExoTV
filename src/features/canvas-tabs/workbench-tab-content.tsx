@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 import { App, Button, Modal } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { History, Trash2 } from 'lucide-react';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
@@ -181,6 +182,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versions, setVersions] = useState<Array<SnapshotListItem<WorkbenchContainer>> | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [versionConfirm, setVersionConfirm] = useState<{ kind: 'restore' | 'delete'; snap: SnapshotListItem<WorkbenchContainer> } | null>(null);
   /** 片段列表（本地受控；防抖写回容器） */
   const [shots, setShots] = useState<WorkbenchShot[]>([]);
   const [activeShotId, setActiveShotId] = useState<string | null>(null);
@@ -282,57 +284,46 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   }, [projectId, message]);
 
   /** 删除某份版本（仅删该快照文件，不改当前内容） */
-  const deleteVersion = useCallback(async (snap: SnapshotListItem<WorkbenchContainer>): Promise<void> => {
+  const deleteVersion = useCallback((snap: SnapshotListItem<WorkbenchContainer>): void => {
     if (!projectId) return;
-    Modal.confirm({
-      centered: true,
-      title: t('director.deleteVersionTitle', '删除这个版本？'),
-      content: t('director.deleteVersionBody', '只删除这份历史快照，当前内容不受影响。'),
-      okText: t('director.deleteVersionOk', '删除'),
-      cancelText: t('director.restoreVersionCancel', '取消'),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          await deleteSnapshotFile(projectId, 'workbench', snap.fileName);
-          setVersions((prev) => prev?.filter((v) => v.fileName !== snap.fileName) ?? prev);
-          message.success(t('director.deleteVersionDone', '已删除该版本'));
-        } catch (err) {
-          message.error(err instanceof Error ? err.message : String(err));
-        }
-      },
-    });
-  }, [projectId, message, t]);
+    setVersionConfirm({ kind: 'delete', snap });
+  }, [projectId]);
 
   /** 恢复某份版本：先自动存当前版（pre-restore），再写回容器 */
-  const restoreVersion = useCallback(async (snap: SnapshotListItem<WorkbenchContainer>): Promise<void> => {
+  const restoreVersion = useCallback((snap: SnapshotListItem<WorkbenchContainer>): void => {
     if (!projectId) return;
-    Modal.confirm({
-      centered: true,
-      title: t('director.restoreVersionTitle', '恢复到这个版本？'),
-      content: t('director.restoreVersionBody', '当前内容会先自动存一份快照，恢复后可再次切换回来。'),
-      okText: t('director.restoreVersionOk', '恢复'),
-      cancelText: t('director.restoreVersionCancel', '取消'),
-      onOk: async () => {
-        try {
-          await restoreSnapshot<WorkbenchContainer>(projectId, 'workbench', { entity: snap.entity }, {
-            readCurrent: () => readWorkbenchContainer(projectId),
-            write: (entity) => updateWorkbenchContainer(projectId, {
-              title: entity.title,
-              tracks: entity.tracks,
-              shots: entity.shots,
-              totalDuration: entity.totalDuration,
-              sharedParams: entity.sharedParams,
-            }),
-          });
-          setVersionsOpen(false);
-          setReloadToken((v) => v + 1);
-          message.success(t('director.restoreVersionDone', '已恢复到该版本'));
-        } catch (err) {
-          message.error(err instanceof Error ? err.message : String(err));
-        }
-      },
-    });
-  }, [projectId, message, t]);
+    setVersionConfirm({ kind: 'restore', snap });
+  }, [projectId]);
+
+  /** 统一确认弹窗（项目 ConfirmDialog：主题 + zIndex 1050，不用静态 Modal.confirm） */
+  const applyVersionConfirm = useCallback(async (): Promise<void> => {
+    const target = versionConfirm;
+    if (!target || !projectId) return;
+    setVersionConfirm(null);
+    try {
+      if (target.kind === 'restore') {
+        await restoreSnapshot<WorkbenchContainer>(projectId, 'workbench', { entity: target.snap.entity }, {
+          readCurrent: () => readWorkbenchContainer(projectId),
+          write: (entity) => updateWorkbenchContainer(projectId, {
+            title: entity.title,
+            tracks: entity.tracks,
+            shots: entity.shots,
+            totalDuration: entity.totalDuration,
+            sharedParams: entity.sharedParams,
+          }),
+        });
+        setVersionsOpen(false);
+        setReloadToken((v) => v + 1);
+        message.success(t('director.restoreVersionDone', '已恢复到该版本'));
+      } else {
+        await deleteSnapshotFile(projectId, 'workbench', target.snap.fileName);
+        setVersions((prev) => prev?.filter((v) => v.fileName !== target.snap.fileName) ?? prev);
+        message.success(t('director.deleteVersionDone', '已删除该版本'));
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : String(err));
+    }
+  }, [versionConfirm, projectId, message, t]);
 
   // 主体库（面板「主体」Tab 数据源）：读 projects/<pid>/entities/storyboard.json 的 entities 字段
   // （元素结构 = ProductionItem：production-manager-types.ts L33-52；状态图 = images[].stateTag）
@@ -1322,6 +1313,25 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           theme={theme}
           isDark={isDark}
         />
+        {/* 版本操作确认：走项目统一 ConfirmDialog（主题 + zIndex，不用静态 Modal.confirm） */}
+        <ConfirmDialog
+          open={versionConfirm !== null}
+          title={versionConfirm?.kind === 'delete'
+            ? t('director.deleteVersionTitle', '删除这个版本？')
+            : t('director.restoreVersionTitle', '恢复到这个版本？')}
+          confirmLabel={versionConfirm?.kind === 'delete'
+            ? t('director.deleteVersionOk', '删除')
+            : t('director.restoreVersionOk', '恢复')}
+          cancelLabel={t('director.restoreVersionCancel', '取消')}
+          danger={versionConfirm?.kind === 'delete'}
+          zIndex={21000}
+          onConfirm={() => void applyVersionConfirm()}
+          onClose={() => setVersionConfirm(null)}
+        >
+          {versionConfirm?.kind === 'delete'
+            ? t('director.deleteVersionBody', '只删除这份历史快照，当前内容不受影响。')
+            : t('director.restoreVersionBody', '当前内容会先自动存一份快照，恢复后可再次切换回来。')}
+        </ConfirmDialog>
         {/* 版本（快照）面板：workbench 每次写盘自动落 pre-save/auto 快照，可查看/恢复 */}
         <Modal
           open={versionsOpen}

@@ -27,6 +27,8 @@ export interface ConfirmDialogProps {
   onClose: () => void;
   /** Modal 宽度(默认 440) */
   width?: number;
+  /** z-index(默认 1050；需要盖住画布浮层时传更高值) */
+  zIndex?: number;
 }
 
 export function ConfirmDialog({
@@ -40,6 +42,7 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
   width = 440,
+  zIndex = 1050,
 }: ConfirmDialogProps): React.ReactElement {
   const { theme } = useTheme();
 
@@ -49,7 +52,7 @@ export function ConfirmDialog({
       title={title}
       width={width}
       centered
-      zIndex={1050}
+      zIndex={zIndex}
       onCancel={onClose}
       destroyOnHidden
       styles={{ mask: { background: 'transparent' } }}
