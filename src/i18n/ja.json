@@ -2866,7 +2866,11 @@
     "versionReasonAuto": "自動",
     "versionReasonPreSave": "保存前",
     "versionReasonManual": "手動",
-    "versionReasonPreRestore": "復元前"
+    "versionReasonPreRestore": "復元前",
+    "deleteVersionTitle": "このバージョンを削除しますか？",
+    "deleteVersionBody": "この履歴スナップショットのみ削除します。現在の内容は変わりません。",
+    "deleteVersionOk": "削除",
+    "deleteVersionDone": "バージョンを削除しました"
   },
   "scriptImportModal": {
     "title": "脚本を読み込む",

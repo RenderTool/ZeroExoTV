@@ -28,6 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Modal } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { History, Trash2 } from 'lucide-react';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
@@ -39,7 +40,13 @@ import {
   type WorkbenchContainer,
   type WorkbenchSharedParams,
 } from '@/entities/slot-containers.js';
-import { listSnapshots, restoreSnapshot, type SnapshotListItem } from '@/entities/snapshot-store.js';
+import {
+  deleteSnapshotFile,
+  listSnapshots,
+  pruneDuplicateSnapshots,
+  restoreSnapshot,
+  type SnapshotListItem,
+} from '@/entities/snapshot-store.js';
 import {
   DIRECTOR_FPS,
   DIRECTOR_PRESETS,
@@ -264,6 +271,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     setVersionsOpen(true);
     setVersions(null);
     try {
+      // 历史垃圾清理：同内容 hash 只保留最新一份（旧实现每次自动保存都落一份）
+      await pruneDuplicateSnapshots(projectId, 'workbench');
       const list = await listSnapshots<WorkbenchContainer>(projectId, 'workbench', { withSize: true });
       setVersions([...list].reverse());
     } catch (err) {
@@ -271,6 +280,28 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       setVersions([]);
     }
   }, [projectId, message]);
+
+  /** 删除某份版本（仅删该快照文件，不改当前内容） */
+  const deleteVersion = useCallback(async (snap: SnapshotListItem<WorkbenchContainer>): Promise<void> => {
+    if (!projectId) return;
+    Modal.confirm({
+      centered: true,
+      title: t('director.deleteVersionTitle', '删除这个版本？'),
+      content: t('director.deleteVersionBody', '只删除这份历史快照，当前内容不受影响。'),
+      okText: t('director.deleteVersionOk', '删除'),
+      cancelText: t('director.restoreVersionCancel', '取消'),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteSnapshotFile(projectId, 'workbench', snap.fileName);
+          setVersions((prev) => prev?.filter((v) => v.fileName !== snap.fileName) ?? prev);
+          message.success(t('director.deleteVersionDone', '已删除该版本'));
+        } catch (err) {
+          message.error(err instanceof Error ? err.message : String(err));
+        }
+      },
+    });
+  }, [projectId, message, t]);
 
   /** 恢复某份版本：先自动存当前版（pre-restore），再写回容器 */
   const restoreVersion = useCallback(async (snap: SnapshotListItem<WorkbenchContainer>): Promise<void> => {
@@ -1203,6 +1234,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                     border: 0, outline: 'none', boxShadow: 'none', background: 'transparent', color: theme.toolbar.text,
                   }}
                 >
+                  <History size={12} />
                   {t('director.versions', '版本')}
                 </button>
               </>
@@ -1330,6 +1362,19 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                         {typeof v.entity?.totalDuration === 'number' ? ` · ${v.entity.totalDuration.toFixed(1)}s` : ''}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      data-version-delete={v.fileName}
+                      onClick={() => void deleteVersion(v)}
+                      title={t('director.deleteVersionOk', '删除')}
+                      style={{
+                        height: 26, width: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        borderRadius: 6, cursor: 'pointer', border: '1px solid rgba(128,128,128,0.35)',
+                        background: 'transparent', color: 'inherit', padding: 0,
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
                     <button
                       type="button"
                       data-version-restore={v.fileName}

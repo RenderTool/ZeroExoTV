@@ -66,12 +66,17 @@ export function snapshotDir(projectId: string, type: SnapshotType): string {
 /**
  * 实质内容提取（hash/去重口径）：
  *  - script：title + episodes（activeEpisodeId/version/updatedAt 等元数据推进不算内容变化）；
- *  - storyboard/workbench：整个容器对象（本轮无更细定义，整体比对）。
+ *  - storyboard/workbench：去掉 version/updatedAt 等写盘元数据后再比对，否则每次自动保存
+ *    都会因为版本号 +1 被当成「内容变化」，快照无限膨胀。
  */
 export function snapshotContentOf(type: SnapshotType, entity: unknown): unknown {
   if (type === 'script' && entity && typeof entity === 'object') {
     const e = entity as { title?: unknown; episodes?: unknown };
     return { title: e.title, episodes: e.episodes };
+  }
+  if ((type === 'storyboard' || type === 'workbench') && entity && typeof entity === 'object') {
+    const { version: _v, updatedAt: _u, schemaVersion: _s, ...rest } = entity as Record<string, unknown>;
+    return rest;
   }
   return entity;
 }
@@ -153,6 +158,25 @@ export async function listSnapshots<T = unknown>(
 export async function getLatestSnapshot<T = unknown>(projectId: string, type: SnapshotType): Promise<SnapshotListItem<T> | null> {
   const all = await listSnapshots<T>(projectId, type);
   return all[all.length - 1] ?? null;
+}
+
+/**
+ * 清理重复快照：同一内容 hash 只保留最新一份，旧的全部删除。
+ * 用于修复历史上「每次自动保存都因 version+1 而落一份快照」造成的垃圾堆积。
+ */
+export async function pruneDuplicateSnapshots(projectId: string, type: SnapshotType): Promise<number> {
+  const all = await listSnapshots(projectId, type);
+  const seen = new Set<string>();
+  const remove: string[] = [];
+  for (let i = all.length - 1; i >= 0; i -= 1) {
+    const snap = all[i]!;
+    if (seen.has(snap.hash)) remove.push(snap.fileName);
+    else seen.add(snap.hash);
+  }
+  for (const fileName of remove) {
+    try { await deleteSnapshotFile(projectId, type, fileName); } catch { /* 缺失/权限静默 */ }
+  }
+  return remove.length;
 }
 
 /**

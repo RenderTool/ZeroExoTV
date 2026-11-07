@@ -2888,7 +2888,11 @@
     "versionReasonAuto": "Auto",
     "versionReasonPreSave": "Before save",
     "versionReasonManual": "Manual",
-    "versionReasonPreRestore": "Before restore"
+    "versionReasonPreRestore": "Before restore",
+    "deleteVersionTitle": "Delete this version?",
+    "deleteVersionBody": "Only this history snapshot is removed; current content stays unchanged.",
+    "deleteVersionOk": "Delete",
+    "deleteVersionDone": "Version deleted"
   },
   "scriptImportModal": {
     "title": "Import script",

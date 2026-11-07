@@ -2899,7 +2899,11 @@
     "versionReasonAuto": "自动",
     "versionReasonPreSave": "保存前",
     "versionReasonManual": "手动",
-    "versionReasonPreRestore": "恢复前"
+    "versionReasonPreRestore": "恢复前",
+    "deleteVersionTitle": "删除这个版本？",
+    "deleteVersionBody": "只删除这份历史快照，当前内容不受影响。",
+    "deleteVersionOk": "删除",
+    "deleteVersionDone": "已删除该版本"
   },
   "scriptImportModal": {
     "title": "导入剧本",
