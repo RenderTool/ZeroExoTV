@@ -23,8 +23,10 @@ export interface ZeroexoJobParams {
   frame_rate: number;
   guide_frames: number;
   use_prev_guide: boolean;
-  /** ComfyUI input 目录下的文件名（缺省空 = 不用参考图） */
+  /** ComfyUI input 目录下的文件名（第一张，兼容单参考） */
   reference_image: string;
+  /** 多参考图（最多 9 张；分镜图/站位锁定图等） */
+  reference_images?: string[];
 }
 
 export type ZeroexoJobState = 'queued' | 'running' | 'success' | 'error' | 'cancelled';
@@ -110,11 +112,31 @@ export async function cancelZeroexoJob(baseUrl: string, jobId: string): Promise<
  * 上传参考图到 ComfyUI input 目录，返回节点可用的文件名（`name` 或 `subfolder/name`）。
  * 失败返回 null（无参考图按纯文字生成，不阻断整次运行）。
  */
+/** 同一张参考图在本次会话内只上传一次（内容哈希缓存；ComfyUI 本地 loopback，跨刷新不保留） */
+const referenceUploadCache = new Map<string, string>();
+
+async function sha256Hex(blob: Blob): Promise<string | null> {
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) return null;
+    const digest = await subtle.digest('SHA-256', await blob.arrayBuffer());
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}
+
 export async function uploadZeroexoReference(
   baseUrl: string,
   blob: Blob,
   filename: string,
 ): Promise<string | null> {
+  const hash = await sha256Hex(blob);
+  const cacheKey = hash ? `${trimBase(baseUrl)}|${hash}` : '';
+  if (cacheKey) {
+    const cached = referenceUploadCache.get(cacheKey);
+    if (cached) return cached;
+  }
   try {
     const form = new FormData();
     form.append('image', new File([blob], filename, { type: blob.type || 'image/png' }));
@@ -123,7 +145,9 @@ export async function uploadZeroexoReference(
     if (!res.ok) return null;
     const data = (await res.json().catch(() => null)) as { name?: string; subfolder?: string } | null;
     if (!data?.name) return null;
-    return data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+    const name = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+    if (cacheKey) referenceUploadCache.set(cacheKey, name);
+    return name;
   } catch {
     return null;
   }

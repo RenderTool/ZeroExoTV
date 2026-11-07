@@ -104,13 +104,17 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
   const cfg = Math.max(0, Math.min(20, asNumber(req.params?.cfg, 1)));
   const seed = resolveSeed(req.params?.seed);
 
-  // 参考图：只取第一张（插件 ZeroExoRefVideo 单参考槽）
-  let referenceImage = '';
-  const firstRef = req.referenceImages?.find((u) => typeof u === 'string' && u.startsWith('data:'));
-  if (firstRef) {
-    const blob = await (await fetch(firstRef)).blob();
-    referenceImage = (await uploadZeroexoReference(base, blob, `canvas_ref_${Date.now()}.png`)) ?? '';
+  // 参考图：连入的图片全部上传（最多 9 张，支持分镜图/站位锁定图等多参考）
+  const referenceNames: string[] = [];
+  for (const [i, dataUrl] of (req.referenceImages ?? [])
+    .filter((u) => typeof u === 'string' && u.startsWith('data:'))
+    .slice(0, 9)
+    .entries()) {
+    const blob = await (await fetch(dataUrl)).blob();
+    const name = await uploadZeroexoReference(base, blob, `canvas_ref_${Date.now()}_${i}.png`);
+    if (name) referenceNames.push(name);
   }
+  const referenceImage = referenceNames[0] ?? '';
 
   const clientId = createPreviewClientId();
   // 先连 /ws 再提交：引擎的预览事件按提交时携带的 client_id 定向发送
