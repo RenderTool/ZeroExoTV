@@ -36,7 +36,7 @@ import type {
 
 // 基类组件
 import { nodeActionBus } from './base-node-view.js';
-export { BaseNodeView, AIStateView, createPinHandlers, nodeActionBus } from './base-node-view.js';
+export { BaseNodeView, AIStateView, AISkeleton, createPinHandlers, nodeActionBus } from './base-node-view.js';
 export {
   useGeneratingPreviewStore,
   setGeneratingPreview,

@@ -22,6 +22,7 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('@zeroexo/plugin-nodes', () => ({
   useHydratedContent: (storageKey?: string) => (storageKey ? `blob:hydrated:${storageKey}` : ''),
+  AISkeleton: () => null,
 }));
 
 import { StoryboardVideoStage } from './storyboard-video-stage.jsx';
@@ -83,7 +84,7 @@ describe('StoryboardVideoStage 媒体/占位互斥', () => {
     }));
     expect(container.querySelector('video')).toBeNull();
     const ph = container.querySelector('[data-placeholder-status]') as HTMLElement;
-    expect(ph.textContent).toContain('生成中');
+    expect(ph.querySelector('[data-generating-skeleton]')).toBeTruthy();
     // 切回有媒体片段
     rerender(createElement(StoryboardVideoStage, {
       ...baseProps,
@@ -157,6 +158,6 @@ describe('StoryboardVideoStage 实时预览角标（2026-11-05 修复：文本�
     }));
     expect(container.querySelector('[data-live-preview-badge]')).toBeNull();
     const ph = container.querySelector('[data-placeholder-status]') as HTMLElement;
-    expect(ph.textContent).toContain('生成中');
+    expect(ph.querySelector('[data-generating-skeleton]')).toBeTruthy();
   });
 });

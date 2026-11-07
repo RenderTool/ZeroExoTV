@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Play, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
 // 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
 import { CANVAS_NODE_ICONS } from '../icons.js';
-import { useHydratedContent } from '@zeroexo/plugin-nodes';
+import { useHydratedContent, AISkeleton } from '@zeroexo/plugin-nodes';
 
 /**
  * StoryboardVideoStage - 中区 16:9 视频舞台（Plan#53 T6）
@@ -386,21 +386,31 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
                 </>
               );
             })()
-          ) : (
+          ) : placeholderStatus === 'generating' ? (
+            /* 无实时帧的生成中：用与画布节点同款骨架（脉冲点 + 阶段文案 + shimmer），
+               不再只留一行静态文字，避免用户以为软件卡死 */
             <>
-              {/* 无实时帧（idle/未连接渠道/完成/失败/取消）→ 居中状态行保持原样 */}
-              <span
+              <div
+                data-generating-skeleton
                 style={{
-                  position: 'relative', zIndex: 2,
-                  display: 'inline-flex', alignItems: 'center', gap: 5,
-                  color: 'rgba(255,255,255,0.72)', fontSize: 12, letterSpacing: '0.02em',
+                  position: 'relative', zIndex: 2, width: '100%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
-                <CANVAS_NODE_ICONS.videoEmpty size={12} strokeWidth={1.8} />
-                {statusLabel}
-                {placeholderDetail ? ` · ${placeholderDetail}` : ''}
-              </span>
-              {placeholderStatus === 'generating' && progressOnly ? (
+                <AISkeleton type="media" accentColor={theme.toolbar.accent} kind="video" />
+              </div>
+              {placeholderDetail ? (
+                <span
+                  data-generating-detail
+                  style={{
+                    position: 'relative', zIndex: 2,
+                    color: 'rgba(255,255,255,0.55)', fontSize: 11, letterSpacing: '0.02em',
+                  }}
+                >
+                  {placeholderDetail}
+                </span>
+              ) : null}
+              {progressOnly ? (
                 <span
                   data-progress-only-badge
                   style={{
@@ -413,6 +423,19 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
                 </span>
               ) : null}
             </>
+          ) : (
+            /* 非生成中（idle/完成/失败/取消）：保留单行状态文案 */
+            <span
+              style={{
+                position: 'relative', zIndex: 2,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                color: 'rgba(255,255,255,0.72)', fontSize: 12, letterSpacing: '0.02em',
+              }}
+            >
+              <CANVAS_NODE_ICONS.videoEmpty size={12} strokeWidth={1.8} />
+              {statusLabel}
+              {placeholderDetail ? ` · ${placeholderDetail}` : ''}
+            </span>
           )}
           {placeholderStatus === 'failed' && placeholderReason ? (
             <span

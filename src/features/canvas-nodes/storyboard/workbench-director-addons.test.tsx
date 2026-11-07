@@ -143,7 +143,9 @@ describe('storyboard-video-stage：状态型占位（第十二条）', () => {
 
   it('四种状态文案：生成中 · detail / 已生成 · 8s / 生成失败 + 一行原因', () => {
     const gen = renderStage({ placeholderStatus: 'generating', placeholderDetail: '2/5' });
-    expect(gen.container.querySelector('[data-placeholder-status="generating"]')?.textContent).toContain('生成中 · 2/5');
+    const genCard = gen.container.querySelector('[data-placeholder-status="generating"]') as HTMLElement;
+    expect(genCard.querySelector('[data-generating-skeleton]')).toBeTruthy();
+    expect(genCard.textContent).toContain('2/5');
     gen.unmount();
 
     const done = renderStage({ placeholderStatus: 'done', placeholderDetail: '8s' });
