@@ -526,7 +526,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         ...INITIAL_STATE,
         phase: 'submitting',
         totalCount: runArgs.selectedIds.length,
-        livePreviewSupported: cfg.mode === 'direct',
+        livePreviewSupported: cfg.mode !== 'openai',
       });
       try {
         let jobId: string;
@@ -542,6 +542,15 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
             return Number.isFinite(n) ? n : d;
           };
           const continuityOn = p.continuityEnabled === true;
+          // 实时预览：v1 作业同样支持 clientId → /ws minimax_director_preview
+          const previewClientId = createPreviewClientId();
+          const socket = new DirectorPreviewSocket(cfg.baseUrl, previewClientId, {
+            onFrame: (frame) => {
+              if (frame.image) setState((st) => ({ ...st, preview: frame }));
+            },
+          });
+          socket.connect();
+          previewSocket.current = socket;
           const submitted: Array<{ jobId: string; shotId: string }> = [];
           for (const [i, shot] of selected.entries()) {
             // 参考图：插件节点只收一张 → 取该片段第一张图片参考（其余槽位生成本身不支持）

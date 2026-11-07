@@ -1070,9 +1070,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           promptRatioDefault={0.75}
           promptRatioStorageKey={`zerovideo.director.promptRatio:${projectId}`}
           videoStageProps={{
-            videoStorageKey:
-              selectedShot.clipState === 'completed' ? selectedShot.media?.storageKey : undefined,
-            videoStatus: selectedShot.status === 'done' ? 'done' : 'idle',
+            // 有产物就允许播放（不依赖 clipState：恢复/导入/旧数据可能只写了 media）
+            videoStorageKey: selectedShot.media?.storageKey,
+            videoStatus: selectedShot.media?.storageKey ? 'done' : 'idle',
             /* 2026-11-04 第十二条：预览占位只显示状态（单行文案+小图标），不回显提示词；
                状态跟随当前激活片段（selectedShot 切换即联动）。
                未生成 / 生成中（·detail 预留，dry-run 阶段无真实进度）/ 已生成 · Ns / 生成失败（+原因一行）。 */
@@ -1112,7 +1112,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             /* 2026-11-05 实时预览：直连 /ws 帧按 ≤10fps 刷新在占位卡上（badge 带步进/段号）；
                OpenAI 兼容渠道无 ws → 只标「仅进度」，不假装实时帧 */
             livePreview:
-              selectedShot.status === 'generating' && comfyRun.preview?.image
+              (comfyRun.phase === 'running' || comfyRun.phase === 'queued') && comfyRun.preview?.image
                 ? {
                     image: comfyRun.preview.image,
                     step: comfyRun.preview.step,
@@ -1123,6 +1123,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             progressOnly:
               selectedShot.status === 'generating' &&
               (comfyRun.phase === 'queued' || comfyRun.phase === 'running') &&
+              !comfyRun.preview?.image &&
               !comfyRun.livePreviewSupported,
             /* 2026-11-04 参数合并：预览区只读文字标签（公共参数，随比例/系数实时更新），
                格式「16:9 · 1512×840」；裸控件已收进导轨「参数」浮层面板 */
