@@ -20,7 +20,7 @@ import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, type Refer
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
-import { generateLocalMiniMaxVideo } from '../interactions/local-minimax-video.js';
+import { cancelLocalJob, generateLocalMiniMaxVideo } from '../interactions/local-minimax-video.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
@@ -439,6 +439,8 @@ export function useAgentBridgeHooks(
 
   /** 停止生成 */
   const handlePromptStop = useCallback((nodeId: string): void => {
+    // 本机作业：立即发 /zeroexo/v1/jobs/{id}/cancel，不等 abort 传播（ComfyUI 侧要马上停）
+    void cancelLocalJob(nodeId);
     const ctl = nodeAbortControllersRef.current.get(nodeId);
     if (ctl) ctl.abort();
     if (refs.commandQueue) {

@@ -61,6 +61,17 @@ export interface LocalVideoResult {
 const POLL_MS = 2000;
 const MAX_WAIT_MS = 45 * 60 * 1000;
 
+/** 当前节点正在跑的本机作业（停止按钮直接按 nodeId 取消，不等 abort 传播） */
+const activeLocalJobs = new Map<string, { base: string; jobId: string }>();
+
+/** 立即取消某画布节点的本机作业（供停止按钮调用；无作业时 no-op） */
+export async function cancelLocalJob(nodeId: string): Promise<void> {
+  const entry = activeLocalJobs.get(nodeId);
+  if (!entry) return;
+  activeLocalJobs.delete(nodeId);
+  await cancelZeroexoJob(entry.base, entry.jobId).catch(() => undefined);
+}
+
 function parseSize(size: string | undefined): { width: number; height: number } {
   const m = /^(\d+)\s*[x×*]\s*(\d+)$/i.exec((size ?? '').trim());
   if (m) {
@@ -154,6 +165,8 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
       },
     });
 
+    if (req.nodeId) activeLocalJobs.set(req.nodeId, { base, jobId: submitted.jobId });
+
     let state: ZeroexoJobState = submitted.state;
     const startAt = Date.now();
     let outputs: Array<{ kind: string; path: string }> = [];
@@ -191,6 +204,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
       generationId: submitted.jobId,
     };
   } finally {
+    if (req.nodeId) activeLocalJobs.delete(req.nodeId);
     previewSocket?.close();
   }
 }
