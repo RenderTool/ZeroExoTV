@@ -1,4 +1,4 @@
-﻿/**
+/**
  * use-director-run — 导演台真实运行编排（上传/提交 → 轮询 → 逐段落库 → 取消/引导）
  *
  * 状态机：idle → submitting → queued → running → success / error / canceled
@@ -38,6 +38,7 @@ import {
 } from './openai-protocol-client.js';
 import { buildDirectorPack, buildRunOverrides, createDefaultRefMediaResolver, type RefMediaResolver } from './director-pack-builder.js';
 import { durationToFrames } from '@/entities/director-params.js';
+import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
 import {
   cancelZeroexoJob,
@@ -507,6 +508,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       }
       stopPolling();
       stopPreview();
+      // 种子：-1/空 = 随机；随机后记录实际种子，面板可查看/复用
+      const runSeed = resolveSeed(runArgs.shared.params?.['seed']);
+      const sharedForRun = { ...runArgs.shared, params: { ...(runArgs.shared.params ?? {}), seed: runSeed } };
       doneIndexes.current = new Set();
       guidanceRequested.current = new Set();
       zeroexoJobs.current = new Map();
@@ -532,7 +536,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           // 本机插件（重写版）：一个片段 = 一个 /zeroexo/v1/jobs 作业；参考图先传 ComfyUI input。
           const selected = runArgs.shots.filter((s) => runArgs.selectedIds.includes(s.id));
           const resolver = runArgs.resolveMedia ?? createDefaultRefMediaResolver(runArgs.subjectCoverOf);
-          const p = (runArgs.shared.params ?? {}) as Record<string, unknown>;
+          const p = (sharedForRun.params ?? {}) as Record<string, unknown>;
           const num = (k: string, d: number): number => {
             const n = Number(p[k]);
             return Number.isFinite(n) ? n : d;
@@ -579,7 +583,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           // 主路径：OpenAI 兼容协议（媒体内联 dataURL，无 zip 上传环节；参数映射唯一表 director-protocol-map）
           const started = await startProtocolDirectorRun(cfg.channel, {
             shots: runArgs.shots,
-            shared: runArgs.shared,
+            shared: sharedForRun,
             tier: runArgs.tier,
             selectedIds: runArgs.selectedIds,
             width: runArgs.width,
@@ -594,7 +598,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           // 高级：直连 ComfyUI 桥接（zip 包 → /zeroexo/h3/pack → /run）
           const built = await buildDirectorPack({
             shots: runArgs.shots,
-            shared: runArgs.shared,
+            shared: sharedForRun,
             tier: runArgs.tier,
             selectedIds: runArgs.selectedIds,
             width: runArgs.width,
@@ -605,7 +609,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           if (built.warnings.length > 0) cbRef.current.onNotice('warning', built.warnings.join('；'));
           const uploaded = await uploadBridgePack(cfg.baseUrl, built.zip, cfg.token);
           const overrides = buildRunOverrides({
-            shared: runArgs.shared,
+            shared: sharedForRun,
             tier: runArgs.tier,
             width: runArgs.width,
             height: runArgs.height,
@@ -650,6 +654,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           segmentShotIds,
         });
         for (const shotId of segmentShotIds) cbRef.current.onSegmentState(shotId, 'generating');
+        recordLastSeed(runSeed, runArgs.projectId);
         pollTimer.current = window.setInterval(() => void pollTick(), pollMs);
         void pollTick();
         return true;

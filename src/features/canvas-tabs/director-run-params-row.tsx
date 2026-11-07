@@ -20,6 +20,7 @@ import { InputNumber, Popover, Select } from 'antd';
 import { Play, SlidersHorizontal } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AspectRatioPicker } from '@/features/generator-settings/aspect-ratio-picker.js';
+import { useLastSeed } from '@/shared/last-seed-store.js';
 import {
   REF_IMAGE_SIZE_OPTIONS,
   SCALE_FACTOR_MAX,
@@ -52,6 +53,8 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
   const aspect = String(params['aspect'] ?? '16:9');
   const scaleFactor = Number(params['scaleFactor'] ?? 1);
   const resolvedSize = resolveVideoSize(aspect, scaleFactor);
+  const seedValue = Number(params['seed'] ?? -1);
+  const lastSeed = useLastSeed();
 
   const setParam = (key: string, v: unknown) => onChange({ [key]: v });
 
@@ -112,19 +115,55 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
       </div>
       <div style={rowStyle}>
         <span style={labelStyle}>{t('director.seed', '种子')}</span>
-        <InputNumber
-          data-param-key="seed"
-          aria-label={t('director.seed', '种子')}
-          size="small"
-          min={0}
-          max={0x7fffffff}
-          step={1}
-          precision={0}
-          value={Number(params['seed'] ?? 0)}
-          onChange={(v) => { if (typeof v === 'number' && Number.isFinite(v)) setParam('seed', Math.max(0, Math.round(v))); }}
-          className="director-input-number"
-          style={{ width: 120, height: 25 }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            data-seed-random
+            data-selected={seedValue < 0 ? 'true' : undefined}
+            onClick={() => setParam('seed', -1)}
+            style={{
+              height: 25, padding: '0 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+              border: `1px solid ${seedValue < 0 ? theme.toolbar.accent : theme.toolbar.border}`,
+              background: seedValue < 0 ? 'rgba(128,128,128,0.16)' : 'transparent',
+              color: 'inherit',
+            }}
+          >
+            {t('director.seedRandom', '随机')}
+          </button>
+          <InputNumber
+            data-param-key="seed"
+            aria-label={t('director.seed', '种子')}
+            size="small"
+            min={-1}
+            max={0x7fffffff}
+            step={1}
+            precision={0}
+            value={seedValue < 0 ? null : seedValue}
+            placeholder={t('director.seedRandom', '随机')}
+            onChange={(v) => setParam('seed', typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : -1)}
+            className="director-input-number"
+            style={{ width: 110, height: 25 }}
+          />
+        </div>
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>{t('director.lastSeed', '上次种子')}</span>
+        {lastSeed == null ? (
+          <span data-last-seed style={{ fontSize: 11, color: subColor }}>{t('director.lastSeedNone', '暂无')}</span>
+        ) : (
+          <button
+            type="button"
+            data-last-seed
+            onClick={() => setParam('seed', lastSeed)}
+            title={t('director.lastSeedReuse', '点击复用上次种子')}
+            style={{
+              border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+              fontSize: 11, color: subColor, fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {lastSeed}
+          </button>
+        )}
       </div>
       <div style={rowStyle}>
         <span style={labelStyle}>{t('director.refImageSize', '参考图尺寸')}</span>

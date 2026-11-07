@@ -34,9 +34,12 @@ import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
   readStoryboardContainer,
+  readWorkbenchContainer,
   updateWorkbenchContainer,
+  type WorkbenchContainer,
   type WorkbenchSharedParams,
 } from '@/entities/slot-containers.js';
+import { listSnapshots, restoreSnapshot, type SnapshotListItem } from '@/entities/snapshot-store.js';
 import {
   DIRECTOR_FPS,
   DIRECTOR_PRESETS,
@@ -167,6 +170,10 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const isActive = activeTabKey === 'workbench' || activeTabKey.startsWith('workbench:');
 
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  /** 版本（快照）面板：workbench 每次写盘都会自动落 pre-save/auto 快照，这里只做查看/恢复 */
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versions, setVersions] = useState<Array<SnapshotListItem<WorkbenchContainer>> | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   /** 片段列表（本地受控；防抖写回容器） */
   const [shots, setShots] = useState<WorkbenchShot[]>([]);
   const [activeShotId, setActiveShotId] = useState<string | null>(null);
@@ -249,7 +256,52 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         setLoadState('error');
       });
     return () => { cancelled = true; };
-  }, [isActive, projectId]);
+  }, [isActive, projectId, reloadToken]);
+
+  /** 打开「版本」：列出 workbench 自动快照（新 → 旧） */
+  const openVersions = useCallback(async (): Promise<void> => {
+    if (!projectId) return;
+    setVersionsOpen(true);
+    setVersions(null);
+    try {
+      const list = await listSnapshots<WorkbenchContainer>(projectId, 'workbench', { withSize: true });
+      setVersions([...list].reverse());
+    } catch (err) {
+      message.warning(err instanceof Error ? err.message : String(err));
+      setVersions([]);
+    }
+  }, [projectId, message]);
+
+  /** 恢复某份版本：先自动存当前版（pre-restore），再写回容器 */
+  const restoreVersion = useCallback(async (snap: SnapshotListItem<WorkbenchContainer>): Promise<void> => {
+    if (!projectId) return;
+    Modal.confirm({
+      centered: true,
+      title: t('director.restoreVersionTitle', '恢复到这个版本？'),
+      content: t('director.restoreVersionBody', '当前内容会先自动存一份快照，恢复后可再次切换回来。'),
+      okText: t('director.restoreVersionOk', '恢复'),
+      cancelText: t('director.restoreVersionCancel', '取消'),
+      onOk: async () => {
+        try {
+          await restoreSnapshot<WorkbenchContainer>(projectId, 'workbench', { entity: snap.entity }, {
+            readCurrent: () => readWorkbenchContainer(projectId),
+            write: (entity) => updateWorkbenchContainer(projectId, {
+              title: entity.title,
+              tracks: entity.tracks,
+              shots: entity.shots,
+              totalDuration: entity.totalDuration,
+              sharedParams: entity.sharedParams,
+            }),
+          });
+          setVersionsOpen(false);
+          setReloadToken((v) => v + 1);
+          message.success(t('director.restoreVersionDone', '已恢复到该版本'));
+        } catch (err) {
+          message.error(err instanceof Error ? err.message : String(err));
+        }
+      },
+    });
+  }, [projectId, message, t]);
 
   // 主体库（面板「主体」Tab 数据源）：读 projects/<pid>/entities/storyboard.json 的 entities 字段
   // （元素结构 = ProductionItem：production-manager-types.ts L33-52；状态图 = images[].stateTag）
@@ -1133,12 +1185,26 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             // 裸控件收进「参数」浮层面板（无边框）；工具行顺序 = 添加/链接/删除/参数/批量/运行；
             // 全界面唯一一份，提示词面板不再渲染
             paramsButton: (
-              <DirectorParamsButton
-                shared={sharedParams}
-                onSharedChange={updateSharedParams}
-                subColor={theme.toolbar.textMuted}
-                textColor={theme.toolbar.text}
-              />
+              <>
+                <DirectorParamsButton
+                  shared={sharedParams}
+                  onSharedChange={updateSharedParams}
+                  subColor={theme.toolbar.textMuted}
+                  textColor={theme.toolbar.text}
+                />
+                <button
+                  type="button"
+                  data-director-versions
+                  onClick={() => void openVersions()}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4, height: 25, padding: '0 8px',
+                    borderRadius: 5, fontSize: 11, flexShrink: 0, whiteSpace: 'nowrap', cursor: 'pointer',
+                    border: 0, outline: 'none', boxShadow: 'none', background: 'transparent', color: theme.toolbar.text,
+                  }}
+                >
+                  {t('director.versions', '版本')}
+                </button>
+              </>
             ),
             runButton: (
               <>
@@ -1223,6 +1289,63 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           theme={theme}
           isDark={isDark}
         />
+        {/* 版本（快照）面板：workbench 每次写盘自动落 pre-save/auto 快照，可查看/恢复 */}
+        <Modal
+          open={versionsOpen}
+          onCancel={() => setVersionsOpen(false)}
+          centered
+          width={560}
+          footer={null}
+          title={t('director.versionsTitle', '版本记录')}
+        >
+          {versions === null ? (
+            <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, opacity: 0.6 }}>
+              {t('director.versionsLoading', '加载中…')}
+            </div>
+          ) : versions.length === 0 ? (
+            <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, opacity: 0.6 }}>
+              {t('director.versionsEmpty', '还没有版本记录，修改片段后会自动生成')}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
+              {versions.map((v) => {
+                const reasonText = v.reason === 'auto' ? t('director.versionReasonAuto', '自动')
+                  : v.reason === 'pre-save' ? t('director.versionReasonPreSave', '保存前')
+                  : v.reason === 'manual' ? t('director.versionReasonManual', '手动')
+                  : t('director.versionReasonPreRestore', '恢复前');
+                return (
+                  <div
+                    key={v.fileName}
+                    data-version-row={v.fileName}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                      borderRadius: 8, border: '1px solid rgba(128,128,128,0.25)',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12 }}>{new Date(v.createdAt).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, opacity: 0.6 }}>
+                        {reasonText} · {t('director.versionShots', { n: (v.entity?.shots ?? []).length, defaultValue: '{{n}} 个片段' })}
+                        {typeof v.entity?.totalDuration === 'number' ? ` · ${v.entity.totalDuration.toFixed(1)}s` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-version-restore={v.fileName}
+                      onClick={() => void restoreVersion(v)}
+                      style={{
+                        height: 26, padding: '0 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                        border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit',
+                      }}
+                    >
+                      {t('director.versionRestore', '恢复')}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
         {/* 运行预检（2026-11-05 起确认 = 真实提交）：槽位表 / 每段帧数 / 延续关系 / 本次断开的衔接；
             「确认运行」→ 组装导演包 → POST /zeroexo/h3/pack → /run → 轮询落库。
             2026-11-04 批量复用：批量「生成」与「运行选中」打开的是同一个预检弹层（同一组件同一渲染）。 */}

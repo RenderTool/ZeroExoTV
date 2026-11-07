@@ -18,6 +18,7 @@ import {
 } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { durationToFrames, resolveVideoSize } from '@/entities/director-params.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
+import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
 import {
   createPreviewClientId,
   DirectorPreviewSocket,
@@ -101,9 +102,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
   };
   const steps = Math.max(1, Math.min(100, Math.round(asNumber(req.params?.steps, 8))));
   const cfg = Math.max(0, Math.min(20, asNumber(req.params?.cfg, 1)));
-  const seed = req.params?.seed == null
-    ? Math.floor(Math.random() * 0x7fffffff)
-    : Math.max(0, Math.trunc(asNumber(req.params?.seed, 0)));
+  const seed = resolveSeed(req.params?.seed);
 
   // 参考图：只取第一张（插件 ZeroExoRefVideo 单参考槽）
   let referenceImage = '';
@@ -177,6 +176,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
     const res = await fetch(url);
     if (!res.ok) throw new Error(`取回视频失败（HTTP ${res.status}）`);
     const blob = await res.blob();
+    recordLastSeed(seed, getCurrentCanvasId() ?? undefined);
     return {
       blob,
       width,
