@@ -20,8 +20,8 @@ import { Copy, Plug, RefreshCw, ShieldCheck } from 'lucide-react';
 import {
   MCP_TOOLS,
   CAPABILITY_BITS,
-  buildStartCommands,
-  buildStdioConfig,
+  MCP_HTTP_URL,
+  buildHttpConfig,
   createToken,
   ensureIdeToken,
   loadAudit,
@@ -119,35 +119,40 @@ export function McpSettingsDialog({ onClose, embedded = false }: McpSettingsDial
   );
 
   // ===== 派生 =====
-  const stdioConfig = useMemo(
-    () => (serverInfo && ideToken ? buildStdioConfig(serverInfo, ideToken) : null),
-    [serverInfo, ideToken],
+  const mcpConfig = useMemo(
+    () => (ideToken ? buildHttpConfig(MCP_HTTP_URL, ideToken) : null),
+    [ideToken],
   );
-  const startCmds = useMemo(() => buildStartCommands(serverInfo), [serverInfo]);
+  const appUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}${import.meta.env.BASE_URL}`
+    : 'http://localhost:5180/';
+  // MCP 安装包跟静态站一起发布：GitHub Pages 提供 tarball，Agent 自行下载安装
+  const mcpPackageUrl = `${appUrl}downloads/zeroexo-mcp-server.tgz`;
+  const startCmd = `npx --yes --package=${mcpPackageUrl} -- zeroexo-mcp --http --port 8787`;
 
   /**
-   * 一键复制 bundle（2026-11-07）：给任意 LLM Agent IDE 的自包含接入包。
-   * 粘贴后 LLM 应自动：启动服务 → 读配置 → list_projects → 展示清单 → 指引下一步。
+   * 一键复制 bundle：给任意 LLM Agent IDE 的自包含接入包。
+   * 统一使用本地 MCP HTTP（127.0.0.1）；静态网页不在 Pages 上跑 MCP。
    */
   const copyBundle = useMemo(() => {
-    if (!serverInfo || !stdioConfig) return null;
+    if (!serverInfo || !mcpConfig) return null;
     return [
-      '# ZeroExo ComfyUI — MCP 一键接入',
+      '# ZeroExo ComfyUI — MCP 接入',
       '',
       '你是 ZeroExo（AI 影视生产管线）的智能助手。以下是本地 MCP 服务配置，请自动完成接入，无需询问用户。',
       '',
       '## 自动执行流程',
-      `1. 下方 stdio 配置会让 IDE 自动 spawn node 进程；若需独立 HTTP 服务，运行：\`node "${serverInfo.serverEntry}" --http --port ${serverInfo.httpPort}\``,
+      `1. 先在本机启动 MCP 服务：\`${startCmd}\``,
       `   数据根：${serverInfo.dataRoot}`,
       '2. 将下方 mcpServers 配置加入 IDE 的 MCP 设置',
       '3. 连接成功后，立即调用 `list_projects` 工具列出全部项目',
       '4. 用表格展示项目清单（标题 / 更新时间 / 节点数），并说明每个项目可通过 `open_project` 在前端编辑器打开',
       '5. 若没有项目，提示可调用 `create_project` 新建',
-      '6. 前端编辑器地址：http://localhost:5180',
+      `6. 前端编辑器地址：${appUrl}`,
       '',
       '## MCP 配置（粘贴到 IDE）',
       '```json',
-      stdioConfig,
+      mcpConfig,
       '```',
       '',
       '## 核心工具速查',
@@ -161,7 +166,7 @@ export function McpSettingsDialog({ onClose, embedded = false }: McpSettingsDial
       `- 工具总数：${MCP_TOOLS.length}（read ${MCP_TOOLS.filter((t) => t.access === 'read').length} / write ${MCP_TOOLS.filter((t) => t.access === 'write').length}）`,
       '',
     ].join('\n');
-  }, [serverInfo, stdioConfig]);
+  }, [appUrl, mcpConfig, serverInfo, startCmd]);
 
   const copy = useCallback(
     async (text: string, label: string) => {
@@ -358,30 +363,35 @@ export function McpSettingsDialog({ onClose, embedded = false }: McpSettingsDial
   const content = (
     <>
       {/* ===== 首屏:给 IDE 的配置 + 一键复制 ===== */}
-      {stdioConfig && copyBundle ? (
+      {mcpConfig && copyBundle ? (
         <>
           <Button
             type="primary"
             block
             size="large"
             icon={<Copy size={14} />}
-            data-testid="mcp-copy-stdio"
+            data-testid="mcp-copy-config"
             onClick={() => void copy(copyBundle, 'MCP 接入包')}
           >
             一键复制（含 LLM 自动接入指令）
           </Button>
-          <pre data-testid="mcp-config-stdio" style={{ ...preStyle, marginTop: 10 }}>{stdioConfig}</pre>
+          <pre data-testid="mcp-config-http" style={{ ...preStyle, marginTop: 10 }}>{mcpConfig}</pre>
           <div style={{ textAlign: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginTop: 4 }}>
-            复制内容含给 LLM 的自动接入指令；粘贴到任意 AI IDE 后，模型会自动连接 MCP、列出项目并指引下一步。
+            先在本机运行 MCP 服务，再粘贴配置；复制内容含给 LLM 的自动接入指令。
+          </div>
+          <div style={{ textAlign: 'center', marginTop: 2 }}>
+            <a href={mcpPackageUrl} download style={{ fontSize: 12 }} data-testid="mcp-download-package">
+              下载 MCP 安装包
+            </a>
           </div>
         </>
       ) : (
         <Alert
           type="warning"
           showIcon
-          message="还没准备好配置(服务路径未登记),请先运行一次启动命令:"
+          message="MCP 服务还没启动，先在本机运行："
           description={
-            <pre data-testid="mcp-start-cmd" style={preStyle}>{startCmds.stdio}</pre>
+            <pre data-testid="mcp-start-cmd" style={preStyle}>{startCmd}</pre>
           }
         />
       )}

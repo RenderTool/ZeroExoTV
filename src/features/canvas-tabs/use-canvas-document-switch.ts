@@ -15,9 +15,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { CommandQueue, GraphModel } from '@zeroexo/core';
+import type { CommandQueue, GraphModel, NodeRecord } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
+import { normalizeNodesToOrigin } from '@/features/sub-canvas/canvas-copy.js';
 import { setGeneratingPreviewCanvas } from '@zeroexo/plugin-nodes';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { MAIN_CANVAS_DOC_ID, setCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
@@ -82,10 +83,13 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const unsubGraphRef = useRef<(() => void) | null>(null);
+  const unsubViewportRef = useRef<(() => void) | null>(null);
 
   const stopCopyAutosave = useCallback(() => {
     unsubGraphRef.current?.();
     unsubGraphRef.current = null;
+    unsubViewportRef.current?.();
+    unsubViewportRef.current = null;
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -117,7 +121,9 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
       },
       onCancel: async () => {
         try {
-          await saveCanvas(projectId, cid, { graph: ed.core.commandQueue.getState() }, null);
+          await saveCanvas(projectId, cid, {
+            graph: { ...ed.core.commandQueue.getState(), viewport: ed.store.getViewport() },
+          }, null);
           const got = await getCanvas(projectId, cid);
           stampRef.current = got?.stamp ?? null;
           conflictRef.current = false;
@@ -144,7 +150,9 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
     }
     if (!dirtyRef.current) return true;
     try {
-      await saveCanvas(projectId, cid, { graph: ed.core.commandQueue.getState() }, stampRef.current);
+      await saveCanvas(projectId, cid, {
+        graph: { ...ed.core.commandQueue.getState(), viewport: ed.store.getViewport() },
+      }, stampRef.current);
       const got = await getCanvas(projectId, cid);
       stampRef.current = got?.stamp ?? null;
       dirtyRef.current = false;
@@ -195,6 +203,8 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
       }, COPY_SAVE_DEBOUNCE_MS);
     };
     unsubGraphRef.current = ed.store.subscribeGraph(schedule);
+    // 平移/缩放也要落盘，否则切换回来会恢复到旧 viewport，看起来整体偏移
+    unsubViewportRef.current = ed.store.subscribeViewport(schedule);
   }, [editor, stopCopyAutosave, saveCopyNow]);
 
   const switchTo = useCallback(async (cid: string) => {
@@ -239,9 +249,13 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         // 换图前先切文档作用域：副本是另一份文档，不得把它的节点/生成态写进主画布 Y.Doc
         setCurrentCanvasDocId(cid);
         setGeneratingPreviewCanvas(cid);
+        // 子画布统一从原点打开：旧副本也归一化一次，避免继承主画布世界坐标造成偏移
+        normalizeNodesToOrigin(got.graph.nodes as NodeRecord[]);
+        got.graph.viewport = { x: 0, y: 0, k: 1 };
         ed.core.commandQueue.replaceState(got.graph);
         ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
-        ed.store.setViewport(viewportOf(got.graph));
+        ed.store.setViewport({ x: 0, y: 0, k: 1 });
+        dirtyRef.current = true; // 归一化后的坐标需要在下次保存时落盘
         stampRef.current = got.stamp;
         conflictRef.current = false;
         dirtyRef.current = false;

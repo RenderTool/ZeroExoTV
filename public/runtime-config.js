@@ -13,6 +13,9 @@
 window.env = {
   API_BASE_URL: '/api',
 
+  // MCP HTTP 地址：默认本机；把 MCP 部署到云服务器时填完整地址
+  MCP_HTTP_URL: '',
+
   // 品牌配置(可选)— 后端未提供接口时,使用此配置作为兜底
   BRANDING_CONFIG: {
     // heroVideoUrl: "https://your-cdn.com/portal-video.mp4",

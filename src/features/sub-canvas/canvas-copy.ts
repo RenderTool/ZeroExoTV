@@ -46,6 +46,27 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/**
+ * 副本落点统一到原点：节点按选区最小 x/y 平移，打开时 viewport 0/0 就能看到内容。
+ * 不改 id、不改相对布局，只消除「从主画布带过来的世界坐标偏移」。
+ */
+export function normalizeNodesToOrigin(nodes: NodeRecord[]): void {
+  if (nodes.length === 0) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const n of nodes) {
+    const x = n.position?.x;
+    const y = n.position?.y;
+    if (typeof x === 'number' && x < minX) minX = x;
+    if (typeof y === 'number' && y < minY) minY = y;
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+  for (const n of nodes) {
+    if (!n.position) continue;
+    n.position = { ...n.position, x: n.position.x - minX, y: n.position.y - minY };
+  }
+}
+
 /** 默认封面：副本里第一张已落盘图片的 storageKey（没有就 null，卡片显示占位，不留假封面） */
 export function pickAutoCoverKey(nodes: readonly NodeRecord[]): string | null {
   for (const n of nodes) {
@@ -65,6 +86,7 @@ export async function createCanvasCopyFromSelection(args: CreateCanvasCopyArgs):
   if (picked.size === 0) return { ok: false, reason: 'empty-selection' };
 
   const nodes = visible.filter((n) => picked.has(n.id)).map(deepClone);
+  normalizeNodesToOrigin(nodes);
   const edges = ((graph.edges ?? []) as EdgeRecord[])
     .filter((e) => picked.has(e.source.nodeId) && picked.has(e.target.nodeId))
     .map(deepClone);
@@ -86,8 +108,8 @@ export async function createCanvasCopyFromSelection(args: CreateCanvasCopyArgs):
       graph: {
         nodes,
         edges,
-        // 副本保留原世界坐标：观感与选区一致，打开时由工作区 fit 拉中（零坐标改写风险）
-        viewport: { ...graph.viewport },
+        // 副本内容已平移到原点：打开即 0/0，不再继承主画布当前视口造成偏移
+        viewport: { x: 0, y: 0, k: 1 },
         metadata: { savedFrom: 'selection' },
       } as GraphModel,
     });

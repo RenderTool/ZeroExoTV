@@ -90,28 +90,24 @@ function renderDialog() {
 
 /** 等待自动 token 生成完毕(配置块出现即代表 token 已注入) */
 async function waitReady() {
-  await waitFor(() => expect(screen.getByTestId('mcp-config-stdio')).toBeTruthy());
+  await waitFor(() => expect(screen.getByTestId('mcp-config-http')).toBeTruthy());
 }
 
 describe('MCP 设置页(一键复制版)', () => {
-  it('① 首屏存在「一键复制」按钮,复制内容为合法 JSON 且含 command/args/env', async () => {
+  it('① 首屏存在「一键复制」按钮,复制内容为合法 HTTP JSON', async () => {
     renderDialog();
     await waitReady();
-    const btn = screen.getByTestId('mcp-copy-stdio');
+    const btn = screen.getByTestId('mcp-copy-config');
     expect(btn.textContent).toMatch(/一\s*键\s*复\s*制/);
     fireEvent.click(btn);
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     const copied = (writeText.mock.calls as unknown as string[][])[0]![0]!;
-    // 2026-11-07 起「一键复制」给的是自包含接入包（含给 LLM 的指令），配置在其中的 json 代码块里
     const jsonBlock = /```json\n([\s\S]*?)\n```/.exec(copied)?.[1];
     expect(jsonBlock).toBeTruthy();
     const cfg = JSON.parse(jsonBlock!); // 合法 JSON
     const server = cfg.mcpServers.zeroexo;
-    expect(server.command).toBe('node');
-    expect(Array.isArray(server.args)).toBe(true);
-    expect(server.args[0]).toContain('mcp-server');
-    expect(server.env.ZEROEXO_DATA_ROOT).toBe('D:\\Test');
-    expect(server.env.ZEROEXO_MCP_TOKEN).toBe('zxp_AUTO_GENERATED_RAW');
+    expect(server.url).toContain('127.0.0.1:8787/mcp');
+    expect(server.headers.Authorization).toBe('Bearer zxp_AUTO_GENERATED_RAW');
   });
 
   it('② 首次无 token 时自动生成全权限 token 并注入配置(无需先手动新建)', async () => {
@@ -120,16 +116,16 @@ describe('MCP 设置页(一键复制版)', () => {
     // 打开面板即自动取 token(ensureIdeToken 内部在无可用 token 时自动创建全权限 token,逻辑见 mcp-client.test.ts)
     expect(clientMock.ensureIdeToken).toHaveBeenCalledTimes(1);
     // 自动生成的 token 原文直接写进配置块
-    expect(screen.getByTestId('mcp-config-stdio').textContent).toContain('zxp_AUTO_GENERATED_RAW');
+    expect(screen.getByTestId('mcp-config-http').textContent).toContain('zxp_AUTO_GENERATED_RAW');
     // 首屏不要求用户先去新建:不应出现"粘贴你的 token"占位符
     expect(document.body.textContent).not.toContain('<粘贴你的');
   });
 
-  it('③ 默认无技术说明文案:关键术语在 DOM 中出现 0 次(折叠且懒渲染)', async () => {
+  it('③ 默认不展开排查术语（折叠且懒渲染）', async () => {
     renderDialog();
     await waitReady();
     const text = document.body.textContent ?? '';
-    for (const term of ['stdio', 'Bearer', 'Authorization', 'jsonrpc', '协议', '审计', '自检', '能力清单', '作用域']) {
+    for (const term of ['jsonrpc', '协议', '审计', '自检', '能力清单', '作用域']) {
       expect(text).not.toContain(term);
     }
   });
@@ -138,7 +134,6 @@ describe('MCP 设置页(一键复制版)', () => {
     renderDialog();
     await waitReady();
     expect(screen.queryByText('远程连接(多台设备共用)')).toBeNull();
-    expect(screen.queryByTestId('mcp-config-http')).toBeNull();
   });
 
   it('⑤ 密钥管理:新建后原文仅显示一次,「我已保存」后消失', async () => {
@@ -170,7 +165,7 @@ describe('MCP 设置页(一键复制版)', () => {
   it('⑥ 无印章(server 未跑过)→ 显示启动命令兜底,不崩溃', async () => {
     clientMock.loadServerInfo.mockImplementationOnce(async () => null as unknown as ServerInfo);
     renderDialog();
-    await waitFor(() => expect(screen.getByTestId('mcp-start-cmd').textContent).toContain('node'));
+    await waitFor(() => expect(screen.getByTestId('mcp-start-cmd').textContent).toContain('npx'));
     // 不应自动生成 token(配置块都还没有)
     expect(clientMock.ensureIdeToken).not.toHaveBeenCalled();
   });
@@ -179,8 +174,8 @@ describe('MCP 设置页(一键复制版)', () => {
     renderDialog();
     await waitReady();
     // 2026-11-06 用户指令：原先首屏与「本地数据面板」各有一份 mcpServers 配置块 → 合并为一份
-    expect(screen.getAllByTestId('mcp-config-stdio')).toHaveLength(1);
-    expect(screen.getAllByTestId('mcp-copy-stdio')).toHaveLength(1);
+    expect(screen.getAllByTestId('mcp-config-http')).toHaveLength(1);
+    expect(screen.getAllByTestId('mcp-copy-config')).toHaveLength(1);
     const text = document.body.textContent ?? '';
     // 数据目录 / 绝对路径合并为一块：面板只剩一个「数据目录」小节标题
     expect(text.match(/数据目录/g) ?? []).toHaveLength(1);

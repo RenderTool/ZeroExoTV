@@ -164,7 +164,7 @@ export function TopNav({ activeRoute, onNavigate }: TopNavProps): React.ReactEle
             <Button
               type="text"
               icon={<Github size={16} />}
-              href="https://github.com/RenderTool/zeroexo-platform-infinite-canvas"
+              href="https://github.com/RenderTool/ZeroExoTV"
               target="_blank"
               rel="noopener noreferrer"
               style={iconBtnInHeader}

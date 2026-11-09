@@ -41,6 +41,23 @@ jobs:
           VITE_BASE_PATH: /ZeroExoTV/
         run: pnpm build
 
+      - name: Package MCP
+        run: |
+          pnpm --filter @zeroexo/mcp-server build
+          cd mcp-server
+          npm pack --pack-destination ../dist/downloads
+          cd ..
+          MCP_VERSION=$(node -p "require('./mcp-server/package.json').version")
+          cp "dist/downloads/zeroexo-mcp-server-${MCP_VERSION}.tgz" dist/downloads/zeroexo-mcp-server.tgz
+
+      - name: Package ComfyUI plugin
+        run: |
+          cd comfyui-plugin
+          zip -r ../dist/downloads/ComfyUI_ZeroExoNodes.zip ComfyUI_ZeroExoNodes \
+            -x '*/__pycache__/*' '*.pyc'
+          cp ../dist/downloads/ComfyUI_ZeroExoNodes.zip \
+            "../dist/downloads/ComfyUI_ZeroExoNodes-${GITHUB_SHA::7}.zip"
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:

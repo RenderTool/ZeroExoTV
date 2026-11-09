@@ -65,7 +65,7 @@ export function AppTopBar({
           <TopBarIconButton
             action="github"
             tooltip="GitHub"
-            href="https://github.com/RenderTool/zeroexo-platform-infinite-canvas"
+            href="https://github.com/RenderTool/ZeroExoTV"
             target="_blank"
             rel="noopener noreferrer"
             className="zeroexo-icon-btn"

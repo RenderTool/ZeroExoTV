@@ -15,7 +15,11 @@ import { listDir, readFile, readJson, writeJson } from '@/platform/fs.js';
 export const MCP_TOKENS_PATH = '.mcp/tokens.json';
 export const MCP_SERVER_INFO_PATH = '.mcp/server-info.json';
 export const MCP_AUDIT_DIR = '.audit';
-export const MCP_HTTP_URL = 'http://localhost:8787/mcp';
+/** 可被 runtime-config.js 覆盖（云端自建 MCP 时填完整地址）；默认本机 HTTP */
+const runtimeMcpUrl = typeof window !== 'undefined'
+  ? (window as unknown as { env?: { MCP_HTTP_URL?: string } }).env?.MCP_HTTP_URL
+  : undefined;
+export const MCP_HTTP_URL = runtimeMcpUrl || 'http://127.0.0.1:8787/mcp';
 
 // ===== 类型 =====
 export interface TokenRecord {

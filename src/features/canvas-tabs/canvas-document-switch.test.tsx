@@ -60,6 +60,7 @@ function makeEditor(calls: string[]) {
   return {
     store: {
       subscribeGraph: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; },
+      subscribeViewport: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; },
       getViewport: () => graph.viewport,
       setViewport: (v: { x: number; y: number; k: number }) => { calls.push('setViewport'); graph = { ...graph, viewport: v }; },
       setSelection: () => { calls.push('clearSelection'); },

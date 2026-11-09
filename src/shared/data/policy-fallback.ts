@@ -172,7 +172,7 @@ ZeroExoTV AI 是一款基于人工智能的创意工具平台，致力于为创�
 
 ## 联系我们
 
-GitHub：github.com/RenderTool/zeroexo-platform-infinite-canvas
+GitHub：github.com/RenderTool/ZeroExoTV
 
 邮箱：750831855@qq.com`,
   },
