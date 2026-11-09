@@ -6,14 +6,16 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  deploy-gh-pages:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,12 +41,22 @@ jobs:
           VITE_BASE_PATH: /ZeroExoTV/
         run: pnpm build
 
-      - name: Add .nojekyll
-        run: touch dist/.nojekyll
-
-      - name: Deploy to gh-pages
-        uses: JamesIves/github-pages-deploy-action@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
         with:
-          branch: gh-pages
-          folder: dist
-          clean: true
+          # 仓库还没启用 Pages 时自动创建，不需要手动去 Settings 点
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
