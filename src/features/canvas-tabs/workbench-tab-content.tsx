@@ -54,12 +54,10 @@ import {
 import {
   DIRECTOR_FPS,
   DIRECTOR_PRESETS,
-  buildPackSummary,
   rebaseShotsForSharedChange,
   resolveVideoSize,
   segmentContinuityEnabled,
   type DirectorAssetRef,
-  type PackSummary,
   type RunShotLike,
 } from '@/entities/director-params.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
@@ -216,6 +214,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [sharedParams, setSharedParams] = useState<WorkbenchSharedParams>(createDefaultSharedParams);
   /** 选择运行：勾选的片段 id 集合（唯一勾选状态源；只在批量模式期间存活） */
   const [runSelection, setRunSelection] = useState<ReadonlySet<string>>(new Set());
+  // 旧预检弹层保留为不可达兜底（生成入口已改为直接提交，不再打开它）
+  const [dryRun, setDryRun] = useState<{ summary: { segments: Array<{ id: string; number: number; frames: number }>; issues: Array<{ message: string }> }; disconnects: Array<{ fromNo: number; toNo: number }>; selectedIds: string[]; continuationOff: ReadonlySet<string> } | null>(null);
   /** 轨道模式：'continuity'=链接（点片段切引导）；'batch'=批量（轨道行勾选，确认/运行收敛到 dry-run 预检页）；null=普通浏览 */
   const [trackMode, setTrackMode] = useState<'continuity' | 'batch' | null>(null);
   /**
@@ -236,7 +236,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    */
   const [episodeContext, setEpisodeContext] = useState<{ activeEpisodeId: string | null; numberById: Record<string, number> }>({ activeEpisodeId: null, numberById: {} });
   /** dry-run 预检弹层：片段表 + pack 摘要 + 本次运行断开的衔接列表（执行按钮保留 dry-run 语义，不发起真实生成） */
-  const [dryRun, setDryRun] = useState<{ summary: PackSummary; disconnects: Array<{ fromNo: number; toNo: number }>; selectedIds: string[]; continuationOff: ReadonlySet<string> } | null>(null);
+
   /** 片段选择面板（2026-11-07 统一生成入口：点"生成"弹出，默认勾选当前段，可全选/按需勾选） */
   const [runPickerOpen, setRunPickerOpen] = useState(false);
   const [runPickerSelection, setRunPickerSelection] = useState<ReadonlySet<string>>(new Set());
@@ -573,43 +573,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     return () => window.removeEventListener(WORKBENCH_SET_GUIDE_EVENT, onSetGuide);
   }, [projectId, activeShotId, updateShot, message, t]);
 
-  /** 选择运行：dry-run（本仓库无导演台生成链路——只产出 pack 结构摘要，不发起真实生成）。
-   *  第十一条D：continuationOff 内的片段本次运行强制断开段间引导（仅投影到运行参数，不改持久实体）。 */
-  const handleRun = useCallback(
-    (selectedIds: string[], continuationOff?: ReadonlySet<string>) => {
-      if (selectedIds.length === 0) {
-        message.warning(t('director.runEmpty', '请先勾选要运行的片段'));
-        return;
-      }
-      const runShots = shotsRef.current.map(toRunShot).map((s) =>
-        continuationOff?.has(s.id) ? { ...s, continuation: { enabled: false } } : s,
-      );
-      const summary = buildPackSummary({
-        shots: runShots,
-        shared: sharedParamsRef.current,
-        tier: sharedParamsRef.current.presetId,
-        selectedIds,
-        /** 无图主体槽位校验（2026-11-04 @ 浮层指令C）：`subject:<id>` 引用经封面回落链解析，null = 尚未录入图像 */
-        subjectCoverOf: (subjectId: string) => {
-          const subject = subjects.find((s) => s.id === subjectId);
-          return subject ? resolveSubjectCover(subject).key : null;
-        },
-      });
-      // 2026-11-04 批量复用预检（要求4）：预检页显式列出本次被断开的衔接处（前段未勾选 → 引导强制 false）
-      const disconnects: Array<{ fromNo: number; toNo: number }> = [];
-      if (continuationOff && continuationOff.size > 0) {
-        const current = shotsRef.current;
-        current.forEach((s, i) => {
-          if (i > 0 && continuationOff.has(s.id)) {
-            disconnects.push({ fromNo: current[i - 1]!.number, toNo: s.number });
-          }
-        });
-      }
-      setDryRun({ summary, disconnects, selectedIds, continuationOff: continuationOff ?? new Set() });
-    },
-    [message, subjects, t],
-  );
-
   const toggleRunSelection = useCallback((shotId: string) => {
     setRunSelection((prev) => {
       const next = new Set(prev);
@@ -734,21 +697,25 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     return set;
   }, [shots, runSelection]);
 
+  /** 片段选择面板自己的缺口检测（不能复用 runSelection，那个只在批量导轨模式里维护） */
+  const pickerAutoDisconnect = useMemo<ReadonlySet<string>>(() => {
+    const set = new Set<string>();
+    shots.forEach((s, i) => {
+      if (i === 0 || !runPickerSelection.has(s.id)) return;
+      if (!segmentContinuityEnabled(toRunShot(s), i)) return;
+      const prev = shots[i - 1];
+      if (prev && !runPickerSelection.has(prev.id)) set.add(s.id);
+    });
+    return set;
+  }, [shots, runPickerSelection]);
+
   /** 退出批量模式：清空勾选（不残留） */
   const exitBatchMode = useCallback(() => {
     setRunSelection(new Set<string>());
     setTrackMode(null);
   }, []);
 
-  /** 批量模式「生成」→ 打开 dry-run 预检（按时间线顺序列出勾选片段；缺口引导强制 false 并列明断开处）。
-      确认/运行都在预检页完成；此处不改勾选（留待预检页「确认运行」或继续调整）。 */
-  const openBatchPreflight = useCallback(() => {
-    if (runSelection.size === 0) {
-      message.warning(t('director.runEmpty', '请先勾选要运行的片段'));
-      return;
-    }
-    handleRun([...runSelection], batchAutoDisconnect);
-  }, [runSelection, batchAutoDisconnect, handleRun, message, t]);
+
 
   /** ===== ComfyUI 真实运行（2026-11-05 极简化单地址）=====
    * 连接配置来自右上角「ComfyUI」弹层（comfyui-connect-button，单地址 + 自动判定后端）；
@@ -797,6 +764,54 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   });
   const runPhaseActive =
     comfyRun.phase === 'submitting' || comfyRun.phase === 'queued' || comfyRun.phase === 'running';
+
+  /** 统一真实提交：片段选择面板「确认 N 段」和批量导轨「生成」都直接走这里，不再二次预检。 */
+  const startRunNow = useCallback(
+    (selectedIds: string[], continuationOff: ReadonlySet<string> = new Set()) => {
+      if (selectedIds.length === 0) {
+        message.warning(t('director.runEmpty', '请先勾选要运行的片段'));
+        return;
+      }
+      const size = resolveVideoSize(
+        String(sharedParamsRef.current.params['aspect'] ?? '16:9'),
+        Number(sharedParamsRef.current.params['scaleFactor'] ?? 1),
+      );
+      void comfyRun.startRun({
+        selectedIds,
+        shots: shotsRef.current.map(toRunShot).map((s) =>
+          continuationOff.has(s.id) ? { ...s, continuation: { enabled: false } } : s,
+        ),
+        shared: sharedParamsRef.current,
+        tier: sharedParamsRef.current.presetId,
+        width: size.width,
+        height: size.height,
+        projectId: projectId ?? 'workbench',
+        episode: `${projectId ?? 'workbench'}-E01`,
+        subjectCoverOf: (subjectId: string) => {
+          const subject = subjects.find((s) => s.id === subjectId);
+          return subject ? resolveSubjectCover(subject).key : null;
+        },
+      });
+      if (trackMode === 'batch') exitBatchMode();
+    },
+    [comfyRun, subjects, projectId, trackMode, exitBatchMode, message, t],
+  );
+
+  /** 批量导轨「生成」：确认勾选后直接开始。 */
+  const openBatchPreflight = useCallback(() => {
+    if (runSelection.size === 0) {
+      message.warning(t('director.runEmpty', '请先勾选要运行的片段'));
+      return;
+    }
+    startRunNow([...runSelection], batchAutoDisconnect);
+  }, [runSelection, batchAutoDisconnect, startRunNow, message, t]);
+
+  /** 旧预检弹层兜底：现在生成入口不会打开它，保留只为兼容旧调用。 */
+  const confirmDryRun = useCallback(() => {
+    if (!dryRun) return;
+    startRunNow(dryRun.selectedIds, dryRun.continuationOff);
+    setDryRun(null);
+  }, [dryRun, startRunNow]);
 
   /**
    * 实时预览跟段（2026-11-07 用户反馈：预览只出现在轨道卡片、右侧预览窗没有）：
@@ -879,33 +894,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (pending?.shotId) focusShot(pending.shotId);
     return () => window.removeEventListener(NAVIGATE_FOCUS_SHOT_EVENT, onEvent);
   }, []);
-
-  /** 预检页「确认运行」：真实提交（组装包 → /pack → /run → 轮询），预检摘要语义保留 */
-  const confirmDryRun = useCallback(() => {
-    if (!dryRun) return;
-    const size = resolveVideoSize(
-      String(sharedParamsRef.current.params['aspect'] ?? '16:9'),
-      Number(sharedParamsRef.current.params['scaleFactor'] ?? 1),
-    );
-    void comfyRun.startRun({
-      selectedIds: dryRun.selectedIds,
-      shots: shotsRef.current.map(toRunShot).map((s) =>
-        dryRun.continuationOff.has(s.id) ? { ...s, continuation: { enabled: false } } : s,
-      ),
-      shared: sharedParamsRef.current,
-      tier: sharedParamsRef.current.presetId,
-      width: size.width,
-      height: size.height,
-      projectId: projectId ?? 'workbench',
-      episode: `${projectId ?? 'workbench'}-E01`,
-      subjectCoverOf: (subjectId: string) => {
-        const subject = subjects.find((s) => s.id === subjectId);
-        return subject ? resolveSubjectCover(subject).key : null;
-      },
-    });
-    setDryRun(null);
-    if (trackMode === 'batch') exitBatchMode();
-  }, [dryRun, comfyRun, subjects, projectId, trackMode, exitBatchMode]);
 
   /* 2026-11-04 拖拽 hover 高亮配套：导演台单轨 drop = 重排（落点判定与 hover 同为 computeInsertIndex） */
   const handleMoveShotBetweenTracks = useCallback(
@@ -1608,7 +1596,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   disabled={runPickerSelection.size === 0}
                   onClick={() => {
                     setRunPickerOpen(false);
-                    handleRun([...runPickerSelection]);
+                    startRunNow([...runPickerSelection], pickerAutoDisconnect);
                   }}
                 >
                   {t('director.runPickerConfirm', '确认 ({{n}} 段)', { n: runPickerSelection.size })}

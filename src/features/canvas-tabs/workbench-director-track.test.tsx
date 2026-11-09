@@ -431,10 +431,10 @@ describe('导轨白色竖线移除 + 零基线对齐', () => {
   });
 });
 
-// ===== 3. 批量运行 = 复用 dry-run 预检（无第二套面板）=====
+// ===== 3. 批量运行：确认即开始（无二次预检）=====
 
-describe('批量运行界面 = 复用现有 dry-run 预检', () => {
-  it('统一生成入口：导轨无批量按钮，「运行」打开片段选择面板；确认后进入全页唯一的预检', async () => {
+describe('批量运行界面 = 确认后直接生成', () => {
+  it('统一生成入口：导轨无批量按钮，「运行」打开片段选择面板；确认 N 段直接开始，不再弹预检', async () => {
     const { container } = await renderWorkbench();
 
     // 2026-11-07 用户指令：批量按钮下线，所有生成走「运行」→ 片段选择面板
@@ -457,15 +457,12 @@ describe('批量运行界面 = 复用现有 dry-run 预检', () => {
     expect(confirmBtn).toBeTruthy();
     fireEvent.click(confirmBtn);
 
-    await waitFor(() => expect(document.querySelector('[data-director-dry-run]')).toBeTruthy());
-    expect(document.querySelectorAll('[data-director-dry-run]').length).toBe(1);
-    const dryRun = document.querySelector('[data-director-dry-run]') as HTMLElement;
-    const note = dryRun.querySelector('[data-dry-run-note]') as HTMLElement;
-    expect(note).toBeTruthy();
-    expect(note.textContent).toContain('ComfyUI 真实生成');
+    // 确认后直接提交生成：不得再出现第二个「确认生成」预检弹层
+    await waitFor(() => expect(document.querySelector('[data-director-dry-run]')).toBeNull());
+    expect(document.querySelector('[data-dry-run-confirm]')).toBeNull();
   });
 
-  it('片段选择面板：全选 → 预检按时间线列出全部片段；返回后导轨数据不变', async () => {
+  it('片段选择面板：全选 → 确认直接开始；导轨片段不丢', async () => {
     const { container } = await renderWorkbench();
     fireEvent.click(container.querySelector('[data-run-selected]') as HTMLElement);
     const allBtn = await waitFor(() => {
@@ -484,18 +481,8 @@ describe('批量运行界面 = 复用现有 dry-run 预检', () => {
     });
     fireEvent.click(confirmBtn);
 
-    const dryRun = await waitFor(() => {
-      const el = document.querySelector('[data-director-dry-run]') as HTMLElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
-    const rows = Array.from(dryRun.querySelectorAll('[data-dry-run-segment]'));
-    expect(rows.length).toBe(3);
-    expect(rows[0]!.textContent).toContain('片段 1');
-    expect(rows[2]!.textContent).toContain('片段 3');
-
-    // 返回 → 导轨片段一个不少（jsdom 下 antd Modal 退场动画不销毁 DOM，不断言节点移除）
-    fireEvent.click(document.querySelector('[data-dry-run-cancel]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-director-dry-run]')).toBeNull());
+    expect(document.querySelector('[data-dry-run-confirm]')).toBeNull();
     expect(container.querySelectorAll('[data-clip-id]').length).toBe(3);
   });
 
@@ -695,7 +682,7 @@ describe('导轨横向滚动条 = 有（轨道区底部同一 scroll 容器）',
 // ===== 6. 参数 = 合并进「参数」按钮；运行按钮 = 运行（批量同组）；预览区文字标签 =====
 
 describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 = 运行；预览标签实时同步', () => {
-  it('「参数」唯一且面板含比例/×系数/尺寸 chip；导轨裸控件 = 0；工具行顺序 = 添加/链接/删除/参数/批量/运行（批量紧邻运行左侧，高均 25）；参数按钮无边框无描边；预览标签随参数实时联动；「运行」打开同一个 dry-run 预检', async () => {
+  it('「参数」唯一且面板含比例/×系数/尺寸 chip；导轨裸控件 = 0；工具行顺序 = 添加/链接/删除/参数/批量/运行（批量紧邻运行左侧，高均 25）；参数按钮无边框无描边；预览标签随参数实时联动；「运行」打开片段选择面板', async () => {
     const { container } = await renderWorkbench();
 
     // 唯一性 + 旧标记/裸控件零残留（比例下拉/系数输入/尺寸 chip 不直接出现在导轨工具行）
@@ -757,7 +744,7 @@ describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 =
     await waitFor(() =>
       expect((container.querySelector('[data-params-label]') as HTMLElement).textContent).toBe('9:16 · 480×864'));
 
-    // 「运行」→ 打开片段选择面板（2026-11-07 统一生成入口），确认后才进预检
+    // 「运行」→ 打开片段选择面板（2026-11-07 统一生成入口）
     fireEvent.click(runBtn);
     await waitFor(() =>
       expect(Array.from(document.querySelectorAll('.ant-modal'))
