@@ -40,6 +40,16 @@ function bridgeHeaders(token?: string, extra?: Record<string, string>): Record<s
   return headers;
 }
 
+/** 网络层失败时保留完整 URL，避免 UI 只显示「Failed to fetch」无法定位 */
+async function bridgeFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`请求 ${url} 失败：${reason}`);
+  }
+}
+
 export async function readErrorBody(res: Response): Promise<string> {
   try {
     const text = await res.text();
@@ -270,7 +280,7 @@ export async function fetchBridgeModels(baseUrl: string, token?: string): Promis
 export async function uploadBridgePack(baseUrl: string, packZip: Blob, token?: string): Promise<BridgePackUploadResult> {
   const form = new FormData();
   form.append('pack', packZip, 'director.mmxpack.zip');
-  const res = await fetch(`${normalizeBaseUrl(baseUrl)}/zeroexo/h3/pack`, {
+  const res = await bridgeFetch(`${normalizeBaseUrl(baseUrl)}/zeroexo/h3/pack`, {
     method: 'POST',
     headers: bridgeHeaders(token),
     body: form,
@@ -286,7 +296,7 @@ export async function uploadBridgePack(baseUrl: string, packZip: Blob, token?: s
 
 /** POST /zeroexo/h3/run：发起运行，返回 jobId（= ComfyUI prompt_id） */
 export async function startBridgeRun(baseUrl: string, req: BridgeRunRequest, token?: string): Promise<BridgeRunStartResult> {
-  const res = await fetch(`${normalizeBaseUrl(baseUrl)}/zeroexo/h3/run`, {
+  const res = await bridgeFetch(`${normalizeBaseUrl(baseUrl)}/zeroexo/h3/run`, {
     method: 'POST',
     headers: bridgeHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(req),

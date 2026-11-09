@@ -732,7 +732,12 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         return true;
       } catch (err) {
         stopPreview();
-        patch({ phase: 'error', error: err instanceof Error ? err.message : String(err), preview: null });
+        const raw = err instanceof Error ? err.message : String(err);
+        const base = cfg.mode === 'openai' ? cfg.channel.baseURL : cfg.baseUrl;
+        const message = /Failed to fetch|NetworkError|Load failed/i.test(raw)
+          ? `无法连接 ComfyUI（${base}）：网络/CORS/本地网络权限被拦截`
+          : raw;
+        patch({ phase: 'error', error: message, preview: null });
         return false;
       }
     },

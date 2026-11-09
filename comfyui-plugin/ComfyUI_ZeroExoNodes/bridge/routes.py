@@ -486,7 +486,16 @@ def _install_cors_middleware() -> None:
         if request.method == "OPTIONS":
             response = web.Response(status=204)
         else:
-            response = await handler(request)
+            try:
+                response = await handler(request)
+            except web.HTTPException as exc:
+                # 413/400 等异常也必须带 CORS，否则浏览器只会报 Failed to fetch
+                response = exc
+            except Exception as exc:  # noqa: BLE001
+                log.exception("ZeroExo CORS wrapper caught: %s", exc)
+                response = web.json_response(
+                    {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500
+                )
         if not isinstance(response, web.StreamResponse):
             return response
         origin = request.headers.get("Origin")

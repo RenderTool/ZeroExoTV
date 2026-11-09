@@ -109,13 +109,22 @@ export async function probeZeroexoPlugin(baseUrl: string, timeoutMs = 4000): Pro
   }
 }
 
+/** 网络层失败保留完整 URL，避免只看到 Failed to fetch */
+async function jobFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    throw new Error(`请求 ${url} 失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /** 提交单段作业（一个片段 = 一个 ComfyUI prompt） */
 async function submitJob(
   baseUrl: string,
   kind: 'reference_video' | 'qwen_image_edit',
   body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: object },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
-  const res = await fetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs`, {
+  const res = await jobFetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ kind, ...body }),
