@@ -1,7 +1,4 @@
-/**
- * AppTopBar MCP 入口单测（2026-11-04，验收①前半：设置入口存在且可点击打开）
- */
-
+/** AppTopBar 服务入口：ComfyUI / MCP / 数据目录 / 插件统一进服务中心。 */
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
@@ -12,22 +9,22 @@ vi.mock('@zeroexo/plugin-theme', () => ({
 }));
 vi.mock('@/shared/components/language-switcher.js', () => ({ LanguageSwitcher: () => null }));
 vi.mock('@/shared/hooks/use-media-query.js', () => ({ useIsMobile: () => false }));
-vi.mock('@/platform/fs.js', () => ({
-  restoreRoot: vi.fn(async () => 'Test'),
-  rootName: () => 'Test',
-}));
-vi.mock('@/platform/root-flow.js', () => ({ activateRoot: vi.fn() }));
 
 import { AppTopBar } from './app-top-bar.js';
+import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 
-describe('顶部导航 MCP 入口（验收①）', () => {
-  it('存在 MCP 入口按钮，点击触发 onRequestMcp', () => {
-    const onRequestMcp = vi.fn();
-    render(
-      createElement(AntdApp, null, createElement(AppTopBar, { onNavigate: () => {}, onRequestMcp })),
-    );
-    const entry = screen.getByTestId('mcp-entry');
-    fireEvent.click(entry);
-    expect(onRequestMcp).toHaveBeenCalledTimes(1);
+describe('顶部导航服务入口', () => {
+  it('只有一个服务按钮，点击广播打开事件', () => {
+    const handler = vi.fn();
+    window.addEventListener(OPEN_SERVICE_CENTER_EVENT, handler);
+    try {
+      render(createElement(AntdApp, null, createElement(AppTopBar, { onNavigate: () => {} })));
+      expect(screen.queryByTestId('mcp-entry')).toBeNull();
+      const entry = screen.getByTestId('services-entry');
+      fireEvent.click(entry);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(OPEN_SERVICE_CENTER_EVENT, handler);
+    }
   });
 });

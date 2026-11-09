@@ -13,7 +13,7 @@ import {
   resolveTextContent,
 } from '@zeroexo/plugin-persistence';
 import type { NodeRecord } from '@zeroexo/core';
-import type { Asset, AssetKind } from '../index.js';
+import type { Asset, AssetKind, GuideMeta } from '../index.js';
 import type { CreateAssetInput } from '../asset-store.js';
 import { uploadToBackend } from '@/services/backend-upload.js';
 import { getToken } from '@/services/api-client.js';
@@ -394,6 +394,7 @@ export function assetInputFromNode(node: NodeRecord): CreateAssetInput | null {
     const width = (data.naturalWidth as number) ?? (node.size?.width ?? 0);
     const height = (data.naturalHeight as number) ?? (node.size?.height ?? 0);
     const durationMs = data.durationMs as number | undefined;
+    const guide = data.guide as GuideMeta | undefined;
     return {
       title,
       kind: 'video',
@@ -407,6 +408,7 @@ export function assetInputFromNode(node: NodeRecord): CreateAssetInput | null {
         width,
         height,
         durationMs,
+        ...(guide?.id ? { guide } : {}),
       },
     };
   }

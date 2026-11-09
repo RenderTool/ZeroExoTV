@@ -23,6 +23,9 @@
 
 | 文件 | 主题 |
 |---|---|
+| [docs/handoff-next-session-20261107.md](docs/handoff-next-session-20261107.md) | 2026-11-07 三项待办完工状态 + 人工验收清单 |
+| [docs/2026-11-07-guide-and-ui-notes.md](docs/2026-11-07-guide-and-ui-notes.md) | 子画布任务串台/下载/引导数据/衔接 UI/另存画布 完工记录与契约 |
+| [docs/2026-11-07-qwen-image-edit-integration.md](docs/2026-11-07-qwen-image-edit-integration.md) | Qwen Image 2.1 图像编辑工作流接入（画布节点 / 图片编辑 / 局部遮罩） |
 | [docs/handoff-2026-11-05.md](docs/handoff-2026-11-05.md) | 未完成项与反复修复失败 Bug 交接 |
 | [docs/entities-redesign-2026-11-04.md](docs/entities-redesign-2026-11-04.md) | 三页签取证 + 实体层 schema |
 | [docs/mcp-server-design.md](docs/mcp-server-design.md) | MCP Server 设计 |

@@ -14,6 +14,8 @@ export interface Ctx {
 }
 
 export const TOOL_REGISTRY: string[] = [];
+/** 真实读写分类（2026-11-09）：由 def.bits 派生，供 --selfcheck 输出，不再硬编码 9/12。 */
+export const TOOL_ACCESS: Record<string, "read" | "write"> = {};
 
 export interface ToolDef<S extends z.ZodRawShape> {
   name: string;
@@ -25,6 +27,7 @@ export interface ToolDef<S extends z.ZodRawShape> {
 
 export function defTool<S extends z.ZodRawShape>(server: McpServer, ctx: Ctx, def: ToolDef<S>): void {
   TOOL_REGISTRY.push(def.name);
+  TOOL_ACCESS[def.name] = def.bits.some((b) => b.endsWith(".write")) ? "write" : "read";
   // zod v3 的 ZodRawShape 与 SDK ZodRawShapeCompat（Record<string, AnySchema>）结构兼容，做一次性断言
   const inputSchema = def.schema as unknown as ZodRawShapeCompat;
   server.registerTool(

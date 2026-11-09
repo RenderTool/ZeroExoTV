@@ -15,6 +15,27 @@ import type { SubjectTree } from './subject-tree-types';
 export type WorkbenchStatus = 'idle' | 'ready' | 'generating' | 'done';
 // idle = 未开拍(初始态), ready = 已就绪(上游连入), generating = 生成中, done = 全部完成
 
+/**
+ * 片段「引导槽」数据（2026-11-07 用户定稿）：
+ * - 独立槽位类型，**不占** 9 张参考图上限；每个片段至多一个，重复发送即替换；
+ * - 来源 = 本机 H3 生成产物自带的 guide（safetensors）；运行该段时作为显式引导，
+ *   不再回退「上一段生成的引导」（use_prev_guide=false）。
+ */
+export interface WorkbenchShotGuide {
+  /** 插件 guide id（gd_xxx，output/zeroexo/guides/gd_xxx.safetensors） */
+  id: string;
+  /** 来源视频标题：引导数据不是独立素材，必须与所属片段视频同名 */
+  title?: string;
+  frames?: number;
+  sha256?: string;
+  /** 来源视频的媒体键/地址：引导槽用视频首帧做预览，与普通视频槽一致 */
+  storageKey?: string;
+  url?: string;
+  /** 来源资产 id（追溯/去重用） */
+  fromAssetId?: string;
+  createdAt?: string;
+}
+
 export interface WorkbenchShot {
   id: string;
   number: number;
@@ -73,7 +94,14 @@ export interface WorkbenchShot {
     /** 关联 AiGeneration.id，用于参数溯源 */
     generationId?: string;
     createdAt?: string;
+    /** 本段生成产物自带的引导数据（供「视频+引导」导出 / 再次发送到导演台） */
+    guide?: WorkbenchShotGuide;
   };
+  /**
+   * 片段引导槽（独立槽位，不占参考图 9 格）：发送引导数据到此段时写入；
+   * 每段至多一个，重复发送 = 替换。
+   */
+  guide?: WorkbenchShotGuide;
   /** 用户手动改过 */
   manualEdit?: boolean;
   /**

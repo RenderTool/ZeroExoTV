@@ -29,6 +29,7 @@ import type { PageItem } from './types.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { autoEpisodeTitle } from '@/entities/script-store.js';
 import { HierarchyListView, useFilterOptions } from '@/features/hierarchy/components/hierarchy-list-view.js';
+import { downloadAssetsAsZip } from '@/features/asset-picker/services/download-asset.js';
 import { sendAssetToWorkbench } from '@/features/canvas-assets/send-to-workbench.js';
 import { MediaLightbox, type MediaLightboxItem, type MediaLightboxKind } from '@/shared/components/media-lightbox.js';
 import { UploadDropZone } from '@/shared/components/upload-drop-zone.js';
@@ -166,10 +167,20 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
         ctx.setRenameItemOpen(true);
       }},
       { key: 'download', label: t('common.download'), icon: null, onClick: () => ctx.handleDownloadItem({ type: ItemType as any, data: item.data }) },
-      { key: 'delete', label: t('assetLibrary.delete'), icon: null, danger: true, onClick: () => {
-        ctx.setConfirmDelete({ type: ItemType as any, id: item.data.id, name: item.data.title });
-      }},
     ];
+    // 2026-11-07：带引导的生成产物 → 下载可选「视频+引导」，发送可选「引导数据」
+    const guideId = (item.data as { guide?: { id?: string } })?.guide?.id;
+    if (guideId) {
+      items.push(
+        { key: 'download-with-guide', label: t('assetLibrary.downloadVideoWithGuide', '下载视频+引导'), icon: null, onClick: () => void ctx.handleDownloadItem({ type: ItemType as any, data: item.data }, { withGuide: true }) },
+        { key: 'send-guide', label: t('assetLibrary.sendGuideToDirector', '发送引导数据到导演台当前片段'), icon: null, onClick: () => void sendAssetToWorkbench(item.data, antdMessage, t, { mode: 'guide' }) },
+      );
+    }
+    items.push({
+      key: 'delete', label: t('assetLibrary.delete'), icon: null, danger: true, onClick: () => {
+        ctx.setConfirmDelete({ type: ItemType as any, id: item.data.id, name: item.data.title });
+      },
+    });
     // 征集 #87 验收轮七:资产库页重新嵌入画布抽屉,恢复「发送到画布」右键入口。
     // 剧本在 PageItem 中以 type='asset' 存储(类型体系限制),发送时按 data.kind 还原真实类型 'script',
     // 否则画布侧 handleAssetInsert 误入媒体资产分支导致创建失败(2026-08-25 实测教训)。
@@ -216,8 +227,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ctx.setConfirmDelete({ type: item.type as any, id: item.data.id, name: item.data.title });
   }, [ctx.setConfirmDelete]);
 
-  const handleDownloadItem = useCallback((item: PageItem) => {
-    ctx.handleDownloadItem({ type: item.type as any, data: item.data });
+  const handleDownloadItem = useCallback((item: PageItem, opts?: { withGuide?: boolean }) => {
+    void ctx.handleDownloadItem({ type: item.type as any, data: item.data }, opts);
   }, [ctx.handleDownloadItem]);
 
   // 文本类资产：资产浏览器内编辑正文后保存（与提示词同一套「编辑 → 保存」语义）
@@ -246,8 +257,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
 
   // 2026-11-05 约定：卡片飞机按钮改下拉分组——「发送到画布」（原行为不变）/
   // 「发送到导演台当前片段」（复用唯一槽位分配；满员拒绝、无选中提示，不用确认框）。
-  const handleSendItemToDirector = useCallback((item: PageItem) => {
-    void sendAssetToWorkbench(item.data, antdMessage, t);
+  const handleSendItemToDirector = useCallback((item: PageItem, mode?: 'video' | 'guide') => {
+    void sendAssetToWorkbench(item.data, antdMessage, t, { mode });
   }, [antdMessage, t]);
 
   // 2026-11-05 用户定稿：卡片点击统一走 MediaLightbox 壳（图片/视频/文本）；
@@ -434,6 +445,22 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Button size="small" onClick={ctx.handleToggleSelectAll}>
                 {ctx.selectedIds.size === ctx.allItems.length ? t('common.batchSelectNone', '取消全选') : t('common.batchSelectAll', '全选')}
+              </Button>
+              <Button
+                size="small"
+                data-asset-batch-download
+                disabled={ctx.selectedIds.size === 0}
+                onClick={() => {
+                  const assets = ctx.allItems
+                    .filter((item) => ctx.selectedIds.has(item.data.id))
+                    .map((item) => item.data as import('@/features/asset-picker/index.js').Asset);
+                  void downloadAssetsAsZip(assets, `assets-${Date.now()}`).then((n) => {
+                    if (n > 0) antdMessage.success(t('assetLibrary.batchDownloaded', { n, defaultValue: `已打包下载 ${n} 项` }));
+                    else antdMessage.warning(t('assetLibrary.batchDownloadEmpty', '没有可下载的文件'));
+                  });
+                }}
+              >
+                {t('assetLibrary.batchDownload', '打包下载')}
               </Button>
               <Button size="small" type="primary" onClick={ctx.handleBatchDelete}>
                 {t('common.batchDeleteSelected', '删除选中')}

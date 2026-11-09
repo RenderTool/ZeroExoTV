@@ -92,6 +92,12 @@ export interface StoryboardVideoStageProps {
    * 同时禁用点击播放与双击全屏 —— 只剩「画面由时间轴时钟驱动」的纯预览区。
    */
   hideControls?: boolean;
+  /**
+   * 2026-11-07 导演台修复：当前片段没有成片（生成中 / 未生成 / 失败）时隐藏播放控制条，
+   * 只保留状态占位与实时帧角标 —— 播放键、时间码、进度条只在生成完成后才有意义。
+   * 出片工作台等由时间轴主时钟驱动的路径不传此开关，控制条行为保持原样（整轨播放需要）。
+   */
+  hideControlBarWhenNoVideo?: boolean;
 
   /**
    * 2026-11-04 参数合并（约定）：预览区只读文字标签（如「16:9 · 1512×840」），
@@ -112,13 +118,14 @@ const formatTime = (s: number): string => {
 };
 
 export const StoryboardVideoStage = memo(function StoryboardVideoStage({
-  videoStorageKey, videoStatus = 'idle', videoProgress = 0, videoError, emptyLabel,
+  videoStorageKey, videoStatus = 'idle', videoError, emptyLabel,
   isPlaying, playbackOffsetSec = 0, autoPlayKey = 0,
   playbackMode, sequenceDuration = 0, sequenceTime = 0,
   onSequenceSeek, onTogglePlay,
   placeholderPrompt, placeholderTitle, placeholderStatus, placeholderDetail, placeholderReason, onFullscreenPlay,
   livePreview, progressOnly = false,
   hideControls = false,
+  hideControlBarWhenNoVideo = false,
   paramsLabel,
   theme, isDark,
 }: StoryboardVideoStageProps): ReactElement {
@@ -126,7 +133,6 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   // 但 2026-11-04 起不在预览区渲染任何按钮（约定：预览区保持简洁、杜绝按钮嵌套）。
   const { t } = useTranslation();
   const textMuted = theme.toolbar.textMuted;
-  const textPrimary = theme.toolbar.text;
   const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
   // 2026-08-31：全站统一画布背景色（原 #0c0a09 暖棕黑已废）
   const bg = theme.canvas.background;
@@ -176,14 +182,22 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
     // 元数据未就绪时由 <video onLoadedMetadata> 兜底 apply（offsetRef 取最新值）
   }, [playbackOffsetSec, isPlaying, videoStorageKey, resolvedSrc, applyPausedSeek]);
 
-  // 点击候选视频 → 中央区立即从 0 播放对应视频
+  // 点击候选视频 / 点击片段 → 中央区立即从 0 播放对应视频。
+  // 关键：切片段时 <video> 会按 videoStorageKey 重挂载，且 storageKey → URL 是异步解析的；
+  // 若只在 autoPlayKey 变化时 play，元素/源还没就绪会被静默吞掉 → 用户点片段「没有反应」。
+  // 因此把请求记成 pending，等 resolvedSrc 就绪后的这次 effect 再起播。
+  const autoPlayPending = useRef(false);
   useEffect(() => {
-    if (autoPlayKey <= 0) return;
+    if (autoPlayKey > 0) autoPlayPending.current = true;
+  }, [autoPlayKey]);
+  useEffect(() => {
+    if (!autoPlayPending.current || !resolvedSrc) return;
     const v = videoRef.current;
     if (!v) return;
+    autoPlayPending.current = false;
     try { v.currentTime = 0; } catch { /* ignore */ }
     void v.play().catch(() => { /* ignore */ });
-  }, [autoPlayKey]);
+  }, [autoPlayKey, resolvedSrc, videoStorageKey]);
 
   // ===== 控制条动作 =====
   const togglePlay = useCallback(() => {
@@ -258,9 +272,12 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
     window.addEventListener('pointercancel', onUp, true);
   }, [seekFromClientX]);
 
-  // 时间码与进度：整轨模式用序列时间，否则用当前视频自身时间
-  const displayTime = isSequence ? sequenceTime : curTime;
-  const displayDuration = isSequence ? sequenceDuration : duration;
+  // 时间码与进度：整轨模式用序列时间，否则用当前视频自身时间。
+  // 2026-11-07 修复：无视频（生成中/未生成/失败）时不沿用上一条成片残留的
+  // curTime/duration —— 否则占位态会露出「00:00 / 00:15」这类假进度。
+  const hasPlayableVideo = !!videoStorageKey && videoStatus !== 'failed';
+  const displayTime = isSequence ? sequenceTime : (hasPlayableVideo ? curTime : 0);
+  const displayDuration = isSequence ? sequenceDuration : (hasPlayableVideo ? duration : 0);
   const progress = displayDuration > 0 ? Math.min(1, Math.max(0, displayTime / displayDuration)) : 0;
   // 播放态：只要时间轴主时钟在跑（playbackMode != null）就以它为准 —— 否则本地暂停会与主时钟脱节，
   // 主时钟继续前进而画面停在原处（2026-09-02 征集 #134）。
@@ -273,12 +290,13 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
     background: 'transparent', color: '#fff', cursor: 'pointer',
   } as const;
 
-  const hasVideo = !!videoStorageKey && videoStatus !== 'failed';
+  const hasVideo = hasPlayableVideo;
   // 占位黑幕卡：当前片段没有视频、且有当前片段（宿主传了标题/提示词）→ 无论提示词是否为空都出黑屏+标题，
   // 满足「播放全部时占位节点 = 黑屏+标题」硬性要求（2026-09-02 验收）。
   const showPlaceholder = !hasVideo && (!!placeholderPrompt || !!placeholderTitle);
   // 第十二条：状态型占位（优先于旧 prompt 卡）——仅单行状态文案 + 小图标，不回显提示词
-  const showStatusPlaceholder = !hasVideo && !!placeholderStatus;
+  // 实时帧到达时即使宿主状态还没翻到 generating，也必须优先显示帧（否则右侧永远停在占位）
+  const showStatusPlaceholder = !hasVideo && (!!placeholderStatus || !!livePreview?.image);
   const statusLabel = placeholderStatus === 'generating'
     ? t('storyboard.statusGenerating', '生成中')
     : placeholderStatus === 'done'
@@ -286,8 +304,12 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
       : placeholderStatus === 'failed'
         ? t('storyboard.statusFailed', '生成失败')
         : t('storyboard.statusIdle', '未生成');
-  // Plan#83 A 修正：hideControls 模式下不渲染控制条 UI
-  const showControlBar = !hideControls && (hasVideo || showPlaceholder || showStatusPlaceholder);
+  // 2026-11-07 修复：导演台开启 hideControlBarWhenNoVideo 后，播放键/时间码/进度条
+  // 只在真正有可播放视频时出现（「只有在生成完成后才播放视频」）；生成中仍由占位卡
+  // 角标展示步进与段号。出片工作台等时间轴路径不传该开关，整轨播放控制条行为不变。
+  // Plan#83 A 修正：hideControls 模式下不渲染控制条 UI。
+  const showControlBar = !hideControls
+    && (hasVideo || (!hideControlBarWhenNoVideo && (showPlaceholder || showStatusPlaceholder)));
 
   return (
     <div
@@ -328,7 +350,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
             gap: 6, padding: '28px 32px', textAlign: 'center',
           }}
         >
-          {placeholderStatus === 'generating' && livePreview?.image ? (
+          {livePreview?.image ? (
             /* 实时预览帧（/ws 推流）：黑幕上按帧刷新，状态信息不压画面（见下方左下角角标） */
             <img
               data-live-preview-frame
@@ -337,7 +359,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
             />
           ) : null}
-          {placeholderStatus === 'generating' && livePreview?.image ? (
+          {livePreview?.image ? (
             /* 2026-11-05 修复（生成中时文本标签挡画面）：两块居中 chip 合并为左下角紧凑角标 ——
                脉冲小点表示跑着 + 「2/25 · 段1」；小字半透明底、pointer-events:none 不拦截交互；
                完整文案（实时预览中 · 2/25 · 第 1 段）走 title 悬停；完成/失败后本角标随条件消失 */
@@ -521,6 +543,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
       {/* 自研控制条（OpenCut 风：底部渐变 + 播放/时间/进度/静音/全屏） */}
       {showControlBar && (
         <div
+          data-video-control-bar
           style={{
             position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 4,
             display: 'flex', alignItems: 'center', gap: 8,
@@ -569,24 +592,8 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
         </div>
       )}
 
-      {/* 状态覆盖层 —— 颜色一律走 theme，禁止硬编码红（2026-08-31 修复） */}
-      {videoStatus === 'generating' && (
-        <div
-          data-video-status="generating"
-          style={{ position: 'absolute', inset: 0, zIndex: 5, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)', color: isDark ? '#fff' : textPrimary, fontSize: 12 }}
-        >
-          <div
-            style={{
-              width: 26, height: 26, borderRadius: '50%',
-              border: `2px solid ${isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.10)'}`,
-              // 无彩色：spinner 上弧用中性文字色（覆盖层明暗自适应）
-              borderTopColor: isDark ? '#ffffff' : textPrimary,
-              animation: 'spin 0.8s linear infinite',
-            }}
-          />
-          <span>{t('storyboard.generating', '视频生成中')} {Math.round((videoProgress ?? 0) * 100)}%</span>
-        </div>
-      )}
+      {/* 状态覆盖层 —— 颜色一律走 theme，禁止硬编码红（2026-08-31 修复）
+          2026-11-07 用户指令：生成中不要全屏遮罩+居中 spinner，画面保持干净（状态角标由 placeholder 区的 compact badge 承担） */}
       {videoStatus === 'failed' && (
         <div
           data-video-status="failed"

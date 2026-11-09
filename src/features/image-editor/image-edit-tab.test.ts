@@ -72,11 +72,16 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(ws).toContain('<MaskEditDialog');
     expect(ws).toContain('applyCrop(');
     expect(ws).toContain('applySplit(');
+    // 局部遮罩必须真实提交本机 Qwen 图像编辑，不得再停在「未接入」提示
+    expect(ws).toContain('generateLocalQwenImage');
+    expect(ws).toContain('applyMaskEdit');
+    expect(ws).not.toContain('maskBackendPending');
     // 输出/关闭回画布
     expect(ws).toContain('onClose');
     const actions = read('src/features/image-editor/image-edit-actions.ts');
     expect(actions).toContain('export async function applyCrop');
     expect(actions).toContain('export async function applySplit');
+    expect(actions).toContain('export async function applyMaskEdit');
   });
 
   it('editor-page 挂载编辑页签层，且不与剧本/导演台内容层叠加', () => {

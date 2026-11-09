@@ -100,7 +100,7 @@
   - 页头最终只剩面包屑 + 「修改即时保存」11/muted。
 - **左列 · 媒体卡**（`maxWidth 380`）：16:9 `CardShell` 预览框，动作**在封面右上角**（与状态卡 / 主体卡同一落位、同一 `IconButton sm variant="overlay"`）：
   「替换/上传」（`ImagePlus`，`data-media-action="replace"`）+「删除媒体」（`Trash2`，`data-media-action="remove"`，仅已有媒体时出现）。
-  - 基础状态与状态**共用同一取数与同一写入入口**：槽位 = `baseState.referenceImages[0]` / `states[].media[0]`，写入统一走 `linkSubjectStateMedia`（`stateId` 允许 `SUBJECT_BASE_STATE_ID`，含 CAS 记账与 null 移除）。
+  - 基础状态与状态**共用同一取数与同一写入入口**（2026-11-08 数据层统一）：基础状态是 `states[0]` 真节点，所有状态槽位一律 = `states[].media[0]`，写入统一走 `linkSubjectStateMedia`（`stateId` 允许 `SUBJECT_BASE_STATE_ID`，含 CAS 记账与 null 移除）。
   - **不只支持图片**：面板四个来源（画布/我的/本项目/手动上传）图片与语音均可关联；旧的「基础状态只能上传图片 + 隐藏 file input」路径已下线。
   - 修复 `subject-media-preview.tsx`：有图时也遵守 `size` / `fill`（原来无脑 `width:100%`，导致素材位被撑成整屏、旁边文字被挤成竖排）。
 - **右列 · 字段**：状态名（antd `Input`）、备注/完整提示词（`Input.TextArea`，8–18 行）、出现集数（chip + antd `Checkbox`），字段标签 12/500、说明 11/muted。

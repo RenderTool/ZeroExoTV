@@ -13,7 +13,7 @@ import localforage from 'localforage';
 import { nanoid } from 'nanoid';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
-import { hasCasEntry, isCasStorageKey, registerCasRef, releaseCas } from '@/entities/cas-store.js';
+import { casStorageKey, hasCasEntry, isCasStorageKey, registerCasRef, releaseCas } from '@/entities/cas-store.js';
 import { readFile as fsReadFile, writeFile as fsWriteFile, removeFile as fsRemoveFile } from '@/platform/fs.js';
 import type { Asset, AssetKind, AssetScope } from './index.js';
 
@@ -72,7 +72,10 @@ const ASSETS_FILE_REL = `.lf/zeroexo/app_state/${encodeURIComponent(ASSETS_KEY)}
 // ===== 资产项目化：scope 迁移 / 默认值 / 写守卫（纯函数，可单测） =====
 
 /**
- * 存量迁移（惰性）：凡无 scope 字段的记录一律视为公共库资产（scope: 'library'）。
+ * 存量迁移（惰性）：
+ * - 无 scope 但有 projectId → 视为本项目资产（历史自动落库的生成产物可能没写 scope，
+ *   若一律归公共库会把项目视频全部“导出到公共位置”，2026-11-07 修正）；
+ * - 无 scope 且无 projectId → 公共库资产（与旧口径一致）。
  * 不改 data 字节、不动其他字段；changed 标记是否发生过迁移（由 readAll 决定是否写回一次）。
  */
 export function migrateAssetScopes(list: Asset[]): { list: Asset[]; changed: boolean } {
@@ -80,7 +83,8 @@ export function migrateAssetScopes(list: Asset[]): { list: Asset[]; changed: boo
   const migrated = list.map((a) => {
     if (a.scope === 'project' || a.scope === 'library') return a;
     changed = true;
-    return { ...a, scope: 'library' as AssetScope };
+    const inferred: AssetScope = a.projectId ? 'project' : 'library';
+    return { ...a, scope: inferred };
   });
   return { list: migrated, changed };
 }
@@ -89,13 +93,13 @@ export function migrateAssetScopes(list: Asset[]): { list: Asset[]; changed: boo
  * 写入守卫：目标资产在当前视图上下文中是否可写（编辑/删除）。
  * - library 资产：仅 view==='library' 可写
  * - project 资产：仅 view==='project' 且 projectId 匹配可写
- * - 无 scope 的视为 library（与迁移口径一致）
+ * - 无 scope 的记录：有 projectId 视为 project，否则视为 library（与迁移口径一致）
  */
 export function canWriteAsset(
   asset: Pick<Asset, 'scope' | 'projectId'>,
   ctx: { view: 'project' | 'library'; projectId: string | null },
 ): boolean {
-  const scope: AssetScope = asset.scope ?? 'library';
+  const scope: AssetScope = asset.scope ?? (asset.projectId ? 'project' : 'library');
   if (scope === 'library') return ctx.view === 'library';
   return ctx.view === 'project' && ctx.projectId != null && asset.projectId === ctx.projectId;
 }
@@ -123,13 +127,21 @@ export function assertLibraryKind(kind: AssetKind): void {
   }
 }
 
+/** API 生成产物：只属于「历史」，不属于「本项目资产」（本项目资产 = 用户导入/手动存入） */
+export function isGeneratedAsset(a: Pick<Asset, 'data'>): boolean {
+  const data = a.data as { origin?: string; generation?: unknown } | null | undefined;
+  // generation 元数据兜底存量记录（origin 字段是后加的）
+  return data?.origin === 'generation' || !!data?.generation;
+}
+
 /**
  * 归属过滤（资产项目化）：按当前视图上下文过滤资产列表。
  * - 无项目上下文（projectId=null，主页/独立资产页等场外空间）：只列公共库资产，
  *   任何 scope='project' 的资产都不得出现（即使调用方误传 scopeTab='project' 也兜底）；
  *   且公共库只列白名单四类（image/video/audio/text），业务 kind 不出现
  * - scopeTab='library'：仅公共库资产（同样只列白名单四类）
- * - scopeTab='project' 且有项目上下文：本项目资产 + 全部公共库资产（引用态混入，不受四类限制）
+ * - scopeTab='project' 且有项目上下文：本项目**用户资产** + 全部公共库资产；
+ *   API 生成产物只在历史里，不得混进本项目资产
  */
 export function filterAssetsByScope(
   list: Asset[],
@@ -141,7 +153,7 @@ export function filterAssetsByScope(
   const pid = ctx.projectId;
   return list.filter((a) => {
     if ((a.scope ?? 'library') === 'library') return true;
-    return a.projectId === pid;
+    return a.projectId === pid && !isGeneratedAsset(a);
   });
 }
 
@@ -157,7 +169,8 @@ function resolveScope(input: CreateAssetInput): { scope: AssetScope; projectId?:
 /**
  * 严格归属过滤（资产库「公共资产 / 本项目」胶囊 Tab 口径，2026-11-04 约定）：
  * 单段内不混排两种作用域——
- * - scopeTab='project' 且有项目上下文：只出当前 projectId 的项目资产（公共库不再以引用态混入）
+ * - scopeTab='project' 且有项目上下文：只出当前 projectId 的**用户资产**（导入/手动存入），
+ *   API 生成产物只在历史；公共库不以引用态混入
  * - 其余（library 页签 / 无项目上下文兜底）：只出公共库资产（限白名单四类）
  */
 export function filterAssetsStrictScope(
@@ -166,7 +179,7 @@ export function filterAssetsStrictScope(
 ): Asset[] {
   if (ctx.scopeTab === 'project' && ctx.projectId != null) {
     const pid = ctx.projectId;
-    return list.filter((a) => (a.scope ?? 'library') === 'project' && a.projectId === pid);
+    return list.filter((a) => (a.scope ?? 'library') === 'project' && a.projectId === pid && !isGeneratedAsset(a));
   }
   return list.filter((a) => (a.scope ?? 'library') === 'library' && isLibraryAllowedKind(a.kind));
 }
@@ -184,7 +197,7 @@ export function countAssetsByScope(list: Asset[], projectId: string | null): Ass
     const scope = a.scope ?? 'library';
     if (scope === 'library') {
       if (isLibraryAllowedKind(a.kind)) library++;
-    } else if (projectId != null && a.projectId === projectId) {
+    } else if (projectId != null && a.projectId === projectId && !isGeneratedAsset(a)) {
       project++;
     }
   }
@@ -583,10 +596,22 @@ export async function removeAssets(ids: string[]): Promise<Asset[]> {
     else remaining.push(a);
   }
   await writeAll(remaining);
-  // 释放 CAS 引用：refCount-1，到 0 由 cas-store 删物理文件并摘索引；两端幂等，重复删除不报错
+  // 释放 CAS 引用：refCount-1，到 0 由 cas-store 删物理文件并摘索引；两端幂等，重复删除不报错。
+  // 2026-11-07 数据安全：先给「仍引用同一 CAS 内容」的存活记录补挂 ref（幂等），再释放被删记录。
+  // 原因：存量记录可能只有 storageKey=cas:... 而没有 cas 字段/没登记 ref —— 直接 release 到 0
+  // 会把仍在历史里使用的视频物理文件删掉（表现为「在资产里删一条，视频历史全没了」）。
   for (const a of deleted) {
     if (!a.cas) continue;
-    await releaseCas(a.cas.hash, { assetId: a.id, projectId: a.projectId }).catch((err) => {
+    const hash = a.cas.hash;
+    const key = casStorageKey(hash, a.cas.ext);
+    for (const s of remaining) {
+      const sameContent = s.cas?.hash === hash || getStorageKeyOfAsset(s) === key;
+      if (!sameContent) continue;
+      await registerCasRef(hash, { assetId: s.id, projectId: s.projectId ?? 'library', kind: s.kind }).catch((err) => {
+        console.warn('[asset-store] 存活记录补挂 CAS ref 失败（不阻断删除）:', s.id, err);
+      });
+    }
+    await releaseCas(hash, { assetId: a.id, projectId: a.projectId }).catch((err) => {
       console.warn('[asset-store] 释放 CAS ref 失败（索引不受影响时可由迁移脚本收敛）:', a.id, err);
     });
   }

@@ -20,6 +20,7 @@
 
 import localforage from 'localforage';
 import { ensureDir, isAuthorized, pathForStorageKey, readFile, readFileHandle, remove, walkFiles, writeFile, writeFileBlob } from './fs.js';
+import { touchBaseline } from './watcher.js';
 
 export const FS_DRIVER = 'zeroexoFsDriver';
 
@@ -87,10 +88,12 @@ async function readEntry(rel: string, key: string): Promise<unknown> {
 async function writeEntry(rel: string, value: unknown): Promise<void> {
   if (isBinary(value)) {
     await writeFileBlob(`${rel}.blob`, new Uint8Array(await value.arrayBuffer()), value.type || 'application/octet-stream');
+    touchBaseline(`${rel}.blob`);
     return;
   }
   const body = isBareTarget(rel) ? JSON.stringify(value, null, 2) : JSON.stringify({ __lf: 1, value }, null, 2);
   await writeFile(`${rel}.json`, body);
+  touchBaseline(`${rel}.json`);
 }
 
 async function dropEntry(rel: string): Promise<void> {

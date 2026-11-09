@@ -501,7 +501,10 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     let newKey: string | undefined;
     let newState: string | undefined;
     if (o.kind === 'subject-base') {
-      newKey = (tree.baseState?.referenceImages ?? [])[0]?.key;
+      // 基础状态已是 states[0]；旧数据（未落盘迁移）仍在 baseState 时兜底读一次
+      const legacy = (tree as unknown as { baseState?: { referenceImages?: Array<{ key?: string }> } }).baseState;
+      newKey = (tree.states?.[0]?.media ?? [])[0]?.key
+        ?? legacy?.referenceImages?.[0]?.key;
     } else if (o.kind === 'subject-state') {
       const node = (tree.states ?? []).find((s) => s.id === o.nodeId || s.state === o.state);
       newState = node?.state;

@@ -20,7 +20,7 @@ import { writeFileBlob } from '@/platform/fs.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { resolveMediaUrl } from '@/platform/media.js';
 import { listAssets, addAsset } from '../asset-store.js';
-import type { Asset, AssetKind } from '../index.js';
+import type { Asset, AssetKind, GuideMeta } from '../index.js';
 
 export interface CasStageResult {
   /** 新内容：预生成资产 id（已注册进 cas_index refs）；命中已有资产：undefined（未注册新 ref） */
@@ -104,22 +104,30 @@ export async function stageCasUpload(
 }
 
 /**
- * 「加入资产库」（2026-11-04 抽屉历史分组）：把项目资产晋升/复制一条公共库记录。
- * 全程不复制第二份字节——
- * - 有 cas 引用：仅 registerCasRef 给新资产 id 补挂一条 ref（refCount+1）；
- * - 存量无 cas：读原文件字节走 stageCasUpload 入 CAS（同 hash 天然去重）；
- * - 公共库已有同 hash 资产 → 返回 null（调用方提示「已存在」）。
- * 返回新建的公共库资产；已存在/不可晋升时返回 null。
+ * 「导出到素材库」（2026-11-07 用户细化）：把历史产出晋升为指定作用域的资产记录。
+ * - target='project'：导出到**当前项目**素材（scope='project'，projectId=当前画布）；
+ * - target='library'：导出到**公共库**（scope='library'）。
+ * 全程不复制第二份字节；同作用域同 hash 已存在时返回 null（调用方提示）。
  */
-export async function promoteAssetToLibrary(asset: Asset): Promise<Asset | null> {
+export async function promoteAssetToScope(
+  asset: Asset,
+  target: 'project' | 'library',
+): Promise<Asset | null> {
   if (asset.kind !== 'image' && asset.kind !== 'video' && asset.kind !== 'audio') return null;
   const d = asset.data as { storageKey?: string; width?: number; height?: number; durationMs?: number };
+  const projectId = target === 'project' ? (getCurrentCanvasId() ?? undefined) : undefined;
+  if (target === 'project' && !projectId) return null;
 
-  // 公共库同内容去重（hash 口径）
+  const sameScope = (a: Asset): boolean => {
+    const scope = a.scope ?? 'library';
+    if (scope !== target) return false;
+    if (target === 'library') return true;
+    return a.projectId === projectId;
+  };
+
+  // 同作用域同内容去重（hash 口径）
   if (asset.cas?.hash) {
-    const twin = (await listAssets()).find(
-      (a) => (a.scope ?? 'library') === 'library' && a.cas?.hash === asset.cas!.hash,
-    );
+    const twin = (await listAssets()).find((a) => sameScope(a) && a.cas?.hash === asset.cas!.hash);
     if (twin) return null;
   }
 
@@ -133,42 +141,41 @@ export async function promoteAssetToLibrary(asset: Asset): Promise<Asset | null>
     id = nanoid();
     cas = asset.cas;
     storageKey = casStorageKey(cas.hash, cas.ext);
-    await registerCasRef(cas.hash, { assetId: id, projectId: 'library', kind: asset.kind });
+    await registerCasRef(cas.hash, { assetId: id, projectId: projectId ?? 'library', kind: asset.kind });
   } else {
     // 存量资产无 cas 字段：读字节入 CAS（同内容天然只落一份物理文件）
     const url = await resolveMediaUrl(d.storageKey);
     if (!url) throw new Error(`无法读取资产文件: ${asset.title}`);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`无法读取资产文件: HTTP ${res.status}`);
-    const staged = await stageCasUpload(await res.blob(), asset.kind, { projectId: 'library' });
+    const staged = await stageCasUpload(await res.blob(), asset.kind, { projectId: projectId ?? 'library' });
     cas = staged.cas;
     storageKey = staged.storageKey;
     bytes = staged.bytes;
     mimeType = staged.mimeType;
-    // 公共库已有同 hash 资产 → 不重复建；若 stage 已注册过 ref 需摘掉（不遗留悬空引用）
-    const libTwin = (await listAssets()).find(
-      (a) => (a.scope ?? 'library') === 'library' && a.cas?.hash === cas.hash,
-    );
-    if (libTwin) {
+    // 目标作用域已有同 hash 资产 → 不重复建；若 stage 已注册过 ref 需摘掉（不遗留悬空引用）
+    const twin = (await listAssets()).find((a) => sameScope(a) && a.cas?.hash === cas.hash);
+    if (twin) {
       if (!staged.dedupedExistingAsset && staged.id) {
-        await releaseCas(cas.hash, { assetId: staged.id, projectId: 'library' }).catch(() => undefined);
+        await releaseCas(cas.hash, { assetId: staged.id, projectId: projectId ?? 'library' }).catch(() => undefined);
       }
       return null;
     }
     if (staged.dedupedExistingAsset) {
-      // 同内容已有其他作用域的资产记录（stage 未注册新 ref）：为公共库记录补挂 ref
+      // 同内容已有其他作用域的资产记录（stage 未注册新 ref）：为本次记录补挂 ref
       id = nanoid();
-      await registerCasRef(cas.hash, { assetId: id, projectId: 'library', kind: asset.kind });
+      await registerCasRef(cas.hash, { assetId: id, projectId: projectId ?? 'library', kind: asset.kind });
     } else {
       id = staged.id!;
     }
   }
 
+  const guide = (asset.data as { guide?: GuideMeta }).guide;
   const data: Asset['data'] =
     asset.kind === 'image'
       ? { kind: 'image', dataUrl: '', storageKey, width: d.width, height: d.height }
       : asset.kind === 'video'
-        ? { kind: 'video', url: '', storageKey, width: d.width, height: d.height, durationMs: d.durationMs }
+        ? { kind: 'video', url: '', storageKey, width: d.width, height: d.height, durationMs: d.durationMs, ...(guide ? { guide } : {}) }
         : { kind: 'audio', url: '', storageKey, durationMs: d.durationMs };
 
   try {
@@ -180,13 +187,19 @@ export async function promoteAssetToLibrary(asset: Asset): Promise<Asset | null>
       bytes,
       mimeType,
       data,
-      scope: 'library',
+      scope: target,
+      ...(projectId ? { projectId } : {}),
     });
   } catch (err) {
     // addAsset 失败时摘掉刚挂的 ref，不遗留悬空引用
-    await releaseCas(cas.hash, { assetId: id, projectId: 'library' }).catch(() => undefined);
+    await releaseCas(cas.hash, { assetId: id, projectId: projectId ?? 'library' }).catch(() => undefined);
     throw err;
   }
+}
+
+/** 兼容旧入口：默认导出到公共库（新代码请用 promoteAssetToScope 明确目标）。 */
+export async function promoteAssetToLibrary(asset: Asset): Promise<Asset | null> {
+  return promoteAssetToScope(asset, 'library');
 }
 
 /** 读图片宽高（createImageBitmap；失败回退 0x0，不阻断上传） */

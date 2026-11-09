@@ -562,11 +562,12 @@ export {
 // ===== 存储分桶(Phase VI.2) =====
 // 媒体存储: 'video:' / 'audio:' 前缀,独立 localforage store(media_files)
 
-export type { UploadedFile, TextResource } from './file-storage.js';
+export type { UploadedFile, TextResource, ExternalMediaBlobResolver } from './file-storage.js';
 export {
   uploadMediaFile,
   resolveMediaUrl,
   getMediaBlob,
+  setExternalMediaBlobResolver,
   setMediaBlob,
   deleteStoredMedia,
   cleanupUnusedMedia,

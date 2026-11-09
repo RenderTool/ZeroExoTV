@@ -239,7 +239,33 @@ function OpenLibEntryCard({ entry, theme, importing, canvasDisabled, onSendToCan
         e.dataTransfer.effectAllowed = 'copy';
       }}
     >
-      <OpenLibThumb entry={entry} theme={theme} />
+      <div style={{ position: 'relative', width: '100%' }}>
+        <OpenLibThumb entry={entry} theme={theme} />
+        {/* 操作按钮统一落位：封面右下角（与资产/历史卡同位，黑色 28×28） */}
+        {showSendActions && !onPick && (
+          <div
+            data-openlib-card-actions
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute', right: 6, bottom: 6, zIndex: 7,
+              display: 'flex', alignItems: 'center', gap: 4,
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? 'auto' : 'none',
+              transition: 'opacity 0.2s',
+            }}
+          >
+            <SendActionButtons
+              onSendToCanvas={() => onSendToCanvas(entry)}
+              onSendToDirector={() => onSendToDirector(entry)}
+              kind="image"
+              importing={importing}
+              visible={hovered}
+              alwaysVisible
+              t={t as any}
+            />
+          </div>
+        )}
+      </div>
       {/* 只读角标（开源库条目不可编辑/不可删除，仅此标注差异） */}
       <ThumbBadge style={{ position: 'absolute', top: 6, left: 6, zIndex: 6 }}>
         {t('openLib.readonlyBadge')}
@@ -253,15 +279,14 @@ function OpenLibEntryCard({ entry, theme, importing, canvasDisabled, onSendToCan
           {t('openLib.importing', '导入中…')}
         </span>
       ) : null}
-      {/* 标题行 + 动作行：动作**内联**排在标题右端（与我的资产卡片同一落位，2026-11-05）；
-          不再绝对定位，也不再给标题预留 paddingRight 补偿；行高仅抽屉宿主固定为 36px */}
+      {/* 标题行只保留标题；操作按钮统一在封面右下角 */}
       <div style={{
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
         gap: 4,
         minWidth: 0,
-        height: showSendActions && !onPick ? 36 : 16,
+        height: 16,
       }}>
         <span style={{
           flex: 1, minWidth: 0,
@@ -270,17 +295,6 @@ function OpenLibEntryCard({ entry, theme, importing, canvasDisabled, onSendToCan
         }} title={entry.title}>
           {displayTitle}
         </span>
-        {showSendActions && !onPick && (
-          <SendActionButtons
-            onSendToCanvas={() => onSendToCanvas(entry)}
-            onSendToDirector={() => onSendToDirector(entry)}
-            kind="image"
-            importing={importing}
-            visible={hovered}
-            alwaysVisible
-            t={t as any}
-          />
-        )}
       </div>
     </div>
   );

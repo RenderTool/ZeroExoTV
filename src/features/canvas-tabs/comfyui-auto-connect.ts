@@ -47,7 +47,7 @@ export async function applyConnectionResult(
     prefs.setConnected(false);
     return { bridgeMissing: false };
   }
-  ep.markTested(result.address, result.backend, result.models);
+  ep.markTested(result.address, result.backend, result.models, result.machine);
   if (result.backend === 'zeroexo') {
     // 重写版插件（/zeroexo/v1/jobs）：不依赖桥接模型四件套，直接视为可运行
     prefs.setConnected(true);

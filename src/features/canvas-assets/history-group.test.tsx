@@ -36,21 +36,24 @@ vi.mock('antd', () => ({
       modal: { confirm: vi.fn() },
     }),
   },
-  Button: ({ children, onClick, icon }: { children?: React.ReactNode; onClick?: () => void; icon?: React.ReactNode }) => (
-    <button type="button" onClick={onClick}>{icon}{children}</button>
+  Button: ({ children, onClick, icon, ...rest }: { children?: React.ReactNode; onClick?: () => void; icon?: React.ReactNode } & Record<string, unknown>) => (
+    <button type="button" onClick={onClick} {...rest}>{icon}{children}</button>
   ),
   Pagination: ({ total, pageSize }: { total: number; pageSize: number }) => (
     <div data-testid="pagination" data-total={total} data-page-size={pageSize} />
   ),
+  Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  Dropdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
 
 // i18n: 复用 zh.json 资源
 vi.mock('react-i18next', async () => {
   const zh = ((await vi.importActual('@/i18n/zh.json')) as { default: Record<string, Record<string, string>> }).default;
-  const lookup = (key: string, opts?: { defaultValue?: string }): string => {
+  const lookup = (key: string, opts?: { defaultValue?: string } & Record<string, unknown>): string => {
     const parts = key.split('.');
     const ns = zh[parts[0] ?? ''];
-    return ns?.[parts[1] ?? ''] ?? opts?.defaultValue ?? key;
+    const raw = ns?.[parts[1] ?? ''] ?? opts?.defaultValue ?? key;
+    return raw.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => String(opts?.[k] ?? _m));
   };
   return {
     useTranslation: () => ({
@@ -63,9 +66,11 @@ import { DRAWER_TAB_DEFS } from './tab-defs.js';
 import {
   HISTORY_PAGE_SIZE,
   countHistoryByKind,
+  countHistoryBySourceAndKind,
   filterHistoryAssets,
   findAssetNodeId,
   fmtRelativeTime,
+  getHistorySource,
   isGenerationAsset,
   paginate,
 } from './history-utils.js';
@@ -112,6 +117,7 @@ function mkStore(assets: Asset[]) {
     historyCounts: countHistoryByKind(assets, PID),
     libraryHashes: new Set<string>(),
     promoteToLibrary: vi.fn(async () => undefined),
+    promoteAssetsTo: vi.fn(async () => undefined),
     handleDownloadItem: vi.fn(async () => undefined),
   } as never;
 }
@@ -121,13 +127,17 @@ const theme = {
   toolbar: { text: '#fff', textMuted: '#888' },
 } as never;
 
-afterEach(cleanup);
+// 来源 Tab 选择会按项目记住（localStorage），每个用例后清掉，避免用例间串默认段
+afterEach(() => {
+  cleanup();
+  localStorage.removeItem('zeroexo.history.sourceTab');
+});
 
 describe('抽屉历史入口', () => {
   it('DRAWER_TAB_DEFS 含 history 页签（与层级/素材同一套切换），且剧本页签已移除', () => {
     const keys = DRAWER_TAB_DEFS.map((d) => d.key);
     expect(keys).toContain('history');
-    expect(keys).toContain('hierarchy');
+    expect(keys).toContain('canvasStructure');
     expect(keys).toContain('material');
     // 2026-11-05 用户指令（征集 #174）：抽屉不再重复「剧本」入口，
     // 剧本正文唯一入口 = 顶部固定槽位页签（一个项目 = 1 剧本）。
@@ -285,6 +295,32 @@ describe('定位画布节点', () => {
   });
 });
 
+describe('历史多选：导出只作用于选中项（2026-11-07 用户指令）', () => {
+  it('进入多选 → 逐项勾选/全选/取消全选，计数同步；默认 0 项（不会把全部视频一起导出）', () => {
+    const assets = [mkAsset({ id: 'g1' }), mkAsset({ id: 'g2' })];
+    const store = mkStore(assets);
+    const storeSpy = store as unknown as { promoteAssetsTo: ReturnType<typeof vi.fn> };
+    const { container } = render(<HistoryGroup store={store} theme={theme} />);
+
+    // 默认无批量条
+    expect(container.querySelector('[data-history-batch-bar]')).toBeNull();
+    fireEvent.click(container.querySelector('[data-history-multiselect]') as Element);
+    const bar = container.querySelector('[data-history-batch-bar]') as HTMLElement;
+    expect(bar).toBeTruthy();
+    expect(bar.textContent).toContain('已选 0 项');
+
+    // 点卡片 = 勾选该条；不会自动全选
+    fireEvent.click(container.querySelector('[data-history-card="g1"]') as HTMLElement);
+    expect(bar.textContent).toContain('已选 1 项');
+    expect(storeSpy.promoteAssetsTo).not.toHaveBeenCalled();
+
+    // 全选 → 2；再点一次 = 取消全选
+    fireEvent.click(container.querySelector('[data-history-select-all]') as HTMLElement);
+    expect(bar.textContent).toContain('已选 2 项');
+    fireEvent.click(container.querySelector('[data-history-select-all]') as HTMLElement);
+    expect(bar.textContent).toContain('已选 0 项');
+  });
+});
 describe('相对时间', () => {
   it('按分钟/小时/天粗粒度格式化', () => {
     const now = Date.parse('2026-11-04T10:00:00.000Z');
@@ -293,5 +329,151 @@ describe('相对时间', () => {
     expect(fmtRelativeTime('2026-11-04T08:00:00.000Z', now)).toBe('2 小时前');
     expect(fmtRelativeTime('2026-11-02T10:00:00.000Z', now)).toBe('2 天前');
     expect(fmtRelativeTime('bad', now)).toBe('');
+  });
+});
+
+describe('历史来源 Tab（2026-11-07：从画布生成 / 从导演台）', () => {
+  const canvasImg = mkAsset({ id: 'h-canvas', title: '一只猫' });
+  const directorVideo = mkAsset({
+    id: 'h-director', kind: 'video', mimeType: 'video/mp4', title: '片段 2 · 13.8s',
+    data: {
+      kind: 'video', url: '', storageKey: 'cas:clip.mp4', durationMs: 13800,
+      origin: 'generation', originSource: 'director', generation: GEN_META,
+    } as never,
+  });
+  /** 存量导演台记录：字段上线前落库，靠本机 provider 兜底识别 */
+  const legacyDirector = mkAsset({
+    id: 'h-legacy', kind: 'video', mimeType: 'video/mp4', title: '片段 1 · 15s',
+    data: {
+      kind: 'video', url: '', storageKey: 'cas:old.mp4', origin: 'generation',
+      generation: { ...GEN_META, provider: 'zeroexo' },
+    } as never,
+  });
+  const all = [canvasImg, directorVideo, legacyDirector];
+
+  it('getHistorySource：显式 originSource 优先；存量按 provider / 标题兜底', () => {
+    expect(getHistorySource(canvasImg)).toBe('canvas');
+    expect(getHistorySource(directorVideo)).toBe('director');
+    expect(getHistorySource(legacyDirector)).toBe('director');
+  });
+
+  it('filterHistoryAssets 按来源分区；三参数旧调用保持不过滤', () => {
+    expect(filterHistoryAssets(all, PID, 'image', 'canvas').map((a) => a.id)).toEqual(['h-canvas']);
+    expect(filterHistoryAssets(all, PID, 'image', 'director')).toEqual([]);
+    expect(filterHistoryAssets(all, PID, 'video', 'director')).toHaveLength(2);
+    expect(filterHistoryAssets(all, PID, 'image').map((a) => a.id)).toEqual(['h-canvas']);
+    expect(filterHistoryAssets(all, PID, 'video')).toHaveLength(2);
+  });
+
+  it('countHistoryBySourceAndKind：胶囊徽标计数与过滤口径一致', () => {
+    expect(countHistoryBySourceAndKind(all, PID)).toEqual({
+      canvas: { image: 1, video: 0, total: 1 },
+      director: { image: 0, video: 2, total: 2 },
+    });
+  });
+
+  it('抽屉渲染与素材 Tab 同款来源胶囊；切换后列表按来源过滤', () => {
+    const { container } = render(<HistoryGroup store={mkStore(all)} theme={theme} />);
+    expect(container.querySelector('[data-testid="history-source-tabs"]')).toBeTruthy();
+    expect(Array.from(container.querySelectorAll('[data-scope]')).map((el) => el.getAttribute('data-scope')))
+      .toEqual(['canvas', 'director']);
+    // 默认「从画布生成」：只看到画布产物
+    expect(container.querySelector('[data-history-card="h-canvas"]')).toBeTruthy();
+    expect(container.querySelector('[data-history-card="h-director"]')).toBeNull();
+
+    fireEvent.click(container.querySelector('[data-scope="director"]') as Element);
+    // 2026-11-08：导演台只有视频 → 不渲染类型分类，直接列出该来源全部
+    expect(screen.queryByText('图片产出')).toBeNull();
+    expect(screen.queryByText('全部')).toBeNull();
+    expect(container.querySelector('[data-history-card="h-director"]')).toBeTruthy();
+    expect(container.querySelector('[data-history-card="h-legacy"]')).toBeTruthy();
+    expect(container.querySelector('[data-history-card="h-canvas"]')).toBeNull();
+  });
+});
+
+describe('历史「全部」与导演台免分类（2026-11-08）', () => {
+  const canvasImg = mkAsset({ id: 'all-c-img' });
+  const canvasVideo = mkAsset({
+    id: 'all-c-video', kind: 'video', mimeType: 'video/mp4',
+    data: { kind: 'video', url: '', storageKey: 'cas:cv.mp4', origin: 'generation', generation: GEN_META } as never,
+  });
+  const directorVideo = mkAsset({
+    id: 'all-d-video', kind: 'video', mimeType: 'video/mp4',
+    data: {
+      kind: 'video', url: '', storageKey: 'cas:dv.mp4',
+      origin: 'generation', originSource: 'director', generation: GEN_META,
+    } as never,
+  });
+
+  it('画布来源点「全部」→ 图片与视频一起显示；来源仍隔离；可切回单类型', () => {
+    const store = mkStore([canvasImg, canvasVideo, directorVideo]);
+    const { container } = render(<HistoryGroup store={store} theme={theme} />);
+    fireEvent.click(screen.getByText(/全部/));
+    expect(container.querySelector('[data-history-card="all-c-img"]')).toBeTruthy();
+    expect(container.querySelector('[data-history-card="all-c-video"]')).toBeTruthy();
+    expect(container.querySelector('[data-history-card="all-d-video"]')).toBeNull();
+
+    fireEvent.click(screen.getByText(/图片产出/));
+    expect(container.querySelector('[data-history-card="all-c-img"]')).toBeTruthy();
+    expect(container.querySelector('[data-history-card="all-c-video"]')).toBeNull();
+  });
+
+  it('filterHistoryAssets kind=all：返回该来源下的全部类型', () => {
+    expect(filterHistoryAssets([canvasImg, canvasVideo], PID, 'all', 'canvas').map((a) => a.id).sort())
+      .toEqual(['all-c-img', 'all-c-video']);
+    expect(filterHistoryAssets([canvasImg, canvasVideo], PID, 'image', 'canvas'))
+      .toHaveLength(1);
+  });
+});
+
+describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', () => {
+  const directorVideo = mkAsset({
+    id: 'btn-director', kind: 'video', mimeType: 'video/mp4', title: '片段 2 · 13.8s',
+    data: {
+      kind: 'video', url: '', storageKey: 'cas:d.mp4',
+      origin: 'generation', originSource: 'director', generation: GEN_META,
+    } as never,
+  });
+  const guideVideo = mkAsset({
+    id: 'btn-guide', kind: 'video', mimeType: 'video/mp4', title: '片段 1 · 15s',
+    data: {
+      kind: 'video', url: '', storageKey: 'cas:g.mp4',
+      origin: 'generation', originSource: 'director',
+      guide: { id: 'gd_btn12345', frames: 22 }, generation: GEN_META,
+    } as never,
+  });
+  const canvasImg = mkAsset({ id: 'btn-canvas' });
+  const LOCATE = '[title="定位到画布节点"]';
+  const SEND_GUIDE = '[aria-label*="发送"]';
+
+  it('「从画布生成」有定位到画布；切到「从导演台」后不显示（导演台产物没有画布节点）', () => {
+    const { container } = render(<HistoryGroup store={mkStore([canvasImg, directorVideo])} theme={theme} />);
+    expect(container.querySelector('[data-history-card="btn-canvas"]')).toBeTruthy();
+    expect(container.querySelectorAll(LOCATE).length).toBe(1);
+
+    fireEvent.click(container.querySelector('[data-scope="director"]') as Element);
+    expect(container.querySelector('[data-history-card="btn-director"]')).toBeTruthy();
+    expect(container.querySelectorAll(LOCATE).length).toBe(0);
+  });
+
+  it('导演台视频卡显示「发送到导演台」入口（下拉含源视频 / 引导）', () => {
+    const { container } = render(<HistoryGroup store={mkStore([guideVideo])} theme={theme} />);
+    fireEvent.click(container.querySelector('[data-scope="director"]') as Element);
+    expect(container.querySelector('[data-history-card="btn-guide"]')).toBeTruthy();
+    expect(container.querySelector(SEND_GUIDE)).toBeTruthy();
+  });
+
+  it('按钮判据源码：视频卡都渲染引导按钮，没有 guide 时置灰；发送走回查执行器', () => {
+    const src = readSrc('src/features/canvas-assets/groups/HistoryGroup.tsx');
+    expect(src).toContain("(asset.data as { kind?: string }).kind === 'video'");
+    expect(src).toContain('sendGuideToWorkbench');
+    expect(src).toContain("historySource === 'canvas' ? () => handleLocate(asset) : undefined");
+  });
+
+  it('图片产出即使带 generation 元数据也不套用视频引导角标/下载菜单', () => {
+    const img = mkAsset({ id: 'img-like-guide' });
+    const { container } = render(<HistoryGroup store={mkStore([img])} theme={theme} />);
+    expect(container.querySelector('[data-guide-download]')).toBeNull();
+    expect(container.textContent).not.toContain('含引导');
   });
 });

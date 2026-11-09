@@ -11,8 +11,10 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { LoaderCircle, Lock, Sparkles } from 'lucide-react';
 import { StyledSelect, type StyledSelectOption } from './styled-select.js';
 import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
-import { LOCAL_VIDEO_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_IMAGE_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LocalQwenParamForm } from './local-qwen-param-form.js';
 import { LocalH3ParamForm } from './local-h3-param-form.js';
+import { PromptLibraryMenu } from '@/features/prompt-library/prompt-library-menu.js';
 import type { GenerationMode } from './node-generate-dock.js';
 
 export const DockFooterBar = memo(function DockFooterBar({
@@ -21,6 +23,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   model,
   modelOptions,
   paramValues,
+  hasImageReference = false,
   isRunning,
   hasText,
   textLength = 0,
@@ -28,6 +31,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   onAction,
   onConfigChange,
   onParamValuesChange,
+  onPromptPreset,
   onConstraintsReady,
   mentionRequired,
   dropUp = false,
@@ -38,6 +42,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   model: string;
   modelOptions: StyledSelectOption[];
   paramValues: Record<string, any>;
+  hasImageReference?: boolean;
   isRunning: boolean;
   hasText: boolean;
   textLength?: number;
@@ -46,6 +51,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   onParamValuesChange: (patch: Record<string, any>) => void;
+  onPromptPreset?: (body: string) => void;
   onConstraintsReady?: (constraints?: ChannelConstraints) => void;
   mentionRequired?: boolean;
   /** Plan#74 Phase B：agent-proxy 模式（script/storyboard）隐藏模型选择——LLM 统一在 Agent 侧设置，避免上下文割裂 */
@@ -86,6 +92,8 @@ export const DockFooterBar = memo(function DockFooterBar({
       {onConfigChange && mode !== 'text' && modelOptions.length > 0 ? (
         mode === 'video' && model === LOCAL_VIDEO_MODEL_KEY ? (
           <LocalH3ParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} />
+        ) : mode === 'image' && model === LOCAL_IMAGE_MODEL_KEY ? (
+          <LocalQwenParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} hasReference={hasImageReference} />
         ) : (
           <DynamicParamForm
             model={model}
@@ -96,6 +104,9 @@ export const DockFooterBar = memo(function DockFooterBar({
             onConstraintsReady={onConstraintsReady}
           />
         )
+      ) : null}
+      {mode === 'image' && onPromptPreset ? (
+        <PromptLibraryMenu onPick={onPromptPreset} />
       ) : null}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1, pointerEvents: 'none', whiteSpace: 'nowrap' }}>

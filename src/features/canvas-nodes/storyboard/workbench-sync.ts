@@ -19,7 +19,7 @@ import type {
   WorkbenchClipRef,
   WorkbenchStatus,
 } from './workbench-types';
-import type { SubjectTree } from './subject-tree-types';
+import { migrateSubjectTrees, type SubjectTree } from './subject-tree-types';
 import { resolveShotMentions, buildRefsFromSource, buildPromptPreview } from './workbench-ref-builder';
 import { detectStaleRefs } from './storyboard-utils';
 
@@ -290,13 +290,9 @@ function hasContentDiff(
   currentShots: WorkbenchShot[],
 ): boolean {
   if (fingerprint !== existing.contentFingerprint) return true;
-  const subjectTrees = (sourceData.subjectTree ?? []) as unknown as Array<{
-    rootId: string;
-    name: string;
-    baseState?: { referenceImages?: Array<{ key?: string }> };
-    states?: Array<{ id: string; state?: string; media?: Array<{ key?: string }> }>;
-  }>;
-  if (!Array.isArray(subjectTrees) || subjectTrees.length === 0) return false;
+  // 统一读盘口径：旧 baseState 双结构在这里一并迁移成 states[0]
+  const subjectTrees = migrateSubjectTrees(sourceData.subjectTree);
+  if (subjectTrees.length === 0) return false;
   const refs: WorkbenchShotReference[] = [];
   for (const s of currentShots ?? []) {
     if (s.sourceShotId && (s.references ?? []).length) refs.push(...(s.references as WorkbenchShotReference[]));

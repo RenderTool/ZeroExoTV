@@ -19,12 +19,12 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import type { ThemeConfig } from '@zeroexo/shared';
-import { ChevronDown, Film, Image as ImageIcon, Music, Plus, User, X, Loader2, Upload as UploadIcon } from 'lucide-react';
+import { ChevronDown, Film, Image as ImageIcon, Music, Plus, User, Waypoints, X, Loader2, Upload as UploadIcon } from 'lucide-react';
 import type { DirectorAssetRef } from '@/entities/director-params.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import type { SubjectTree, SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { nonBaseStates, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 import { OpenLibBrowser } from '@/features/open-library/open-lib-browser.js';
 
@@ -38,9 +38,24 @@ export const ASSET_PICK_ROW_HEIGHT = 44;
 export const ASSET_PICK_THUMB_SIZE = 36;
 export const ASSET_PICK_DETAIL_WIDTH = 216;
 
-export type AssetPickTab = 'canvas' | 'asset' | 'subject' | 'openlib' | 'upload';
+export type AssetPickTab = 'canvas' | 'asset' | 'subject' | 'openlib' | 'upload' | 'guide';
 
 const DEFAULT_TABS: AssetPickTab[] = ['canvas', 'asset', 'subject', 'openlib'];
+
+/**
+ * 引导数据候选（2026-11-09）：来自已生成视频产物的 guide，进 `WorkbenchShot.guide` 独立槽，
+ * 不占 9 个标准素材槽。只有传了 onPickGuide 才渲染「引导」页签。
+ */
+export interface GuideCandidate {
+  id: string;
+  title: string;
+  guideId: string;
+  frames?: number;
+  fromAssetId?: string;
+  /** 来源视频媒体键/地址：候选列表与引导槽用同一首帧预览，不再画通用图标 */
+  storageKey?: string;
+  url?: string;
+}
 
 const SUBJECT_KIND_NAME: Record<ProductionItem['kind'], string> = { character: '角色', scene: '场景', prop: '道具' };
 const KIND_NAME: Record<DirectorAssetRef['kind'], string> = { image: '图片', video: '视频', audio: '音频' };
@@ -162,6 +177,10 @@ export interface AssetPickPanelProps {
   onPickSubjectState?: (ref: DirectorAssetRef) => void;
   /** 开源条目「入库后插入」回调 */
   onPickAssetFromOpenLib?: (a: Asset) => void;
+  /** 引导数据候选（已生成视频的 guide）；给了才出现「引导」页签 */
+  guideCandidates?: GuideCandidate[];
+  /** 选中引导 → 调用方写入片段独立引导槽（不占标准素材槽） */
+  onPickGuide?: (candidate: GuideCandidate) => void;
   /** 手动上传页签 / 资产导入：选中文件后由调用方上传并写入 */
   onUploadFiles?: (files: File[]) => void | Promise<void>;
   uploading?: boolean;
@@ -203,6 +222,8 @@ export function AssetPickPanel({
   onPickSubjectImage,
   onPickSubjectState,
   onPickAssetFromOpenLib,
+  guideCandidates = [],
+  onPickGuide,
   onUploadFiles,
   uploading = false,
   accept = 'image/*,video/*,audio/*',
@@ -222,10 +243,11 @@ export function AssetPickPanel({
     const list = tabs.filter((k) => {
       if (k === 'openlib') return !!onPickAssetFromOpenLib;
       if (k === 'upload') return !!onUploadFiles;
+      if (k === 'guide') return !!onPickGuide;
       return true;
     });
     return list.length > 0 ? list : ['asset' as AssetPickTab];
-  }, [tabs, onPickAssetFromOpenLib, onUploadFiles]);
+  }, [tabs, onPickAssetFromOpenLib, onUploadFiles, onPickGuide]);
 
   const [activeIdx, setActiveIdx] = useState(0);
   const [panelTab, setPanelTab] = useState<AssetPickTab>(() => {
@@ -344,7 +366,7 @@ export function AssetPickPanel({
     const out: Array<{ tree: SubjectTree; rows: Array<{ stateId: string; stateName: string; media: SubjectNodeMediaRef | null }> }> = [];
     for (const tree of subjectTrees) {
       const treeHit = tree.name.toLowerCase().includes(query);
-      const rows = (tree.states ?? [])
+      const rows = nonBaseStates(tree)
         .filter((st) => !query || treeHit || (st.state ?? '').toLowerCase().includes(query))
         .map((st) => ({
           stateId: st.id,
@@ -540,6 +562,12 @@ export function AssetPickPanel({
   const pickSubjectImage = onPickSubjectImage ?? (() => {});
   const pickSubjectState = onPickSubjectState ?? (() => {});
 
+  /** 引导候选按标题 / guideId 搜索（与资产页签共用搜索框） */
+  const filteredGuides = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    return guideCandidates.filter((c) => !q || `${c.title} ${c.guideId}`.toLowerCase().includes(q));
+  }, [guideCandidates, searchQ]);
+
   let rowIdx = -1;
 
   const tabLabel = (key: AssetPickTab): string => {
@@ -549,6 +577,7 @@ export function AssetPickPanel({
       case 'subject': return t('director.subjectTab', '主体');
       case 'openlib': return t('director.openlibTab', '开源');
       case 'upload': return t('director.uploadTab', '手动上传');
+      case 'guide': return t('director.guideTab', '引导');
     }
   };
 
@@ -668,6 +697,61 @@ export function AssetPickPanel({
               color: palette.capsuleText, outline: 'none', boxSizing: 'border-box', flexShrink: 0,
             }}
           />
+        )}
+
+        {/* 引导数据页签：只列已生成视频的 guide，单击写片段独立引导槽（不占标准素材槽） */}
+        {panelTab === 'guide' && (
+          <div data-guide-candidate-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {filteredGuides.length === 0 ? (
+              <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
+                {t('director.guideCandidatesEmpty', '暂无可用的引导数据（先在导演台生成视频）')}
+              </div>
+            ) : filteredGuides.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                data-guide-candidate={c.guideId}
+                onClick={() => onPickGuide?.(c)}
+                title={`${c.title} · ${c.guideId}`}
+                onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
+                  borderRadius: 6, border: 'none', background: 'transparent', color: palette.capsuleText,
+                  cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, padding: '0 10px', textAlign: 'left',
+                }}
+              >
+                <span style={{ position: 'relative', width: ASSET_PICK_THUMB_SIZE, height: ASSET_PICK_THUMB_SIZE, flexShrink: 0 }}>
+                  <ThumbImage
+                    kind="video"
+                    storageKey={c.storageKey}
+                    url={c.url}
+                    width={ASSET_PICK_THUMB_SIZE}
+                    height={ASSET_PICK_THUMB_SIZE}
+                    radius={6}
+                    title={c.title}
+                    icon={<Film size={14} style={{ opacity: 0.7 }} />}
+                  />
+                  <span
+                    data-guide-badge
+                    title={t('director.guideBadge', '引导')}
+                    style={{
+                      position: 'absolute', left: 2, bottom: 2, height: 14, padding: '0 3px',
+                      borderRadius: 3, background: palette.brand, color: '#fff',
+                      fontSize: 9, lineHeight: '14px', fontWeight: 600,
+                      display: 'inline-flex', alignItems: 'center', gap: 2,
+                    }}
+                  >
+                    <Waypoints size={8} />
+                  </span>
+                </span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+                <span style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
+                  {c.frames ? t('director.guideFrames', '{{n}} 帧', { n: c.frames }) : c.guideId.slice(0, 12)}
+                </span>
+              </button>
+            ))}
+          </div>
         )}
 
         {panelTab === 'canvas' && (

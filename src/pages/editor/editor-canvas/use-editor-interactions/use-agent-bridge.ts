@@ -19,8 +19,10 @@ import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, type ReferenceItem } from '@zeroexo/plugin-nodes';
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { cancelLocalJob, generateLocalMiniMaxVideo } from '../interactions/local-minimax-video.js';
+import { generateLocalQwenImage } from '../interactions/local-qwen-image.js';
+import { canvasDocNodeKey, getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
@@ -255,10 +257,13 @@ export function useAgentBridgeHooks(
       }
       const provider = refs.aiProvider;
       if (!provider || !refs.commandQueue || !refs.store) return;
-      const prevCtl = nodeAbortControllersRef.current.get(nodeId);
+      // 生成任务归属在发起时固化：之后切画布文档（主↔副本）不得把状态/预览写进另一份文档
+      const jobDocId = getCurrentCanvasDocId();
+      const jobKey = canvasDocNodeKey(nodeId, jobDocId);
+      const prevCtl = nodeAbortControllersRef.current.get(jobKey);
       if (prevCtl) prevCtl.abort();
       const ctl = new AbortController();
-      nodeAbortControllersRef.current.set(nodeId, ctl);
+      nodeAbortControllersRef.current.set(jobKey, ctl);
 
       const nodeRec = refs.store.getGraph().nodes.find((n: any) => n.id === nodeId);
       const nodeData = (nodeRec?.data ?? {}) as Record<string, any>;
@@ -267,6 +272,8 @@ export function useAgentBridgeHooks(
         const cq = refs.commandQueue;
         const storeNow = refs.store;
         if (!cq || !storeNow) return;
+        // 文档已切走：结果只留历史资产，不得回写当前（另一份）画布的同 id 节点
+        if (getCurrentCanvasDocId() !== jobDocId) return;
         cq.execute(new UpdateNodeDataCommand(nodeId, patch));
         if (!mediaSize) return;
         const { width, height, fallbackWidth, fallbackHeight } = mediaSize;
@@ -283,14 +290,18 @@ export function useAgentBridgeHooks(
 
       const modelValue = (nodeData?.model as string) ?? '';
       // 本机 H3ZeroExo：视频节点不经过外部 provider（否则没 API Key 就报「请先配置 API Key」）
-      const isLocalVideoModel = modelValue === LOCAL_VIDEO_MODEL_KEY
-        || modelValue.startsWith('zeroexo:')
-        || (!modelValue && mode === 'video');
-      const taskLabel = isLocalVideoModel ? LOCAL_VIDEO_MODEL_LABEL : (modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined);
+      const isLocalVideoModel = mode === 'video' && (modelValue === LOCAL_VIDEO_MODEL_KEY
+        || modelValue.startsWith('zeroexo:minimax')
+        || (!modelValue && mode === 'video'));
+      const isLocalImageModel = mode === 'image' && (modelValue === LOCAL_IMAGE_MODEL_KEY
+        || modelValue.startsWith('zeroexo:qwen'));
+      const taskLabel = isLocalVideoModel ? LOCAL_VIDEO_MODEL_LABEL
+        : isLocalImageModel ? LOCAL_IMAGE_MODEL_LABEL
+          : (modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined);
       refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, {
         prompt, status: 'loading', errorDetails: undefined, errorType: undefined, taskLabel,
       } as any));
-      clearGeneratingPreview(nodeId);
+      clearGeneratingPreview(nodeId, jobDocId);
 
       try {
         const { refImages, refVideos, refAudios, effectivePrompt } = await collectInputReferences(mentionedRefs, prompt);
@@ -326,6 +337,43 @@ export function useAgentBridgeHooks(
         if (mode === 'image') {
           const data = nodeData;
           const sizeStr = fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined;
+          if (isLocalImageModel) {
+            const pv = (nodeData.paramValues ?? {}) as Record<string, unknown>;
+            const result = await generateLocalQwenImage({
+              prompt: effectivePrompt,
+              referenceImages: refImages.length > 0 ? refImages : undefined,
+              width: fallback.size?.width,
+              height: fallback.size?.height,
+              params: pv,
+              nodeId,
+              signal: ctl.signal,
+            }).catch((err: unknown) => {
+              if (err instanceof Error && err.name === 'AbortError') throw err;
+              throw new AiError('NETWORK_ERROR', err instanceof Error ? err.message : String(err));
+            });
+            const url = URL.createObjectURL(result.blob);
+            applyResult({
+              content: url, status: 'success',
+              naturalWidth: result.width, naturalHeight: result.height,
+              mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
+              errorDetails: undefined, errorType: undefined,
+            } as any, { width: result.width, height: result.height, fallbackWidth: 340, fallbackHeight: 240 });
+            nodeActionBus.emit('canvas:history:created', {
+              kind: 'image',
+              title: promptTitleSummary(prompt) || nodeData?.title || '',
+              generationId: result.generationId,
+              prompt: effectivePrompt,
+              nodeId,
+            });
+            void autoLandGenerationOutput({
+              nodeId, kind: 'image', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
+              content: url, width: result.width, height: result.height, bytes: result.bytes, mimeType: result.mimeType,
+              jobId: result.generationId, model: LOCAL_IMAGE_MODEL_KEY, prompt: effectivePrompt,
+            }).then((landed) => {
+              if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
+            }).catch((err) => console.warn('[history] 图片产出落库失败:', err));
+            return;
+          }
           const results = refImages.length > 0
             ? await provider.editImage({ prompt: effectivePrompt, model: (data?.model as string) ?? 'gpt-4o', params, size: sizeStr, quality: fallback.quality!, count: fallback.count!, referenceImages: refImages, inputs: inputRefs, signal: ctl.signal })
             : await provider.generateImage({ prompt: effectivePrompt, model: (data?.model as string) ?? 'gpt-4o', params, size: sizeStr, quality: fallback.quality!, count: fallback.count!, inputs: inputRefs, signal: ctl.signal });
@@ -346,6 +394,9 @@ export function useAgentBridgeHooks(
             nodeId, kind: 'image', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
             content: first.dataUrl, width: first.width, height: first.height, bytes: first.bytes, mimeType: first.mimeType,
             jobId: first.generationId, model: (nodeData?.model as string) ?? undefined, prompt: effectivePrompt,
+          }).then((landed) => {
+            // 写回 CAS storageKey：刷新后节点仍能按 key 重新解析图片（否则只剩会话级 dataURL）
+            if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
           }).catch((err) => console.warn('[history] 图片产出落库失败:', err));
         } else if (mode === 'text') {
           const data = nodeData;
@@ -355,7 +406,7 @@ export function useAgentBridgeHooks(
           const data = nodeData;
           const sizeStr = fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined;
           // 本机链路：先用参考图垫底显示，随后被引擎推送的采样帧替换（首帧预览不空白）
-          if (isLocalVideoModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!);
+          if (isLocalVideoModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!, jobDocId);
           const result = isLocalVideoModel
             ? await generateLocalMiniMaxVideo({
                 prompt: effectivePrompt,
@@ -365,7 +416,7 @@ export function useAgentBridgeHooks(
                 params,
                 nodeId,
                 onPreview: (frame) => {
-                  if (frame.image) setGeneratingPreview(nodeId, frame.image);
+                  if (frame.image) setGeneratingPreview(nodeId, frame.image, jobDocId);
                 },
                 signal: ctl.signal,
               }).catch((err: unknown) => {
@@ -375,7 +426,12 @@ export function useAgentBridgeHooks(
               })
             : await provider.generateVideo({ prompt: effectivePrompt, model: (data?.model as string) ?? 'sora-2', params, size: sizeStr, seconds: fallback.seconds ?? 5, vquality: String(fallback.vquality ?? 5), generateAudio: fallback.generateAudio ?? true, watermark: false, returnLastFrame: params.returnLastFrame as boolean ?? true, referenceImages: refImages.length > 0 ? refImages : undefined, referenceVideos: refVideos.length > 0 ? refVideos : undefined, referenceAudios: refAudios.length > 0 ? refAudios : undefined, inputs: inputRefs, signal: ctl.signal });
           const url = URL.createObjectURL(result.blob);
-          applyResult({ content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height, durationMs: result.durationMs, mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId, errorDetails: undefined, errorType: undefined } as any, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
+          // 本机链路带 guide；外部渠道 provider 结果无此字段（union 收窄）
+          const resultGuide = (result as { guide?: { id: string; path?: string; frames?: number; sha256?: string } }).guide;
+          const guideMeta = resultGuide
+            ? { id: resultGuide.id, path: resultGuide.path, frames: resultGuide.frames, sha256: resultGuide.sha256 }
+            : undefined;
+          applyResult({ content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height, durationMs: result.durationMs, mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId, guide: guideMeta, errorDetails: undefined, errorType: undefined } as any, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
           // Plan#69: 产物已由后端自动落 Asset 素材库,事件仅通知抽屉刷新产出历史(不再传 blob URL)
           nodeActionBus.emit('canvas:history:created', {
             kind: 'video',
@@ -391,6 +447,10 @@ export function useAgentBridgeHooks(
             nodeId, kind: 'video', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
             content: url, width: result.width, height: result.height, durationMs: result.durationMs, bytes: result.bytes, mimeType: result.mimeType,
             jobId: result.generationId, model: (nodeData?.model as string) ?? undefined, prompt: effectivePrompt,
+            guide: guideMeta,
+          }).then((landed) => {
+            // 写回 CAS storageKey：刷新后节点仍能按 key 重新解析/下载视频（否则只剩会话级 blob 地址）
+            if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
           }).catch((err) => console.warn('[history] 视频产出落库失败:', err));
           if (result.lastFrameUrl) {
             const graph = refs.store.getGraph();
@@ -422,6 +482,8 @@ export function useAgentBridgeHooks(
         if (titleSummary) refs.commandQueue.execute(new UpdateNodeTitleCommand(nodeId, titleSummary));
         nodeFailureCountRef.current.delete(nodeId);
       } catch (err) {
+        // 文档已切走：不要把「已失败/已取消」写到当前另一份画布的同 id 节点上
+        if (getCurrentCanvasDocId() !== jobDocId) return;
         if (ctl.signal.aborted) {
           refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle', errorDetails: undefined, errorType: undefined } as any));
           return;
@@ -430,8 +492,8 @@ export function useAgentBridgeHooks(
         const msg = err instanceof Error ? err.message : String(err);
         refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'error', errorDetails: msg, errorType } as any));
       } finally {
-        clearGeneratingPreview(nodeId);
-        if (nodeAbortControllersRef.current.get(nodeId) === ctl) nodeAbortControllersRef.current.delete(nodeId);
+        clearGeneratingPreview(nodeId, jobDocId);
+        if (nodeAbortControllersRef.current.get(jobKey) === ctl) nodeAbortControllersRef.current.delete(jobKey);
       }
     },
     [refs.aiProvider, refs.commandQueue, refs.store, aiConfig, t],
@@ -441,7 +503,7 @@ export function useAgentBridgeHooks(
   const handlePromptStop = useCallback((nodeId: string): void => {
     // 本机作业：立即发 /zeroexo/v1/jobs/{id}/cancel，不等 abort 传播（ComfyUI 侧要马上停）
     void cancelLocalJob(nodeId);
-    const ctl = nodeAbortControllersRef.current.get(nodeId);
+    const ctl = nodeAbortControllersRef.current.get(canvasDocNodeKey(nodeId));
     if (ctl) ctl.abort();
     if (refs.commandQueue) {
       refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle' } as any));

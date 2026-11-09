@@ -12,20 +12,19 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { History, Layers, Package, PackageOpen, FileText } from 'lucide-react';
+import { History, Layers, FileText } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { GroupPlugin } from '@zeroexo/plugin-group';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { useCanvasAssetsPanel } from './store.js';
 import type { DrawerGroup } from './tab-defs.js';
-import { SidebarNav } from './components/common.js';
+import { SidebarNav, type GroupTabItem } from './components/common.js';
 import { MaterialGroup } from './groups/MaterialGroup.js';
 import { HistoryGroup } from './groups/HistoryGroup.js';
-import { HierarchyGroup } from './groups/HierarchyGroup.js';
-import { CanvasCopiesGroup } from './groups/CanvasCopiesGroup.js';
+import { CanvasStructureGroup } from './groups/CanvasStructureGroup.js';
 import { ScriptMetaGroup } from './groups/ScriptMetaGroup.js';
-import { CANVAS_COPY_TAB_ICON } from '@/features/canvas-tabs/icons.js';
+import { SidebarAnimatedIcon } from '@/features/app-sidebar/sidebar-animated-icon.js';
 import type { SendToCanvasItem } from './store.js';
 
 export interface CanvasAssetsPanelProps {
@@ -46,12 +45,14 @@ export { DRAWER_TAB_DEFS } from './tab-defs.js';
 import { DRAWER_TAB_DEFS, resolveDrawerModule } from './tab-defs.js';
 
 const TAB_ICONS: Record<(typeof DRAWER_TAB_DEFS)[number]['key'], { icon: React.ReactNode; activeIcon?: React.ReactNode }> = {
-  hierarchy: { icon: <Layers size={18} /> },
   history: { icon: <History size={18} /> },
   // 素材分组两态图标：激活 PackageOpen / 未激活 Package（仅视觉切换，不收起抽屉）
-  material: { icon: <Package size={18} />, activeIcon: <PackageOpen size={18} /> },
-  // 画布分组（征集#184）：画中画图标与顶部副本标签、工作区同一语义
-  canvases: { icon: <CANVAS_COPY_TAB_ICON size={18} /> },
+  material: {
+    icon: <SidebarAnimatedIcon type="assets" size={18} active={false} hovered={false} mode="inline" />,
+    activeIcon: <SidebarAnimatedIcon type="assets" size={18} active hovered={false} mode="inline" />,
+  },
+  // 画布相关合并入口：层级 / 子画布在组内 Tab 切换
+  canvasStructure: { icon: <Layers size={18} /> },
   // 本剧信息（2026-11-07）：整部剧的一句话概述 + 标签，仅剧本/导演台模块挂载
   scriptMeta: { icon: <FileText size={18} /> },
 };
@@ -69,7 +70,7 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
   // （zeroexo-platform，GET /api/ai/generations，本地不接）；手动上传资产不进历史
   // 2026-11-05 用户指令（征集 #174）：「剧本」页签与剧本分组组件从抽屉全删（只留顶部「剧本」页签）
   // 2026-11-06 用户指令：顺序 = 资产 → 历史 → 层级 → 画布；非画布模块只留前两个
-  const tabItems = DRAWER_TAB_DEFS.map((d) => ({
+  const tabItems: GroupTabItem[] = DRAWER_TAB_DEFS.map((d) => ({
     key: d.key,
     label: t(d.labelKey, { defaultValue: d.key === 'history' ? '历史' : undefined }),
     ...TAB_ICONS[d.key],
@@ -77,19 +78,10 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0 }}>
-      <SidebarNav items={tabItems} active={store.activeGroup} onChange={(k) => store.changeGroup(k as any)} theme={theme} />
+      <SidebarNav items={tabItems} active={store.activeGroup} onChange={(k) => store.changeGroup(k as DrawerGroup)} theme={theme} />
 
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
-        {store.activeGroup === 'hierarchy' && hierarchy ? (
-          <HierarchyGroup
-            theme={theme}
-            store={hierarchy.store}
-            groupPlugin={hierarchy.groupPlugin}
-            search={store.search}
-            onSearchChange={store.setSearch}
-            onFocusNode={hierarchy.onFocusNode}
-          />
-        ) : store.activeGroup === 'material' ? (
+        {store.activeGroup === 'material' ? (
           <MaterialGroup store={store} theme={theme} />
         ) : store.activeGroup === 'history' ? (
           <HistoryGroup
@@ -98,9 +90,9 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
             graphStore={hierarchy?.store}
             onFocusNode={hierarchy?.onFocusNode}
           />
-        ) : store.activeGroup === 'canvases' ? (
-          // 项目下的画布列表（1 号主画布 + N 份副本），卡片形式复用主页 ProjectCard
-          <CanvasCopiesGroup store={store} theme={theme} />
+        ) : store.activeGroup === 'canvasStructure' ? (
+          // 层级 / 子画布合并为一个「画布」入口，组内 Tab 切换
+          <CanvasStructureGroup store={store} theme={theme} hierarchy={hierarchy} />
         ) : store.activeGroup === 'scriptMeta' ? (
           // 本剧信息（2026-11-07 用户指令）：整部剧一句话概述 + 推荐标签
           <ScriptMetaGroup theme={theme} />

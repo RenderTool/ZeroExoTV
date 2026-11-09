@@ -20,7 +20,7 @@ import { replaceNodeVideo, stripFileExtension } from '../utils/media-replace-mod
 import { VIDEO_DEFAULT_SIZE } from '../utils/node-contracts.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '../base-node-view.js';
-import { useGeneratingPreviewStore } from '../generating-preview-store.js';
+import { generatingPreviewKey, useGeneratingPreviewStore } from '../generating-preview-store.js';
 
 // ===== requestVideoFrameCallback 元数据类型(TS DOM lib 未内置) =====
 interface VideoFrameMetadata {
@@ -86,8 +86,9 @@ export function VideoNodeView({
 }: VideoNodeViewProps): React.ReactElement {
   const data = (node.data ?? {}) as Partial<VideoNodeData>;
   const status = data.status ?? 'idle';
-  /** 生成中实时预览帧（app 侧按 /ws minimax_director_preview 写入，不进 node.data/撤销栈） */
-  const generatingPreview = useGeneratingPreviewStore((s) => s.byNode[node.id]);
+  /** 生成中实时预览帧（app 侧按 /ws minimax_director_preview 写入，不进 node.data/撤销栈）；
+   *  键带画布文档 id，副本与主画布同 node id 时不会串帧 */
+  const generatingPreview = useGeneratingPreviewStore((s) => s.byNode[generatingPreviewKey(s.canvasDocId, node.id)]);
   const { t } = useTranslation();
   const { theme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -605,6 +606,8 @@ export function VideoNodeView({
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         skeleton="media" skeletonKind="video"
+        // 画布视频节点：生成中把 /ws 实时帧铺在节点内容区（此前只在 contentOnly 分支传了 previewImage）
+        previewImage={status === 'loading' ? generatingPreview : undefined}
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >

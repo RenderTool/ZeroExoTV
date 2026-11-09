@@ -160,6 +160,19 @@ export function setWatchTarget(projectId: string | null): void {
   }
 }
 
+/**
+ * 前端自己写文件后调用：把该文件指纹刷新为新基线，同时从去抖窗口摘掉，
+ * 避免把自己写的文件误判为外部变更（2026-11-07 导演台改时间整页刷新 BUG）。
+ */
+export function touchBaseline(path: string): void {
+  const st = state;
+  if (!st) return;
+  st.pending.delete(path);
+  void st.fp(path).then((fp) => {
+    if (state === st) st.last.set(path, fp);
+  }).catch(() => undefined);
+}
+
 /** 停止监听（幂等）：清定时器、移除窗口监听、丢弃待上报路径 */
 export function stopExternalWatcher(): void {
   const st = state;

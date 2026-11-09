@@ -115,19 +115,30 @@ describe('素材抽屉卡片：完整 pointer 序列 → 查看器真实可见',
 
     await waitFor(() => expect(container.textContent).toContain('素材 1'));
 
-    // 2026-11-05 用户纠偏：抽屉卡片必须保留两枚快捷动作按钮（列表页才隐藏）
-    const sendCanvasBtn = container.querySelector('[data-card-action="sendToCanvas"]') as HTMLButtonElement;
-    const sendDirectorBtn = container.querySelector('[data-card-action="sendToDirector"]') as HTMLButtonElement;
-    expect(sendCanvasBtn).toBeTruthy();
-    expect(sendDirectorBtn).toBeTruthy();
-    expect(sendCanvasBtn.disabled).toBe(false);
-    expect(sendDirectorBtn.disabled).toBe(false);
-    expect(getComputedStyle(sendCanvasBtn).opacity).toBe('0.75'); // 常驻半透明可见
+    // 发送动作统一收进一个「发送」下拉：画布 / 导演台在菜单里
+    const sendBtn = container.querySelector('[data-card-action="send"]') as HTMLButtonElement;
+    expect(sendBtn).toBeTruthy();
+    expect(sendBtn.disabled).toBe(false);
+    expect(getComputedStyle(sendBtn).opacity).toBe('0.75'); // 常驻半透明可见
     sendMock.mockClear();
     (store.sendToCanvas as any).mockClear();
-    fireEvent.click(sendCanvasBtn);
+    fireEvent.click(sendBtn);
+    const canvasItem = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('[role="menuitem"]'))
+        .find((n) => n.textContent?.includes('assetLibrary.sendToCanvas'));
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    fireEvent.click(canvasItem);
     expect(store.sendToCanvas).toHaveBeenCalledTimes(1);
-    fireEvent.click(sendDirectorBtn);
+    fireEvent.click(sendBtn);
+    const directorItem = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('[role="menuitem"]'))
+        .find((n) => n.textContent?.includes('assetLibrary.sendToDirector'));
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    fireEvent.click(directorItem);
     expect(sendMock).toHaveBeenCalledTimes(1);
     // 发送不应误触大图查看
     expect(document.querySelector('[data-lightbox]')).toBeNull();

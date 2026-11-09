@@ -217,7 +217,7 @@ export async function testConnection(baseUrl: string, token?: string): Promise<C
     return {
       kind: 'fail',
       failure: 'cors',
-      message: `服务在线但被浏览器拦截（跨域）：已连上 ${base}，请求未返回响应。重启 ComfyUI 即可——桥接插件已自带 CORS，无需 --enable-cors-header 参数`,
+      message: `跨域被拒：已连上 ${base}，但 ComfyUI 未启用 CORS，带 Origin 的请求被 origin-only 中间件返回 403（浏览器 fetch 因此失败）。请在启动参数加 --enable-cors-header '*' 后重启；桥接插件 CORS 仅覆盖 /zeroexo/h3/*`,
     };
   }
   if (res.status === 404) {

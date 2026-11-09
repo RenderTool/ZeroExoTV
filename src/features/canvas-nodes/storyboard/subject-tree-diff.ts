@@ -10,7 +10,7 @@
  * 供「出片连入时做 3 层比较」（Task 3）与「下次询问 Agent 时校验」使用。
  */
 
-import type { SubjectTree, SubjectTreeNode, SubjectNodeMedia } from './subject-tree-types';
+import { nonBaseStates, type SubjectTree, type SubjectTreeNode, type SubjectNodeMedia } from './subject-tree-types';
 
 /** 幂等键：rootId + state + type（注入 type 避免同名不同媒体类型误判幂等） */
 export function subjectNodeStableKey(rootId: string, state: string, type: SubjectNodeMedia): string {
@@ -32,7 +32,8 @@ export interface SubjectAiIndexEntry {
 export function buildAiIndex(trees: SubjectTree[]): SubjectAiIndexEntry[] {
   const out: SubjectAiIndexEntry[] = [];
   for (const tree of trees) {
-    for (const node of tree.states) {
+    // 基础状态是 states[0]，但不参与 AI 状态幂等索引（与统一前 states-only 口径一致）
+    for (const node of nonBaseStates(tree)) {
       out.push({
         key: node.aiStableKey ?? subjectNodeStableKey(tree.rootId, node.state, node.type),
         rootId: tree.rootId,

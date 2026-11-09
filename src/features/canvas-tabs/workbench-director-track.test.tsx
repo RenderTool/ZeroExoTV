@@ -6,7 +6,8 @@
  * 内存适配器）与重媒体组件（视频台/资产面板/授权图/胶片条/提示词面板）——timeline 组件一律不 mock。
  *
  * 本轮覆盖（2026-11-04 第四轮：拖拽实时预览 / 链接模式全选取消 / 文案微调）：
- * 1. 衔接 = 方向性接续标记（2026-11-06 胶囊化）：仅开启交界渲染 [data-continuity-arrow]（34×22 占位、
+ * 1. 衔接 = 交界常显开关（2026-11-07 用户指令：链接/断链图标，点击直接切换）：每个交界渲染
+ *    [data-continuity-arrow]（34×22 占位、深色胶囊），data-continuity-on=true 绿链接 / false 红断链；
  *    项目同款深色胶囊：半透明底 + 1px 细描边 + 圆角 5 + 阴影；glyph = 起点实心圆点 + 连接线 + 右向单箭头，
  *    stroke/fill #00c758、stroke-width 1.7、round），left=交界中心-17 / top=卡片垂直中心-11；第 1 段恒无、未开启零渲染；绿色拼合缝残留 = 0
  *    （clip 边框无 #00c758、圆角恒 4px）。
@@ -209,23 +210,20 @@ beforeEach(() => {
 
 // ===== 1. 衔接 = ComfyUI 导演台同款箭头（绿色拼合缝残留 = 0）=====
 
-describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
-  it('仅开启交界（段1↔段2）渲染箭头：34×22 占位、无底色/无描边/无圆角、双向 ⇄ glyph 22×10；left=间隙中心/top=卡片垂直中心；第 1 段恒无、关闭交界零渲染；clip 绿缝残留 = 0（边框无绿、圆角恒 4px）；宽度/left 不变', async () => {
+describe('衔接视觉 = 链接/断链图标（2026-11-07 用户指令）', () => {
+  it('每个交界常显一枚开关：开启=绿色链接、断开=红色断链；34×22 胶囊、点击即切换；第 1 段恒无；clip 绿缝残留 = 0', async () => {
     const { container } = await renderWorkbench();
 
-    // 箭头唯一：只在 seg-2 交界（开启衔接且有前段）
+    // 段 2/段 3 两个交界都渲染开关（开启与断开都可见，靠状态区分）
     const arrows = container.querySelectorAll('[data-continuity-arrow]');
-    expect(arrows.length).toBe(1);
+    expect(arrows.length).toBe(2);
     expect(container.querySelector('[data-director-continuity-overlay]')).toBeTruthy();
     expect(container.querySelector('[data-continuity-arrow="seg-1"]')).toBeNull(); // 第 1 段恒无
-    expect(container.querySelector('[data-continuity-arrow="seg-3"]')).toBeNull(); // 未开启零渲染
 
     // 2026-11-05 放大尺寸：34×22 占位 + 间隙中心 + 卡片垂直中心
     const arrow = container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement;
     expect(arrow.style.width).toBe('34px');
     expect(arrow.style.height).toBe('22px');
-    // 2026-11-06 用户指令：箭头改项目同款深色胶囊（半透明底 + 1px 细描边 + 圆角 5），
-    // 34×22 占位与命中行为保持原样（border-box 保证加边不撑大）
     expect(arrow.style.background).not.toBe('');
     expect(arrow.style.borderWidth).toBe('1px');
     expect(arrow.style.borderRadius).toBe('5px');
@@ -235,18 +233,26 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
     // 220+6 间距：间隙中心 = 1×226−3 → left = 223−17；卡片高 168、top=7+84−11=80
     expect(arrow.style.left).toBe('206px');
     expect(arrow.style.top).toBe('80px');
-    expect(arrow.title).toBe('段间衔接：片段 1 → 片段 2');
-    // 2026-11-05 新 glyph：连接线 + 右向单箭头（旧 ⇄ 双向箭头零残留）+ 起点实心圆点
-    const path = arrow.querySelector('path')!;
-    expect(path.getAttribute('d')).toBe('M -6.5 0 L 6 0 M 2.6 -3.4 L 6 0 L 2.6 3.4');
-    expect(path.getAttribute('d')).not.toContain('M 7 -4');
-    expect(path.getAttribute('stroke')).toBe('#00c758');
-    expect(path.getAttribute('stroke-width')).toBe('1.7');
-    const dot = arrow.querySelector('circle')!;
-    expect(dot.getAttribute('cx')).toBe('-8.6');
-    expect(dot.getAttribute('fill')).toBe('#00c758');
-    expect(path.getAttribute('stroke-linecap')).toBe('round');
-    expect(path.getAttribute('fill')).toBe('none');
+    // 开启态 = 绿色链接图标 + 点击后断开
+    expect(arrow.getAttribute('data-continuity-on')).toBe('true');
+    expect(arrow.title).toBe('断开衔接');
+    expect(arrow.querySelector('svg')?.getAttribute('class')).toContain('lucide-link2');
+    expect(arrow.style.color).toBe('rgb(0, 199, 88)');
+
+    // 断开态 = 红色断链图标 + 点击后开启
+    const offArrow = container.querySelector('[data-continuity-arrow="seg-3"]') as HTMLElement;
+    expect(offArrow.getAttribute('data-continuity-on')).toBe('false');
+    expect(offArrow.title).toBe('开启衔接');
+    expect(offArrow.querySelector('svg')?.getAttribute('class')).toContain('lucide-link2-off');
+    expect(offArrow.style.color).toBe('rgb(239, 68, 68)');
+
+    // 点击图标本身 = 切换（段 2 开 → 关）
+    fireEvent.click(arrow);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).title).toBe('开启衔接');
+    // 再点一次恢复
+    fireEvent.click(container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
 
     // 绿色拼合缝残留 = 0：所有片段边框无 #00c758、圆角 = 画布同源 WORKSPACE_SURFACE_RADIUS（2026-11-07）
     const clip1 = container.querySelector('[data-clip-id="seg-1"]') as HTMLElement;
@@ -265,22 +271,23 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
     for (const c of [clip1, clip2, clip3]) expect(c.style.width).toBe('220px');
   });
 
-  it('链接模式内点击片段 = 切换箭头（段1 恒无）；完成退出后持久态保留；全程绿缝 = 0', async () => {
+  it('链接模式内点击片段 = 切换衔接状态（段1 恒无）；完成退出后持久态保留；全程绿缝 = 0', async () => {
     const { container } = await renderWorkbench();
     fireEvent.click(container.querySelector('[data-continuity-mode]') as HTMLButtonElement);
     expect(container.querySelector('[data-track-select-mode="continuity"]')).toBeTruthy();
 
-    // 关：点 seg-2 → 箭头零渲染（不是灰显）
+    // 关：点 seg-2 → 图标仍在，但状态变断开（红色断链，不是消失）
     clickClip(container.querySelector('[data-clip-id="seg-2"]') as HTMLElement, 100);
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(0);
+    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(2);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
 
     // 段1（无前序）点击不生效
     clickClip(container.querySelector('[data-clip-id="seg-1"]') as HTMLElement, 20);
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(0);
+    expect(container.querySelector('[data-continuity-arrow="seg-1"]')).toBeNull();
 
-    // 再开：点 seg-2 → 箭头恢复
+    // 再开：点 seg-2 → 链接图标恢复
     clickClip(container.querySelector('[data-clip-id="seg-2"]') as HTMLElement, 100);
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(1);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
 
     // 全程无绿缝：圆角 = 画布同源半径、边框无绿
     for (const id of ['seg-1', 'seg-2', 'seg-3']) {
@@ -290,10 +297,10 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
       expect(c.style.borderRightColor).not.toBe(ARROW_GREEN);
     }
 
-    // 「完成」退出 → 持久态保留（箭头仍在）
+    // 「完成」退出 → 持久态保留（段2 仍为开启）
     fireEvent.click(container.querySelector('[data-select-mode-done]') as Element);
     expect(container.querySelector('[data-track-select-mode]')).toBeNull();
-    expect(container.querySelector('[data-continuity-arrow="seg-2"]')).toBeTruthy();
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
   });
 
   it('链接模式「全选/取消全选」：一键切换段 2..N 全部可衔接交界（段1 恒不可选），计数 已选 M/M 同步；「完成」落盘后状态保留', async () => {
@@ -308,32 +315,35 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
     expect(container.querySelector('[data-select-mode-done]')?.textContent).toBe('完成');
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 1/2');
 
-    // 全选 → 段2/段3 交界都勾上（段1 恒无），计数 2/2，按钮变为「取消全选」
+    // 全选 → 段2/段3 交界都开启（段1 恒无），计数 2/2，按钮变为「取消全选」
     fireEvent.click(selectAllBtn);
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 2/2');
     expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(2);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
+    expect((container.querySelector('[data-continuity-arrow="seg-3"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
     expect(container.querySelector('[data-continuity-arrow="seg-1"]')).toBeNull(); // 段1 恒不可选
     expect((container.querySelector('[data-select-all]') as HTMLElement).textContent).toBe('取消全选');
 
     // 全选后单独取消段2 → 计数同步回退、全选按钮恢复可点态
     clickClip(container.querySelector('[data-clip-id="seg-2"]') as HTMLElement, 250);
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 1/2');
-    expect(container.querySelector('[data-continuity-arrow="seg-2"]')).toBeNull();
-    expect(container.querySelector('[data-continuity-arrow="seg-3"]')).toBeTruthy();
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
+    expect((container.querySelector('[data-continuity-arrow="seg-3"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
     expect((container.querySelector('[data-select-all]') as HTMLElement).textContent).toBe('全选');
 
-    // 取消全选（先全选再点）→ 全部清空
+    // 取消全选（先全选再点）→ 全部清空（图标仍在，状态全断开）
     fireEvent.click(container.querySelector('[data-select-all]') as Element);
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 2/2');
     fireEvent.click(container.querySelector('[data-select-all]') as Element);
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 0/2');
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(0);
+    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(2);
+    expect(container.querySelectorAll('[data-continuity-on="true"]').length).toBe(0);
 
-    // 再全选 → 「完成」落盘：退出后箭头按最终结果渲染、重进模式计数 = 2/2
+    // 再全选 → 「完成」落盘：退出后图标按最终结果渲染、重进模式计数 = 2/2
     fireEvent.click(container.querySelector('[data-select-all]') as Element);
     fireEvent.click(container.querySelector('[data-select-mode-done]') as Element);
     expect(container.querySelector('[data-track-select-mode]')).toBeNull();
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(2);
+    expect(container.querySelectorAll('[data-continuity-on="true"]').length).toBe(2);
     fireEvent.click(container.querySelector('[data-continuity-mode]') as HTMLButtonElement);
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 2/2');
     // 收尾：取消退出（回到持久态，不影响后续用例种子）
@@ -342,33 +352,35 @@ describe('衔接视觉 = ComfyUI 同款箭头（绿缝残留 0）', () => {
 
   it('链接模式「取消」= 回滚：模式内改动不生效，退出后持久值/渲染与进入前一致；Esc 同取消、Enter 同完成', async () => {
     const { container } = await renderWorkbench();
-    // 进入前持久态：段2 开、段3 关（1 个箭头）
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(1);
+    // 进入前持久态：段2 开、段3 关（两个图标、状态不同）
+    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(2);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
+    expect((container.querySelector('[data-continuity-arrow="seg-3"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
 
     // 取消回滚：全选后点「取消」→ 恢复进入前状态
     fireEvent.click(container.querySelector('[data-continuity-mode]') as HTMLButtonElement);
     fireEvent.click(container.querySelector('[data-select-all]') as Element);
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(2); // 草稿态
+    expect(container.querySelectorAll('[data-continuity-on="true"]').length).toBe(2); // 草稿态
     fireEvent.click(container.querySelector('[data-select-mode-cancel]') as Element);
     expect(container.querySelector('[data-track-select-mode]')).toBeNull();
-    // 回滚生效：渲染与进入前一致（段3 箭头不残留）
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(1);
-    expect(container.querySelector('[data-continuity-arrow="seg-3"]')).toBeNull();
+    // 回滚生效：渲染与进入前一致（段3 回到断开）
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('true');
+    expect((container.querySelector('[data-continuity-arrow="seg-3"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
 
     // Esc 同取消
     fireEvent.click(container.querySelector('[data-continuity-mode]') as HTMLButtonElement);
     fireEvent.click(container.querySelector('[data-select-all]') as Element);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(container.querySelector('[data-track-select-mode]')).toBeNull();
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(1);
+    expect((container.querySelector('[data-continuity-arrow="seg-3"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
 
-    // Enter 同完成：草稿落盘（取消 seg-2 → 提交后段2 箭头消失且重进不恢复）
+    // Enter 同完成：草稿落盘（取消 seg-2 → 提交后段2 保持断开且重进不恢复）
     fireEvent.click(container.querySelector('[data-continuity-mode]') as HTMLButtonElement);
     clickClip(container.querySelector('[data-clip-id="seg-2"]') as HTMLElement, 250);
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(0);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(container.querySelector('[data-track-select-mode]')).toBeNull();
-    expect(container.querySelectorAll('[data-continuity-arrow]').length).toBe(0);
+    expect((container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement).getAttribute('data-continuity-on')).toBe('false');
     fireEvent.click(container.querySelector('[data-continuity-mode]') as HTMLButtonElement);
     expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 0/2');
     // 收尾：取消退出（草稿丢弃，持久态保持 seg-2 关）
@@ -422,103 +434,87 @@ describe('导轨白色竖线移除 + 零基线对齐', () => {
 // ===== 3. 批量运行 = 复用 dry-run 预检（无第二套面板）=====
 
 describe('批量运行界面 = 复用现有 dry-run 预检', () => {
-  it('入口唯一：[data-batch-mode]=1；进入模式 → 模式条 + 轨道勾选块；「生成」打开同一个预检（按时间线序列行、主按钮只写「确认运行」、dry-run 说明在正文）；确认清勾选退出', async () => {
+  it('统一生成入口：导轨无批量按钮，「运行」打开片段选择面板；确认后进入全页唯一的预检', async () => {
     const { container } = await renderWorkbench();
 
-    // 批量按钮去重：导轨入口唯一；提示词行批量入口已删除（无 [data-run-all]）
-    expect(container.querySelectorAll('[data-batch-mode]').length).toBe(1);
+    // 2026-11-07 用户指令：批量按钮下线，所有生成走「运行」→ 片段选择面板
+    expect(container.querySelectorAll('[data-batch-mode]').length).toBe(0);
     expect(container.querySelectorAll('[data-run-all]').length).toBe(0);
+    expect(container.querySelectorAll('[data-run-selected]').length).toBe(1);
 
-    // 进入批量模式：模式条 + 勾选块（飘层在轨道内容内，非独立面板）
-    fireEvent.click(container.querySelector('[data-batch-mode]') as HTMLElement);
-    expect(container.querySelector('[data-track-select-mode="batch"]')).toBeTruthy();
-    // 2026-11-04 文案微调：批量模式提交按钮 = 「生成」（不是「完成」）
-    const doneBtn = container.querySelector('[data-select-mode-done]') as HTMLElement;
-    expect(doneBtn.textContent).toBe('生成');
-    const overlay = container.querySelector('[data-director-batch-overlay]') as HTMLElement;
-    expect(overlay).toBeTruthy();
-    expect(overlay.closest('[data-timeline-body]')).toBeTruthy();
-    expect(overlay.querySelectorAll('[data-clip-check]').length).toBe(3);
-    // 无第二套预检/面板 DOM
-    expect(container.querySelector('[data-director-batch-panel]')).toBeNull();
-    expect(container.querySelector('[data-director-batch-table]')).toBeNull();
+    fireEvent.click(container.querySelector('[data-run-selected]') as HTMLElement);
+    const picker = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('.ant-modal'))
+        .find((m) => (m.textContent ?? '').includes('选择要生成的片段')) as HTMLElement;
+      expect(el).toBeTruthy();
+      return el;
+    });
+    // 三个片段各一个勾选框，默认只勾当前片段
+    expect(picker.querySelectorAll('input[type="checkbox"]').length).toBe(3);
 
-    // 勾 段1+段3（不连续）→ 计数跟随
-    fireEvent.click(overlay.querySelector('[data-clip-check="seg-1"]') as Element);
-    fireEvent.click(overlay.querySelector('[data-clip-check="seg-3"]') as Element);
-    expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 2 段');
-    expect(container.querySelector('[data-clip-check="seg-1"]')?.getAttribute('data-checked')).toBe('true');
+    const confirmBtn = Array.from(picker.querySelectorAll('button'))
+      .find((b) => (b.textContent ?? '').startsWith('确认')) as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    fireEvent.click(confirmBtn);
 
-    // 「生成」→ 打开与「运行」同一个 dry-run 预检页
-    fireEvent.click(doneBtn);
-    const modal = document.querySelector('.ant-modal') as HTMLElement;
-    const dryRun = document.querySelector('[data-director-dry-run]') as HTMLElement;
-    expect(dryRun).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('[data-director-dry-run]')).toBeTruthy());
     expect(document.querySelectorAll('[data-director-dry-run]').length).toBe(1);
-    // 主按钮只写「确认运行」（不含 dry-run 字样，也无图标/伪元素偷塞）
-    const confirmBtn = modal.querySelector('[data-dry-run-confirm]') as HTMLElement;
-    expect(confirmBtn.textContent).toBe('开始生成');
-    expect(confirmBtn.textContent).not.toContain('dry-run');
-    expect(confirmBtn.textContent).not.toContain('不发起真实生成');
-    // 2026-11-05 语义升级：确认 = 组装导演包提交到 ComfyUI 真实生成（预检说明同步）
+    const dryRun = document.querySelector('[data-director-dry-run]') as HTMLElement;
     const note = dryRun.querySelector('[data-dry-run-note]') as HTMLElement;
     expect(note).toBeTruthy();
     expect(note.textContent).toContain('ComfyUI 真实生成');
-    // 预检页内无「完成」措辞
-    expect(modal.textContent).not.toContain('完成');
-    // 按时间线顺序列出勾选片段（执行 = 只运行这些片段）
-    const rows = Array.from(dryRun.querySelectorAll('[data-dry-run-segment]'));
-    expect(rows.length).toBe(2);
-    expect(rows[0]!.textContent).toContain('片段 1');
-    expect(rows[1]!.textContent).toContain('片段 3');
-    expect(dryRun.querySelector('[data-dry-run-disconnect]')).toBeNull();
+  });
 
-    // 预检页「确认运行」→ 关闭 + 清勾选 + 退出批量模式（不残留）
+  it('片段选择面板：全选 → 预检按时间线列出全部片段；返回后导轨数据不变', async () => {
+    const { container } = await renderWorkbench();
+    fireEvent.click(container.querySelector('[data-run-selected]') as HTMLElement);
+    const allBtn = await waitFor(() => {
+      // antd 双字中文按钮会自动插入空格（「全 选」），比较前先去掉空白
+      const btn = Array.from(document.querySelectorAll('.ant-modal button'))
+        .find((b) => (b.textContent ?? '').replace(/\s/g, '') === '全选') as HTMLElement;
+      expect(btn).toBeTruthy();
+      return btn;
+    });
+    fireEvent.click(allBtn);
+    const confirmBtn = await waitFor(() => {
+      const btn = Array.from(document.querySelectorAll('.ant-modal button'))
+        .find((b) => (b.textContent ?? '').startsWith('确认')) as HTMLButtonElement;
+      expect(btn).toBeTruthy();
+      return btn;
+    });
     fireEvent.click(confirmBtn);
-    await waitFor(() => expect(container.querySelector('[data-track-select-mode]')).toBeNull());
-    expect(container.querySelectorAll('[data-clip-check]').length).toBe(0);
-    fireEvent.click(container.querySelector('[data-batch-mode]') as HTMLElement);
-    expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 0 段');
-  });
 
-  it('不连续勾选 + 引导开启：预检显式列出断开衔接，只影响本次运行、持久值（衔接箭头）不变；Esc 取消清空', async () => {
-    const { container } = await renderWorkbench();
-    fireEvent.click(container.querySelector('[data-batch-mode]') as HTMLElement);
-    // 只勾 seg-2（引导开、前段未勾 → 本次断开）
-    fireEvent.click(container.querySelector('[data-clip-check="seg-2"]') as Element);
-    fireEvent.click(container.querySelector('[data-select-mode-done]') as Element);
-
-    const dryRun = document.querySelector('[data-director-dry-run]') as HTMLElement;
+    const dryRun = await waitFor(() => {
+      const el = document.querySelector('[data-director-dry-run]') as HTMLElement;
+      expect(el).toBeTruthy();
+      return el;
+    });
     const rows = Array.from(dryRun.querySelectorAll('[data-dry-run-segment]'));
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.textContent).toContain('片段 2');
-    // 显式列出断开的衔接处
-    const list = dryRun.querySelector('[data-dry-run-disconnect]') as HTMLElement;
-    expect(list).toBeTruthy();
-    expect(list.querySelector('[data-dry-run-disconnect-item]')?.textContent)
-      .toBe('片段 1 与片段 2 不相邻，本次不启用衔接');
-    // 本次运行只列选中的片段（不再有逐帧/槽位列）
-    expect(rows[0]!.querySelectorAll('td').length).toBe(0);
-    expect(container.querySelector('[data-continuity-arrow="seg-2"]')).toBeTruthy();
+    expect(rows.length).toBe(3);
+    expect(rows[0]!.textContent).toContain('片段 1');
+    expect(rows[2]!.textContent).toContain('片段 3');
 
-    // 返回（取消预检）→ 模式与勾选仍在，可继续调整
+    // 返回 → 导轨片段一个不少（jsdom 下 antd Modal 退场动画不销毁 DOM，不断言节点移除）
     fireEvent.click(document.querySelector('[data-dry-run-cancel]') as Element);
-    expect(container.querySelector('[data-track-select-mode="batch"]')).toBeTruthy();
-    expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 1 段');
-
-    // Esc = 取消：清空勾选退出模式，重进无残留
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(container.querySelector('[data-track-select-mode]')).toBeNull();
-    fireEvent.click(container.querySelector('[data-batch-mode]') as HTMLElement);
-    expect(container.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 0 段');
+    expect(container.querySelectorAll('[data-clip-id]').length).toBe(3);
   });
 
-  it('空勾选点「完成」→ 不开预检、停留在模式内', async () => {
+  it('片段选择面板：全不选时「确认」禁用，不会打开预检', async () => {
     const { container } = await renderWorkbench();
-    fireEvent.click(container.querySelector('[data-batch-mode]') as HTMLElement);
-    fireEvent.click(container.querySelector('[data-select-mode-done]') as Element);
+    fireEvent.click(container.querySelector('[data-run-selected]') as HTMLElement);
+    const noneBtn = await waitFor(() => {
+      const btn = Array.from(document.querySelectorAll('.ant-modal button'))
+        .find((b) => b.textContent === '全不选') as HTMLElement;
+      expect(btn).toBeTruthy();
+      return btn;
+    });
+    fireEvent.click(noneBtn);
+    await waitFor(() => {
+      const confirmBtn = Array.from(document.querySelectorAll('.ant-modal button'))
+        .find((b) => (b.textContent ?? '').startsWith('确认')) as HTMLButtonElement;
+      expect(confirmBtn?.disabled).toBe(true);
+    });
     expect(document.querySelector('[data-director-dry-run]')).toBeNull();
-    expect(container.querySelector('[data-track-select-mode="batch"]')).toBeTruthy();
   });
 });
 
@@ -659,22 +655,17 @@ describe('拖拽 = 实时预览重排（拖动中呈现 = 松手后排列）', (
     expect(document.body.style.cursor).toBe('');
   });
 
-  it('模式门禁：批量勾选模式下禁拖（不启动、不提交）', async () => {
+  it('片段选择面板打开期间，导轨顺序稳定（弹层不改变片段排列）', async () => {
     const { container } = await renderWorkbench();
-    stubRects();
-    fireEvent.click(container.querySelector('[data-batch-mode]') as HTMLElement);
-    expect(container.querySelector('[data-track-select-mode="batch"]')).toBeTruthy();
-    const clip1 = clipOf(container, 'seg-1');
-    pdown(clip1, 50);
-    pmove(58);
-    pmove(450);
-    expect(container.querySelectorAll('[data-drop-placeholder]').length).toBe(0);
-    expect(clipOf(container, 'seg-1').style.transform).toBe('none');
-    pup(450);
+    fireEvent.click(container.querySelector('[data-run-selected]') as HTMLElement);
+    await waitFor(() =>
+      expect(Array.from(document.querySelectorAll('.ant-modal'))
+        .some((el) => (el.textContent ?? '').includes('选择要生成的片段'))).toBe(true));
     expect(orderOf(container)).toEqual(['seg-1', 'seg-2', 'seg-3']);
-    // 收尾：Esc 退出批量模式
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(container.querySelector('[data-track-select-mode]')).toBeNull();
+    const cancelBtn = Array.from(document.querySelectorAll('.ant-modal button'))
+      .find((b) => (b.textContent ?? '').replace(/\s/g, '') === '取消') as HTMLElement;
+    fireEvent.click(cancelBtn);
+    expect(orderOf(container)).toEqual(['seg-1', 'seg-2', 'seg-3']);
   });
 });
 
@@ -716,19 +707,16 @@ describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 =
     expect(toolbar.querySelectorAll('[data-param-key]').length).toBe(0);
     expect(toolbar.querySelectorAll('[data-resolved-size]').length).toBe(0);
 
-    // 位置：与 删除/批量 同一组 —— 顺序 添加/链接/删除/参数/批量/运行（批量紧邻运行左侧）
+    // 2026-11-07：批量按钮下线 —— 顺序 添加/链接/删除/参数/运行
     const paramsBtn = container.querySelector('[data-params-trigger]') as HTMLElement;
-    const batchBtn = container.querySelector('[data-batch-mode]') as HTMLElement;
     const runBtn = container.querySelector('[data-run-selected]') as HTMLButtonElement;
     const deleteBtn = Array.from(toolbar.querySelectorAll('button'))
       .find((b) => (b as HTMLButtonElement).title === '删除选中片段') as HTMLElement;
+    expect(container.querySelectorAll('[data-batch-mode]').length).toBe(0);
     expect(toolbar.contains(paramsBtn)).toBe(true);
     expect(toolbar.contains(runBtn)).toBe(true);
     expect(deleteBtn.compareDocumentPosition(paramsBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(paramsBtn.compareDocumentPosition(batchBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(batchBtn.compareDocumentPosition(runBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // 批量与运行相邻（中间无其它元素插入）
-    expect(batchBtn.nextElementSibling).toBe(runBtn);
+    expect(paramsBtn.compareDocumentPosition(runBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // 2026-11-05 二调：「参数」按钮无边框无描边（border/outline/描边 box-shadow 全 0），
     // hover/激活只靠背景色（CSS 规则在组件 <style> 内，此处断言内联基线 + 无 solid 边框）
@@ -769,10 +757,12 @@ describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 =
     await waitFor(() =>
       expect((container.querySelector('[data-params-label]') as HTMLElement).textContent).toBe('9:16 · 480×864'));
 
-    // 「运行」→ 与批量「生成」同一个 dry-run 预检
+    // 「运行」→ 打开片段选择面板（2026-11-07 统一生成入口），确认后才进预检
     fireEvent.click(runBtn);
-    await waitFor(() => expect(document.querySelector('[data-director-dry-run]')).toBeTruthy());
-    expect(document.querySelectorAll('[data-director-dry-run]').length).toBe(1);
+    await waitFor(() =>
+      expect(Array.from(document.querySelectorAll('.ant-modal'))
+        .some((el) => (el.textContent ?? '').includes('选择要生成的片段'))).toBe(true));
+    expect(document.querySelector('[data-director-dry-run]')).toBeNull();
   });
 });
 

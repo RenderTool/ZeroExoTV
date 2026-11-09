@@ -33,10 +33,9 @@ import { GroupLayer, GroupDefaultsProvider, getGroupBoundsWithEmptyFallback } fr
 import { useTheme } from '@zeroexo/plugin-theme';
 import { fullSync, onProjectDeleted } from '@/services/sync/sync-service.js';
 import { useSyncStatus, CLOUD_ENABLED } from '@/services/sync/sync-store.js';
-import type { NodeRecord, EdgeRecord } from '@zeroexo/core';
+import type { NodeRecord } from '@zeroexo/core';
 import { filterVisibleNodes } from '@zeroexo/core';
 import { TopBar, ConfigDialog } from '@/features/top-bar/index.js';
-import { McpSettingsDialog } from '@/features/mcp-settings/mcp-settings-dialog.js';
 import { CanvasMenu } from '@/features/top-bar/components/canvas-menu.js';
 import { CanvasOverlays } from '@/features/canvas-interaction/canvas-overlays.js';
 import { ConnectionDropMenu } from '@/features/canvas-interaction/connection-drop-menu.js';
@@ -112,10 +111,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const isMobile = useIsMobile();
   const { status } = useSyncStatus();
   const { isAuthenticated, logout } = useAuth();
-  // 「数据目录 / MCP 配置」面板：本页自持 open 状态并本地渲染同一 McpSettingsDialog
-  // （2026-11-05 约定：画布内必然可弹，不依赖 app.tsx 全局 dialog 分支）
-  const [mcpPanelOpen, setMcpPanelOpen] = useState(false);
-  const openMcpPanel = useCallback((): void => setMcpPanelOpen(true), []);
   // 教育提示全局开关(设置弹窗控制,localStorage 持久化)
   const hintsEnabled = useHintsEnabled();
   // 空画布引导态(2026-11-04):响应式订阅 graph,空态时 CanvasView 背景交给引导层绘制
@@ -598,45 +593,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     store.focusOnNode(nodeId, state.containerSize, width, height, 400, 51);
   }, [state.editor?.store, state.containerSize]);
 
-  // 是否选中可堆叠媒体节点(image/video,有内容时)
-  const isStackableMedia = (() => {
-    const nodeType = state.selectedNodeType as string;
-    if (nodeType !== 'image' && nodeType !== 'video') return false;
-    const data = state.selectedNodeData;
-    if (!data) return false;
-    return Boolean(data['content']);
-  })();
-
-  // StackNode 状态派生:是否有卡片/是否有连线预览
-  const stackHasCards = (() => {
-    if ((state.selectedNodeType as string) !== 'stacked-media') return false;
-    const store = state.editor?.store;
-    if (!store) return false;
-    const selected = store.getSelection().selectedNodeIds;
-    if (selected.size !== 1) return false;
-    const nodeId = selected.values().next().value;
-    if (!nodeId) return false;
-    const node = store.getNode(nodeId);
-    if (!node) return false;
-    const data = node.data as Record<string, unknown> | undefined;
-    const cards = data?.cards as unknown[] | undefined;
-    return !!cards && cards.length > 0;
-  })();
-
-  const hasIncomingPreviews = (() => {
-    if ((state.selectedNodeType as string) !== 'stacked-media') return false;
-    const store = state.editor?.store;
-    if (!store) return false;
-    const selected = store.getSelection().selectedNodeIds;
-    if (selected.size !== 1) return false;
-    const nodeId = selected.values().next().value;
-    if (!nodeId) return false;
-    const graph = store.getGraph();
-    return graph.edges.some((e: EdgeRecord) =>
-      e.target.nodeId === nodeId && e.target.pinId === 'prompt'
-    );
-  })();
-
   // 出片工作台页签联动打开资产抽屉（订阅页签 store）
   const hierarchyOpenRef = useRef(dialogs.setIsHierarchyOpen);
   useEffect(() => {
@@ -699,7 +655,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           gridStyle={dialogs.background}
           onGridStyleChange={dialogs.setBackground}
           onOpenSettings={dialogs.onOpenSettings}
-          onRequestMcp={openMcpPanel}
           keyboardShortcuts={keyboardShortcuts}
           isMobile={isMobile}
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
@@ -836,13 +791,14 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
                 if (targetNode.type === 'group') {
                   const bounds = getGroupBoundsWithEmptyFallback(graph.nodes, nodeId, interactions.getNodeSize);
                   if (bounds) {
-                    store.focusOnBounds(bounds, state.containerSize, 400, 51);
+                    // 画布结构定位：聚焦到组并固定 100%，避免只平移导致附近相似节点看不出变化
+                    store.focusOnBounds(bounds, state.containerSize, 400, 51, 0.82, 1);
                     return;
                   }
                 }
-                // 普通节点聚焦
+                // 普通节点聚焦：1 = 100%，不再按“适合屏幕”缩放
                 const size = interactions.getNodeSize(targetNode as any);
-                store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51);
+                store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51, 0.82, 1);
               }}
             />
             </div>
@@ -973,10 +929,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               singleSelected={state.selectedCount === 1}
               singleSelectedInGroup={state.selectedInGroup}
               createMenuOpen={!!nodeCreateMenuPos}
-              isStackedMedia={(state.selectedNodeType as string) === 'stacked-media'}
-              stackHasCards={stackHasCards}
-              hasIncomingPreviews={hasIncomingPreviews}
-              isStackableMedia={isStackableMedia}
+              isStackedMedia={false}
+              stackHasCards={false}
+              hasIncomingPreviews={false}
+              isStackableMedia={false}
               selectedNodeType={state.selectedNodeType as string | null}
               canvasHasNodes={canvasHasNodes}
               transient={refs.interactionController}
@@ -1138,11 +1094,21 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
                   };
                 }}
                 onNodesCreated={(nodeIds: string[]) => {
-                  // 切图后自动成组：选中新节点 → 触发预览 → 确认成组
-                  if (!refs.store || !refs.groupPlugin || nodeIds.length < 2) return;
-                  const ctrl = refs.groupPlugin.getController();
+                  const firstId = nodeIds[0];
+                  if (!refs.store || !firstId) return;
+                  // 2026-11-08：三种工具统一「完成反馈」——选中结果节点 + 视口对准，
+                  // 关闭页签回画布后用户立刻看得到刚生成的是哪张、在哪儿。
                   refs.store.setSelection({ selectedNodeIds: new Set(nodeIds), selectedEdgeIds: new Set() });
-                  if (ctrl.isPreviewing()) ctrl.confirmPreview(t('groupTools.defaultGroupName'));
+                  const el = containerRef.current;
+                  refs.store.focusOnNode?.(firstId, {
+                    width: el?.clientWidth ?? 800,
+                    height: el?.clientHeight ?? 600,
+                  });
+                  // 切图多块：沿用成组预览确认
+                  if (nodeIds.length >= 2 && refs.groupPlugin) {
+                    const ctrl = refs.groupPlugin.getController();
+                    if (ctrl.isPreviewing()) ctrl.confirmPreview(t('groupTools.defaultGroupName'));
+                  }
                 }}
                 onGetNodeTitle={(type: string, batchIndex = 0, baseCount?: number) => {
                   if (!refs.store) return '';
@@ -1261,10 +1227,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         config={dialogs.canvasConfig}
         onConfirm={dialogs.onCanvasConfigConfirm}
       />
-
-      {/* 「数据目录 / MCP 配置」面板：画布本地实例（同一 McpSettingsDialog 导出，
-          TopBar 数据目录/MCP 两个按钮触发；不依赖 app.tsx 全局分支，画布路由下必然可弹） */}
-      {mcpPanelOpen ? <McpSettingsDialog onClose={() => setMcpPanelOpen(false)} /> : null}
 
       {/* 画布资产 → 主体状态关联弹层(2026-11-04 主体库改造):
           挂在应用树内以获得 antd App 上下文(message 3 秒可撤销轻提示)与主题 */}

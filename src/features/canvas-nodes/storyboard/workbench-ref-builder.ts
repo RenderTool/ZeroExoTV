@@ -18,7 +18,7 @@
  * - origin.mediaKey 取实际引用图 key，供 detectStaleRefs 比对换代；
  * - 幂等：同一次 resync 重复调用生成相同指纹引用（id 每次新建，调用方负责去重合并）。
  */
-import type { SubjectTree, SubjectTreeNode } from './subject-tree-types';
+import { baseStateNodeOf, type SubjectTree, type SubjectTreeNode } from './subject-tree-types';
 import type { WorkbenchShotReference } from './workbench-types';
 import { extractSubjectMentions } from './storyboard-utils';
 
@@ -137,7 +137,7 @@ export function buildRefsFromSource(
         // 状态未登记 → 跳过（避免幽灵引用；后续 validateShots 会拦截）
         continue;
       }
-      const baseMedia = (tree.baseState?.referenceImages ?? [])[0];
+      const baseMedia = (baseStateNodeOf(tree)?.media ?? [])[0];
       if (baseMedia) {
         refs.push({
           id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,

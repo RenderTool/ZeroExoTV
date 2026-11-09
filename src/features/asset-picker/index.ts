@@ -30,7 +30,7 @@ export interface ScriptMeta {
  * 资产归属范围（资产项目化）：
  * - project：项目私有，仅所属项目（画布）内可编辑
  * - library：公共库，所有项目可引用，仅公共库视图可编辑
- * 存量记录无 scope 字段，读取时惰性迁移为 'library'（见 asset-store.migrateAssetScopes）
+ * 存量记录无 scope 字段，读取时惰性迁移（有 projectId → project，否则 library；见 asset-store.migrateAssetScopes）
  */
 export type AssetScope = 'project' | 'library';
 
@@ -40,6 +40,15 @@ export type AssetScope = 'project' | 'library';
  * 手动上传/拖入/素材库添加路径一律不写，历史查询以该标记为唯一判据（isGenerationAsset）。
  */
 export type AssetOrigin = 'generation';
+
+/**
+ * 历史产出来源（2026-11-07 用户指令：抽屉「历史」按来源分 Tab）
+ * - canvas：画布节点上调用生成 API 的产物
+ * - director：导演台运行片段（分镜）产出的视频
+ * 由 history-autoland 落库时写入 data.originSource；存量记录无该字段时
+ * 由 history-utils.getHistorySource 按 provider/标题启发式兜底判定。
+ */
+export type HistorySource = 'canvas' | 'director';
 
 /** 生成产物的自证元数据（随 origin='generation' 一并写入） */
 export interface GenerationMeta {
@@ -57,6 +66,22 @@ export interface GenerationMeta {
   frames?: number;
   /** 产物生成完成时间（ISO） */
   createdAt: string;
+}
+
+/**
+ * 引导数据（2026-11-07）：本机 H3 生成时同步产出的 guide 帧（safetensors）。
+ * - 与视频一起落资产记录（data.guide），导出时可选「视频+引导」；
+ * - 发送到导演台时作为独立引导槽（不占 9 张参考图上限）。
+ */
+export interface GuideMeta {
+  /** 插件 guide id（gd_xxx；对应 output/zeroexo/guides/gd_xxx.safetensors） */
+  id: string;
+  /** 服务端绝对路径（本机插件；下载/查看时换算 /view） */
+  path?: string;
+  /** 引导帧数 */
+  frames?: number;
+  /** 内容 sha256（去重/校验） */
+  sha256?: string;
 }
 
 export interface Asset {
@@ -114,8 +139,8 @@ export interface Asset {
         height?: number;
         durationMs?: number;
       }
-    | { kind: 'image'; dataUrl: string; storageKey?: string; width?: number; height?: number; originNodeId?: string; origin?: AssetOrigin; generation?: GenerationMeta }
-    | { kind: 'video'; url: string; storageKey?: string; width?: number; height?: number; durationMs?: number; originNodeId?: string; origin?: AssetOrigin; generation?: GenerationMeta }
+    | { kind: 'image'; dataUrl: string; storageKey?: string; width?: number; height?: number; originNodeId?: string; origin?: AssetOrigin; originSource?: HistorySource; generation?: GenerationMeta }
+    | { kind: 'video'; url: string; storageKey?: string; width?: number; height?: number; durationMs?: number; originNodeId?: string; origin?: AssetOrigin; originSource?: HistorySource; generation?: GenerationMeta; guide?: GuideMeta }
     | { kind: 'audio'; url: string; storageKey?: string; durationMs?: number };
   /** 所属文件夹 ID(资产库/测试模块合并后,素材可归入文件夹) */
   folderId?: string | null;

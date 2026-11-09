@@ -107,15 +107,19 @@ describe('画布抽屉开源卡片：动作与资产卡一致', () => {
     const card = await waitForFirstCard();
     expect(document.querySelector('[data-lightbox]')).toBeNull();
 
-    const canvasBtn = card.querySelector('[data-card-action="sendToCanvas"]') as HTMLButtonElement;
-    const directorBtn = card.querySelector('[data-card-action="sendToDirector"]') as HTMLButtonElement;
-    expect(canvasBtn).toBeTruthy();
-    expect(directorBtn).toBeTruthy();
-    expect(canvasBtn.disabled).toBe(false);
-    expect(directorBtn.disabled).toBe(false);
+    const sendBtn = card.querySelector('[data-card-action="send"]') as HTMLButtonElement;
+    expect(sendBtn).toBeTruthy();
+    expect(sendBtn.disabled).toBe(false);
 
     // ① 发送到画布：按需导入 → sendToCanvas；不打开大图、不误发导演台
-    fireEvent.click(canvasBtn);
+    fireEvent.click(sendBtn);
+    const canvasItem = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('[role="menuitem"]'))
+        .find((n) => n.textContent?.includes('assetLibrary.sendToCanvas'));
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    fireEvent.click(canvasItem);
     await waitFor(() => expect(sendToCanvas).toHaveBeenCalledTimes(1));
     expect(importMock).toHaveBeenCalledTimes(1);
     expect(importMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ id: 'openlib:g1:e1' }));
@@ -124,9 +128,16 @@ describe('画布抽屉开源卡片：动作与资产卡一致', () => {
     expect(document.querySelector('[data-lightbox]')).toBeNull();
 
     // ② 发送到导演台：同一导入执行器 → sendAssetToWorkbench；动作仍存在（已导入状态不消失）
-    const directorBtnAfter = (await waitForFirstCard()).querySelector('[data-card-action="sendToDirector"]') as HTMLButtonElement;
-    expect(directorBtnAfter).toBeTruthy();
-    fireEvent.click(directorBtnAfter);
+    const sendBtnAfter = (await waitForFirstCard()).querySelector('[data-card-action="send"]') as HTMLButtonElement;
+    expect(sendBtnAfter).toBeTruthy();
+    fireEvent.click(sendBtnAfter);
+    const directorItem = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('[role="menuitem"]'))
+        .find((n) => n.textContent?.includes('assetLibrary.sendToDirector'));
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    fireEvent.click(directorItem);
     await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
     expect(importMock).toHaveBeenCalledTimes(2);
     expect(sendMock).toHaveBeenCalledWith(
@@ -145,8 +156,7 @@ describe('画布抽屉开源卡片：动作与资产卡一致', () => {
     );
 
     const card = await waitForFirstCard();
-    expect(card.querySelector('[data-card-action="sendToCanvas"]')).toBeNull();
-    expect(card.querySelector('[data-card-action="sendToDirector"]')).toBeNull();
+    expect(card.querySelector('[data-card-action="send"]')).toBeNull();
 
     // 卡片本体点击仍打开大图（浏览路径不变）
     fireEvent.click(card);

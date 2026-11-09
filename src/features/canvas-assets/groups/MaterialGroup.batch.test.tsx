@@ -182,9 +182,9 @@ describe('抽屉素材分段批量操作', () => {
   it('多选态隐藏卡内快捷发送按钮（一个时刻只留一套操作）', () => {
     const { unmount } = renderGroup(makeStore());
     // 非多选：卡片信息区带快捷动作（2026-11-05 用户纠偏要求保留）
-    expect(document.querySelectorAll('[data-card-action="sendToCanvas"]').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('[data-card-action="send"]').length).toBeGreaterThan(0);
     unmount();
     renderGroup(makeStore({ assetMultiSelect: true }));
-    expect(document.querySelectorAll('[data-card-action="sendToCanvas"]').length).toBe(0);
+    expect(document.querySelectorAll('[data-card-action="send"]').length).toBe(0);
   });
 });

@@ -13,7 +13,7 @@
  * 迁移前容器先就位（本模块），页签打开不再依赖画布节点。
  */
 import { readJson, writeJson } from '@/platform/fs';
-import { preSaveSnapshot, afterWriteSnapshot } from './snapshot-store.js';
+import { preSaveSnapshot, afterWriteSnapshot, writeSnapshot, recycleSnapshots } from './snapshot-store.js';
 import { ensureScript } from './script-store.js';
 import type { DirectorAssetRef, DirectorModelTier } from './director-params.js';
 
@@ -349,6 +349,9 @@ export type WorkbenchContainerPatchFn = (current: WorkbenchContainer) => Workben
 /**
  * 导演台容器写 API：同 updateStoryboardContainer 语义（版本 +1，自愈挂载，绝不写 graph）。
  * 导轨/片段/sharedParams 的多笔并发写同样按路径串行，互不覆盖。
+ *
+ * 版本快照策略（2026-11-07 用户指令）：编辑参数不自动产生快照版本；
+ * 版本记录只在「发起生成任务」时由 snapshotWorkbenchForRun() 写入。
  */
 export async function updateWorkbenchContainer(
   projectId: string,
@@ -365,11 +368,33 @@ export async function updateWorkbenchContainer(
       version: container.version + 1,
       updatedAt: new Date().toISOString(),
     };
-    if (snapshotHooksEnabled(io)) await preSaveSnapshot(projectId, 'workbench', container, next);
     await io.writeJson(path, next);
-    if (snapshotHooksEnabled(io)) await afterWriteSnapshot(projectId, 'workbench', next);
     return next;
   });
+}
+
+/**
+ * 发起生成任务时调用：把当前导演台状态存为一份 manual 快照（版本记录）。
+ * 名称自动带片段号 + 时间，版本列表 = 任务历史，而非编辑历史。
+ */
+export async function snapshotWorkbenchForRun(
+  projectId: string,
+  shotNumber: number,
+  io: ContainersIO = defaultIO,
+): Promise<void> {
+  try {
+    const current = await readWorkbenchContainer(projectId, io);
+    if (!current) return;
+    const now = new Date();
+    const timeLabel = now.toLocaleString('zh-CN', { hour12: false });
+    await writeSnapshot(projectId, 'workbench', current, 'manual', {
+      name: `任务：片段${shotNumber} · ${timeLabel}`,
+    });
+    // 2026-11-08：写完立即回收，导演台版本不再无限增长（非收藏最多 30 份，星标跳过）
+    await recycleSnapshots(projectId, 'workbench');
+  } catch (err) {
+    console.error('[workbench-run-snapshot] failed (non-blocking):', err);
+  }
 }
 
 export interface ProjectMountsResult {

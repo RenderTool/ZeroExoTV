@@ -212,11 +212,12 @@ describe('主体库整页「改类型」写回真实容器', () => {
 function seedWithMedia(): void {
   const tree = createSubjectTree('character', '东海龙王');
   tree.rootId = 'subj-1';
-  tree.baseState.referenceImages = [{ key: 'base-key-1', type: 'image' }];
+  const base = tree.states[0]!;
+  base.media = [{ key: 'base-key-1', type: 'image' }];
   const node = createSubjectNode('东海龙王 · 状态2', 'image', 'user', 'subj-1', { step: 2 });
   node.id = 'state-1';
   node.media = [{ key: 'state-key-1', type: 'image' }];
-  tree.states = [node];
+  tree.states = [base, node];
   memfs.set(PATH, JSON.stringify({
     schemaVersion: 1, version: 1, title: '主体库', shots: [],
     entities: [{ id: 'item-1', name: '东海龙王', kind: 'character', aliases: [], consistency: '', note: '', episodeIds: [], images: [], coverKey: null }],
@@ -279,7 +280,7 @@ describe('把某个状态当封面（真实落盘）', () => {
 });
 
 describe('基础状态与状态共用同一媒体入口（可挂音频）', () => {
-  it('基础状态替换面板选音频 → baseState.referenceImages[0] 落盘为 audio，卡片变语音', async () => {
+  it('基础状态替换面板选音频 → states[0].media[0] 落盘为 audio，卡片变语音', async () => {
     seedWithMedia();
     render(createElement(AntdApp, null, createElement(Host)));
     await openSubjectPageUi();
@@ -292,7 +293,7 @@ describe('基础状态与状态共用同一媒体入口（可挂音频）', () =
     await settle();
 
     const onDisk = await readStoryboardContainer(PID);
-    const refs = (onDisk?.subjectTree as Array<{ baseState: { referenceImages: unknown[] } }>)[0]?.baseState.referenceImages;
+    const refs = (onDisk?.subjectTree as Array<{ states: Array<{ media: unknown[] }> }>)[0]?.states[0]?.media;
     expect(refs).toEqual([{ key: 'picked-audio-key', type: 'audio' }]);
     expect(document.querySelector('[data-subject-media-thumb][data-media-kind="audio"]')).toBeTruthy();
   });

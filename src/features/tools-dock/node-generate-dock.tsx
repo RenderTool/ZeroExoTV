@@ -41,7 +41,7 @@ import {
 import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
 import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
@@ -350,6 +350,10 @@ export function NodeGenerateDock({
     if (mode === 'video') {
       options.push({ value: LOCAL_VIDEO_MODEL_KEY, label: LOCAL_VIDEO_MODEL_LABEL, iconKey: 'zeroexo' });
     }
+    // 本机 Qwen Image 2.1：图像编辑/文生图，作为图片节点常驻选项
+    if (mode === 'image') {
+      options.push({ value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL, iconKey: 'zeroexo' });
+    }
     return options;
   }, [channels, mode]);
 
@@ -427,10 +431,16 @@ export function NodeGenerateDock({
 
   // 当前模型支持的输入类型(兼容性计算,与生成器一致)
   const currentModelValue = model ?? '';
+  const hasImageReference = useMemo(
+    () => incomingNodes.some((n) => n.type === 'image' || n.type === 'stacked-media'),
+    [incomingNodes],
+  );
   const supportedInputTypes = useMemo(() => {
     if (!currentModelValue) return ['text'];
     // 本机 MiniMax H3：参考生视频（文本 + 一张参考图），与插件节点单参考槽一致
     if (currentModelValue === LOCAL_VIDEO_MODEL_KEY) return ['text', 'image'];
+    // 本机 Qwen Image 2.1：图像编辑（文本 + 参考图）
+    if (currentModelValue === LOCAL_IMAGE_MODEL_KEY) return ['text', 'image'];
     return getModelInputTypes(channels, currentModelValue);
   }, [channels, currentModelValue]);
 
@@ -619,6 +629,15 @@ export function NodeGenerateDock({
       onPromptChange(nodeId, value);
     },
     [onPromptChange, nodeId],
+  );
+
+  /** 提示词库预设：空输入直接填入；已有内容则追加，避免覆盖用户正在写的提示词 */
+  const appendPromptPreset = useCallback(
+    (body: string) => {
+      const current = promptRef.current.trim();
+      updatePrompt(current ? `${current}\n\n${body}` : body);
+    },
+    [updatePrompt],
   );
 
   // 契约参数模块:增量 patch 直传,由 handleNodeConfigChange 基于 graph 最新 paramValues 合并,
@@ -937,6 +956,7 @@ export function NodeGenerateDock({
           model={model ?? ''}
           modelOptions={modelOptions}
           paramValues={paramValues ?? {}}
+          hasImageReference={hasImageReference}
           isRunning={isRunning}
           hasText={hasText}
           textLength={prompt.length}
@@ -944,6 +964,7 @@ export function NodeGenerateDock({
           onAction={handleAction}
           onConfigChange={onConfigChange}
           onParamValuesChange={handleParamValuesChange}
+          onPromptPreset={appendPromptPreset}
           onConstraintsReady={handleConstraintsReady}
           mentionRequired={mentionRequired}
           dropUp={inline}

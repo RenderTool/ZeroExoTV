@@ -20,12 +20,13 @@ export interface GridCardRendererProps<T> {
   onOpen: () => void;
   onRename: () => void;
   onDelete: () => void;
-  onDownload?: () => void;
+  onDownload?: (opts?: { withGuide?: boolean }) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   /** 发送到画布(征集 #87 验收轮十三:仅画布内嵌入时提供,卡片右上角飞机图标) */
   onSendToCanvas?: () => void;
-  /** 发送到导演台当前片段（2026-11-05 用户拍板：与画布入口同组下拉；仅画布内嵌时提供） */
-  onSendToDirector?: () => void;
+  /** 发送到导演台当前片段（2026-11-05 用户拍板：与画布入口同组下拉；仅画布内嵌时提供）。
+   *  2026-11-07：mode='guide' = 发送该素材自带的引导数据（独立引导槽） */
+  onSendToDirector?: (mode?: 'video' | 'guide') => void;
   /** 图片资产「编辑」：开画布图片编辑页签（2026-11-06 用户指令） */
   onEditImage?: () => void;
   /**

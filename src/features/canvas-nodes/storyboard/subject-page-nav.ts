@@ -12,8 +12,11 @@
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import type { SubjectPageLast } from '@/shared/view-prefs.js';
 
-/** 基础状态的虚拟 stateId（不对应 states[]，只用于状态编辑页路由） */
-export const SUBJECT_BASE_STATE_ID = '__base__';
+/**
+ * 基础状态 id（2026-11-08）：从「虚拟槽」升级为 states[0] 的真实节点 id。
+ * 单一定义在 subject-tree-types.ts，这里转出保持既有 import 路径不变。
+ */
+export { SUBJECT_BASE_STATE_ID } from './subject-tree-types.js';
 
 /** history.state 上的命名空间键（不污染其它路由的 history 状态） */
 export const SUBJECT_PAGE_HISTORY_KEY = '__subjectPages';

@@ -10,7 +10,7 @@
  *   视口中心附近创建结果节点（"编辑结果落在画布"）。
  */
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Tooltip } from 'antd';
 import { ArrowLeft, Brush, Grid2x2, Scissors } from 'lucide-react';
@@ -19,7 +19,8 @@ import type { CommandQueue, NodeRecord } from '@zeroexo/core';
 import { useHydratedContent } from '@zeroexo/plugin-nodes';
 import { CropDialog, SplitDialog, MaskEditDialog } from '@zeroexo/plugin-image-editor';
 import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
-import { applyCrop, applySplit } from './image-edit-actions.js';
+import { applyCrop, applyMaskEdit, applySplit } from './image-edit-actions.js';
+import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
 
 export type ImageEditTool = 'crop' | 'split' | 'maskEdit';
 
@@ -57,7 +58,7 @@ export interface ImageEditWorkspaceProps {
 const TOOLS: { id: ImageEditTool; labelKey: string; fallback: string; icon: React.ReactNode }[] = [
   { id: 'crop', labelKey: 'imageEditor.toolCrop', fallback: '裁剪', icon: <Scissors size={14} /> },
   { id: 'split', labelKey: 'imageEditor.toolSplit', fallback: '分割', icon: <Grid2x2 size={14} /> },
-  { id: 'maskEdit', labelKey: 'imageEditor.toolMask', fallback: '局部遮罩', icon: <Brush size={14} /> },
+  { id: 'maskEdit', labelKey: 'imageEditor.toolMask', fallback: '局部', icon: <Brush size={14} /> },
 ];
 
 export function ImageEditWorkspace({
@@ -73,6 +74,8 @@ export function ImageEditWorkspace({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [mode, setMode] = useState<ImageEditTool>(initialMode);
+  /** 已确认输出：避免编辑器确认后回调 onClose 被误判成「放弃编辑」 */
+  const completedRef = useRef(false);
 
   const nodeSource = source.kind === 'node' ? source : null;
   const assetSource = source.kind === 'asset' ? source : null;
@@ -84,6 +87,37 @@ export function ImageEditWorkspace({
   const title = nodeSource
     ? (nodeSource.node.title || nodeData.title || t('imageEditor.tabTitle', '图片编辑'))
     : (assetSource?.title ?? t('imageEditor.tabTitle', '图片编辑'));
+
+  /**
+   * 资产来源：结果节点标题前带上被编辑的资产名。
+   * 页签关闭后画布上仍能一眼认出这张结果来自哪张图（不靠通名「AI 图片 N」猜）。
+   */
+  const resultTitle = (type: string, batchIndex?: number, baseCount?: number): string => {
+    const base = onGetNodeTitle?.(type, batchIndex, baseCount) ?? '';
+    return assetSource ? `${assetSource.title} · ${base}` : base;
+  };
+
+  /** 放弃：与「完成」明确区分，关闭后画布不留任何节点 */
+  const abandonEdit = useCallback(() => {
+    if (!completedRef.current) {
+      message.info(t('imageEditor.editAbandoned', {
+        title,
+        defaultValue: '「{{title}}」的编辑已放弃，未生成结果',
+      }));
+    }
+    onClose();
+  }, [message, t, onClose, title]);
+
+  /** 完成：选中并聚焦结果节点 + 成功提示，再关闭页签回画布 */
+  const completeEdit = (ids: string[]): void => {
+    completedRef.current = true;
+    if (ids.length > 0) onNodesCreated?.(ids);
+    message.success(t('imageEditor.editDone', {
+      title,
+      defaultValue: '「{{title}}」编辑完成，结果已放到画布并选中',
+    }));
+    onClose();
+  };
 
   /** 输出用的源节点：资产来源在确认时才用视口中心生成一个虚拟原点，不往画布写源节点 */
   const resolveEditNode = (): NodeRecord => {
@@ -116,7 +150,7 @@ export function ImageEditWorkspace({
         background: theme.toolbar.background,
       }}
     >
-      <Button size="small" type="text" icon={<ArrowLeft size={14} />} onClick={onClose}>
+      <Button size="small" type="text" icon={<ArrowLeft size={14} />} onClick={abandonEdit}>
         {t('imageEditor.backToCanvas', '返回画布')}
       </Button>
       <span style={{ width: 1, height: 20, background: theme.toolbar.border, margin: '0 4px' }} />
@@ -135,16 +169,16 @@ export function ImageEditWorkspace({
       ))}
       <span style={{ flex: 1 }} />
       <span style={{ fontSize: 12, color: theme.toolbar.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 }}>
-        {title}
+        {t('imageEditor.tabEditing', '编辑')} · {title}
       </span>
     </div>
-  ), [mode, onClose, t, theme, title]);
+  ), [mode, t, theme, title, abandonEdit]);
 
   const handleCrop = async (crop: CropRect): Promise<void> => {
     if (!dataUrl) return;
     try {
-      await applyCrop({ node: resolveEditNode(), commandQueue, dataUrl, rect: crop, onGetNodeTitle });
-      onClose();
+      const ids = await applyCrop({ node: resolveEditNode(), commandQueue, dataUrl, rect: crop, onGetNodeTitle: resultTitle });
+      completeEdit(ids);
     } catch (err) {
       console.error('[ImageEditWorkspace] crop failed:', err);
       message.error(t('imageEditor.cropFailed', '裁剪失败，请重试'));
@@ -154,11 +188,38 @@ export function ImageEditWorkspace({
   const handleSplit = async (params: SplitParams): Promise<void> => {
     if (!dataUrl) return;
     try {
-      await applySplit({ node: resolveEditNode(), commandQueue, dataUrl, params, onNodesCreated, onGetNodeTitle });
-      onClose();
+      const ids = await applySplit({ node: resolveEditNode(), commandQueue, dataUrl, params, onGetNodeTitle: resultTitle });
+      completeEdit(ids);
     } catch (err) {
       console.error('[ImageEditWorkspace] split failed:', err);
       message.error(err instanceof Error && err.message ? err.message : t('imageEditor.splitFailed', '分割失败，请重试'));
+    }
+  };
+
+  // 局部遮罩：本机 Qwen Image 2.1 图像编辑（有遮罩 → 服务端走遮罩模板）
+  const handleMaskEdit = async (payload: { prompt: string; maskDataUrl: string }): Promise<void> => {
+    if (!dataUrl) return;
+    const hide = message.loading(t('imageEditor.maskGenerating', '局部修改生成中…'), 0);
+    try {
+      const result = await generateLocalQwenImage({
+        prompt: payload.prompt,
+        referenceImages: [dataUrl],
+        maskDataUrl: payload.maskDataUrl,
+        params: { steps: 25, cfg: 1, denoise: 1, use_llm_enhance: false, sizeMode: 'source' },
+      });
+      const ids = await applyMaskEdit({
+        node: resolveEditNode(),
+        commandQueue,
+        blob: result.blob,
+        prompt: payload.prompt,
+        onGetNodeTitle: resultTitle,
+      });
+      completeEdit(ids);
+    } catch (err) {
+      console.error('[ImageEditWorkspace] mask edit failed:', err);
+      message.error(err instanceof Error && err.message ? err.message : t('imageEditor.maskFailed', '局部修改失败，请重试'));
+    } finally {
+      hide();
     }
   };
 
@@ -167,20 +228,17 @@ export function ImageEditWorkspace({
       {t('imageEditor.noContent', '图片内容尚未就绪')}
     </div>
   ) : mode === 'crop' ? (
-    <CropDialog dataUrl={dataUrl} open inline theme={theme} onClose={onClose} onConfirm={(crop) => void handleCrop(crop)} />
+    <CropDialog dataUrl={dataUrl} open inline theme={theme} onClose={abandonEdit} onConfirm={(crop) => void handleCrop(crop)} />
   ) : mode === 'split' ? (
-    <SplitDialog dataUrl={dataUrl} open inline theme={theme} onClose={onClose} onConfirm={(params) => void handleSplit(params)} />
+    <SplitDialog dataUrl={dataUrl} open inline theme={theme} onClose={abandonEdit} onConfirm={(params) => void handleSplit(params)} />
   ) : (
     <MaskEditDialog
       dataUrl={dataUrl}
       open
       inline
       theme={theme}
-      onClose={onClose}
-      onConfirm={() => {
-        // 局部修改需要生成后端；未接入前明确告知，不假装成功
-        message.info(t('imageEditor.maskBackendPending', '局部修改需要接入生成后端，本次未提交'));
-      }}
+      onClose={abandonEdit}
+      onConfirm={(payload) => { void handleMaskEdit(payload); }}
     />
   );
 

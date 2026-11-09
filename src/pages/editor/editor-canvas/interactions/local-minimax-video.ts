@@ -16,8 +16,10 @@ import {
   LOCAL_VIDEO_MODEL_KEY,
   type ZeroexoJobState,
 } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { ensureComfyuiMachineInfo, shouldUseLowVram } from '@/features/canvas-tabs/vram-mode.js';
 import { durationToFrames, resolveVideoSize } from '@/entities/director-params.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
+import { canvasDocNodeKey, getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
 import {
   createPreviewClientId,
@@ -37,10 +39,17 @@ export interface LocalVideoRequest {
   seconds?: number;
   /** 节点参数面板的原始值（steps / seed / cfg 等） */
   params?: Record<string, unknown>;
+  /**
+   * 显式引导 id（gd_xxx，2026-11-09）：画布节点也默认产出 guide，用不用由调用方决定；
+   * 传了它 → 插件把该引导作为本段 motion context，并强制关闭 use_prev_guide。
+   */
+  guideId?: string;
   /** 画布节点 id（预览帧按节点回写；可选） */
   nodeId?: string;
   /** 实时预览帧回调（引擎按步解码，经 /ws 的 minimax_director_preview 推送） */
   onPreview?: (frame: DirectorPreviewFrame) => void;
+  /** 作业提交成功回调（拿到 jobId 后立刻回写节点，供刷新后续接恢复） */
+  onJobSubmitted?: (jobId: string) => void;
   signal?: AbortSignal;
 }
 
@@ -52,23 +61,28 @@ export interface LocalVideoResult {
   mimeType: string;
   bytes: number;
   generationId: string;
+  /** 任务所属画布文档（发起时捕获；回写前必须与当前文档一致，防副本任务串到主画布） */
+  canvasDocId: string;
   /** 本机链路不返回尾帧（保持与 GeneratedVideo 同形，节点侧尾帧逻辑自然跳过） */
   lastFrameUrl?: string;
   /** 外部渠道产物才有云端资产 id；本机为 undefined */
   assetId?: string;
+  /** 本机 H3 同步产出的引导数据（safetensors，供导出/发送导演台） */
+  guide?: { id: string; path?: string; frames?: number; sha256?: string };
 }
 
 const POLL_MS = 2000;
 const MAX_WAIT_MS = 45 * 60 * 1000;
 
-/** 当前节点正在跑的本机作业（停止按钮直接按 nodeId 取消，不等 abort 传播） */
+/** 当前节点正在跑的本机作业（按「画布文档 + nodeId」定位：副本与主画布同 id 也不能混） */
 const activeLocalJobs = new Map<string, { base: string; jobId: string }>();
 
 /** 立即取消某画布节点的本机作业（供停止按钮调用；无作业时 no-op） */
 export async function cancelLocalJob(nodeId: string): Promise<void> {
-  const entry = activeLocalJobs.get(nodeId);
+  const key = canvasDocNodeKey(nodeId);
+  const entry = activeLocalJobs.get(key);
   if (!entry) return;
-  activeLocalJobs.delete(nodeId);
+  activeLocalJobs.delete(key);
   await cancelZeroexoJob(entry.base, entry.jobId).catch(() => undefined);
 }
 
@@ -93,6 +107,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise<LocalVideoResult> {
+  // 任务归属在发起时固化：之后切换画布文档也不得把结果/预览写进另一份文档
+  const jobCanvasDocId = getCurrentCanvasDocId();
   const ep = useComfyuiEndpointStore.getState();
   const base = ep.address.replace(/\/+$/, '');
   if (!base) throw new Error('尚未连接 ComfyUI：先在右上角连接本机 ComfyUI');
@@ -144,6 +160,8 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
     previewSocket.connect();
   }
   try {
+    await ensureComfyuiMachineInfo(base);
+    const useLowVram = shouldUseLowVram();
     const submitted = await submitZeroexoJob(base, {
       clientJobId: `zx_canvas_${Date.now()}`,
       clientId,
@@ -161,15 +179,20 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
         frame_rate: 24,
         guide_frames: 22,
         use_prev_guide: false,
+        use_low_vram: useLowVram,
+        ...(req.guideId ? { guide_id: req.guideId } : {}),
         reference_image: referenceImage,
       },
     });
 
-    if (req.nodeId) activeLocalJobs.set(req.nodeId, { base, jobId: submitted.jobId });
+    if (req.nodeId) activeLocalJobs.set(canvasDocNodeKey(req.nodeId, jobCanvasDocId), { base, jobId: submitted.jobId });
+    // 提交成功立刻回调，外部把 jobId 写到节点数据（刷新后续接用）
+    req.onJobSubmitted?.(submitted.jobId);
 
     let state: ZeroexoJobState = submitted.state;
     const startAt = Date.now();
     let outputs: Array<{ kind: string; path: string }> = [];
+    let guide: LocalVideoResult['guide'];
     try {
       while (state === 'queued' || state === 'running') {
         if (req.signal?.aborted) throw new DOMException('aborted', 'AbortError');
@@ -178,6 +201,14 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
         const status = await fetchZeroexoJob(base, submitted.jobId);
         state = status.state;
         outputs = status.outputs ?? [];
+        if (status.guide?.id) {
+          guide = {
+            id: status.guide.id,
+            path: status.guide.path,
+            frames: status.guide.frames,
+            sha256: status.guide.sha256,
+          };
+        }
         if (state === 'error') throw new Error(status.error || '本机执行失败（详见 ComfyUI 日志）');
         if (state === 'cancelled') throw new Error('本机作业已取消');
       }
@@ -202,9 +233,11 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
       mimeType: blob.type || 'video/mp4',
       bytes: blob.size,
       generationId: submitted.jobId,
+      canvasDocId: jobCanvasDocId,
+      guide,
     };
   } finally {
-    if (req.nodeId) activeLocalJobs.delete(req.nodeId);
+    if (req.nodeId) activeLocalJobs.delete(canvasDocNodeKey(req.nodeId, jobCanvasDocId));
     previewSocket?.close();
   }
 }

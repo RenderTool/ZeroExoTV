@@ -7,7 +7,7 @@
  * - 已认证时访问 auth 路由重定向到 home
  *
  * 布局:
- * - home/canvas/assets/prompts:顶部栏 + 侧边栏 + 主内容
+ * - home/canvas/assets:顶部栏 + 侧边栏 + 主内容
  * - editor:编辑器自带 TopBar(无顶部栏/侧边栏)
  * - auth:认证页独立布局(无顶部栏/侧边栏)
  *
@@ -47,7 +47,8 @@ import {
   startExternalWatcher,
   stopExternalWatcher,
 } from '@/platform/watcher.js';
-import { McpSettingsDialog } from '@/features/mcp-settings/index.js';
+import { ServiceCenterDialog } from '@/features/service-center/service-center-dialog.js';
+import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 
 type Route =
   | { name: 'canvas'; canvasId?: string }
@@ -132,8 +133,7 @@ export function App(): React.ReactElement {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   // 语言设置弹窗(移动端抽屉触发)
   const [languageOpen, setLanguageOpen] = useState(false);
-  // MCP 服务配置弹窗
-  const [mcpOpen, setMcpOpen] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
 
   const { theme } = useTheme();
   const { t, i18n } = useTranslation();
@@ -257,6 +257,13 @@ export function App(): React.ReactElement {
     };
   }, []);
 
+  // 顶栏唯一「服务」入口：由任意页面的顶栏广播打开
+  useEffect(() => {
+    const openServices = (): void => setServicesOpen(true);
+    window.addEventListener(OPEN_SERVICE_CENTER_EVENT, openServices);
+    return () => window.removeEventListener(OPEN_SERVICE_CENTER_EVENT, openServices);
+  }, []);
+
   // 需要显示顶部栏 + 侧边栏的路由（画布列表与资产页套主布局；editor 为全屏独立画布页，自带 TopBar）
   const showHeaderAndSidebar = route.name !== 'editor' && !(route.name === 'canvas' && !!route.canvasId);
 
@@ -332,7 +339,6 @@ export function App(): React.ReactElement {
               onNavigate={handleNavigate}
               activeRoute={activeRoute}
               onRequestAppearance={() => setAppearanceOpen(true)}
-              onRequestMcp={() => setMcpOpen(true)}
             />
           ) : undefined}
           sidebar={showHeaderAndSidebar && !isMobile ? (
@@ -421,7 +427,10 @@ export function App(): React.ReactElement {
         ) : null}
 
         {/* MCP 服务配置弹窗(全局唯一) */}
-        {mcpOpen ? <McpSettingsDialog onClose={() => setMcpOpen(false)} /> : null}
+        <ServiceCenterDialog
+          open={servicesOpen}
+          onClose={() => setServicesOpen(false)}
+        />
       </AntdApp>
     </AntdThemeProvider>
   );

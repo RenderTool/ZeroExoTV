@@ -1,15 +1,26 @@
 {
   "name": "@zeroexo/mcp-server",
-  "private": true,
   "version": "0.1.0",
   "description": "MCP server for zeroexo-comfyui project management (M1)",
   "type": "module",
+  "bin": {
+    "zeroexo-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "selfcheck": "node dist/index.js --selfcheck",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:guide": "node e2e-guide.mjs",
+    "e2e:guide:smoke": "node e2e-guide.mjs --smoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

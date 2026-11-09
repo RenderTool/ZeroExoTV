@@ -29,8 +29,8 @@
  */
 import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Checkbox, InputNumber, Popover, Select } from 'antd';
-import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, X } from 'lucide-react';
+import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
+import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, Waypoints, X } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
   CONTINUITY_OVERLAP_OPTIONS,
@@ -61,6 +61,8 @@ import { MentionEditor, type MentionEditorHandle, type MentionSlotView } from '.
 import { useContext } from 'react';
 import { ReactGraphStoreContext } from '@zeroexo/plugin-render-react';
 import { ThumbImage } from './thumb-image.js';
+import { getGuideMeta } from '@/features/asset-picker/guide.js';
+import { isGeneratedAsset } from '@/features/asset-picker/asset-store.js';
 import { useCasUpload } from '@/features/canvas-assets/use-cas-upload.js';
 import {
   AssetPickPanel,
@@ -101,6 +103,7 @@ function shotRefToDirectorRef(r: WorkbenchShotReference): DirectorAssetRef | nul
 }
 
 const KIND_ICON = { image: ImageIcon, video: Film, audio: Music } as const;
+const KIND_NAME: Record<DirectorAssetRef['kind'], string> = { image: '图片', video: '视频', audio: '音频' };
 
 /**
  * 槽位移除时把提示词里该槽位的 `@Label ` 提及降级为纯文本（保留可读 Label 字样、去掉 @ 引用关系），
@@ -197,6 +200,9 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   /** 替换模式：点已填槽位 → 选定后替换该槽位内容（槽位号不变） */
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
   const [hoverSlot, setHoverSlot] = useState<string | null>(null);
+  /** 视频槽 / 引导槽的「源视频 / 引导」下拉菜单 */
+  const [slotMenuId, setSlotMenuId] = useState<string | null>(null);
+  const [hoverGuide, setHoverGuide] = useState(false);
   /** 插槽拖拽中：不弹 hover 大图预览（拖拽经过别的槽位时预览会挡住落点） */
   const draggingSlotRef = useRef(false);
   const { assets: allAssets } = useAssets();
@@ -235,7 +241,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   const caps = DIRECTOR_ASSET_CAPS[tier];
 
   const mentionCandidates = useMemo(
-    () => allAssets.filter((a) => a.data.kind === 'image' || a.data.kind === 'video' || a.data.kind === 'audio'),
+    () => allAssets.filter((a) => (a.data.kind === 'image' || a.data.kind === 'video' || a.data.kind === 'audio')
+      && !isGeneratedAsset(a)),
     [allAssets],
   );
 
@@ -466,6 +473,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     const Icon = KIND_ICON[a.kind];
     // `subject:<id>` 整主体占槽走封面回落链（补图后自动解析）；无图主体 = 占位格（图标+名称+槽号）
     const visual = resolveRefVisual(a, subjects);
+    const guide = a.kind === 'video' ? guideMetaOfRef(a) : undefined;
     return (
       <span
         key={a.id}
@@ -521,6 +529,17 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
         }}
       >
+        {/* 素材类型标签（视频 / 图片 / 音频）：槽位必须一眼看出类型 */}
+        <span
+          data-slot-kind={a.kind}
+          style={{
+            position: 'absolute', top: 3, left: 3, zIndex: 3, height: 14, padding: '0 3px',
+            borderRadius: 3, background: 'rgba(0,0,0,0.65)', color: '#fff',
+            fontSize: 9, lineHeight: '14px', fontWeight: 500,
+          }}
+        >
+          {KIND_NAME[a.kind]}
+        </span>
         {/* 2026-11-05 媒体分派：视频显示首帧（poster 优先，取不到 → <video preload="metadata">），
             音频显示图标；源取不到给可读原因（不静默胶片图标） */}
         {visual.storageKey || visual.url ? (
@@ -551,6 +570,39 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         >
           <X size={11} />
         </button>
+        {guide && (
+          <Dropdown
+            open={slotMenuId === a.id}
+            onOpenChange={(open) => setSlotMenuId(open ? a.id : null)}
+            menu={{
+              items: [
+                { key: 'source', label: t('director.useSourceVideo', '使用源视频'), disabled: true },
+                {
+                  key: 'guide',
+                  icon: <Waypoints size={13} />,
+                  label: t('director.useGuide', '使用引导'),
+                  onClick: () => useGuideFromVideo(a),
+                },
+              ],
+            }}
+          >
+            <button
+              type="button"
+              data-slot-variant-menu={a.id}
+              aria-label={t('director.videoVariant', '切换源视频 / 引导')}
+              title={t('director.videoVariant', '切换源视频 / 引导')}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setSlotMenuId(a.id); }}
+              style={{
+                position: 'absolute', left: 3, bottom: 3, zIndex: 4, width: 16, height: 16, padding: 0,
+                borderRadius: 4, border: 'none', background: 'rgba(0,0,0,0.65)', color: '#fff',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+              }}
+            >
+              <ChevronDown size={10} />
+            </button>
+          </Dropdown>
+        )}
         {hoverSlot === a.id && (
           <span
             data-slot-preview
@@ -777,6 +829,63 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     return candidateRefs.filter((r) => r.kind === target.kind && !isDuplicate(r.id));
   }, [replaceTarget, candidateRefs, segmentAssets, isDuplicate]);
 
+  /** 引导是视频槽的变体：同一格在「源视频 / 引导」间切换，不另开独立素材列表 */
+  const assetById = useMemo(() => new Map(allAssets.map((a) => [a.id, a])), [allAssets]);
+  const guideMetaOfRef = useCallback((ref: DirectorAssetRef) => {
+    const asset = assetById.get(ref.id);
+    return asset ? getGuideMeta(asset.data) : undefined;
+  }, [assetById]);
+
+  const useGuideFromVideo = useCallback((ref: DirectorAssetRef): void => {
+    const asset = assetById.get(ref.id);
+    const g = asset ? getGuideMeta(asset.data) : undefined;
+    if (!g?.id) {
+      message.warning(t('assetLibrary.guideMissing', '该视频没有引导'));
+      return;
+    }
+    onShotChange({
+      references: (shot.references ?? []).filter((r) => r.id !== ref.id),
+      guide: {
+        id: g.id,
+        title: ref.title,
+        frames: g.frames,
+        sha256: g.sha256,
+        fromAssetId: ref.id,
+        storageKey: ref.storageKey,
+        url: ref.url,
+        createdAt: new Date().toISOString(),
+      },
+    });
+    setSlotMenuId(null);
+  }, [assetById, message, onShotChange, shot.references, t]);
+
+  const useSourceFromGuide = useCallback((): void => {
+    const g = shot.guide;
+    if (!g) return;
+    const refs = shot.references ?? [];
+    const existingRef = segmentAssets.find((r) => r.id === g.fromAssetId);
+    const ref: DirectorAssetRef = existingRef ?? {
+      id: g.fromAssetId ?? `guide-src:${g.id}`,
+      kind: 'video',
+      title: g.title,
+      storageKey: g.storageKey,
+      url: g.url,
+    };
+    onShotChange({
+      guide: undefined,
+      references: existingRef ? refs : [...refs, ref as unknown as WorkbenchShotReference],
+    });
+    setSlotMenuId(null);
+  }, [onShotChange, shot.guide, shot.references]);
+
+  /** 同一个视频的引导槽不能和源视频槽同时显示（同一格切换） */
+  const visibleSegmentAssets = useMemo(
+    () => (shot.guide?.fromAssetId
+      ? segmentAssets.filter((a) => a.id !== shot.guide?.fromAssetId)
+      : segmentAssets),
+    [segmentAssets, shot.guide?.fromAssetId],
+  );
+
   return (
     <div
       data-director-prompt-panel
@@ -944,7 +1053,128 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
           hover 浮出大图（视频可播、音频可控）+名称；常驻加号格（虚线）打开资产选择；点已填槽位 = 替换该槽位 */}
       <div style={{ position: 'relative', flexShrink: 0, marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div data-director-slotpool="segment" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-          {renderSlotCells(segmentAssets)}
+          {renderSlotCells(visibleSegmentAssets)}
+          {shot.guide && (
+            <span
+              data-guide-slot={shot.guide.id}
+              data-guide-title={shot.guide.title ?? ''}
+              title={`${shot.guide.title ?? t('director.guideBadge', '引导')}${shot.guide.frames ? ` · ${t('director.guideFrames', '{{n}} 帧', { n: shot.guide.frames })}` : ''}`}
+              onMouseEnter={() => setHoverGuide(true)}
+              onMouseLeave={() => setHoverGuide(false)}
+              style={{
+                position: 'relative', width: 64, height: 64, borderRadius: 8, flexShrink: 0,
+                border: `1px solid ${palette.brand}`, background: palette.chipBg,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                overflow: 'visible',
+              }}
+            >
+              <ThumbImage
+                kind="video"
+                storageKey={shot.guide.storageKey}
+                url={shot.guide.url}
+                width={64}
+                height={64}
+                radius={8}
+                title={shot.guide.title}
+                icon={<Waypoints size={20} style={{ opacity: 0.75 }} />}
+              />
+              <span
+                data-slot-kind="guide"
+                style={{
+                  position: 'absolute', top: 3, left: 3, zIndex: 3, height: 14, padding: '0 3px',
+                  borderRadius: 3, background: palette.brand, color: '#fff',
+                  fontSize: 9, lineHeight: '14px', fontWeight: 600,
+                  display: 'inline-flex', alignItems: 'center', gap: 2,
+                }}
+              >
+                <Waypoints size={8} />
+                {t('director.guideBadge', '引导')}
+              </span>
+              {shot.guide.frames ? (
+                <span style={{ position: 'absolute', right: 3, bottom: 3, zIndex: 3, height: 14, padding: '0 3px', borderRadius: 3, fontSize: 9, lineHeight: '14px', background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
+                  {shot.guide.frames}f
+                </span>
+              ) : null}
+              <Dropdown
+                open={slotMenuId === '__guide__'}
+                onOpenChange={(open) => setSlotMenuId(open ? '__guide__' : null)}
+                menu={{
+                  items: [
+                    {
+                      key: 'source',
+                      icon: <Film size={13} />,
+                      label: t('director.useSourceVideo', '使用源视频'),
+                      onClick: useSourceFromGuide,
+                    },
+                    { key: 'guide', icon: <Waypoints size={13} />, label: t('director.useGuide', '使用引导'), disabled: true },
+                  ],
+                }}
+              >
+                <button
+                  type="button"
+                  data-guide-variant-menu={shot.guide.id}
+                  aria-label={t('director.videoVariant', '切换源视频 / 引导')}
+                  title={t('director.videoVariant', '切换源视频 / 引导')}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); setSlotMenuId('__guide__'); }}
+                  style={{
+                    position: 'absolute', left: 3, bottom: 3, zIndex: 4, width: 16, height: 16, padding: 0,
+                    borderRadius: 4, border: 'none', background: 'rgba(0,0,0,0.65)', color: '#fff',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                  }}
+                >
+                  <ChevronDown size={10} />
+                </button>
+              </Dropdown>
+              <button
+                type="button"
+                className="director-slot-remove"
+                data-guide-x={shot.guide.id}
+                aria-label={t('director.guideRemove', '移除引导')}
+                title={t('director.guideRemove', '移除引导')}
+                onClick={(e) => { e.stopPropagation(); onShotChange({ guide: undefined }); }}
+                style={{
+                  position: 'absolute', top: -6, right: -6, width: 18, height: 18, padding: 0, zIndex: 4,
+                  borderRadius: '50%', border: `1px solid ${palette.popBorder}`, background: palette.popBg,
+                  color: palette.sub, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <X size={11} />
+              </button>
+              {hoverGuide && (
+                <span
+                  data-guide-preview
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 41, width: 200,
+                    background: palette.popBg, border: `1px solid ${palette.popBorder}`, borderRadius: 8,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.45)', padding: 8, cursor: 'default',
+                    display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left',
+                  }}
+                >
+                  <ThumbImage
+                    kind="video"
+                    playable
+                    storageKey={shot.guide.storageKey}
+                    url={shot.guide.url}
+                    prefer="thumb"
+                    width={184}
+                    height={120}
+                    radius={8}
+                    title={shot.guide.title}
+                    icon={<Waypoints size={26} style={{ opacity: 0.6 }} />}
+                  />
+                  <span style={{ fontSize: 12, color: palette.capsuleText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {shot.guide.title ?? t('director.guideBadge', '引导')}
+                  </span>
+                  <span style={{ fontSize: 10, color: palette.sub }}>
+                    {t('director.guideBadge', '引导')}{shot.guide.frames ? ` · ${shot.guide.frames}f` : ''}
+                  </span>
+                </span>
+              )}
+            </span>
+          )}
           <button
             type="button"
             data-asset-add="segment"

@@ -15,9 +15,8 @@
 export const DRAWER_TAB_DEFS = [
   { key: 'material', labelKey: 'assetLibrary.filterMaterial' },
   { key: 'history', labelKey: 'assetLibrary.filterHistory' },
-  { key: 'hierarchy', labelKey: 'hierarchy.tabHierarchy' },
-  // 2026-11-06 征集#184：项目下的画布（1 号主画布 + N 份副本）要有独立入口，卡片形式同主页项目
-  { key: 'canvases', labelKey: 'canvasCopy.drawerTab' },
+  // 画布相关合并为一个入口：层级 / 子画布在组内用 Tab 切换
+  { key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab' },
   // 2026-11-07 用户指令：剧本页的「本剧信息」放进资产抽屉，作为独立分组（整部剧一句话概述 + 标签）
   { key: 'scriptMeta', labelKey: 'assetLibrary.filterScriptMeta' },
 ] as const;
@@ -30,7 +29,7 @@ export type DrawerModule = 'canvas' | 'script' | 'storyboard' | 'workbench';
 
 /** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在 */
 export const DRAWER_MODULE_GROUPS: Record<DrawerModule, readonly DrawerGroup[]> = {
-  canvas: DRAWER_TAB_DEFS.map((d) => d.key).filter((k) => k !== 'scriptMeta'),
+  canvas: ['material', 'history', 'canvasStructure'],
   // 剧本 / 导演台：本剧信息是这两个阶段共用的项目级信息，只在这两个模块挂载
   script: ['material', 'history', 'scriptMeta'],
   storyboard: ['material', 'history'],

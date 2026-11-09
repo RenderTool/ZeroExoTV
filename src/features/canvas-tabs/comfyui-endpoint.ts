@@ -36,7 +36,30 @@ export const DEFAULT_COMFYUI_ENDPOINT_ADDRESS = DEFAULT_COMFYUI_BASE_URL;
 export interface ComfyuiEndpointPrefs {
   /** 唯一地址：本机 ComfyUI（http://127.0.0.1:8188）或线上地址都填这里 */
   address: string;
+  /**
+   * 显存策略（用户手动兜底）：auto = 按机器显存自动选；low / high = 强制。
+   * 默认 auto；只有用户明确改过才持久化非 auto。
+   */
+  vramMode?: ComfyuiVramMode;
 }
+
+export type ComfyuiVramMode = 'auto' | 'low' | 'high';
+
+/** 连接机器信息（/system_stats 读取；拿不到则 auto 走保守低显存） */
+export interface ComfyuiMachineInfo {
+  gpuName?: string;
+  gpuType?: string;
+  vramTotalBytes?: number;
+  vramFreeBytes?: number;
+  ramTotalBytes?: number;
+  ramFreeBytes?: number;
+  os?: string;
+  comfyuiVersion?: string;
+  fetchedAt: number;
+}
+
+/** 低于该显存（16GiB）自动走低显存链；阈值只用于 auto，手动模式不覆盖 */
+export const LOW_VRAM_THRESHOLD_BYTES = 16 * 1024 ** 3;
 
 // ===== 旧数据迁移（幂等） =====
 
@@ -105,7 +128,10 @@ export function loadComfyuiEndpoint(): ComfyuiEndpointPrefs {
             typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).address === 'string'
               ? ((data as Record<string, unknown>).address as string)
               : '';
-          return { address: address || DEFAULT_COMFYUI_ENDPOINT_ADDRESS };
+          const rawMode = typeof data === 'object' && data !== null ? (data as Record<string, unknown>).vramMode : undefined;
+          const vramMode: ComfyuiVramMode =
+            rawMode === 'low' || rawMode === 'high' ? rawMode : 'auto';
+          return { address: address || DEFAULT_COMFYUI_ENDPOINT_ADDRESS, vramMode };
         }
       }
     }
@@ -132,8 +158,39 @@ export function saveComfyuiEndpoint(prefs: ComfyuiEndpointPrefs): void {
 export type EndpointBackend = 'direct' | 'openai' | 'zeroexo';
 
 export type EndpointTestResult =
-  | { kind: 'ok'; backend: EndpointBackend; address: string; version?: string; models: string[] }
+  | { kind: 'ok'; backend: EndpointBackend; address: string; version?: string; models: string[]; machine?: ComfyuiMachineInfo }
   | { kind: 'fail'; failure: 'unreachable' | 'cors' | 'rejected'; message: string };
+
+function bytes(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** 读取 ComfyUI 机器信息（/system_stats）；CORS 被拦/旧版无该口 → null，由 auto 兜底低显存 */
+export async function fetchComfyuiMachineInfo(base: string): Promise<ComfyuiMachineInfo | null> {
+  try {
+    const res = await fetch(`${normalizeBaseUrl(base)}/system_stats`);
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== 'object') return null;
+    const system = (body.system ?? {}) as Record<string, unknown>;
+    const devices = Array.isArray(body.devices) ? body.devices : [];
+    const device = (devices[0] ?? {}) as Record<string, unknown>;
+    const info: ComfyuiMachineInfo = {
+      gpuName: typeof device.name === 'string' ? device.name : undefined,
+      gpuType: typeof device.type === 'string' ? device.type : undefined,
+      vramTotalBytes: bytes(device.vram_total),
+      vramFreeBytes: bytes(device.vram_free),
+      ramTotalBytes: bytes(system.ram_total),
+      ramFreeBytes: bytes(system.ram_free),
+      os: typeof system.os === 'string' ? system.os : undefined,
+      comfyuiVersion: typeof system.comfyui_version === 'string' ? system.comfyui_version : undefined,
+      fetchedAt: Date.now(),
+    };
+    return info;
+  } catch {
+    return null;
+  }
+}
 
 export async function testEndpointConnection(rawAddress: string): Promise<EndpointTestResult> {
   const base = normalizeBaseUrl(rawAddress);
@@ -148,6 +205,8 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
     };
   }
   let sawResponse = false; // 是否见到过任何真实 HTTP 响应（区分「跨域被拦」与「地址不对」）
+  // 机器信息与后端判定并行/一次性取；/system_stats 被拦时 machine=null，auto 模式会保守走低显存
+  const machine = await fetchComfyuiMachineInfo(base);
   // 2) 桥接健康检查（/zeroexo/h3/health）：完整的导演包流程（多参考图 / 延续 / 引导预览），优先
   try {
     const res = await fetch(`${base}/zeroexo/h3/health`);
@@ -155,8 +214,8 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
     if (res.ok) {
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (body && body.ok === true) {
-        const version = typeof body.version === 'string' ? body.version : undefined;
-        return { kind: 'ok', backend: 'direct', address: base, version, models: [] };
+        const version = typeof body.version === 'string' ? body.version : machine?.comfyuiVersion;
+        return { kind: 'ok', backend: 'direct', address: base, version, models: [], machine: machine ?? undefined };
       }
     }
   } catch { /* 桥接未装/旧版未开 CORS → 继续探测 */ }
@@ -167,8 +226,8 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
     if (res.ok) {
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (body && body.ok === true && typeof body.plugin === 'string') {
-        const version = typeof body.version === 'string' ? body.version : undefined;
-        return { kind: 'ok', backend: 'zeroexo', address: base, version, models: [] };
+        const version = typeof body.version === 'string' ? body.version : machine?.comfyuiVersion;
+        return { kind: 'ok', backend: 'zeroexo', address: base, version, models: [], machine: machine ?? undefined };
       }
     }
   } catch { /* 未装插件 / 未开 CORS → 继续探测 */ }
@@ -182,8 +241,8 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
         const version =
           'system' in body && typeof (body.system as Record<string, unknown> | undefined)?.comfyui_version === 'string'
             ? ((body.system as Record<string, unknown>).comfyui_version as string)
-            : undefined;
-        return { kind: 'ok', backend: 'direct', address: base, version, models: [] };
+            : machine?.comfyuiVersion;
+        return { kind: 'ok', backend: 'direct', address: base, version, models: [], machine: machine ?? undefined };
       }
     }
   } catch { /* CORS 拦截或解析失败 → 继续探测兼容口 */ }
@@ -211,7 +270,7 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
     return {
       kind: 'fail',
       failure: 'cors',
-      message: `服务在线但被浏览器拦截（跨域）：${base} 可达，请求未返回任何响应。重启 ComfyUI 即可——桥接插件已自带 CORS，无需 --enable-cors-header 参数`,
+      message: `跨域被拒：${base} 可达，但 ComfyUI 未启用 CORS，带 Origin 的请求会被 origin-only 中间件直接返回 403（浏览器侧表现为 fetch 失败）。请在 ComfyUI 启动参数加 --enable-cors-header '*' 后重启；桥接插件自带的 CORS 只覆盖 /zeroexo/h3/*，不覆盖 /system_stats 与 /zeroexo/v1/*`,
     };
   }
   // 5) 有响应但既非 ComfyUI 也非兼容口
@@ -231,32 +290,42 @@ export interface ComfyuiEndpointState extends ComfyuiEndpointPrefs {
   backend: EndpointBackend | null;
   /** 运行态：兼容口的模型清单（运行时自动取 models[0] 作 model）；direct 为空数组 */
   models: string[];
+  /** 运行态：连接机器的 GPU / 显存信息（/system_stats） */
+  machine: ComfyuiMachineInfo | null;
   /** 保存：持久化地址；地址与上次测试的不同则断开 */
   applyAddress: (raw: string) => void;
-  /** 测试通过：持久化地址 + 置连接态 */
-  markTested: (raw: string, backend: EndpointBackend, models: string[]) => void;
+  /** 测试通过：持久化地址 + 置连接态（machine 由 /system_stats 带回） */
+  markTested: (raw: string, backend: EndpointBackend, models: string[], machine?: ComfyuiMachineInfo) => void;
+  /** 用户手动兜底：显存策略（auto / low / high），持久化 */
+  setVramMode: (mode: ComfyuiVramMode) => void;
   /** 断开（测试失败 / 地址改动） */
   disconnect: () => void;
 }
 
 export const useComfyuiEndpointStore = create<ComfyuiEndpointState>()((set, get) => ({
   ...loadComfyuiEndpoint(),
+  vramMode: loadComfyuiEndpoint().vramMode ?? 'auto',
   connected: false,
   backend: null,
   models: [],
+  machine: null,
   applyAddress: (raw) => {
     const address = normalizeBaseUrl(raw);
     const changed = address !== get().address;
     set({ address });
-    saveComfyuiEndpoint({ address });
-    if (changed) set({ connected: false, backend: null, models: [] });
+    saveComfyuiEndpoint({ address, vramMode: get().vramMode });
+    if (changed) set({ connected: false, backend: null, models: [], machine: null });
   },
-  markTested: (raw, backend, models) => {
+  markTested: (raw, backend, models, machine) => {
     const address = normalizeBaseUrl(raw);
-    set({ address, connected: true, backend, models });
-    saveComfyuiEndpoint({ address });
+    set({ address, connected: true, backend, models, machine: machine ?? null });
+    saveComfyuiEndpoint({ address, vramMode: get().vramMode });
   },
-  disconnect: () => set({ connected: false, backend: null, models: [] }),
+  setVramMode: (mode) => {
+    set({ vramMode: mode });
+    saveComfyuiEndpoint({ address: get().address, vramMode: mode });
+  },
+  disconnect: () => set({ connected: false, backend: null, models: [], machine: null }),
 }));
 
 // ===== 运行配置推导（导演台运行按钮直接调用，不再有渠道选择环节） =====

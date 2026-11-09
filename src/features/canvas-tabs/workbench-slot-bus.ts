@@ -27,11 +27,28 @@ import {
 import type { Asset } from '@/features/asset-picker/index.js';
 
 export const WORKBENCH_ADD_REF_EVENT = 'zeroexo:workbench-add-ref';
+/** 片段引导槽（独立槽位，不占参考图上限）：发送引导数据 → 替换该段唯一引导 */
+export const WORKBENCH_SET_GUIDE_EVENT = 'zeroexo:workbench-set-guide';
 
 /** 抽屉「发送到导演台」事件载荷 */
 export interface WorkbenchAddRefDetail {
   assetId: string;
   ref: DirectorAssetRef;
+  projectId: string;
+}
+
+export interface WorkbenchSetGuideDetail {
+  guide: {
+    id: string;
+    title?: string;
+    frames?: number;
+    sha256?: string;
+    fromAssetId?: string;
+    /** 来源视频媒体键/地址：引导槽用视频首帧做预览 */
+    storageKey?: string;
+    url?: string;
+    createdAt?: string;
+  };
   projectId: string;
 }
 
@@ -105,4 +122,10 @@ export function computeSegmentInsert(args: {
 export function emitWorkbenchAddRef(detail: WorkbenchAddRefDetail): boolean {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return false;
   return window.dispatchEvent(new CustomEvent<WorkbenchAddRefDetail>(WORKBENCH_ADD_REF_EVENT, { detail }));
+}
+
+/** 抽屉侧发布「写入/替换片段引导槽」请求（每段至多一个：宿主整体覆盖 guide 字段） */
+export function emitWorkbenchSetGuide(detail: WorkbenchSetGuideDetail): boolean {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return false;
+  return window.dispatchEvent(new CustomEvent<WorkbenchSetGuideDetail>(WORKBENCH_SET_GUIDE_EVENT, { detail }));
 }

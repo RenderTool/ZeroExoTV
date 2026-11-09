@@ -1,4 +1,4 @@
-﻿/** * CanvasPage - 画布项目列表页 * * 从原 HomePage 提取的画布项目列表功能。 * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。 */
+/** * CanvasPage - 画布项目列表页 * * 从原 HomePage 提取的画布项目列表功能。 * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。 */
 
 import { useState, useMemo, useCallback } from 'react';
 import type { CSSProperties } from 'react';

@@ -8,6 +8,8 @@
 import type { NodeRecord } from '@zeroexo/core';
 import { resolveNodeSize } from '@zeroexo/core';
 import { resolveContentUrl } from '@zeroexo/plugin-nodes';
+import { getMediaBlob } from '@/platform/media.js';
+import { downloadGuideFile } from '@/shared/utils/guide-file.js';
 import { serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
 
 // ===== 反推提示词预设 =====
@@ -46,32 +48,35 @@ export function triggerAnchorDownload(url: string, filename: string, revoke = fa
   if (revoke) URL.revokeObjectURL(url);
 }
 
-/** 下载单个节点内容 */
-export async function downloadNodeAsFile(node: NodeRecord): Promise<void> {
+/** 下载单个节点内容（withGuide=true 时附带本机 H3 引导数据 .safetensors） */
+export async function downloadNodeAsFile(
+  node: NodeRecord,
+  opts?: { withGuide?: boolean },
+): Promise<{ ok: boolean; guideOk?: boolean }> {
   const data = (node.data ?? {}) as Record<string, unknown>;
   if (node.type === 'script') {
     const text = serializeScriptContent(node);
-    if (!text.trim()) return;
+    if (!text.trim()) return { ok: false };
     triggerAnchorDownload(
       URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })),
       `${(node.title ?? '剧本').trim() || '剧本'}.txt`,
       true,
     );
-    return;
+    return { ok: true };
   }
   if (node.type === 'text') {
     const text = (data.content as string) ?? '';
-    if (!text.trim()) return;
+    if (!text.trim()) return { ok: false };
     triggerAnchorDownload(
       URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })),
       `${(node.title ?? '文本').trim() || '文本'}.txt`,
       true,
     );
-    return;
+    return { ok: true };
   }
   const content = (data.content as string | undefined) ?? '';
   const storageKey = data.storageKey as string | undefined;
-  if (!content && !storageKey) return;
+  if (!content && !storageKey) return { ok: false };
   const mimeType = (data.mimeType as string) || '';
   const ext = mimeType
     ? (mimeType.split('/')[1] || 'bin')
@@ -83,27 +88,30 @@ export async function downloadNodeAsFile(node: NodeRecord): Promise<void> {
     const pad = (n: number): string => n.toString().padStart(2, '0');
     filename = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.${ext}`;
   }
-  let sourceUrl = content;
-  if (storageKey) {
-    try {
-      const resolved = await resolveContentUrl(storageKey, content);
-      if (resolved) sourceUrl = resolved;
-    } catch { /* 回退 content */ }
+  // 2026-11-07：优先按 storageKey 直接读盘/CAS（content 可能是不再有效的 blob: 会话地址）
+  let blob: Blob | null = null;
+  if (storageKey) blob = await getMediaBlob(storageKey).catch(() => null);
+  if (!blob?.size && storageKey) {
+    const resolved = await resolveContentUrl(storageKey, content).catch(() => '');
+    if (resolved) {
+      const res = await fetch(resolved).catch(() => null);
+      if (res?.ok) blob = await res.blob().catch(() => null);
+    }
   }
-  if (!sourceUrl) return;
-  const isBlob = sourceUrl.startsWith('blob:');
-  const isData = sourceUrl.startsWith('data:');
-  let downloadUrl = sourceUrl;
-  let needsRevoke = false;
-  if (!isBlob && !isData) {
-    try {
-      const res = await fetch(sourceUrl);
-      const blob = await res.blob();
-      downloadUrl = URL.createObjectURL(blob);
-      needsRevoke = true;
-    } catch { /* 保留原 URL */ }
+  if (!blob?.size && content && !content.startsWith('blob:')) {
+    const res = await fetch(content).catch(() => null);
+    if (res?.ok) blob = await res.blob().catch(() => null);
   }
-  triggerAnchorDownload(downloadUrl, filename, needsRevoke);
+  if (!blob?.size) return { ok: false };
+  triggerAnchorDownload(URL.createObjectURL(blob), filename, true);
+  if (opts?.withGuide) {
+    const guide = data.guide as { id?: string } | undefined;
+    const guideOk = guide?.id
+      ? await downloadGuideFile(guide, `${baseName || '视频'} 引导`)
+      : false;
+    return { ok: true, guideOk };
+  }
+  return { ok: true };
 }
 
 /** 分镜列锚点：取剧本下游已连分镜中最靠下的一个 */

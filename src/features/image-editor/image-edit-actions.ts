@@ -21,8 +21,52 @@ function nodePrompt(node: NodeRecord): string {
   return (node.data as { prompt?: string } | null)?.prompt ?? '';
 }
 
+/** 局部遮罩：用本机 Qwen 图像编辑产出的 Blob 生成结果节点（原节点不动） */
+export async function applyMaskEdit({ node, commandQueue, blob, prompt, onGetNodeTitle }: {
+  node: NodeRecord;
+  commandQueue: CommandQueue;
+  blob: Blob;
+  prompt: string;
+  onGetNodeTitle?: (type: string, batchIndex?: number, baseCount?: number) => string;
+}): Promise<string[]> {
+  const objectUrl = URL.createObjectURL(blob);
+  const img = await uploadImage(objectUrl);
+  URL.revokeObjectURL(objectUrl);
+  const origWidth = node.size?.width ?? 340;
+  const newWidth = Math.min(origWidth, Math.max(220, img.width ?? origWidth));
+  const newHeight = Math.round(newWidth * ((img.height || 1) / (img.width || 1)));
+  const childId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  commandQueue.execute(
+    new AddNodeCommand({
+      id: childId,
+      type: 'image',
+      title: onGetNodeTitle?.('image') ?? '',
+      position: { x: node.position.x + origWidth + 96, y: node.position.y },
+      size: { width: newWidth, height: newHeight },
+      data: {
+        prompt,
+        content: img.url,
+        storageKey: img.storageKey,
+        status: 'success',
+        naturalWidth: img.width,
+        naturalHeight: img.height,
+        mimeType: img.mimeType,
+        bytes: img.bytes,
+      },
+    }),
+  );
+  commandQueue.execute(
+    new AddEdgeCommand({
+      id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      source: { nodeId: node.id, pinId: 'image' },
+      target: { nodeId: childId, pinId: 'prompt' },
+    }),
+  );
+  return [childId];
+}
+
 /** 裁剪：原节点右侧生成一张裁剪结果节点，并连一条 原节点 → 新节点 的边 */
-export async function applyCrop({ node, commandQueue, dataUrl, onGetNodeTitle, rect }: BaseInput & { rect: CropRect }): Promise<void> {
+export async function applyCrop({ node, commandQueue, dataUrl, onGetNodeTitle, rect }: BaseInput & { rect: CropRect }): Promise<string[]> {
   const cropped = await cropDataUrl(dataUrl, rect);
   const img = await uploadImage(cropped);
   const origWidth = node.size?.width ?? 340;
@@ -55,6 +99,7 @@ export async function applyCrop({ node, commandQueue, dataUrl, onGetNodeTitle, r
       target: { nodeId: childId, pinId: 'prompt' },
     }),
   );
+  return [childId];
 }
 
 /** 分割切片布局：**同一缩放比例 + 累计边界取整**，保证非均匀切片也能严丝合缝拼回原图 */
@@ -101,7 +146,7 @@ export function computeSplitLayout(
 /** 分割：按网格生成 N 个切片节点（同一缩放比例、零间距紧密拼合），并连边 */
 export async function applySplit({
   node, commandQueue, dataUrl, onGetNodeTitle, onNodesCreated, params,
-}: BaseInput & { params: SplitParams; onNodesCreated?: (nodeIds: string[]) => void }): Promise<void> {
+}: BaseInput & { params: SplitParams; onNodesCreated?: (nodeIds: string[]) => void }): Promise<string[]> {
   // 兜底：一次切太多块会同时做 N 次 canvas 编码 + 上传 + 建节点/连线（浏览器会卡死）
   if (params.rows * params.columns > MAX_SPLIT_PIECES) {
     throw new Error(`单次最多切 ${MAX_SPLIT_PIECES} 块（当前 ${params.rows * params.columns} 块）`);
@@ -151,4 +196,5 @@ export async function applySplit({
     );
   });
   if (childIds.length >= 2 && onNodesCreated) onNodesCreated(childIds);
+  return childIds;
 }

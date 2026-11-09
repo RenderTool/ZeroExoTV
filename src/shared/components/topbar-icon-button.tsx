@@ -18,6 +18,7 @@ import {
   PanelsTopLeft,
   Plug,
   PlugZap,
+  ServerCog,
   SquareMousePointer,
   SunMoon,
   type LucideIcon,
@@ -39,6 +40,7 @@ export const TOPBAR_ICON_GAP = 6;
 export const TOPBAR_ICONS = {
   dataRoot: FolderOpen,
   mcp: Plug,
+  services: ServerCog,
   comfyui: PlugZap,
   appearance: SunMoon,
   language: Languages,

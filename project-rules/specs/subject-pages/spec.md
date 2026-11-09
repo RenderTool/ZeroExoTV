@@ -13,7 +13,7 @@
 | 状态编辑页 | `{ view: 'state', rootId, stateId }` | 主体库 / 主体名 / 状态名 | 状态名、提示词（备注标签）、出现集数（多选）、媒体（图片/语音）接收位 |
 
 - 面包屑每一级都是原生 `<button>`：可点击、Tab 聚焦、Enter/Space 触发。
-- 状态归属：`rootId = SubjectTree.rootId`；`stateId = SubjectTreeNode.id`；基础状态用保留 id `__base__`（虚拟节点，不对应 `states[]`）。
+- 状态归属：`rootId = SubjectTree.rootId`；`stateId = SubjectTreeNode.id`。2026-11-08 数据层统一后，基础状态是 `states[0]` **真节点**，id 恒为 `__base__`；所有状态（含基础）都走同一套 `stateId` 路由与 `states[].media` 取数。
 - 进入主体页时若该主体尚无 `SubjectTree`，按既有逻辑幂等建树（`createSubjectTree` + `buildBaseStatePrompt` + 条目图片带入），树写回容器。
 
 ## 2. 导航记忆 / 前进后退

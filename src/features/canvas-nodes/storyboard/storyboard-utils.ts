@@ -6,7 +6,7 @@
 import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityKind, AiSubject } from './storyboard-types';
 import type { ProductionItem } from '../production-manager/production-manager-types';
 import { resolveSubjectCover } from '../production-manager/production-manager-types';
-import type { SubjectTree } from './subject-tree-types';
+import { nonBaseStates, type SubjectTree } from './subject-tree-types';
 import { resolveContentUrl } from '@zeroexo/plugin-nodes';
 
 /**
@@ -211,14 +211,15 @@ export function collectSubjectSources(
   };
   // 主体树最高优先级：root = 主体名/id/kind，states = 状态节点（含 state 名）
   for (const t of subjectTrees ?? []) {
-    const hasMedia = (t.states ?? []).some((n) => (n.media ?? []).length > 0) || (t.baseState?.referenceImages ?? []).length > 0;
+    const hasMedia = (t.states ?? []).some((n) => (n.media ?? []).length > 0);
     push({
       name: t.name,
       kind: t.kind as StoryboardEntity['kind'],
       id: t.rootId,
       aliases: t.aliases ?? [],
-      states: (t.states ?? []).map((n) => ({ id: n.id, name: n.state })),
-      generationStatus: hasMedia ? 'generated' : (t.states?.length ? 'placeholder' : 'placeholder'),
+      // 基础状态是 states[0]，但不是「状态 chip」：与统一前口径一致，只列迭代状态
+      states: nonBaseStates(t).map((n) => ({ id: n.id, name: n.state })),
+      generationStatus: hasMedia ? 'generated' : 'placeholder',
     });
   }
   for (const e of entities ?? []) {
@@ -344,7 +345,11 @@ export function detectStaleRefs(input: {
       continue;
     }
     if (o.kind === 'subject-base') {
-      const still = (tree.baseState?.referenceImages ?? []).some((m) => m.key && m.key === o.mediaKey);
+      // 统一后基础状态是 states[0]（id '__base__'）；旧数据仍可能在 baseState 单对象里
+      const baseMedia = (tree.states ?? []).find((s) => s.id === '__base__')?.media
+        ?? tree.baseState?.referenceImages
+        ?? [];
+      const still = baseMedia.some((m) => m.key && m.key === o.mediaKey);
       if (!still) {
         results.push({ refId: ref.id, level: 'warn', reason: `基础形态图已更新/替换（${tree.name}），建议用新图替换` });
       }

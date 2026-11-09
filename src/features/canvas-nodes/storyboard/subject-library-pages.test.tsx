@@ -6,6 +6,8 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, fireEvent, screen, waitFor, act, cleanup } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createElement } from 'react';
 import { App as AntdApp } from 'antd';
 
@@ -93,11 +95,13 @@ const PID = 'p-subject-pages';
 function makeTree(): SubjectTree {
   const tr = createSubjectTree('character', '东海龙王');
   tr.rootId = 'subj-1';
-  tr.baseState.prompt = '东海龙王三视图定妆';
+  const base = tr.states[0]!; // 基础状态 = states[0] 真节点
+  base.fullPrompt = '东海龙王三视图定妆';
+  base.deltaPrompt = base.fullPrompt;
   const node = createSubjectNode('东海龙王 · 状态2', 'image', 'user', tr.rootId, { step: 2 });
   node.id = 'state-1';
   node.appearEpisodes = [1];
-  tr.states = [node];
+  tr.states = [base, node];
   return tr;
 }
 
@@ -300,7 +304,7 @@ describe('发送资产到主体', () => {
     // 唯一写入函数落容器（真实数据断言，不是回调查用）
     const container = await readStoryboardContainer('p-send');
     const states = (container?.subjectTree as SubjectTree[] | undefined)?.[0]?.states ?? [];
-    expect(states[0]?.media?.[0]?.key).toBe('asset-key-9');
+    expect(states.find((s) => s.id === 'state-1')?.media?.[0]?.key).toBe('asset-key-9');
 
     // 状态编辑页缩略图即时可见
     await waitFor(() => expect(document.querySelector('img[data-subject-media-thumb]')).toBeTruthy());
@@ -594,7 +598,7 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
 
   it('媒体动作换到封面右上角（与外层卡片同位）；页头不再有「返回主体 / 删除状态」', async () => {
     const tree = makeTree();
-    tree.states = [{ ...tree.states[0]!, media: [{ key: 'state-key-1', type: 'image' }] }];
+    tree.states.find((s) => s.id === 'state-1')!.media = [{ key: 'state-key-1', type: 'image' }];
     renderPages(tree, PID);
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
@@ -674,8 +678,9 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
 
   it('未标注状态按全集适用；全部状态都不命中 → 整卡隐藏 + 一键回全集', async () => {
     const tree = makeTree();
-    const unmarked = { ...tree.states[0]!, id: 'state-unmarked', step: 3, appearEpisodes: [] as number[] };
-    tree.states = [tree.states[0]!, unmarked];
+    const state1 = tree.states.find((s) => s.id === 'state-1')!;
+    const unmarked = { ...state1, id: 'state-unmarked', step: 3, appearEpisodes: [] as number[] };
+    tree.states = [...tree.states, unmarked];
     renderPages(tree);
     await act(async () => { await Promise.resolve(); });
 
@@ -686,7 +691,8 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
     // 去掉未标注状态 → 选第 2 集时主体整卡隐藏
     cleanup();
     const marked = makeTree();
-    marked.states = [marked.states[0]!];
+    // 全部状态（含基础状态）都标注为其它集 → 选第 2 集整卡隐藏
+    marked.states = marked.states.map((s) => ({ ...s, appearEpisodes: [1] }));
     renderPages(marked);
     act(() => useViewPrefsStore.getState().setSubjectActiveEpisode(PID, 2));
     await waitFor(() => expect(document.querySelector('[data-subject-card="item-1"]')).toBeNull());
@@ -863,5 +869,82 @@ describe('抽屉工具栏与素材同源 + 批量编辑', () => {
     await waitFor(() => expect(onChangeTree).toHaveBeenCalledTimes(1));
     const left = onChangeTree.mock.calls[0]![0] as SubjectTree[];
     expect(left.map((tr) => tr.rootId)).toEqual(['subj-2']);
+  });
+});
+
+describe('基础状态 = 独立状态（2026-11-08）', () => {
+  it('状态卡各显示自己的出现集数；基础状态未标注显示「全部」', async () => {
+    renderPages(makeTree());
+    await openSubjectPage();
+    expect(document.querySelector('[data-state-card="__base__"]')?.textContent).toContain('全部');
+    expect(document.querySelector('[data-state-card="state-1"]')?.textContent).toContain('第 1 集');
+  });
+
+  it('基础状态编辑页与更多状态同一套表单：提示词 + 出现集数，勾选写回 baseState', async () => {
+    const onChangeTree = vi.fn();
+    renderPages(makeTree(), PID, onChangeTree);
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+
+    // label 统一为「提示词」（不再是「完整提示词 / 备注」二选一）
+    expect(document.querySelector('[data-field="prompt"]')?.getAttribute('aria-label')).toBe('提示词');
+    expect(screen.getByText('出现集数')).toBeTruthy();
+    expect(document.querySelectorAll('[data-episode-option]').length).toBe(2);
+
+    fireEvent.click(document.querySelector('[data-episode-option="2"]') as Element);
+    await waitFor(() => {
+      const calls = onChangeTree.mock.calls;
+      const next = calls[calls.length - 1]?.[0] as SubjectTree[] | undefined;
+      expect(next?.[0]?.states[0]?.appearEpisodes).toEqual([2]);
+    });
+  });
+});
+
+describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出现集数」（2026-11-08）', () => {
+  it('基础状态的状态名独立写回 states[0].state，不再改主体名', async () => {
+    const onChangeTree = vi.fn();
+    renderPages(makeTree(), PID, onChangeTree);
+    await openSubjectPage();
+    // 主体名在主体页单独编辑
+    expect((document.querySelector('[data-field="subject-name"]') as HTMLInputElement).value).toBe('东海龙王');
+
+    fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+    const nameInput = document.querySelector('[data-field="name"]') as HTMLInputElement;
+    expect(nameInput.value).toBe(''); // 不再复用主体名
+    expect(document.querySelector('[data-field="prompt"]')).toBeTruthy();
+    expect(screen.getByText('出现集数')).toBeTruthy();
+
+    fireEvent.change(nameInput, { target: { value: '正常人类' } });
+    await waitFor(() => {
+      const calls = onChangeTree.mock.calls;
+      const next = calls[calls.length - 1]?.[0] as SubjectTree[] | undefined;
+      expect(next?.[0]?.states[0]?.state).toBe('正常人类');
+      expect(next?.[0]?.name).toBe('东海龙王'); // 主体名不动
+    });
+  });
+
+  it('状态卡与面包屑显示基础状态自己的状态名', async () => {
+    const tr = makeTree();
+    tr.states[0]!.state = '正常人类';
+    renderPages(tr);
+    await openSubjectPage();
+    expect(document.querySelector('[data-state-card="__base__"]')?.textContent).toContain('正常人类');
+    fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('正常人类');
+  });
+
+  it('数据层统一：基础状态是 states[0] 真节点，旧单树不再有第二套卡片', () => {
+    const types = readFileSync(resolve(process.cwd(), 'src/features/canvas-nodes/storyboard/subject-tree-types.ts'), 'utf8');
+    expect(types).toContain("SUBJECT_BASE_STATE_ID = '__base__'");
+    expect(types).toContain('migrateSubjectTree');
+    expect(types).not.toContain('baseState: SubjectBaseState;');
+    const tree = readFileSync(resolve(process.cwd(), 'src/features/canvas-nodes/storyboard/StoryboardSubjectTree.tsx'), 'utf8');
+    expect(tree).not.toContain('function BaseStateCard');
+    expect(tree).toContain('isBase={node.id === SUBJECT_BASE_STATE_ID}');
+    expect(tree).toContain("t('subject.statePromptLabel', '提示词')");
+    expect(tree).toContain('<EpisodeMultiSelect');
   });
 });

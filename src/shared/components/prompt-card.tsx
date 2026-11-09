@@ -41,6 +41,8 @@ export interface PromptCardProps {
   categoryLabel?: string;
   tags: string[];
   imageKeys: string[];
+  /** 直接封面 URL（提示词预设用；data:/http 均可） */
+  coverUrl?: string;
   animationDelay?: number;
   borderRadius?: number;
   thumbnailAspectRatio?: string;
@@ -271,6 +273,7 @@ export function PromptCard({
   categoryLabel,
   tags,
   imageKeys,
+  coverUrl: coverUrlProp,
   animationDelay = 0,
   borderRadius = 14,
   thumbnailAspectRatio,
@@ -291,12 +294,12 @@ export function PromptCard({
   const { t } = useTranslation();
   const { message: antdMessage } = AntdApp.useApp();
 
-  const coverUrl = imageKeys.length > 0 && !coverError
+  const coverSrc = coverUrlProp ?? (imageKeys.length > 0 && !coverError
     ? getResourceUrl(imageKeys[0], 'preview')
-    : undefined;
+    : undefined);
 
   // 封面 URL 变化（列表复用同一组件实例）时重置骨架态，避免新图直接突变
-  useEffect(() => { setImgLoaded(false); }, [coverUrl]);
+  useEffect(() => { setImgLoaded(false); }, [coverSrc]);
 
   const animationDelayValue = Math.min(animationDelay * ANIMATION_BASE_DELAY, ANIMATION_MAX_DELAY);
 
@@ -327,12 +330,12 @@ export function PromptCard({
     >
       {/* 缩略图区 */}
       <div style={thumbnailStyle(thumbnailAspectRatio)}>
-        {coverUrl ? (
+        {coverSrc ? (
           <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
             {/* 骨架占位：图片未加载完成前持续 shimmer */}
             {!imgLoaded && <div style={imgSkeletonStyle(theme)} />}
             <AuthorizedImage
-              src={coverUrl}
+              src={coverSrc}
               alt={title}
               style={{
                 ...imgStyle(),

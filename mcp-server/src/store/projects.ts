@@ -91,3 +91,25 @@ export async function createProject(
   await fs.mkdir(paths.entitiesDir(meta.id, root), { recursive: true });
   return meta;
 }
+
+/** 更新项目元信息（title / tags）；updatedAt 自动刷新。 */
+export async function updateProjectMeta(
+  root: string,
+  projectId: string,
+  patch: { title?: string; tags?: string[] },
+): Promise<CanvasProjectMeta> {
+  const result = await updateUnversionedJson<ProjectsEnvelope>(paths.projectsMeta(root), {
+    mutate: (env) => {
+      const list = env?.value ?? [];
+      const idx = list.findIndex((m) => m.id === projectId);
+      if (idx < 0) throw new McpError("NOT_FOUND", `项目不存在: ${projectId}`, { projectId });
+      if (patch.title !== undefined) list[idx].title = patch.title;
+      if (patch.tags !== undefined) list[idx].tags = patch.tags;
+      list[idx].updatedAt = new Date().toISOString();
+      return { __lf: 1, value: list };
+    },
+  });
+  const updated = result.after.value.find((m) => m.id === projectId);
+  if (!updated) throw new McpError("NOT_FOUND", `项目不存在: ${projectId}`, { projectId });
+  return updated;
+}

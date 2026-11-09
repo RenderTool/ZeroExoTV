@@ -18,7 +18,9 @@ import { useTranslation } from 'react-i18next';
 import type { CommandQueue, GraphModel } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
+import { setGeneratingPreviewCanvas } from '@zeroexo/plugin-nodes';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import { MAIN_CANVAS_DOC_ID, setCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import {
   getCanvas,
   isCanvasConflict,
@@ -214,6 +216,9 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         stopCopyAutosave();
         const graph = await loadProjectGraph(projectId);
         if (!graph) throw new Error('main graph missing');
+        // 先声明「当前文档 = 主画布」再换图：Yjs 推送守卫按此判断，副本内容绝不进主文档
+        setCurrentCanvasDocId(MAIN_CANVAS_DOC_ID);
+        setGeneratingPreviewCanvas(MAIN_CANVAS_DOC_ID);
         ed.core.commandQueue.replaceState(graph);
         ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
         ed.store.setViewport(viewportOf(graph));
@@ -224,11 +229,16 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         const got = await getCanvas(projectId, cid);
         if (!got) {
           // 文件已被外部删除：回主画布，不猜、不重建
+          setCurrentCanvasDocId(MAIN_CANVAS_DOC_ID);
+          setGeneratingPreviewCanvas(MAIN_CANVAS_DOC_ID);
           ed.plugins.persistence?.resume();
           activateTab(CANVAS_TAB_KEY);
           message.warning(t('canvasCopy.missing', '画布副本文件不存在（可能已被外部删除）'));
           return;
         }
+        // 换图前先切文档作用域：副本是另一份文档，不得把它的节点/生成态写进主画布 Y.Doc
+        setCurrentCanvasDocId(cid);
+        setGeneratingPreviewCanvas(cid);
         ed.core.commandQueue.replaceState(got.graph);
         ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
         ed.store.setViewport(viewportOf(got.graph));
@@ -271,6 +281,9 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
     return () => {
       stopCopyAutosave();
       if (currentCidRef.current !== MAIN_CANVAS_ID) void saveCopyRef.current();
+      // 文档作用域复位：下一次进入画布页从主画布开始，生成任务/预览不得命中旧副本键
+      setCurrentCanvasDocId(MAIN_CANVAS_DOC_ID);
+      setGeneratingPreviewCanvas(MAIN_CANVAS_DOC_ID);
     };
   }, [stopCopyAutosave]);
 }

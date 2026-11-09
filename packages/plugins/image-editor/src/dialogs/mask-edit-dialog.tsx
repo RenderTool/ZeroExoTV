@@ -525,7 +525,7 @@ export function MaskEditDialog({
     <Modal
       open={open && Boolean(dataUrl)}
       onCancel={onClose}
-      title="局部遮罩编辑"
+      title="局部编辑"
       width={980}
       centered
       destroyOnHidden
@@ -655,14 +655,21 @@ function buildEditMask(selectionCanvas: HTMLCanvasElement): string {
   const context = canvas.getContext('2d');
   if (!context) return selectionCanvas.toDataURL('image/png');
   const selectionContext = selectionCanvas.getContext('2d');
-  context.fillStyle = '#fff';
+  // 输出给生成后端的遮罩必须是「白=要改、黑=保留」的 RGB 图：
+  // LoadImageMask(channel=red) 只读 RGB，不读 alpha；旧实现白底+透明笔迹会被当成整图全白。
+  context.fillStyle = '#000';
   context.fillRect(0, 0, canvas.width, canvas.height);
   if (!selectionContext) return canvas.toDataURL('image/png');
   const selection = selectionContext.getImageData(0, 0, canvas.width, canvas.height);
   const mask = context.getImageData(0, 0, canvas.width, canvas.height);
-  for (let index = 3; index < mask.data.length; index += 4) {
-    const sel = selection.data[index];
-    if (sel !== undefined && sel > 0) mask.data[index] = 0;
+  for (let index = 0; index < mask.data.length; index += 4) {
+    const sel = selection.data[index + 3];
+    if (sel !== undefined && sel > 0) {
+      mask.data[index] = 255;
+      mask.data[index + 1] = 255;
+      mask.data[index + 2] = 255;
+    }
+    mask.data[index + 3] = 255;
   }
   context.putImageData(mask, 0, 0);
   return canvas.toDataURL('image/png');

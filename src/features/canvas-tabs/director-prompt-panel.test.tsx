@@ -1655,3 +1655,45 @@ describe('导演台时长 = 0–30s 滑动条 + 超推荐实时提醒', () => {
     expect(document.querySelector('[data-duration-warning]')).toBeNull();
   });
 });
+
+describe('引导 = 视频槽的变体（2026-11-09 用户纠正）', () => {
+  it('视频槽有类型标签与「源视频 / 引导」下拉；选引导后同一槽转为 shot.guide', async () => {
+    const guideAsset = {
+      id: 'gv-pick', title: '片段 2 · 13.8s', kind: 'video', scope: 'project',
+      data: { kind: 'video', storageKey: 'cas:gv.mp4', guide: { id: 'gd_pick12345', frames: 22 } },
+    } as unknown;
+    mockAssets.assets.push(guideAsset);
+    try {
+      const onShotChange = vi.fn();
+      const { container } = renderPanel({
+        shot: makeShot({
+          references: [{
+            id: 'gv-pick', kind: 'video', title: '片段 2 · 13.8s', storageKey: 'cas:gv.mp4',
+          } as never],
+        }),
+        onShotChange,
+      });
+      // 槽位明确标出素材类型
+      expect(container.querySelector('[data-slot-kind="video"]')).toBeTruthy();
+      const menu = container.querySelector('[data-slot-variant-menu="gv-pick"]') as HTMLElement;
+      expect(menu).toBeTruthy();
+      fireEvent.click(menu);
+      const guideItem = await waitFor(() => {
+        const el = Array.from(document.querySelectorAll('[role="menuitem"]'))
+          .find((n) => n.textContent?.includes('使用引导'));
+        expect(el).toBeTruthy();
+        return el as HTMLElement;
+      });
+      fireEvent.click(guideItem);
+      expect(onShotChange).toHaveBeenCalledWith(expect.objectContaining({
+        guide: expect.objectContaining({ id: 'gd_pick12345', title: '片段 2 · 13.8s', frames: 22 }),
+        references: [],
+      }));
+      // 不再另开「引导」候选列表 / 空引导槽
+      expect(document.querySelector('[data-guide-candidate-list]')).toBeNull();
+      expect(container.querySelector('[data-guide-add]')).toBeNull();
+    } finally {
+      mockAssets.assets.pop();
+    }
+  });
+});

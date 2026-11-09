@@ -163,7 +163,14 @@ export class DirectorPreviewSocket {
     const prev = this.pendingFrame;
     this.pendingFrame = frame.image
       ? frame
-      : { image: prev?.image ?? null, step: frame.step, totalSteps: frame.totalSteps, segmentIndex: frame.segmentIndex };
+      : {
+          // 2026-11-07：progress-only 事件只有同一段才沿用上一张图；跨段必须清空，
+          // 否则「帧属于第 1 段、段号已是第 2 段」会把上一段画面串到下一段。
+          image: prev?.image && frame.segmentIndex === prev.segmentIndex ? prev.image : null,
+          step: frame.step,
+          totalSteps: frame.totalSteps,
+          segmentIndex: frame.segmentIndex,
+        };
     if (this.flushTimer === null) {
       this.flushTimer = window.setTimeout(() => this.flush(), this.throttleMs);
     }

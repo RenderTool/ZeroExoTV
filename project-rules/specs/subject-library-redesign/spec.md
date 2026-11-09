@@ -111,7 +111,7 @@
 |------|------|------|
 | 主体名称 | 输入框 | `tree.name` + `ProductionItem.name` |
 | 完整提示词 | textarea（6 行，可拖高） | `baseState.prompt` |
-| 基础图 | 96px 缩略 + 上传 / 删除 | `baseState.referenceImages[0]`（沿用现有上传逻辑） |
+| 基础图 | 96px 缩略 + 上传 / 删除 | `states[0].media[0]`（基础状态真节点，2026-11-08 统一） |
 | 说明 | 「基础状态不接收资产；资产发送请选择具体状态」 | — |
 
 **选中具体状态时**：
@@ -314,7 +314,7 @@
 | `ProductionItem`（name/kind/aliases/consistency/images/coverKey/episodeIds/voice） | `productionItems` prop | 左栏行、主体头、封面回落（`resolveSubjectCover`） |
 | `SubjectTree`（rootId/name/kind/baseState/states/coverKey） | `subjectTree` prop + `onChangeTree` | 中栏全部内容与写入 |
 | `SubjectTreeNode`（state/step/media/origin/appearEpisodes/source/fullPrompt/deltaPrompt） | 同上 | 状态卡与右栏字段 |
-| `baseState.referenceImages[0]` | 树 | 基础卡缩略与基础图编辑 |
+| `states[0].media[0]` | 树 | 基础卡缩略与基础图编辑 |
 | `appearEpisodes` | 节点 | chip 多选 + 排序/标签（悬空编号过滤显示） |
 | `origin` | `media[0].origin` | 来源徽章（可缺省） |
 | `view-prefs.subjectLibrary.activeKind` | store | 左栏类型筛选持久化 |
@@ -330,7 +330,7 @@
 | 非 CAS storageKey | 视为存活，靠 `usePreviewImage` 回落占位 |
 | 历史 video 引用 | 只读展示（`视频不再支持，仅保留引用`），不提供新关联 |
 | 旧浏览器 history marker | 三态字段未变，直接可映射到三栏选中组合 |
-| `baseState.referenceImages` 与 `ProductionItem.images` | 两者并存：主体头部封面/基础卡缩略走 `baseState`；左栏封面走 `resolveSubjectCover(ProductionItem)`；不改任何一侧 |
+| `states[0].media` 与 `ProductionItem.images` | 两者并存：主体头部封面/基础卡缩略走 `states[0]`；左栏封面走 `resolveSubjectCover(ProductionItem)`；不改任何一侧 |
 
 ### 5.3 明确不读的数据
 

@@ -83,6 +83,8 @@ function cleanStaleBuildAssets(): Plugin {
 }
 
 export default defineConfig({
+  // GitHub Pages 项目站点：部署时设置 VITE_BASE_PATH=/<repo>/；自定义域名/根站点保持 /
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [tailwindcss(), react(), zeroexoFsServer(), cleanStaleBuildAssets()],
   build: {
     // 静态资源目录（public/openlib 7268 张）原样保留；旧 hashed chunk 由

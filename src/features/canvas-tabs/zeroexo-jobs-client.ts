@@ -27,9 +27,41 @@ export interface ZeroexoJobParams {
   reference_image: string;
   /** 多参考图（最多 9 张；分镜图/站位锁定图等） */
   reference_images?: string[];
+  /**
+   * 片段引导槽（2026-11-07）：显式指定本段使用的 guide id（gd_xxx）。
+   * 传了它 → 服务端不得再使用「上一段生成的引导」；前端同时发 use_prev_guide=false。
+   */
+  guide_id?: string;
+  /** 显存策略（服务层自动决定；true=低显存链，false=原模型） */
+  use_low_vram?: boolean;
 }
 
 export type ZeroexoJobState = 'queued' | 'running' | 'success' | 'error' | 'cancelled';
+
+/** 图像编辑（Qwen Image 2.1）作业参数（2026-11-07） */
+export interface QwenImageJobParams {
+  /** 编辑指令（同时写工作流的 raw prompt 与 LLM 改写输入） */
+  edit_prompt: string;
+  negative_prompt?: string;
+  /** ComfyUI input 文件名（先经 /upload/image）；t2i 时为空 */
+  input_image?: string;
+  /** 遮罩文件名（可选；有值时服务端走遮罩模板） */
+  mask_image?: string;
+  seed: number;
+  steps: number;
+  cfg: number;
+  denoise: number;
+  /** false=图生图编辑（用 input_image），true=文生图 */
+  edit_mode: boolean;
+  /** true=先用 LLM（TextGenerate）改写指令 */
+  use_llm_enhance: boolean;
+  width: number;
+  height: number;
+}
+
+/** 画布图像节点的「本机 Qwen 图像编辑」伪模型 key */
+export const LOCAL_IMAGE_MODEL_KEY = 'zeroexo:qwen-image-2.1';
+export const LOCAL_IMAGE_MODEL_LABEL = 'QwenImage2.1';
 
 /** 画布视频节点的「本机」伪模型 key（node.data.model 存它即走 /zeroexo/v1/jobs） */
 export const LOCAL_VIDEO_MODEL_KEY = 'zeroexo:minimax-h3';
@@ -43,6 +75,8 @@ export interface ZeroexoJobStatus {
   params?: Partial<ZeroexoJobParams>;
   outputs?: Array<{ kind: string; path: string }>;
   guide?: { id?: string; path?: string; frames?: number; sha256?: string } | null;
+  /** 插件回传：本段引导来源（explicit=显式 guide_id / prev=上一段 / none=未使用） */
+  guideSource?: 'explicit' | 'prev' | 'none' | null;
   error?: string | null;
 }
 
@@ -76,14 +110,15 @@ export async function probeZeroexoPlugin(baseUrl: string, timeoutMs = 4000): Pro
 }
 
 /** 提交单段作业（一个片段 = 一个 ComfyUI prompt） */
-export async function submitZeroexoJob(
+async function submitJob(
   baseUrl: string,
-  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: ZeroexoJobParams },
+  kind: 'reference_video' | 'qwen_image_edit',
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: object },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
   const res = await fetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind: 'reference_video', ...body }),
+    body: JSON.stringify({ kind, ...body }),
   });
   if (!res.ok) throw new Error(`/zeroexo/v1/jobs ${await readError(res)}`);
   const data = (await res.json().catch(() => null)) as
@@ -92,6 +127,22 @@ export async function submitZeroexoJob(
   if (!data?.jobId) throw new Error('/zeroexo/v1/jobs 未返回 jobId');
   if (data.ok === false) throw new Error(data.error || '插件拒绝作业（模型/模板未就绪）');
   return { jobId: data.jobId, state: (data.state ?? 'queued') as ZeroexoJobState, error: data.error ?? null };
+}
+
+/** 提交参考生视频作业 */
+export async function submitZeroexoJob(
+  baseUrl: string,
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: ZeroexoJobParams },
+): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
+  return submitJob(baseUrl, 'reference_video', body);
+}
+
+/** 提交图像编辑作业（Qwen Image 2.1） */
+export async function submitQwenImageJob(
+  baseUrl: string,
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: QwenImageJobParams },
+): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
+  return submitJob(baseUrl, 'qwen_image_edit', body);
 }
 
 /** 查询作业状态 */

@@ -124,6 +124,10 @@ describe('测试连接三态', () => {
       expect(useComfyuiEndpointStore.getState()).toMatchObject({ connected: true, backend: 'direct' }),
     );
     expect(screen.getByTestId('comfyui-connect-trigger').getAttribute('data-connection-state')).toBe('connected');
+    // 连接机器信息 + 显存策略手动兜底
+    expect(screen.getByTestId('comfyui-machine-info')).toBeTruthy();
+    expect(screen.getByTestId('comfyui-vram-mode')).toBeTruthy();
+    expect(screen.getByTestId('comfyui-vram-summary')).toBeTruthy();
     // 直连自动抓模型四件套（界面不暴露下拉）
     expect(useComfyuiConnectionStore.getState().models.unet).toBe('minimax_h3_v1.safetensors');
   });
@@ -169,6 +173,8 @@ describe('测试连接三态', () => {
     ]);
     fireEvent.click(screen.getByTestId('comfyui-test-btn'));
     await waitFor(() => expect(screen.getByTestId('comfyui-test-fail').textContent).toContain('--enable-cors-header'));
+    // 不能只在文案里出现参数名就算通过：必须明确是「要加」，而不是「无需」
+    expect(screen.getByTestId('comfyui-test-fail').textContent).not.toContain('无需 --enable-cors-header');
   });
 });
 

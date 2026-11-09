@@ -19,7 +19,8 @@
  * 回收（单类目录内，不跨项目）：
  *  - 保留最近 30 份且不早于 7 天（超出任一条件即回收）；
  *  - 目录总量 > 200MB 时按最旧继续回收；
- *  - 永不回收：最近 3 份（任意 reason）与最近 1 份 pre-restore。
+ *  - 永不回收：最近 3 份（任意 reason）、最近 1 份 pre-restore、以及全部星标收藏版本；
+ *  - 星标收藏版本不占 30 份配额（配额只统计非收藏项）。
  *
  * 迁移：老 entities/backups/ 下文件（上轮 pre-save 备份 + 导入覆盖备份）一次性归并到
  * snapshots/script/（reason=pre-save），先 dry-run 打印清单再执行，幂等。
@@ -41,6 +42,8 @@ export interface EntitySnapshot<T = unknown> {
   name?: string;
   /** 实质内容 hash（去重/校验口径见 snapshotContentOf） */
   hash: string;
+  /** 星标收藏（2026-11-08）：收藏版本跳过一切自动回收，且不占用 SNAPSHOT_KEEP_COUNT 配额 */
+  favorite?: boolean;
   entity: T;
 }
 
@@ -115,7 +118,7 @@ export async function writeSnapshot<T>(
   type: SnapshotType,
   entity: T,
   reason: SnapshotReason,
-  opts: { name?: string; now?: Date } = {},
+  opts: { name?: string; now?: Date; favorite?: boolean } = {},
 ): Promise<SnapshotListItem<T>> {
   const now = opts.now ?? new Date();
   const fileName = `${SNAPSHOT_FILE_PREFIX}${snapTimestamp(now)}.json`;
@@ -125,6 +128,7 @@ export async function writeSnapshot<T>(
     reason,
     createdAt: now.toISOString(),
     ...(opts.name ? { name: opts.name } : {}),
+    ...(opts.favorite ? { favorite: true } : {}),
     hash: contentHash(snapshotContentOf(type, entity)),
     entity,
   };
@@ -219,9 +223,10 @@ export async function afterWriteSnapshot(projectId: string, type: SnapshotType, 
 
 /**
  * 回收（单类目录内，不跨项目）：
- *  - 删除条件（满足其一）：不在最近 30 份内，或创建于 7 天前；
+ *  - 删除条件（满足其一）：不在最近 30 份**非收藏版本**内，或创建于 7 天前；
  *  - 目录总量 > 200MB 时按最旧继续回收；
- *  - 保护：最近 3 份（任意 reason）与最近 1 份 pre-restore 永不回收。
+ *  - 保护：最近 3 份（任意 reason）、最近 1 份 pre-restore、全部星标收藏版本永不回收；
+ *  - 星标不占 30 份配额（配额只统计非收藏项），避免收藏越多越挤掉普通版本。
  * @returns 实际回收份数
  */
 export async function recycleSnapshots(projectId: string, type: SnapshotType, now = new Date()): Promise<number> {
@@ -229,19 +234,25 @@ export async function recycleSnapshots(projectId: string, type: SnapshotType, no
   const snaps = await listSnapshots(projectId, type);
   if (snaps.length === 0) return 0;
 
-  // 保护集：最近 3 份（任意 reason）+ 最近 1 份 pre-restore
+  // 保护集：最近 3 份（任意 reason）+ 最近 1 份 pre-restore + 全部星标收藏
   const protectedNames = new Set<string>();
   for (const s of snaps.slice(-3)) protectedNames.add(s.fileName);
   for (let i = snaps.length - 1; i >= 0; i -= 1) {
     if (snaps[i]!.reason === 'pre-restore') { protectedNames.add(snaps[i]!.fileName); break; }
   }
+  for (const s of snaps) if (s.favorite) protectedNames.add(s.fileName);
 
   let removed = 0;
   const t = now.getTime();
+  // fromEnd 按非收藏项计数：收藏项被完全排除在配额之外
+  const normalCount = snaps.reduce((n, s) => (s.favorite ? n : n + 1), 0);
+  let normalSeen = 0;
   for (let i = 0; i < snaps.length; i += 1) {
     const s = snaps[i]!;
+    if (s.favorite) continue;
+    const fromEnd = normalCount - normalSeen; // 1 = 最新的非收藏版本
+    normalSeen += 1;
     if (protectedNames.has(s.fileName)) continue;
-    const fromEnd = snaps.length - i; // 1 = 最新
     const tooMany = fromEnd > SNAPSHOT_KEEP_COUNT;
     const tooOld = t - Date.parse(s.createdAt) > SNAPSHOT_KEEP_MS;
     if (tooMany || tooOld) {
@@ -292,6 +303,27 @@ export async function undeleteSnapshot<T>(
 ): Promise<void> {
   const { fileName: _fileName, ...rest } = snap;
   await writeJson(`${snapshotDir(projectId, type)}/${snap.fileName}`, rest);
+}
+
+/**
+ * 切换快照的星标收藏（2026-11-08）：
+ *  - 按原文件名原内容写回，fileName / createdAt / hash 全不变 → 字典序排序位置不变；
+ *  - 取消收藏时移除字段，老快照（无该字段）天然兼容 listSnapshots 的校验；
+ *  - 收藏项由 recycleSnapshots 保护，跳过数量上限 / 7 天 / 200MB 三类自动回收。
+ */
+export async function setSnapshotFavorite(
+  projectId: string,
+  type: SnapshotType,
+  fileName: string,
+  favorite: boolean,
+): Promise<void> {
+  const path = `${snapshotDir(projectId, type)}/${fileName}`;
+  const snap = await readJson<EntitySnapshot>(path);
+  if (!snap || typeof snap !== 'object' || typeof snap.hash !== 'string') return;
+  const next: EntitySnapshot = { ...snap };
+  if (favorite) next.favorite = true;
+  else delete next.favorite;
+  await writeJson(path, next);
 }
 
 /**

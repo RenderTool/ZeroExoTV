@@ -18,8 +18,9 @@ import {
   Pencil,
   Trash2,
   MoreHorizontal,
+  Waypoints,
 } from 'lucide-react';
-import { Tooltip, Dropdown } from 'antd';
+import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { TFunction } from 'i18next';
@@ -27,6 +28,7 @@ import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { registerCard, type GridCardRendererProps, type ListCardRendererProps } from './card-registry.js';
 import { SendActionButtons, cardActionBtnStyle } from './card-send-actions.js';
 import { AssetScopeBadge } from '@/features/asset-picker/components/scope-badge.js';
+import { assetMayHaveGuide } from '@/features/asset-picker/services/guide-resolve.js';
 import { cardCoverMetrics, CARD_COVER_TRANSITION, useMasonryColumnWidth } from '@/shared/components/masonry-grid.js';
 import {
   UI_CARD_GAP,
@@ -35,6 +37,7 @@ import {
   uiCardMetaStyle,
   uiCardNameStyle,
   CardShell,
+  ThumbBadge,
 } from '@/shared/ui/index.js';
 
 // ===== 辅助 =====
@@ -127,7 +130,8 @@ function AssetCardGrid({
 
   const kindIcon = getKindIcon(asset.kind, theme);
   const showCover = (isImage || isVideo) && hydrated && !coverError;
-  const isDark = theme.mode === 'dark';
+  /** 生成产物自带的引导数据（2026-11-07）：提供「视频+引导」导出与发送引导入口 */
+  const hasGuide = isVideo && assetMayHaveGuide(asset);
   // 2026-11-05 用户拍板：主体卡与资产卡共用同一套视觉 token（shared/ui）
 
   // 资产项目化：归属标识（公共/本项目）。2026-11-05 用户拍板：公共资产在本项目内
@@ -140,12 +144,28 @@ function AssetCardGrid({
   const moreMenuItems = useMemo<MenuProps['items']>(() => {
     const items: MenuProps['items'] = [];
     if (onDownload) {
-      items.push({
-        key: 'download',
-        icon: <Download size={14} />,
-        label: t('common.download'),
-        onClick: (e) => { e.domEvent.stopPropagation(); onDownload(); },
-      });
+      if (hasGuide) {
+        // 生成了引导的数据：下载时必须能选「只视频 / 视频+引导」（2026-11-07 需求 1）
+        items.push({
+          key: 'download',
+          icon: <Download size={14} />,
+          label: t('assetLibrary.downloadVideoOnly', '下载视频'),
+          onClick: (e) => { e.domEvent.stopPropagation(); onDownload(); },
+        });
+        items.push({
+          key: 'download-guide',
+          icon: <Waypoints size={14} />,
+          label: t('assetLibrary.downloadVideoWithGuide', '下载视频+引导'),
+          onClick: (e) => { e.domEvent.stopPropagation(); onDownload({ withGuide: true }); },
+        });
+      } else {
+        items.push({
+          key: 'download',
+          icon: <Download size={14} />,
+          label: t('common.download'),
+          onClick: (e) => { e.domEvent.stopPropagation(); onDownload(); },
+        });
+      }
     }
     items.push({
       key: 'rename',
@@ -161,7 +181,7 @@ function AssetCardGrid({
       onClick: (e) => { e.domEvent.stopPropagation(); onDelete(); },
     });
     return items;
-  }, [onDownload, onRename, onDelete, t]);
+  }, [hasGuide, onDownload, onSendToDirector, onRename, onDelete, t]);
 
   return (
     <div
@@ -204,6 +224,22 @@ function AssetCardGrid({
           scope={assetScope}
           style={{ position: 'absolute', top: 6, left: multiSelectEnabled ? 34 : 6, zIndex: 4 }}
         />
+        {hasGuide && (
+          <button
+            type="button"
+            data-guide-download={asset.id}
+            title={t('assetLibrary.downloadVideoWithGuide', '下载视频+引导')}
+            aria-label={t('assetLibrary.downloadVideoWithGuide', '下载视频+引导')}
+            onClick={(e) => { e.stopPropagation(); onDownload?.({ withGuide: true }); }}
+            style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 4, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}
+          >
+            <ThumbBadge>
+              <Waypoints size={10} />
+              {t('assetLibrary.hasGuide', '含引导')}
+              <Download size={10} />
+            </ThumbBadge>
+          </button>
+        )}
         {isVideo && videoCreated ? (
           <video
             ref={videoRef}
@@ -288,22 +324,18 @@ function AssetCardGrid({
           transition: 'opacity 0.3s',
           pointerEvents: 'none',
         }} />
-
-      </CardShell>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        gap: 2,
-        paddingLeft: UI_CARD_INFO_PADDING_X,
-        paddingRight: UI_CARD_INFO_PADDING_X,
-      }}>
-        {/* 动作按钮与开源资产同一落位：内联在标题行右侧，不再压在封面上
-            （2026-11-05 修正“两套图标”；仅抽屉宿主 showQuickActions=true 时行高撑到 32） */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: showQuickActions ? 32 : 24 }}>
-          <span style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}>
-            {asset.title}
-          </span>
+        {/* 操作按钮统一落位：封面右下角（与历史卡同位置，黑色 28×28 图标） */}
+        <div
+          data-asset-card-actions
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute', right: 6, bottom: 6, zIndex: 5,
+            display: 'flex', alignItems: 'center', gap: 4,
+            opacity: hovered ? 1 : 0,
+            pointerEvents: hovered ? 'auto' : 'none',
+            transition: 'opacity 0.2s',
+          }}
+        >
           {showQuickActions && onEditImage && asset.kind === 'image' && (
             <button
               type="button"
@@ -319,13 +351,43 @@ function AssetCardGrid({
           {showQuickActions && (
             <SendActionButtons
               onSendToCanvas={onSendToCanvas}
-              onSendToDirector={onSendToDirector}
+              onSendToDirector={onSendToDirector ? () => onSendToDirector('video') : undefined}
+              hasGuide={hasGuide}
+              onSendGuideToDirector={hasGuide && onSendToDirector ? () => onSendToDirector('guide') : undefined}
               kind={asset.kind}
               visible={hovered}
               alwaysVisible
               t={t}
             />
           )}
+          <Dropdown menu={{ items: moreMenuItems }} trigger={['click']} placement="bottomRight">
+            <button
+              type="button"
+              data-card-more
+              aria-label={t('assetLibrary.moreActions', '更多')}
+              title={t('assetLibrary.moreActions', '更多')}
+              onClick={(e) => e.stopPropagation()}
+              style={cardActionBtnStyle}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </Dropdown>
+        </div>
+
+      </CardShell>
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        gap: 2,
+        paddingLeft: UI_CARD_INFO_PADDING_X,
+        paddingRight: UI_CARD_INFO_PADDING_X,
+      }}>
+        {/* 标题行只保留标题；操作按钮统一在封面右下角（历史卡同位） */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: showQuickActions ? 32 : 24 }}>
+          <span style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}>
+            {asset.title}
+          </span>
         </div>
         {/* 资产项目化：全局资产库资产中性小标签「全局」——仅标识来源，不带操作限制（scopeView 缺省时不显示） */}
         {fromLibrary && (
@@ -342,39 +404,6 @@ function AssetCardGrid({
           <span style={uiCardMetaStyle(theme)}>
             {getKindLabel(asset.kind, t)}
           </span>
-          {/* 画布项目卡片同款「更多」按钮(下载/重命名/删除) */}
-          <Dropdown
-            menu={{ items: moreMenuItems }}
-            trigger={['click']}
-            placement="bottomRight"
-          >
-            <button
-              type="button"
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                flexShrink: 0,
-                width: 24,
-                height: 24,
-                padding: 0,
-                border: 'none',
-                borderRadius: 6,
-                background: 'transparent',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: theme.toolbar.textMuted,
-                opacity: hovered ? 1 : 0,
-                transition: 'opacity 0.2s, background 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <Tooltip title={t('projectCard.moreActions')}>
-                <MoreHorizontal size={14} />
-              </Tooltip>
-            </button>
-          </Dropdown>
         </div>
       </div>
     </div>

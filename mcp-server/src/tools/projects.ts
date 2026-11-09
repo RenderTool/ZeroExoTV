@@ -3,7 +3,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot, frontendBaseUrl } from "../config.js";
-import { createProject, getProjectOverview, readProjectsMeta } from "../store/projects.js";
+import { createProject, getProjectOverview, readProjectsMeta, updateProjectMeta } from "../store/projects.js";
 import { defTool, type Ctx } from "./_register.js";
 
 export function registerProjectTools(server: McpServer, ctx: Ctx): void {
@@ -52,6 +52,27 @@ export function registerProjectTools(server: McpServer, ctx: Ctx): void {
     handler: async (args) => {
       const meta = await createProject(dataRoot(), { title: args.title, tags: args.tags });
       return { projectId: meta.id, title: meta.title, url: `${frontendBaseUrl()}/#/editor/${meta.id}` };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "update_project_meta",
+    description: "更新项目元信息（标题、标签）。至少提供 title 或 tags 之一。",
+    bits: ["project.write"],
+    schema: {
+      projectId: z.string(),
+      title: z.string().min(1).optional(),
+      tags: z.array(z.string()).optional(),
+    },
+    handler: async (args) => {
+      const patch: { title?: string; tags?: string[] } = {};
+      if (args.title !== undefined) patch.title = args.title;
+      if (args.tags !== undefined) patch.tags = args.tags;
+      if (patch.title === undefined && patch.tags === undefined) {
+        throw new Error("至少提供 title 或 tags 之一");
+      }
+      const meta = await updateProjectMeta(dataRoot(), args.projectId, patch);
+      return { projectId: meta.id, title: meta.title, tags: meta.tags, updatedAt: meta.updatedAt };
     },
   });
 }

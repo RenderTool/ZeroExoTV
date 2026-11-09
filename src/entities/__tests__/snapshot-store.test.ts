@@ -48,7 +48,7 @@ vi.mock('@/platform/fs', () => {
 import {
   writeSnapshot, listSnapshots, recycleSnapshots, afterWriteSnapshot,
   migrateLegacyBackups, ensureLegacyMigrated,
-  deleteSnapshotFile, undeleteSnapshot,
+  deleteSnapshotFile, undeleteSnapshot, setSnapshotFavorite,
   SNAPSHOT_KEEP_COUNT, SNAPSHOT_KEEP_MS,
   type EntitySnapshot, type SnapshotListItem,
 } from '@/entities/snapshot-store.js';
@@ -178,6 +178,80 @@ describe('snapshot-store 回收（③：30 份 / 7 天 / 保护 / 200MB）', () 
     }
     await recycleSnapshots('p1', 'script', now);
     expect(snapNames()).toHaveLength(3); // 240MB > 200MB → 最旧一份被回收 → 180MB ≤ 200MB
+  });
+});
+
+describe('snapshot-store 星标收藏（2026-11-08：上限 30 + 收藏跳过）', () => {
+  beforeEach(() => {
+    files.clear();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-04T12:00:00.000Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('writeSnapshot 写入 favorite；setSnapshotFavorite 可切换且不改文件名/时间/hash', async () => {
+    const snap = await writeSnapshot('p1', 'script', entityAt(0), 'manual', { favorite: true });
+    const before = await snapAt(0);
+    expect(before?.favorite).toBe(true);
+    expect((await listSnapshots('p1', 'script'))[0]?.favorite).toBe(true);
+
+    await setSnapshotFavorite('p1', 'script', snap.fileName, false);
+    const off = await snapAt(0);
+    expect(off?.favorite).toBeUndefined();
+    expect(off?.createdAt).toBe(before?.createdAt);
+    expect(off?.hash).toBe(before?.hash);
+    expect(snapNames()[0]).toBe(`${DIR}/${snap.fileName}`); // 排序位置不变
+
+    await setSnapshotFavorite('p1', 'script', snap.fileName, true);
+    expect((await snapAt(0))?.favorite).toBe(true);
+  });
+
+  it('收藏项不占 30 份配额：35 份里 3 份收藏 → 只回收最旧的普通版本', async () => {
+    const TOTAL = SNAPSHOT_KEEP_COUNT + 5;
+    const favoriteNames: string[] = [];
+    for (let i = 0; i < TOTAL; i += 1) {
+      vi.setSystemTime(new Date(Date.now() + 1000));
+      const fav = i === 0 || i === 1 || i === TOTAL - 1;
+      const snap = await writeSnapshot('p1', 'script', entityAt(i), 'auto', fav ? { favorite: true } : {});
+      if (fav) favoriteNames.push(snap.fileName);
+    }
+    expect(snapNames()).toHaveLength(TOTAL);
+    await recycleSnapshots('p1', 'script');
+
+    const all = await listSnapshots('p1', 'script');
+    const favs = all.filter((s) => s.favorite);
+    const normals = all.filter((s) => !s.favorite);
+    expect(favs.map((s) => s.fileName).sort()).toEqual(favoriteNames.sort());
+    expect(normals).toHaveLength(SNAPSHOT_KEEP_COUNT);
+    expect(normals[0]?.entity).toEqual(entityAt(4)); // 最旧两份普通版本被回收
+  });
+
+  it('收藏项跳过 7 天 TTL 回收', async () => {
+    const now = new Date('2026-11-04T12:00:00.000Z');
+    const old = new Date(now.getTime() - SNAPSHOT_KEEP_MS - 86400000);
+    const fav = await writeSnapshot('p1', 'script', entityAt(0), 'manual', { now: old, favorite: true });
+    await writeSnapshot('p1', 'script', entityAt(1), 'manual', { now: new Date(old.getTime() + 1000) });
+    for (let i = 2; i < 5; i += 1) {
+      await writeSnapshot('p1', 'script', entityAt(i), 'auto', { now: new Date(now.getTime() - (5 - i) * 1000) });
+    }
+    await recycleSnapshots('p1', 'script', now);
+    const all = await listSnapshots('p1', 'script');
+    expect(all.some((s) => s.fileName === fav.fileName && s.favorite)).toBe(true);
+  });
+
+  it('收藏项跳过 200MB 总量回收（改删次旧的普通版本）', async () => {
+    const now = new Date('2026-11-04T12:00:00.000Z');
+    const BIG = 60 * 1024 * 1024;
+    const fav = await writeSnapshot('p1', 'script', entityAt(0), 'manual', { now, favorite: true });
+    files.get(`${DIR}/${fav.fileName}`)!.size = BIG;
+    for (let i = 1; i < 5; i += 1) {
+      const s = await writeSnapshot('p1', 'script', entityAt(i), 'auto', { now: new Date(now.getTime() + i * 1000) });
+      files.get(`${DIR}/${s.fileName}`)!.size = BIG;
+    }
+    await recycleSnapshots('p1', 'script', now);
+    const all = await listSnapshots('p1', 'script');
+    expect(all.some((s) => s.fileName === fav.fileName && s.favorite)).toBe(true);
+    expect(all.map((s) => JSON.stringify(s.entity))).not.toContain(JSON.stringify(entityAt(1)));
   });
 });
 

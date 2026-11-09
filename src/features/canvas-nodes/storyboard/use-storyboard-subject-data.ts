@@ -25,7 +25,7 @@ import {
   type ProductionItem,
   type ProductionItemKind,
 } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { migrateSubjectTrees, type SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 
 export type StoryboardSubjectLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -91,8 +91,10 @@ export function useStoryboardSubjectData(
     if (!projectId || !container) return;
     useSubjectCountStore.getState().publish(projectId, (container.entities ?? []).length);
   }, [projectId, container]);
-  const subjectTree = useMemo(
-    () => ((container?.subjectTree ?? []) as SubjectTree[]),
+  // 2026-11-08 唯一读盘归一化点：旧 baseState 双结构 → states[0] 真节点。
+  // 任何一笔写回都会把统一结构落盘（惰性迁移），老数据不会丢。
+  const subjectTree = useMemo<SubjectTree[]>(
+    () => migrateSubjectTrees(container?.subjectTree),
     [container],
   );
 

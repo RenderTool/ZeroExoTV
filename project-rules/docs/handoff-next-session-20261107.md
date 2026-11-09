@@ -1,61 +1,32 @@
-# 交接：下一会话待办（2026-11-07 收尾）
+# 交接：2026-11-07 收尾（三项待办已完工）
 
-本次会话已收尾，工作区干净。前端 `tsc` 干净、全量 1238 项测试通过（10 项为已禁用的 CAS 自愈旧用例跳过）；MCP 65 项通过；ComfyUI 插件 `ComfyUI_ZeroExoNodes` 运行中，健康接口署名 `H3ZeroExo`。
+> 本文件原列三项待办，已在同日完成并记账。详细根因/契约/人工验证清单见
+> [2026-11-07-guide-and-ui-notes.md](2026-11-07-guide-and-ui-notes.md)。
 
-## 待办 1：子画布生成任务刷新后串到主画布同节点
+## 状态
 
-现象：在子画布发起的视频生成任务，刷新页面后错误地出现在主画布的同 id 节点上。
+| 待办 | 状态 | 摘要 |
+|---|---|---|
+| 1. 子画布生成任务刷新后串到主画布同 id 节点 | 已修 | 画布文档作用域（`current-canvas-doc`）+ 本地版不从共享 Y.Doc 播种 + 预览/任务按 `canvasDocId:nodeId` + 续接记录带 `canvasId` |
+| 2. 点击下载视频没有任何反应 | 已修 | 统一 `downloadAsset`：按 storageKey 读磁盘/CAS 后触发下载，失败明确提示；生成后 storageKey 写回节点 |
+| 3. 引导数据导出 + 导演台引导槽 + ComfyUI API | 已实现 | 资产 `data.guide` / 片段 `guide` 槽（不占 9 图）/ 下载视频+引导 / 发送引导 / `guide_id` + `use_prev_guide` 语义 / 插件 `prev_guide_path` |
+| 用户追加：衔接 UI 改链接/断链图标、点击切换 | 已改 | 时间轴交界常显开关：绿链接 / 红断链，点击直接切换 |
+| 用户追加：预览组胶囊「另存画布」+ 文案简化 | 已改 | 预览组也渲染入口；文案统一「另存画布」/「已另存为画布副本「title」」 |
+| 用户追加：历史「加入资产库」目标可选 + 只导出选中 | 已改 | 单卡/批量均下拉选择「本项目 / 公共资产」；导出共用同一文件，历史保留 |
+| 用户追加：点击导演台片段右侧预览不播放 | 已改 | 点片段/缩略播放键 = 切段并自增起播令牌；源异步解析完成后再起播 |
+| 用户追加：导演台版本历史批量操作 | 已改 | 版本记录支持多选、全选/取消、批量删除（二次确认） |
+| 用户追加：资产删除误删历史视频 | 已修 | 删除前为仍引用同一 CAS 的存活记录补挂 ref；无 ref 的存量记录不会再被删文件 |
+| 用户追加：引导下载按钮看不到 | 已改 | 「含引导」角标本身可点（下载视频+引导）；菜单保留两项；存量按 jobId 回查 guide |
+| 用户追加：Qwen Image 2.1 图像编辑工作流接入（画布 + 图片编辑 + 剧本遮罩） | 已实现 | 新增 `qwen_image_edit` kind + 图生图/遮罩/文生图三模板；画布图片节点可选 QwenImage2.1；局部遮罩真实提交；详见 `2026-11-07-qwen-image-edit-integration.md` |
 
-排查方向：
-- 生成任务的前端跟踪状态是否只按 `nodeId` 做键、没有带 `canvasId`：
-  - `src/pages/editor/editor-canvas/interactions/local-minimax-video.ts` 的 `activeLocalJobs`（目前 key = nodeId）
-  - `packages/plugins/nodes/src/generating-preview-store.ts` 的 `byNode`（目前 key = nodeId）
-  - `src/features/canvas-tabs/use-director-run.ts` 的秒级预览/段状态回写
-- 画布副本与主画布可能复用相同节点 id（复制画布时 id 不变）→ 任何全局按 nodeId 的映射都会串台。需要把键改为 `canvasId + nodeId`，或把 job 归属画布 id 一起持久化，回写前校验当前画布。
-- 刷新后自愈路径：`workbench-stale-generating.ts` / 节点 `data.status='loading'` 的恢复逻辑也可能按 nodeId 误命中。
-- 验收：主画布与子画布各有一个同 id 视频节点，在子画布发起任务，刷新后主画布对应节点不得出现 loading/预览/错误。
+## 仍需人工做
 
-## 待办 2：点击下载视频没有任何反应
+1. 按 `2026-11-07-guide-and-ui-notes.md` 第六节做生成/下载/导演台/子画布实操验收（ComfyUI 已重启，API smoke 已过）。
 
-排查方向：
-- 资产卡/历史卡的下载动作（`download` 菜单项）最终如何取 URL：
-  - `src/features/asset-library/cards/asset-card.tsx`
-  - `src/features/canvas-assets/groups/HistoryGroup.tsx`
-  - 资产 `data.url` 对生成产物为空，只有 `storageKey`（`cas:` / `video:`），需要异步 `resolveMediaUrl` 后再触发 `<a download>`。
-- blob URL 是否在点击前被 revoke；`<a>` 是否挂到 DOM、`download` 属性是否被浏览器忽略（跨域 URL 只能打开不能下载）。
-- 验收：历史/素材/画布节点三处下载视频都有真实文件落盘（本地文件选择器或浏览器下载）。
+## 工具链快照
 
-## 待办 3：引导数据（guide）导出与导演台插槽语义（含 ComfyUI API 适配）
-
-需求：
-1. 通过我们方法生成的视频必须**带引导数据**，并在本地下载时提供选项：只导出视频 / 导出视频+引导数据（引导数据单独文件，`.safetensors` 或约定格式）。
-2. 发送到导演台时让用户选择：发送视频本身，还是发送引导数据。
-3. 引导数据**不占 9 张参考图槽位数量，但要插入插槽**（独立槽位类型）。
-4. 引导数据必须有**特殊标识**（角标/类型），与普通图片/视频区分。
-5. 每个片段**至多一个引导槽**；再次发送引导数据只替换该槽内容。
-6. 如果当前片段已有引导槽数据，**不得再用上一段生成的引导数据**作为本段引导（覆盖 `use_prev_guide`）。
-7. 以上需要 ComfyUI 插件 API 层面适配（不是只改前端）。
-
-现有相关位置：
-- 插件：`D:\ComfyUI\ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI_ZeroExoNodes`
-  - `ref_video.py`：`reference_image` / `reference_images`、`guide_frames`、`use_prev_guide`、`guide_path`
-  - `__init__.py`：`/zeroexo/v1/jobs` 参数、guide 落盘 `output/zeroexo/guides/gd_*.safetensors`
-  - `templates/reference_video.json`
-- 桥接（同插件内 `bridge/`）：`/zeroexo/h3/run` 的 timeline、`guide` 机制、`use_prev_guide`
-- 前端：
-  - `src/features/canvas-tabs/use-director-run.ts`（逐段落库、guide 元数据）
-  - `src/features/canvas-tabs/director-pack-builder.ts` / `director-protocol-map.ts`（参考槽位、use_prev_guide）
-  - `src/features/canvas-nodes/storyboard/`（槽位 UI、素材发送、导轨卡片）
-  - `src/features/canvas-tabs/zeroexo-jobs-client.ts`（job 参数）
-
-验收：
-- 生成完成后可在节点/资产处选择「导出视频」或「导出视频+引导」；
-- 发送到导演台时可选「发送视频」/「发送引导数据」；
-- 引导槽有专属类型与标识，每片段最多一个，重复发送是替换；
-- 片段存在引导槽时，运行参数不再使用上一段 guide（API 侧 `use_prev_guide=false`，且优先显式 guide 路径）；
-- 对应前端单测 + 插件 smoke（提交作业验证参数）通过。
-
-## 备注
-
-- ComfyUI 插件目录不在本 git 仓库内，改动不随前端提交；改完需重启 ComfyUI。
-- MCP 服务地址 `http://127.0.0.1:8787/mcp`，token `zxp_e2e_smoke_token`。
+- 前端：`pnpm typecheck` 通过；`vitest run` = 137 passed / 2 skipped（1311 passed / 10 skipped）。
+- 插件：`python -m py_compile` 通过（`__init__.py` / `ref_video.py` / `engine/plan.py` / `engine/segment_continuity.py`）。
+- ComfyUI：已重启并加载新插件；`/zeroexo/v1/health` 正常，capabilities 含 `guide_id`；显式 guide 校验链路 smoke 通过
+  （非法 id 400 / 不存在 404 / 合法 id 回传 `guideSource=explicit` 且 `use_prev_guide=false`）。
+- MCP：`http://127.0.0.1:8787/mcp`。

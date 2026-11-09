@@ -17,10 +17,9 @@ import {
   Pencil, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
   Heading1, History,
 } from 'lucide-react';
-import { NODE_ICONS } from './icons.js';
 import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
 import { AddNodeCommand, AddEdgeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
-import { setImageBlob } from '@zeroexo/plugin-persistence';
+import { setImageBlob, resolveMediaUrl } from '@zeroexo/plugin-persistence';
 import { collectCard } from './nodes/stacked-media-model.js';
 import { parseStackedMediaData } from './nodes/stacked-media-types.js';
 import { STACKED_MEDIA_DEFAULT_SIZE, IMAGE_DEFAULT_SIZE } from './utils/node-contracts.js';
@@ -329,17 +328,6 @@ export function getImageTools(): ToolDefinition[] {
     // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
     createReplayTool(),
     ...buildImageEditTools(),
-    // 堆叠置末(征集#45 H3):与胶囊导航按钮紧邻成一组(堆叠+导航同组)
-    {
-      id: 'createStackNode',
-      label: '堆叠',
-      title: '',
-      icon: <NODE_ICONS.stack size={14} />,
-      group: 'edit',
-      run: (node: NodeRecord, ctx: ToolContext) => {
-        convertToStack(node, ctx);
-      },
-    },
   ];
 }
 
@@ -369,17 +357,6 @@ export function getVideoTools(): ToolDefinition[] {
         { key: 'download-current', label: '下载当前帧图片', run: (node) => { void captureAndDownloadFrame(node, 'current'); } },
       ],
       run: () => {},
-    },
-    // 堆叠置末(征集#45 H3):与胶囊导航按钮紧邻成一组(堆叠+导航同组)
-    {
-      id: 'createStackNode',
-      label: '堆叠',
-      title: '',
-      icon: <NODE_ICONS.stack size={14} />,
-      group: 'edit',
-      run: (node: NodeRecord, ctx: ToolContext) => {
-        convertToStack(node, ctx);
-      },
     },
   ];
 }
@@ -522,7 +499,8 @@ async function captureVideoFrame(
 ): Promise<{ blob: Blob; width: number; height: number; frameLabel: string } | null> {
   const data = (node.data ?? {}) as Record<string, unknown>;
   const content = data.content as string | undefined;
-  if (!content) return null;
+  const storageKey = data.storageKey as string | undefined;
+  if (!content && !storageKey) return null;
 
   // 优先用 data-node-id 找到页面上已渲染的 video 元素
   const existingVid = document.querySelector<HTMLVideoElement>(
@@ -537,8 +515,12 @@ async function captureVideoFrame(
     // 确保暂停,避免 drawImage 时帧正在更新
     existingVid.pause();
   } else {
-    // 截首帧/尾帧:需要创建新 video 元素并 seek 到目标位置
-    const videoSrc = existingVid?.currentSrc || existingVid?.src || content;
+    // 首/尾帧，或当前帧但视频元素未挂载（画布缩小/离屏）：用 storageKey 重新解析可播放 URL
+    const resolvedSrc = await resolveMediaUrl(storageKey, content ?? '');
+    const videoSrc = resolvedSrc
+      || existingVid?.currentSrc
+      || existingVid?.src;
+    if (!videoSrc) return null;
     const vid = document.createElement('video');
     vid.muted = true;
     vid.preload = 'auto';
@@ -546,16 +528,43 @@ async function captureVideoFrame(
 
     try {
       await new Promise<void>((resolve, reject) => {
-        vid.onloadedmetadata = () => {
-          if (frameType === 'first') {
-            vid.currentTime = 0;
-          } else if (frameType === 'last') {
-            vid.currentTime = Math.max(0, (vid.duration || 0) - 0.1);
-          }
-          vid.onseeked = () => resolve();
+        let settled = false;
+        const done = (): void => {
+          if (settled) return;
+          settled = true;
+          resolve();
         };
-        vid.onerror = () => reject(new Error('Failed to load video'));
-        setTimeout(() => reject(new Error('Timeout')), 10000);
+        const fail = (): void => {
+          if (settled) return;
+          settled = true;
+          reject(new Error('Failed to load video'));
+        };
+        vid.onloadedmetadata = () => {
+          try {
+            const target = frameType === 'last'
+              ? Math.max(0, (vid.duration || 0) - 0.1)
+              : 0;
+            // 首帧/无现成元素的当前帧：第一帧已可绘制，不必再 seek（currentTime=0 不会触发 seeked）
+            if (target === 0 && vid.readyState >= 2) {
+              done();
+              return;
+            }
+            vid.onseeked = done;
+            if (Math.abs(vid.currentTime - target) < 0.001 && vid.readyState >= 2) {
+              done();
+              return;
+            }
+            vid.currentTime = target;
+          } catch {
+            fail();
+          }
+        };
+        // 首帧：metadata 后等 loadeddata，避免首帧还没解码就 drawImage 到黑屏
+        vid.onloadeddata = () => {
+          if (frameType !== 'last') done();
+        };
+        vid.onerror = fail;
+        setTimeout(fail, 10000);
       });
       frameSrc = vid;
     } catch {

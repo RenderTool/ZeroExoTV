@@ -8,16 +8,14 @@
  * - 新增/插入状态统一一个「＋」按钮：不预选媒体类型，创建后用户上传素材自动识别类型
  * - 不再做「关联上一图」的 derive UI：生成时由 LLM 自行决定参考哪个 step 的图，用户无需操作
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { App as AntdApp, Dropdown } from 'antd';
 import {
   Plus, Film, Image as ImageIcon, AudioLines, Trash2,
-  Upload as UploadIcon, Sparkles, Copy, Check, ChevronDown, RefreshCw, Paperclip,
+  Sparkles, Copy, Check, ChevronDown, RefreshCw, Paperclip,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
-import { useAuth } from '@/features/auth/auth-store.js';
-import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { hasCasEntry, isCasStorageKey, parseCasStorageKey } from '@/entities/cas-store.js';
@@ -26,8 +24,9 @@ import {
   type ProductionItemKind,
 } from '../production-manager/production-manager-types';
 import {
-  type SubjectTree, type SubjectTreeNode, type SubjectNodeMedia, type SubjectNodeMediaRef,
-  type SubjectBaseState, type ColorCardSwatch,
+  SUBJECT_BASE_STATE_ID,
+  type SubjectTree, type SubjectTreeNode, type SubjectNodeMedia,
+  type ColorCardSwatch,
   type SubjectTemplateType,
   buildDefaultStateName,
   createSubjectNode,
@@ -158,18 +157,18 @@ function useCasAlive(storageKey?: string): boolean {
  * - 新增集自动出现在列表（episodes 来自 script-store 实时读取）
  */
 function EpisodeMultiSelect({
-  node, tree, episodes, t, onUpdateNode,
+  appearEpisodes, episodes, t, onChange,
 }: {
-  node: SubjectTreeNode;
-  tree: SubjectTree;
+  /** 2026-11-08：基础状态与更多状态共用 —— 只吃集数数组与写回回调，不绑定具体节点类型 */
+  appearEpisodes?: number[];
   episodes?: Array<{ number: number; title?: string }>;
   t: ReturnType<typeof useTranslation>['t'];
-  onUpdateNode: (rootId: string, nodeId: string, patch: Partial<SubjectTreeNode>) => void;
+  onChange: (next: number[]) => void;
 }): React.ReactElement {
   const validNumbers = useMemo(() => (episodes ?? []).map((e) => e.number), [episodes]);
   const selected = useMemo(
-    () => (node.appearEpisodes ?? []).filter((n) => validNumbers.includes(n)).sort((a, b) => a - b),
-    [node.appearEpisodes, validNumbers],
+    () => (appearEpisodes ?? []).filter((n) => validNumbers.includes(n)).sort((a, b) => a - b),
+    [appearEpisodes, validNumbers],
   );
   const summary = selected.length > 0 ? selected.join(', ') : t('subject.appearEpisodesAll', '全部');
   const items = useMemo(() => {
@@ -194,7 +193,7 @@ function EpisodeMultiSelect({
             const next = selected.includes(n)
               ? selected.filter((x) => x !== n)
               : [...selected, n].sort((a, b) => a - b);
-            onUpdateNode(tree.rootId, node.id, { appearEpisodes: next });
+            onChange(next);
           },
         }}
       >
@@ -211,132 +210,18 @@ function EpisodeMultiSelect({
   );
 }
 
-/** 基础形态占位卡（step 1，术语随 kind） */
-function BaseStateCard({
-  tree, theme, t, onUpdateBaseState, onUploadBaseImage, onDeleteBaseMedia,
-}: {
-  tree: SubjectTree;
-  theme: ThemeConfig;
-  t: ReturnType<typeof useTranslation>['t'];
-  onUpdateBaseState: (rootId: string, patch: Partial<SubjectBaseState>) => void;
-  onUploadBaseImage: (rootId: string, file: File) => void;
-  /** 删除当前基础图（恢复上传占位），Plan#71 反馈：上传后应可删除/替换 */
-  onDeleteBaseMedia: (rootId: string) => void;
-}): React.ReactElement {
-  const isDark = theme.mode === 'dark';
-  const surface = isDark ? '#161616' : '#ffffff';
-  const border = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
-  const textPrimary = theme.toolbar.text;
-  const textMuted = theme.toolbar.textMuted;
-  const fileRef = useRef<HTMLInputElement>(null);
-  const baseImg = tree.baseState.referenceImages?.find((m) => m.type === 'image');
-
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', borderRadius: CARD_RADIUS, overflow: 'hidden',
-      background: surface, border: `1px solid ${border}`,
-    }}>
-      {/* 头：step1 + 统一术语「基础状态」
-          2026-09-04 征集 #155：删除按 kind 派生的术语（原「角色形象·三视图定妆」预设了角色必是人形，
-          生物/机器人/动物类角色被错称）与右侧彩色模板徽标，统一叫「基础状态」。
-          baseState.templateType / templateReason 数据字段保留（后端 LLM 契约），仅不再展示。 */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
-        background: `linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.28) 62%, rgba(0,0,0,0) 100%)`,
-        color: '#fff', fontSize: 11, fontWeight: 600,
-      }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 20, height: 16, borderRadius: 999, background: 'rgba(255,255,255,0.22)', fontSize: 9, padding: '0 6px', flexShrink: 0 }}>1</span>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('subject.baseState', '基础状态')}</span>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, padding: 10 }}>
-        {/* 媒体缩略/上传 */}
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          {baseImg?.key ? (
-            <>
-              <MediaThumb mediaKey={baseImg.key} dark={isDark} type="image" />
-              {/* hover：替换 / 删除 */}
-              <div style={{
-                position: 'absolute', inset: 0, borderRadius: 8, display: 'flex',
-                flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
-                background: 'rgba(0,0,0,0.42)', opacity: 0, transition: 'opacity 0.15s',
-              }} onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.opacity = '1'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.opacity = '0'; }}>
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  title={t('subject.replaceMedia', '替换')}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 3, border: '1px solid rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.12)', color: '#fff', borderRadius: 6, padding: '2px 7px', fontSize: 9, cursor: 'pointer', fontFamily: 'inherit' }}
-                >
-                  <RefreshCw size={9} />{t('subject.replaceMedia', '替换')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDeleteBaseMedia(tree.rootId)}
-                  title={t('subject.deleteMedia', '删除媒体')}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 3, border: '1px solid rgba(255,120,120,0.55)', background: 'rgba(220,38,38,0.25)', color: '#fff', borderRadius: 6, padding: '2px 7px', fontSize: 9, cursor: 'pointer', fontFamily: 'inherit' }}
-                >
-                  <Trash2 size={9} />{t('common.delete')}
-                </button>
-              </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              title={t('subject.uploadBaseImage', '上传图片')}
-              style={{
-                width: MEDIA_SIZE, height: MEDIA_SIZE, borderRadius: 12, cursor: 'pointer',
-                border: `1.5px dashed ${border}`, background: 'transparent',
-                color: textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6,
-              }}
-            >
-              <UploadIcon size={22} />
-              <span style={{ fontSize: 10, opacity: 0.8 }}>{t('subject.uploadBaseImage', '上传图片')}</span>
-            </button>
-          )}
-        </div>
-
-        {/* 完整提示词（复制钮） */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-            <span style={{ fontSize: 9, fontWeight: 600, color: textMuted }}>{t('subject.basePrompt', '完整提示词')}</span>
-            <span style={{ flex: 1 }} />
-            <CopyButton text={tree.baseState.prompt || ''} t={t} muted={textMuted} />
-          </div>
-          <textarea
-            value={tree.baseState.prompt ?? ''}
-            onChange={(e) => onUpdateBaseState(tree.rootId, { prompt: e.target.value })}
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            rows={6}
-            placeholder={t('subject.basePromptPlaceholder', '完整三视图/多角度参考提示词（可按 kind 使用模板后由 AI 参数化填充）')}
-            style={{
-              width: '100%', resize: 'vertical', border: `1px solid ${border}`, borderRadius: 6,
-              background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)',
-              color: textPrimary, fontSize: 10.5, outline: 'none', padding: 6, fontFamily: 'inherit',
-            }}
-          />
-          {tree.baseState.templateReason && (
-            <div style={{ marginTop: 4, fontSize: 9, color: textMuted }}>{tree.baseState.templateReason}</div>
-          )}
-        </div>
-      </div>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUploadBaseImage(tree.rootId, f); e.target.value = ''; }} />
-    </div>
-  );
-}
-
-/** 状态卡（大纲逐行；统一一套展示：媒体预览/图标 + 完整提示词；占位卡点击打开来源面板） */
+/** 状态卡（大纲逐行；2026-11-08 起基础状态也是 states[0]，所有状态共用这一张卡） */
 function StateCard({
-  node, tree, theme, t, episodes, activeEpisodeNumber, onUpdateNode, onDeleteNode, onInsertAfter, onOpenSourcePanel, onClearStateMedia,
+  node, tree, theme, t, episodes, activeEpisodeNumber, isBase = false,
+  onUpdateNode, onDeleteNode, onInsertAfter, onOpenSourcePanel, onClearStateMedia,
 }: {
   node: SubjectTreeNode;
   tree: SubjectTree;
   theme: ThemeConfig;
   t: ReturnType<typeof useTranslation>['t'];
   episodes?: Array<{ number: number; title?: string }>;
+  /** 基础状态（states[0]）：UI 完全同款，只是不提供删除入口 */
+  isBase?: boolean;
   /** 当前剧集编号（方案 C）：标注为其它集的状态显示小号次要标签；未标注 = 通用不加标签 */
   activeEpisodeNumber?: number | null;
   onUpdateNode: (rootId: string, nodeId: string, patch: Partial<SubjectTreeNode>) => void;
@@ -394,7 +279,7 @@ function StateCard({
           onChange={(e) => onUpdateNode(tree.rootId, node.id, { state: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          placeholder={t('subject.newState', '新状态')}
+          placeholder={isBase ? t('subject.baseState', '基础状态') : t('subject.newState', '新状态')}
           style={{
             flex: 1, minWidth: 0, border: 'none', background: 'transparent', color: '#fff',
             fontWeight: 600, fontSize: 11, outline: 'none', fontFamily: 'inherit', padding: 0,
@@ -421,14 +306,16 @@ function StateCard({
           </span>
         )}
         <CopyButton text={node.fullPrompt || node.deltaPrompt || ''} t={t} muted="rgba(255,255,255,0.7)" />
-        <button
-          type="button"
-          onClick={() => onDeleteNode(tree.rootId, node.id)}
-          title={t('common.delete')}
-          style={{ display: 'inline-flex', padding: 2, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', flexShrink: 0 }}
-        >
-          <Trash2 size={11} />
-        </button>
+        {!isBase && (
+          <button
+            type="button"
+            onClick={() => onDeleteNode(tree.rootId, node.id)}
+            title={t('common.delete')}
+            style={{ display: 'inline-flex', padding: 2, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', flexShrink: 0 }}
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
       </div>
 
       {/* 主体：媒体（图缩略/音频波形+播放器）+ 完整提示词
@@ -534,9 +421,9 @@ function StateCard({
 
         {/* 完整提示词（统一输入框；不再拆分识别语/差异词） */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          {/* 备注标签（2026-11-04 约定）：提示词区小号次要色文本标签，明确这是给 AI 的补充说明 */}
-          <div title={t('subject.stateRemarkHint', '给 AI 的补充说明')} style={{ fontSize: 9, fontWeight: 600, color: textMuted, marginBottom: 3 }}>
-            {t('subject.stateRemark', '备注')}
+          {/* 生成提示词标签（2026-11-08：与基础状态同一套 label，不再叫「备注」） */}
+          <div title={t('subject.stateRemarkHint', '该状态的生成提示词')} style={{ fontSize: 9, fontWeight: 600, color: textMuted, marginBottom: 3 }}>
+            {t('subject.statePromptLabel', '提示词')}
           </div>
           <textarea
             value={node.fullPrompt || node.deltaPrompt || ''}
@@ -559,7 +446,12 @@ function StateCard({
             </div>
           )}
           {/* 出现集数多选（2026-11-04 约定：替换原「仅作引导」帮助文案位置） */}
-          <EpisodeMultiSelect node={node} tree={tree} episodes={episodes} t={t} onUpdateNode={onUpdateNode} />
+          <EpisodeMultiSelect
+            appearEpisodes={node.appearEpisodes}
+            episodes={episodes}
+            t={t}
+            onChange={(next) => onUpdateNode(tree.rootId, node.id, { appearEpisodes: next })}
+          />
         </div>
       </div>
 
@@ -594,15 +486,12 @@ function TreeOutline({
   activeEpisodeNumber?: number | null;
   handlers: {
     onUpdateNode: (rootId: string, nodeId: string, patch: Partial<SubjectTreeNode>) => void;
-    onUpdateBaseState: (rootId: string, patch: Partial<SubjectBaseState>) => void;
     onRenameRoot: (rootId: string, name: string) => void;
     onChangeKind: (rootId: string, kind: ProductionItemKind) => void;
     onDeleteNode: (rootId: string, nodeId: string) => void;
     onDeleteRoot?: (rootId: string) => void;
     /** 点占位卡/替换/重新关联 → 打开来源面板（统一走 linkSubjectStateMedia） */
     onOpenSourcePanel: (rootId: string, nodeId: string, anchorEl?: HTMLElement | null) => void;
-    onUploadBaseImage: (rootId: string, file: File) => void;
-    onDeleteBaseMedia: (rootId: string) => void;
     onClearStateMedia: (rootId: string, nodeId: string) => void;
     onInsertAfter: (rootId: string, afterNodeId: string, type: SubjectNodeMedia) => void;
     onAddBottom: (rootId: string, type: SubjectNodeMedia) => void;
@@ -678,27 +567,28 @@ function TreeOutline({
           数据结构 `SubjectTree.identityAnchor` **保留**（后端 entity-tools.ts save_subject_tree
           的 schema 仍要求 LLM 产出并逐字复用），仅去掉前端录入界面。 */}
 
-      {/* 基础形态 = 第 1 张卡 */}
-      <BaseStateCard tree={norm} theme={theme} t={t} onUpdateBaseState={handlers.onUpdateBaseState} onUploadBaseImage={handlers.onUploadBaseImage} onDeleteBaseMedia={handlers.onDeleteBaseMedia} />
-
-      {/* 状态卡（逐行）。方案 C（2026-11-05）：显示排序 = 本集命中/未标注在前、标注为其它集在后；
-          display-only 稳定排序，norm.states 数据顺序不变、卡片不禁用不隐藏，仍可点击选择 */}
-      {sortStatesByEpisodeRelevance(norm.states, activeEpisodeNumber ?? null).map((node) => (
-        <StateCard
-          key={node.id}
-          node={node}
-          tree={norm}
-          theme={theme}
-          t={t}
-          episodes={episodes}
-          activeEpisodeNumber={activeEpisodeNumber}
-          onUpdateNode={handlers.onUpdateNode}
-          onDeleteNode={handlers.onDeleteNode}
-          onInsertAfter={handlers.onInsertAfter}
-          onOpenSourcePanel={handlers.onOpenSourcePanel}
-          onClearStateMedia={handlers.onClearStateMedia}
-        />
-      ))}
+      {/* 2026-11-08：基础状态是 states[0]，所有状态共用同一张卡、同一个 map。
+          基础恒在首位，其余按与本集相关性 display-only 排序（norm.states 数据顺序不变）。 */}
+      {sortStatesByEpisodeRelevance(norm.states, activeEpisodeNumber ?? null)
+        .slice()
+        .sort((a, b) => (a.id === SUBJECT_BASE_STATE_ID ? -1 : b.id === SUBJECT_BASE_STATE_ID ? 1 : 0))
+        .map((node) => (
+          <StateCard
+            key={node.id}
+            node={node}
+            tree={norm}
+            theme={theme}
+            t={t}
+            episodes={episodes}
+            activeEpisodeNumber={activeEpisodeNumber}
+            isBase={node.id === SUBJECT_BASE_STATE_ID}
+            onUpdateNode={handlers.onUpdateNode}
+            onDeleteNode={handlers.onDeleteNode}
+            onInsertAfter={handlers.onInsertAfter}
+            onOpenSourcePanel={handlers.onOpenSourcePanel}
+            onClearStateMedia={handlers.onClearStateMedia}
+          />
+        ))}
 
       {/* 底部添加 */}
       <BottomAddBar rootId={tree.rootId} theme={theme} t={t} onAdd={handlers.onAddBottom} />
@@ -746,19 +636,11 @@ export const StoryboardSubjectTree = memo(function StoryboardSubjectTree({
 }: StoryboardSubjectTreeProps): React.ReactElement {
   const { t } = useTranslation();
   const { message: antdMessage } = AntdApp.useApp();
-  const { isAuthenticated } = useAuth();
 
   const updateNode = useCallback((rootId: string, nodeId: string, patch: Partial<SubjectTreeNode>) => {
     onChange(trees.map((tr) => {
       if (tr.rootId !== rootId) return tr;
       return { ...tr, states: tr.states.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)) };
-    }));
-  }, [trees, onChange]);
-
-  const updateBaseState = useCallback((rootId: string, patch: Partial<SubjectBaseState>) => {
-    onChange(trees.map((tr) => {
-      if (tr.rootId !== rootId) return tr;
-      return { ...tr, baseState: { ...tr.baseState, ...patch } };
     }));
   }, [trees, onChange]);
 
@@ -813,7 +695,11 @@ export const StoryboardSubjectTree = memo(function StoryboardSubjectTree({
     };
     onChange(trees.map((tr) => {
       if (tr.rootId !== rootId || tr.kind === kind) return tr;
-      return { ...tr, kind, baseState: { ...tr.baseState, templateType: DEFAULT_TEMPLATE[kind], templateReason: '' } };
+      // 模板契约字段挂在基础状态节点（states[0]）上
+      const states = tr.states.map((n, i) => (i === 0
+        ? { ...n, templateType: DEFAULT_TEMPLATE[kind], templateReason: '' }
+        : n));
+      return { ...tr, kind, states };
     }));
   }, [trees, onChange]);
 
@@ -850,34 +736,6 @@ export const StoryboardSubjectTree = memo(function StoryboardSubjectTree({
     void handleSourcePick(rootId, nodeId, null);
   }, [handleSourcePick]);
 
-  /** 上传基础形态图（替换已有 image 首张；无则追加） */
-  const uploadBaseImage = useCallback(async (rootId: string, file: File) => {
-    if (!isAuthenticated) { antdMessage.warning(t('subjectCreate.loginRequired')); return; }
-    const uploaded = await uploadAsset(file);
-    const d = uploaded.data as { kind?: string; storageKey?: string; dataUrl?: string };
-    const storageKey = d.storageKey ?? '';
-    if (!storageKey) { antdMessage.error(t('subjectCreate.saveFailed')); return; }
-    onChange(trees.map((tr) => {
-      if (tr.rootId !== rootId) return tr;
-      const cur = tr.baseState.referenceImages ?? [];
-      const ref: SubjectNodeMediaRef = { key: storageKey, type: 'image' };
-      const next = cur.length > 0
-        ? cur.map((m, i) => (i === 0 && m.type === 'image' ? ref : m))
-        : [ref];
-      // 首张非 image（罕见）→ 直接替换第一项为 image
-      const finalNext = next[0]?.type !== 'image' ? [ref, ...next] : next;
-      return { ...tr, baseState: { ...tr.baseState, referenceImages: finalNext } };
-    }));
-  }, [trees, onChange, isAuthenticated, antdMessage, t]);
-
-  /** 删除基础形态图（全部清空 → 回到上传占位） */
-  const clearBaseMedia = useCallback((rootId: string) => {
-    onChange(trees.map((tr) => {
-      if (tr.rootId !== rootId) return tr;
-      return { ...tr, baseState: { ...tr.baseState, referenceImages: [] } };
-    }));
-  }, [trees, onChange]);
-
   const filtered = useMemo(
     // 方案 C（2026-11-05）：主体列表按与本集相关性显示排序（display-only 稳定排序，不改 trees 数据与树结构）
     () => sortTreesByEpisodeRelevance(
@@ -902,14 +760,11 @@ export const StoryboardSubjectTree = memo(function StoryboardSubjectTree({
                 activeEpisodeNumber={activeEpisodeNumber}
                 handlers={{
                   onUpdateNode: updateNode,
-                  onUpdateBaseState: updateBaseState,
                   onRenameRoot: renameRoot,
                   onChangeKind: changeKind,
                   onDeleteNode: deleteNode,
                   onDeleteRoot,
                   onOpenSourcePanel: openSourcePanel,
-                  onUploadBaseImage: uploadBaseImage,
-                  onDeleteBaseMedia: clearBaseMedia,
                   onClearStateMedia: clearStateMedia,
                   onInsertAfter: insertAfter,
                   onAddBottom: addBottom,

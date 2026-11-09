@@ -29,17 +29,19 @@ export interface FocusTarget {
  * 计算聚焦目标视口:节点中心对齐视口中心 + 最佳缩放(上限 2.0)
  * @param capsuleHeight 胶囊菜单高度(px),菜单在节点上方时计入总高
  * @param paddingRatio 聚焦缩放系数(0~1),越小节点周边留白越大(默认 0.82)
+ * @param forcedK 强制缩放（如画布结构定位用 1=100%）；不传则自动适配
  */
 export function computeFocusTarget(
   bounds: FocusBounds,
   containerSize: FocusContainerSize,
   capsuleHeight = 0,
   paddingRatio = 0.82,
+  forcedK?: number,
 ): FocusTarget {
   // 缩放范围:包含胶囊菜单高度(菜单在节点上方,所以 totalH = height + capsuleHeight)
   const totalH = bounds.height + capsuleHeight;
   // 计算缩放:使 bounds 完整显示在视口内,保留 (1-paddingRatio) 边距;上限 2.0 防止小高度节点过度放大
-  const k = Math.min(
+  const k = forcedK ?? Math.min(
     (containerSize.width / bounds.width) * paddingRatio,
     (containerSize.height / totalH) * paddingRatio,
     2.0,

@@ -1,16 +1,17 @@
 /**
  * subject-tree-types - 分镜「主体树」数据契约（2026-09-01 重构）
  *
- * 占位主体 ≠ 提示词卡片，而是「主体树」：
+ * 占位主体 ≠ 提示词卡片，而是「主体树」（2026-11-08 数据层统一）：
  * - root：主体的唯一 id + 名称 + 类型（角色/场景/道具）——它是主体稳定标识
- * - baseState：基础定妆（三视图），生成完整 Cinematic Character Lineup Sheet 参考图
- * - states[]：状态迭代节点，基于 baseState 的差异描述，只写"变什么"
- *   如"受伤" = 保持 baseRef 形象不变，仅修改：左臂绷带、面色苍白、血迹
+ * - states[]：**所有状态（含基础状态）都是同一种节点**，不再有 baseState 单对象；
+ *   states[0] 恒为基础状态，id 恒为 SUBJECT_BASE_STATE_ID（'__base__'，真实节点而非虚拟槽）。
  *
  * 核心原则：
  * 1. 先出三视图定妆图锁定形象 → 状态在定妆图基础上迭代差异
  * 2. 差异提示词不重复基础特征，只写 delta
- * 3. 色卡为项目级共享，每个主体在 baseState 中绑定色卡
+ * 3. 基础状态的提示词/定妆图/状态名/出现集数与其它状态走同一批字段：
+ *    fullPrompt / media / state / appearEpisodes；templateType、templateReason
+ *    以可选字段挂在基础节点上，保留后端 LLM 契约。
  */
 
 import type { ProductionItemKind } from '../production-manager/production-manager-types';
@@ -57,8 +58,19 @@ export interface SubjectNodeMediaRef {
 /** 定妆模板类型 */
 export type SubjectTemplateType = 'character_lineup' | 'creature_reference' | 'environment_panorama' | 'prop_detail';
 
-/** 基础定妆 */
+/**
+ * 基础状态节点 id（2026-11-08：从「虚拟槽」升级为 states[0] 的真实 id）。
+ * 沿用同一字面量，已落盘的 CAS refs / workbench refs / viewPrefs / history marker 全部无需重写。
+ */
+export const SUBJECT_BASE_STATE_ID = '__base__';
+
+/** @deprecated 旧数据结构的形状，仅供 migrateSubjectTree 读取；新代码一律用 SubjectTreeNode */
 export interface SubjectBaseState {
+  /**
+   * 状态名（2026-11-08）：基础状态也是一个独立状态，与 states[].state 同语义。
+   * 用户可命名为「正常人类」「女鬼」等；空 = 回落展示「基础状态」，不再复用主体名。
+   */
+  name?: string;
   /** 完整的三视图定妆提示词（高度参数化的定妆模板，根据 templateType 选择对应模板） */
   prompt: string;
   /** 使用的模板类型 */
@@ -69,6 +81,11 @@ export interface SubjectBaseState {
   referenceImages: SubjectNodeMediaRef[];
   /** 幂等键 */
   aiStableKey: string;
+  /**
+   * 出现集数（2026-11-08）：基础状态也是一个独立状态，和 states[] 一样可以有自己的出场集。
+   * 空/缺省 = 未设置（视为全部剧集），与 SubjectTreeNode.appearEpisodes 同口径。
+   */
+  appearEpisodes?: number[];
 }
 
 /** 生成优先级 */
@@ -85,7 +102,7 @@ export type GenerationPriority = 'p0_critical' | 'p1_important' | 'p2_optional';
 export interface SubjectDeriveFrom {
   /** 来源主体 rootId */
   rootId: string;
-  /** 来源占位 nodeId；缺省 = baseState */
+  /** 来源占位 nodeId；缺省 = 基础状态（states[0]，其真实 id 为 __base__） */
   nodeId?: string;
   /** 来源图 storageKey（指纹快照，供失效检测比对） */
   mediaKey?: string;
@@ -118,13 +135,13 @@ export interface SubjectTreeNode {
   /** 推演软映射：可参考哪张图做 img2img（无依赖=null；Spec §2.3） */
   deriveFrom?: SubjectDeriveFrom | null;
   /**
-   * 差异提示词：只描述与 baseState 的不同，不重复基础特征。
+   * 差异提示词：只描述与基础状态（states[0]）的不同，不重复基础特征。
    * 格式：保持 @baseRef 角色一致性。仅修改：[具体差异，如"左臂缠着白色绷带，面色苍白，粗布短褐沾满血迹"]
    */
   deltaPrompt: string;
   /**
-   * 完整提示词（系统组装 = baseState.prompt 基础上 + deltaPrompt 语义合成）。
-   * AI 生成时使用此字段调用 ai_image，但用户编辑时只改 deltaPrompt。
+   * 完整提示词（系统组装 = 基础状态 fullPrompt 基础上 + deltaPrompt 语义合成）。
+   * AI 生成时使用此字段调用 ai_image；基础状态自身也用此字段存定妆提示词。
    */
   fullPrompt: string;
   /** LLM 识别语 */
@@ -149,6 +166,10 @@ export interface SubjectTreeNode {
    *  编号取剧集 number（script-store nextEpisodeNumber 保证删除集后不复用空缺号）；
    *  剧集被删后的悬空编号在 UI 层过滤显示、数据保留（不静默清除）。 */
   appearEpisodes?: number[];
+  /** 仅基础状态：定妆模板类型（后端 LLM 契约字段，从旧 baseState 迁来） */
+  templateType?: SubjectTemplateType;
+  /** 仅基础状态：模板选择理由（后端 LLM 契约字段，从旧 baseState 迁来） */
+  templateReason?: string;
 }
 
 /** 单个主体的完整树（root + 基础定妆 + 状态迭代） */
@@ -170,9 +191,7 @@ export interface SubjectTree {
   aliases: string[];
   /** 形象锚点句：跨镜头/视频逐字复用（Spec §2.2） */
   identityAnchor?: string;
-  /** 基础定妆 */
-  baseState: SubjectBaseState;
-  /** 状态迭代节点集合 */
+  /** 全部状态（含基础状态）；states[0] 恒为基础状态，id = SUBJECT_BASE_STATE_ID */
   states: SubjectTreeNode[];
   /** 封面：root 级别剧照（选填） */
   coverKey?: string | null;
@@ -182,6 +201,115 @@ export interface SubjectTree {
   devlook?: DevLookEntry[];
   /** 色卡选择理由 */
   colorCardReason?: string;
+}
+
+/**
+ * 旧数据形状（2026-11-08 之前落盘）：baseState 单对象 + states[] 从 step=2 开始。
+ * 只在读盘迁移时使用，不参与任何新代码。
+ */
+export interface LegacySubjectTree {
+  rootId: string;
+  itemId?: string | null;
+  name: string;
+  kind: ProductionItemKind;
+  aliases: string[];
+  identityAnchor?: string;
+  baseState?: Partial<SubjectBaseState> | null;
+  states?: SubjectTreeNode[];
+  coverKey?: string | null;
+  deletedStates?: string[];
+  devlook?: DevLookEntry[];
+  colorCardReason?: string;
+}
+
+/**
+ * 幂等迁移：旧双结构 → states[0] 真节点。
+ * 基础状态 id 沿用 SUBJECT_BASE_STATE_ID，CAS refs / workbench refs / viewPrefs / history
+ * 里已落盘的 '__base__' 字面量全部保持有效，不需要重写任何持久化 id。
+ * 已是新结构时原样返回。
+ */
+export function migrateSubjectTree(raw: SubjectTree | LegacySubjectTree): SubjectTree {
+  const legacy = raw as LegacySubjectTree;
+  const existing = raw.states ?? [];
+  if (existing[0]?.id === SUBJECT_BASE_STATE_ID && legacy.baseState === undefined) {
+    return raw as SubjectTree;
+  }
+  const b = legacy.baseState ?? {};
+  const media = b.referenceImages ?? [];
+  const baseNode: SubjectTreeNode = {
+    id: SUBJECT_BASE_STATE_ID,
+    state: b.name ?? '',
+    type: media[0]?.type ?? 'image',
+    step: 1,
+    deriveFrom: null,
+    deltaPrompt: b.prompt ?? '',
+    fullPrompt: b.prompt ?? '',
+    recognitionTerms: [],
+    media,
+    source: 'user',
+    baseRef: raw.rootId,
+    aiStableKey: b.aiStableKey ?? `${raw.rootId}_base`,
+    templateType: b.templateType ?? 'character_lineup',
+    templateReason: b.templateReason ?? '',
+    appearEpisodes: b.appearEpisodes ?? [],
+  };
+  const { baseState: _dropped, ...rest } = legacy;
+  void _dropped;
+  return {
+    ...(rest as Omit<SubjectTree, 'states'>),
+    states: [baseNode, ...existing.filter((n) => n.id !== SUBJECT_BASE_STATE_ID)],
+  };
+}
+
+/**
+ * 基础状态节点唯一取数口（states[0]），所有只读消费方都走这里，不再各自判断 isBase。
+ * 对尚未落盘迁移的旧数据（baseState 单对象）临时构造等价节点，保证读取侧零断链。
+ */
+export function baseStateNodeOf(tree: SubjectTree | LegacySubjectTree | null | undefined): SubjectTreeNode | undefined {
+  if (!tree) return undefined;
+  const states = tree.states ?? [];
+  const real = states.find((n) => n.id === SUBJECT_BASE_STATE_ID);
+  if (real) return real;
+  const legacy = (tree as LegacySubjectTree).baseState;
+  if (legacy) {
+    const media = legacy.referenceImages ?? [];
+    return {
+      id: SUBJECT_BASE_STATE_ID,
+      state: legacy.name ?? '',
+      type: media[0]?.type ?? 'image',
+      step: 1,
+      deriveFrom: null,
+      deltaPrompt: legacy.prompt ?? '',
+      fullPrompt: legacy.prompt ?? '',
+      recognitionTerms: [],
+      media,
+      source: 'user',
+      baseRef: tree.rootId,
+      aiStableKey: legacy.aiStableKey,
+      templateType: legacy.templateType,
+      templateReason: legacy.templateReason,
+      appearEpisodes: legacy.appearEpisodes,
+    };
+  }
+  return states[0];
+}
+
+/**
+ * 「状态迭代节点」集合（排除 states[0] 基础状态）。
+ * 统一前 states[] 本来就不含基础，凡是把 states 当「状态 chip / AI diff / 资产候选」遍历的
+ * 旧消费方统一走这里，保证数据层统一后这些列表的语义与数量不变。
+ */
+export function nonBaseStates(tree: SubjectTree | null | undefined): SubjectTreeNode[] {
+  return (tree?.states ?? []).filter((n) => n.id !== SUBJECT_BASE_STATE_ID);
+}
+
+/** 容器读盘用：把任意（新旧混合）subjectTree 数组归一化为统一结构 */
+export function migrateSubjectTrees(raw: unknown): SubjectTree[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t): t is SubjectTree | LegacySubjectTree =>
+      !!t && typeof t === 'object' && typeof (t as { rootId?: unknown }).rootId === 'string')
+    .map((t) => normalizeSubjectTree(migrateSubjectTree(t)));
 }
 
 /**
@@ -208,7 +336,7 @@ export function subjectCoverCandidates(tree: SubjectTree | null | undefined): st
   const push = (k: string | null): void => {
     if (k && !out.includes(k)) out.push(k);
   };
-  push(firstCoverMediaKeyOfState(tree.baseState?.referenceImages));
+  // states[0] 恒为基础状态 → 顺序仍是「基础 → 其它状态」，与旧口径一致
   for (const n of tree.states ?? []) push(firstCoverMediaKeyOfState(n.media));
   return out;
 }
@@ -271,7 +399,7 @@ export function createSubjectNode(
   };
 }
 
-/** 创建默认主体树（含空 baseState）；itemId = 绑定的统筹条目 id（新建就写，不留名字配对窗口） */
+/** 创建默认主体树：states[0] 就是基础状态（真实节点），不再有 baseState 单对象 */
 export function createSubjectTree(kind: ProductionItemKind = 'character', name = '', itemId?: string | null): SubjectTree {
   const id = `subj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   return {
@@ -280,14 +408,23 @@ export function createSubjectTree(kind: ProductionItemKind = 'character', name =
     name,
     kind,
     aliases: [],
-    baseState: {
-      prompt: '',
+    states: [{
+      id: SUBJECT_BASE_STATE_ID,
+      state: '',
+      type: 'image',
+      step: 1,
+      deriveFrom: null,
+      deltaPrompt: '',
+      fullPrompt: '',
+      recognitionTerms: [],
+      media: [],
+      source: 'user',
+      baseRef: id,
+      aiStableKey: `${id}_base`,
       templateType: 'character_lineup',
       templateReason: '',
-      referenceImages: [],
-      aiStableKey: `${id}_base`,
-    },
-    states: [],
+      appearEpisodes: [],
+    }],
     coverKey: null,
     devlook: [],
     colorCardReason: '',
@@ -311,27 +448,28 @@ export function createDefaultColorCard(): ProjectColorCard {
 // 原值：character='角色形象·三视图定妆' / scene='场景·全景参考' / prop='道具参考·多角度细节'。
 // 需求变更两个前提：① 角色不一定是人形（生物/机器人/动物类角色此前被错称）；
 // ② 不再使用「xxx 定妆照」这类术语，统一称「基础状态」。前端统一用 i18n `subject.baseState`。
-// baseState.templateType / templateReason 字段保留（后端 LLM 契约），仅不再映射成展示术语。
+// 基础状态节点的 templateType / templateReason 字段保留（后端 LLM 契约），仅不再映射成展示术语。
 
 /**
- * 兼容旧数据归一化（Spec §2.3/§2.4）
- * - 为缺失 step 的状态占位按大纲顺序补号（基础形态=1，其后 2,3…）
- * - 缺省 deriveFrom → null（无依赖）
- * - baseRef 恒指 rootId
+ * 归一化（2026-11-08）：先做旧结构 → states[0] 迁移，再补齐每个状态的缺省字段。
+ * 老数据 states 的 step 原本从 2 开始，迁移后正好落在 states[1]、states[2]，无需重排。
  */
-export function normalizeSubjectTree(tree: SubjectTree): SubjectTree {
-  const states = (tree.states ?? []).map((n, i) => ({
+export function normalizeSubjectTree(tree: SubjectTree | LegacySubjectTree): SubjectTree {
+  const migrated = migrateSubjectTree(tree);
+  const states = migrated.states.map((n, i) => ({
     ...n,
-    baseRef: tree.rootId,
-    step: typeof n.step === 'number' ? n.step : i + 2,
+    baseRef: migrated.rootId,
+    step: i === 0 ? 1 : (typeof n.step === 'number' ? n.step : i + 1),
     deriveFrom: n.deriveFrom === undefined ? null : n.deriveFrom,
+    appearEpisodes: n.appearEpisodes ?? [],
+    media: n.media ?? [],
   }));
-  return { ...tree, states };
+  return { ...migrated, states };
 }
 
-/** 下一个状态占位的 step（基础=1，states 数 n → 下一个 = n+2） */
+/** 下一个状态占位的 step（states 已含基础=1，长度 n → 下一个 = n+1） */
 export function nextStateStep(tree: SubjectTree): number {
-  return (tree.states?.length ?? 0) + 2;
+  return (tree.states?.length ?? 0) + 1;
 }
 
 /**
@@ -380,14 +518,18 @@ export function sortStatesByEpisodeRelevance<T extends Pick<SubjectTreeNode, 'ap
     .map((x) => x.s);
 }
 
-/** 树级相关性：任一状态 rank 0（命中/未标注）即 0；全部状态都标注为其它集才 1；无状态 = 通用 0 */
+/**
+ * 树级相关性：任一状态 rank 0（命中/未标注）即 0；全部状态都标注为其它集才 1；无状态 = 通用 0。
+ * 2026-11-08：基础状态已是 states[0]，不再需要单独的 baseEpisodes 参数。
+ */
 export function treeEpisodeRank(
   states: Array<Pick<SubjectTreeNode, 'appearEpisodes'>> | undefined,
   activeEpisodeNumber: number | null,
 ): 0 | 1 {
   if (activeEpisodeNumber == null) return 0;
-  if (!states || states.length === 0) return 0;
-  return states.some((s) => stateEpisodeRank(s, activeEpisodeNumber) === 0) ? 0 : 1;
+  const all = states ?? [];
+  if (all.length === 0) return 0;
+  return all.some((s) => stateEpisodeRank(s, activeEpisodeNumber) === 0) ? 0 : 1;
 }
 
 /** 主体列表显示排序（同上稳定、display-only）：树间父子结构不变，仅渲染顺序变化 */
@@ -420,10 +562,6 @@ export function findDeriveSuggestion(tree: SubjectTree): SubjectDeriveFrom | nul
         label: `${tree.name}/${n.state || '状态'}`,
       };
     }
-  }
-  const bm = (tree.baseState?.referenceImages ?? []).find((x) => x.type === 'image');
-  if (bm) {
-    return { rootId: tree.rootId, mediaKey: bm.key, label: `${tree.name}/基础形态` };
   }
   return null;
 }

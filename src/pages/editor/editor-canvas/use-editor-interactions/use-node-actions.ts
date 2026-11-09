@@ -206,8 +206,8 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
             const copyIds = selectionIds.includes(nodeId) ? selectionIds : [nodeId];
             items.push({
               key: 'toCanvasCopy',
-              label: t('canvasCopy.create', '保存为画布副本'),
-              title: t('canvasCopy.createTitle', '把选中的节点另存为项目里的另一块画布（主画布不动）'),
+              label: t('canvasCopy.create', '另存画布'),
+              title: t('canvasCopy.createTitle', '把选中内容另存为画布副本'),
               icon: createElement(EDITOR_ICONS.canvasCopy, { size: 14 }),
               onClick: () => { onCreateCanvasCopy(copyIds); },
             });
@@ -294,9 +294,27 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
           if (canDownload && node) {
             items.push({
               key: 'download', label: t('editor.downloadNode'), icon: createElement(EDITOR_ICONS.download, { size: 14 }), onClick: () => {
-                import('./helpers.js').then(m => m.downloadNodeAsFile(node));
-            }},
-            );
+                void import('./helpers.js').then(async (m) => {
+                  const res = await m.downloadNodeAsFile(node);
+                  if (!res.ok) message.error(t('editor.downloadNodeFailed', '下载失败：文件不存在或已被清理'));
+                });
+              },
+            });
+            // 带引导的生成视频：额外提供「视频+引导」导出（2026-11-07 需求 1）
+            if ((node.data as { guide?: { id?: string } } | null)?.guide?.id) {
+              items.push({
+                key: 'download-with-guide',
+                label: t('editor.downloadNodeWithGuide', '下载视频+引导'),
+                icon: createElement(EDITOR_ICONS.download, { size: 14 }),
+                onClick: () => {
+                  void import('./helpers.js').then(async (m) => {
+                    const res = await m.downloadNodeAsFile(node, { withGuide: true });
+                    if (!res.ok) message.error(t('editor.downloadNodeFailed', '下载失败：文件不存在或已被清理'));
+                    else if (!res.guideOk) message.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
+                  });
+                },
+              });
+            }
           }
 
           setContextMenuItems(items);

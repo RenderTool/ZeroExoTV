@@ -142,7 +142,7 @@ describe('测试连接三态（自动判定后端类型）', () => {
     expect(r.kind === 'fail' && r.message).toContain('不可达');
   });
 
-  it('跨域被拒：TCP 通但真实请求全被浏览器拦截，附 --enable-cors-header 一行原因', async () => {
+  it('跨域被拒：提示明确要求加 --enable-cors-header 并说明 403 根因（不能说「无需」）', async () => {
     mockFetch([
       { match: (u) => u.endsWith('/favicon.ico'), body: {} },
       { match: (u) => u.endsWith('/system_stats'), reject: true },
@@ -151,6 +151,9 @@ describe('测试连接三态（自动判定后端类型）', () => {
     const r = await testEndpointConnection(LOCAL);
     expect(r.kind === 'fail' && r.failure).toBe('cors');
     expect(r.kind === 'fail' && r.message).toContain('--enable-cors-header');
+    // 旧文案写「无需 --enable-cors-header」也能通过 toContain，必须显式排除这个反话
+    expect(r.kind === 'fail' && r.message).not.toContain('无需 --enable-cors-header');
+    expect(r.kind === 'fail' && r.message).toContain('403');
   });
 
   it('rejected：有响应但既非 ComfyUI 也非兼容口（如 401 要求密钥）', async () => {

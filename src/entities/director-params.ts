@@ -561,6 +561,16 @@ export interface RunShotLike {
   imagePrompt?: string;
   references?: DirectorAssetRef[];
   continuation?: { enabled: boolean };
+  /**
+   * 片段引导槽（2026-11-07）：显式引导数据，独立于参考图槽位。
+   * 存在时本段以它为引导，不再使用上一段 guide（API 侧 use_prev_guide=false）。
+   */
+  guide?: { id: string; frames?: number; sha256?: string } | null;
+  /**
+   * 本段上一次生成产物自带的引导（2026-11-09）：视频默认都会产出 guide，
+   * 重跑单独一段时用它接续时间线里的上一段，不依赖「本次勾选顺序」。
+   */
+  media?: { guide?: { id?: string } | null } | null;
 }
 
 export interface SharedParamsLike {
@@ -655,7 +665,8 @@ export function validateRunSelection(args: {
     }
     const idx = args.shots.findIndex((s) => s.id === shot.id);
     const prev = idx > 0 ? args.shots[idx - 1] : undefined;
-    if (prev && segmentContinuityEnabled(shot, idx)) {
+    // 本段已有显式引导槽 → 不依赖上一段 guide（API 侧 use_prev_guide=false），不报衔接阻塞
+    if (prev && !shot.guide && segmentContinuityEnabled(shot, idx)) {
       const prevInRun = args.selectedIds.includes(prev.id) &&
         selected.findIndex((s) => s.id === prev.id) < selected.findIndex((s) => s.id === shot.id);
       if (prev.status !== 'done' && !prevInRun) {

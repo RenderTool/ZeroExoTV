@@ -21,14 +21,16 @@ import { deleteAssetsWithUndo } from '@/features/asset-library/delete-with-undo.
 import type { AssetScope } from '@/features/asset-picker/index.js';
 import { sendAssetToWorkbench } from './send-to-workbench.js';
 import { getWorkbenchSendContext } from './workbench-send.js';
-import { promoteAssetToLibrary } from '@/features/asset-picker/services/cas-upload.js';
+import { promoteAssetToScope } from '@/features/asset-picker/services/cas-upload.js';
 import { onAssetCreated } from '@/services/sync/sync-service.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useAssetUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
-import { getToken } from '@/services/api-client.js';
+import { downloadAsset } from '@/features/asset-picker/services/download-asset.js';
+import { downloadGuideFile } from '@/shared/utils/guide-file.js';
+import { getGuideMeta } from '@/features/asset-picker/guide.js';
+import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-resolve.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { getOpenLibMeta } from '@/features/open-library/open-library.js';
 import { countHistoryByKind, libraryCasHashes } from './history-utils.js';
 import type { Asset } from '@/features/asset-picker/index.js';
@@ -270,18 +272,53 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   const historyCounts = useMemo(() => countHistoryByKind(allAssets, historyProjectId), [allAssets, historyProjectId]);
   const libraryHashes = useMemo(() => libraryCasHashes(allAssets), [allAssets]);
 
-  /** 历史卡片「加入资产库」：CAS 去重补挂 ref，不复制第二份字节 */
-  const promoteToLibrary = useCallback(async (asset: Asset) => {
+  /** 历史卡片「加入资产库」：历史产物保留；按用户选择复制到本项目或公共库（共用同一文件） */
+  const promoteToScope = useCallback(async (asset: Asset, target: 'project' | 'library') => {
     try {
-      const created = await promoteAssetToLibrary(asset);
+      const created = await promoteAssetToScope(asset, target);
       if (!created) {
-        antdMessage.info(t('assetLibrary.historyAlreadyInLibrary', { defaultValue: '资产库已有相同内容，无需重复加入' }));
+        antdMessage.info(target === 'library'
+          ? t('assetLibrary.historyAlreadyInLibrary', { defaultValue: '公共库已有相同内容，无需重复加入' })
+          : t('assetLibrary.historyAlreadyInProject', { defaultValue: '本项目已有相同内容，无需重复加入' }));
         return;
       }
       await refreshAssets();
-      antdMessage.success(t('assetLibrary.historyAddedToLibrary', { defaultValue: '已加入资产库（与原产出共用同一文件）' }));
+      antdMessage.success(target === 'library'
+        ? t('assetLibrary.historyAddedToLibrary', { defaultValue: '已加入公共库（与原产出共用同一文件）' })
+        : t('assetLibrary.historyAddedToProject', { defaultValue: '已加入本项目资产（与历史共用同一文件）' }));
     } catch (err) {
       antdMessage.error(err instanceof Error ? err.message : t('assetLibrary.saveFailed', { defaultValue: '保存失败' }));
+    }
+  }, [refreshAssets, antdMessage, t]);
+
+  const promoteToLibrary = useCallback((asset: Asset) => promoteToScope(asset, 'library'), [promoteToScope]);
+
+  /** 批量加入资产库：只处理传入的选中项；目标由用户选择（本项目 / 公共库） */
+  const promoteAssetsTo = useCallback(async (targets: Asset[], target: 'project' | 'library' = 'library') => {
+    if (targets.length === 0) return;
+    let created = 0;
+    let existed = 0;
+    let failed = 0;
+    for (const asset of targets) {
+      try {
+        const r = await promoteAssetToScope(asset, target);
+        if (r) created += 1;
+        else existed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    await refreshAssets();
+    if (created > 0) {
+      antdMessage.success(target === 'library'
+        ? t('assetLibrary.batchExported', { n: created, defaultValue: '已将 {{n}} 项加入公共库' })
+        : t('assetLibrary.batchExportedProject', { n: created, defaultValue: '已将 {{n}} 项加入本项目' }));
+    }
+    if (existed > 0) {
+      antdMessage.info(t('assetLibrary.batchExportSkipped', { n: existed, defaultValue: '{{n}} 项已存在，已跳过' }));
+    }
+    if (failed > 0) {
+      antdMessage.warning(t('assetLibrary.batchExportFailed', { n: failed, defaultValue: '{{n}} 项导出失败' }));
     }
   }, [refreshAssets, antdMessage, t]);
 
@@ -426,31 +463,30 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     }
   }, [renameItemTarget, renameItemName, refreshAssets, updateAsset, antdMessage, t]);
 
-  /** 下载（素材封面；私有资源统一经 fetch+blob 带鉴权） */
-  const handleDownloadItem = useCallback(async (item: { type: 'asset'; data: any }) => {
-    const download = async (url: string, filename: string): Promise<void> => {
-      const token = getToken();
-      const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    };
+  /** 下载（素材卡/历史卡共用 downloadAsset：按 storageKey 读盘；无文件明确提示） */
+  const handleDownloadItem = useCallback(async (
+    item: { type: 'asset'; data: Asset },
+    opts?: { withGuide?: boolean },
+  ) => {
     try {
-      if (item.type === 'asset') {
-        const d = item.data.data;
-        const cover = d.kind === 'image' ? d.dataUrl : d.kind === 'video' ? d.url : undefined;
-        const url = getResourceUrl(d.storageKey, 'full') || cover;
-        if (url) await download(url, item.data.title);
+      if (item.type !== 'asset') return;
+      const ok = await downloadAsset(item.data);
+      if (!ok) {
+        antdMessage.error(t('assetLibrary.downloadFailed', '下载失败：文件不存在或已被清理'));
+        return;
       }
-    } catch { /* ignore */ }
-  }, []);
+      if (!opts?.withGuide) return;
+      const guide = getGuideMeta(item.data) ?? await resolveGuideForAsset(item.data);
+      if (!guide?.id) {
+        antdMessage.warning(t('assetLibrary.guideMissing', '该视频没有引导数据'));
+        return;
+      }
+      const saved = await downloadGuideFile(guide, `${item.data.title ?? '视频'} 引导`).catch(() => false);
+      if (!saved) antdMessage.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
+    } catch (err) {
+      antdMessage.error(err instanceof Error ? err.message : t('assetLibrary.downloadFailed', '下载失败：文件不存在或已被清理'));
+    }
+  }, [antdMessage, t]);
 
   /** 打开条目（素材详情） */
   const openItem = useCallback((item: { type: 'asset'; data: any }) => {
@@ -512,6 +548,8 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     historyCounts,
     libraryHashes,
     promoteToLibrary,
+    promoteToScope,
+    promoteAssetsTo,
 
     // 通用
     focusAssetId,

@@ -18,12 +18,12 @@ import {
   useSubjectMediaLinkEventStore,
   type SubjectStateMediaAsset,
 } from './subject-state-media';
-import type { SubjectTree } from './subject-tree-types';
+import { migrateSubjectTrees, type SubjectTree } from './subject-tree-types';
 
 export type SendAssetToSubjectResult = 'linked-current' | 'dialog';
 
 function treesOf(container: Awaited<ReturnType<typeof readStoryboardContainer>>): SubjectTree[] {
-  return (container?.subjectTree as SubjectTree[] | undefined) ?? [];
+  return migrateSubjectTrees(container?.subjectTree);
 }
 
 /** 发送资产到主体：有当前状态页 → 直接绑定；否则弹主体→状态选择 */

@@ -75,7 +75,11 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(buf);
 }
 
-async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+/**
+ * fs REST 请求处理器（T0 2026-11-09 导出）：
+ * `--http` 模式用它把数据服务并入 MCP 同一进程，避免多起一个 fs-server 服务。
+ */
+export async function handleFsRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const p = url.searchParams.get("p") ?? "";
 
@@ -206,6 +210,16 @@ async function ensureRootMarker(): Promise<void> {
   }
 }
 
+/** T0：`--http` 同进程复用时只做数据根自愈，不 listen、不 exit。 */
+export async function ensureFsRoot(): Promise<void> {
+  try {
+    await ensureDataRoot();
+    await ensureRootMarker();
+  } catch (err) {
+    process.stderr.write(`[zeroexo-fs] 数据根自愈失败（不阻断监听）: ${(err as Error).message}\n`);
+  }
+}
+
 /** 幂等启动：已在线直接退出；否则监听并返回 server（供测试持有）。 */
 export async function startFileServer(): Promise<http.Server> {
   const port = fsServerPort();
@@ -219,15 +233,10 @@ export async function startFileServer(): Promise<http.Server> {
     process.exit(0);
   }
 
-  try {
-    await ensureDataRoot();
-    await ensureRootMarker();
-  } catch (err) {
-    process.stderr.write(`[zeroexo-fs] 数据根自愈失败（不阻断监听）: ${(err as Error).message}\n`);
-  }
+  await ensureFsRoot();
 
   const server = http.createServer((req, res) => {
-    void handle(req, res);
+    void handleFsRequest(req, res);
   });
   await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
   process.stderr.write(

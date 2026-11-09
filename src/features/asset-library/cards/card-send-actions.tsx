@@ -13,9 +13,10 @@
  */
 
 import type { TFunction } from 'i18next';
-import { Tooltip } from 'antd';
+import { useState } from 'react';
+import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
-import { Clapperboard, Loader2, Send } from 'lucide-react';
+import { Clapperboard, ImagePlus, Loader2, Share2, Waypoints } from 'lucide-react';
 
 // ===== 能力规则（与 workbench-slot-bus 槽位分配同口径） =====
 
@@ -58,6 +59,10 @@ export interface SendActionHandlers {
   onSendToCanvas?: () => void;
   /** 发送到导演台当前片段（sendAssetToWorkbench 链路） */
   onSendToDirector?: () => void;
+  /** 素材自带引导数据（2026-11-07）：导演台按钮点开时提供「视频 / 引导数据」二选一 */
+  hasGuide?: boolean;
+  /** 发送引导数据到导演台当前片段引导槽（仅 hasGuide 时使用） */
+  onSendGuideToDirector?: () => void;
   /** 素材类型（image/video/audio/text/script…）；决定导演台动作可用性（统一置灰规则） */
   kind?: string;
   /** 开源库首用下载中：两钮转圈禁用（用户资产恒为 false） */
@@ -85,12 +90,13 @@ export interface SendActionHandlers {
 export function SendActionButtons({
   onSendToCanvas,
   onSendToDirector,
+  hasGuide,
+  onSendGuideToDirector,
   kind,
   importing,
   canvasDisabled,
   visible,
   alwaysVisible,
-  overlay,
   t,
 }: SendActionHandlers & {
   /** hover 可见性（opacity 过渡，触屏设备常驻半透明见 alwaysVisible） */
@@ -101,49 +107,56 @@ export function SendActionButtons({
   overlay?: boolean;
   t: TFunction;
 }): React.ReactElement | null {
+  const [directorMenuOpen, setDirectorMenuOpen] = useState(false);
   if (!onSendToCanvas && !onSendToDirector) return null;
   const directorDisabled = !!onSendToDirector && !importing && !canSendKindToDirector(kind);
   const opacity = alwaysVisible ? (visible ? 1 : 0.75) : visible ? 1 : 0;
-  const btn = (extra?: Partial<React.CSSProperties>): React.CSSProperties => ({
+  const items: NonNullable<MenuProps['items']> = buildSendMenuItems({
+    onSendToCanvas,
+    onSendToDirector: onSendToDirector && !directorDisabled ? onSendToDirector : undefined,
+    kind,
+    canvasDisabled,
+    t,
+  });
+  if (onSendToDirector && hasGuide && onSendGuideToDirector) {
+    items.push({
+      key: 'sendGuide',
+      icon: <Waypoints size={13} />,
+      label: t('assetLibrary.sendGuideToDirector', '发送引导'),
+      onClick: () => { setDirectorMenuOpen(false); onSendGuideToDirector(); },
+    });
+  }
+  const btn: React.CSSProperties = {
     ...cardActionBtnStyle,
     opacity,
     cursor: importing ? 'wait' : 'pointer',
     transition: 'opacity 0.2s, background 0.15s',
-    ...extra,
-  });
+  };
   return (
-    <div
-      style={{
-        ...(overlay
-          ? { position: 'absolute', top: 8, right: 8, zIndex: 10 }
-          : { flexShrink: 0 }),
-        display: 'inline-flex',
-        gap: 4,
-      }}
-    >
-      {onSendToCanvas && (
-        <Tooltip title={importing ? t('openLib.importing') : canvasDisabled ? t('openLib.noCanvasTarget') : t(SEND_ACTION_LABEL_KEYS.sendToCanvas)}>
-          <button
-            type="button"
-            data-card-action="sendToCanvas"
-            aria-label={t(SEND_ACTION_LABEL_KEYS.sendToCanvas)}
-            disabled={!!importing || !!canvasDisabled}
-            style={btn(canvasDisabled && !importing ? { opacity: visible ? 0.45 : 0, cursor: 'not-allowed' } : undefined)}
-            onClick={(e) => { e.stopPropagation(); onSendToCanvas(); }}
-          >
-            {importing ? <Loader2 size={13} style={{ animation: 'zeroexo-card-spin 1s linear infinite' }} /> : <Send size={13} />}
-          </button>
-        </Tooltip>
-      )}
-      {onSendToDirector && (
-        <Tooltip title={directorDisabled ? t('workbench.unsupportedKind') : t(SEND_ACTION_LABEL_KEYS.sendToDirector)}>
-          <button type="button" data-card-action="sendToDirector" aria-label={t(SEND_ACTION_LABEL_KEYS.sendToDirector)} disabled={directorDisabled || !!importing} style={btn(directorDisabled ? { opacity: visible ? 0.45 : 0, cursor: 'not-allowed' } : undefined)} onClick={(e) => { e.stopPropagation(); if (!directorDisabled) onSendToDirector(); }}>
-            <Clapperboard size={13} />
-          </button>
-        </Tooltip>
-      )}
+    <>
+      <Dropdown
+        open={directorMenuOpen}
+        onOpenChange={setDirectorMenuOpen}
+        trigger={['click']}
+        menu={{ items }}
+      >
+        <button
+          type="button"
+          data-card-action="send"
+          aria-label={t('assetLibrary.sendTo', '发送')}
+          title={t('assetLibrary.sendTo', '发送')}
+          disabled={!!importing}
+          style={btn}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!importing) setDirectorMenuOpen(true);
+          }}
+        >
+          {importing ? <Loader2 size={13} style={{ animation: 'zeroexo-card-spin 1s linear infinite' }} /> : <Share2 size={13} />}
+        </button>
+      </Dropdown>
       <style>{'@keyframes zeroexo-card-spin{to{transform:rotate(360deg)}}'}</style>
-    </div>
+    </>
   );
 }
 
@@ -159,7 +172,7 @@ export function buildSendMenuItems({ onSendToCanvas, onSendToDirector, kind, can
   if (onSendToCanvas) {
     items.push({
       key: 'sendToCanvas',
-      icon: <Send size={13} />,
+      icon: <ImagePlus size={13} />,
       label: t(SEND_ACTION_LABEL_KEYS.sendToCanvas) + (canvasDisabled ? `（${t('openLib.noCanvasTarget')}）` : ''),
       disabled: !!canvasDisabled,
       onClick: onSendToCanvas,

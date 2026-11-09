@@ -99,6 +99,16 @@ describe('migrateAssetScopes 纯函数', () => {
     expect(r2.changed).toBe(false);
     expect(r2.list[0]).toBe(r.list[0]);
   });
+
+  it('无 scope 但有 projectId → 迁移为本项目资产（历史生成产物不会被当成公共库）', () => {
+    const input = [
+      { ...legacyAsset('p1', '项目产出'), projectId: 'c1' },
+      { ...legacyAsset('l1', '旧公共') },
+    ] as unknown as Asset[];
+    const r = migrateAssetScopes(input);
+    expect(r.list.map((a) => a.scope)).toEqual(['project', 'library']);
+    expect(r.list[0]?.projectId).toBe('c1');
+  });
 });
 
 describe('listAssets 惰性迁移写回', () => {
@@ -310,6 +320,18 @@ describe('filterAssetsStrictScope 胶囊 Tab 严格口径（单段不混排）',
     const out = filterAssetsStrictScope(mixed, { scopeTab: 'project', projectId: 'c1' });
     expect(out.map((a) => a.id)).toEqual(['p1']);
     expect(out.every((a) => a.scope === 'project' && a.projectId === 'c1')).toBe(true);
+  });
+
+  it('API 生成产物只属于历史，不混进本项目资产（本项目只放导入/手动存入）', () => {
+    const list = [
+      { ...legacyAsset('manual', '手动导入'), scope: 'project', projectId: 'c1' },
+      {
+        ...legacyAsset('gen', 'API 生成视频'), scope: 'project', projectId: 'c1', kind: 'video',
+        data: { kind: 'video', origin: 'generation', storageKey: 'video:assets/c1/videos/a.mp4' },
+      },
+    ] as unknown as Asset[];
+    expect(filterAssetsStrictScope(list, { scopeTab: 'project', projectId: 'c1' }).map((a) => a.id)).toEqual(['manual']);
+    expect(countAssetsByScope(list, 'c1').project).toBe(1);
   });
 
   it('公共段：只出公共库资产（四类白名单），项目资产与业务 kind 均不出现', () => {

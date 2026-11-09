@@ -8,9 +8,29 @@
  * 用户手动上传、拖入画布、从素材库添加的资产一律不写该标记 → 不进历史。
  */
 
-import type { Asset } from '@/features/asset-picker/index.js';
+import type { Asset, HistorySource } from '@/features/asset-picker/index.js';
 
-export type HistoryKind = 'image' | 'video';
+export type { HistorySource } from '@/features/asset-picker/index.js';
+
+export type HistoryKind = 'image' | 'video' | 'all';
+
+/**
+ * 历史产出来源判定（2026-11-07）：优先读落库字段 data.originSource；
+ * 存量记录（该字段上线前产生）按「导演台特征」兜底：本机 provider（zeroexo /
+ * comfyui-direct）或导演台标题「片段 N · Ns」。其余一律视为画布生成。
+ * 只用于展示分区，不改写资产数据。
+ */
+export function getHistorySource(asset: Asset): HistorySource {
+  const d = asset.data as {
+    originSource?: HistorySource;
+    generation?: { provider?: string };
+  };
+  if (d.originSource === 'canvas' || d.originSource === 'director') return d.originSource;
+  const provider = d.generation?.provider;
+  if (provider === 'zeroexo' || provider === 'comfyui-direct') return 'director';
+  if (/^片段\s*\d+/.test(asset.title)) return 'director';
+  return 'canvas';
+}
 
 /** 单页条数：超过即分页（验收要求 >50 分页） */
 export const HISTORY_PAGE_SIZE = 50;
@@ -20,15 +40,27 @@ export function isGenerationAsset(asset: Asset): boolean {
   return (asset.data as { origin?: string }).origin === 'generation';
 }
 
-/** 过滤某项目的历史产出（仅生成产物 + 指定 kind），按 createdAt 倒序 */
-export function filterHistoryAssets(assets: Asset[], projectId: string | null, kind: HistoryKind): Asset[] {
+/**
+ * 过滤某项目的历史产出（仅生成产物 + 指定 kind），按 createdAt 倒序。
+ * source 省略或 'all' = 不按来源过滤（存量调用方/测试零影响）；
+ * 传 'canvas' / 'director' = 抽屉来源 Tab 的分区口径。
+ */
+export function filterHistoryAssets(
+  assets: Asset[],
+  projectId: string | null,
+  kind: HistoryKind,
+  source?: HistorySource | 'all',
+): Asset[] {
   if (!projectId) return [];
   return assets
-    .filter((a) => isGenerationAsset(a) && a.projectId === projectId && a.kind === kind)
+    .filter((a) => isGenerationAsset(a)
+      && a.projectId === projectId
+      && (kind === 'all' || a.kind === kind)
+      && (!source || source === 'all' || getHistorySource(a) === source))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-/** 两分类计数（一次遍历；仅生成产物） */
+/** 两分类计数（一次遍历；仅生成产物，不分来源；保留给旧调用方） */
 export function countHistoryByKind(assets: Asset[], projectId: string | null): { image: number; video: number } {
   let image = 0;
   let video = 0;
@@ -40,6 +72,29 @@ export function countHistoryByKind(assets: Asset[], projectId: string | null): {
     }
   }
   return { image, video };
+}
+
+/**
+ * 来源 Tab × 类型 chips 的实时计数（一次遍历）：
+ * 每段胶囊徽标显示该来源总数，类型 chips 显示当前来源下该类型的条数。
+ */
+export function countHistoryBySourceAndKind(
+  assets: Asset[],
+  projectId: string | null,
+): Record<HistorySource, { image: number; video: number; total: number }> {
+  const result: Record<HistorySource, { image: number; video: number; total: number }> = {
+    canvas: { image: 0, video: 0, total: 0 },
+    director: { image: 0, video: 0, total: 0 },
+  };
+  if (!projectId) return result;
+  for (const a of assets) {
+    if (!isGenerationAsset(a) || a.projectId !== projectId) continue;
+    const bucket = result[getHistorySource(a)];
+    bucket.total++;
+    if (a.kind === 'image') bucket.image++;
+    else if (a.kind === 'video') bucket.video++;
+  }
+  return result;
 }
 
 /** 公共库已有的内容 hash 集合（历史卡片「加入资产库」按钮据此隐藏） */

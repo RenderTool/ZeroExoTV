@@ -38,9 +38,12 @@ import type {
 import { nodeActionBus } from './base-node-view.js';
 export { BaseNodeView, AIStateView, AISkeleton, createPinHandlers, nodeActionBus } from './base-node-view.js';
 export {
+  DEFAULT_CANVAS_DOC_ID,
   useGeneratingPreviewStore,
   setGeneratingPreview,
   clearGeneratingPreview,
+  setGeneratingPreviewCanvas,
+  generatingPreviewKey,
 } from './generating-preview-store.js';
 export type { BaseNodeViewProps, AIStateViewProps, PinHandlers, NodeActionEvent } from './base-node-view.js';
 export { NODE_ICONS } from './icons.js';
@@ -405,8 +408,8 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
   return {
     type: NODE_TYPES.stackedMedia,
     displayName: i18next.t('nodes.stackedMediaTitle'),
-    // Basic 分类:可拖拽/菜单创建的通用节点(多选堆叠入口已移除)
-    category: 'Basic',
+    // Basic 分类：本版本不启用堆叠，先隐藏创建入口（旧数据节点仍可读取）
+    category: '_hidden',
     color: '#f59e0b',
     // 基准尺寸与 image/video 节点一致
     defaultSize: STACKED_MEDIA_DEFAULT_SIZE,

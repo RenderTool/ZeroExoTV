@@ -68,6 +68,30 @@ export async function uploadMediaFile(
 }
 
 /**
+ * 外部媒体 Blob 解析器（2026-11-07）：导演台成片/首帧写在 platform/media 磁盘
+ * （video:assets/...），不在本插件的 media_files 桶。应用启动时注册磁盘读取器，
+ * 本地键先读磁盘，未命中再回退本桶（兼容旧数据）。
+ */
+export type ExternalMediaBlobResolver = (storageKey: string) => Promise<Blob | null>;
+let externalMediaBlobResolver: ExternalMediaBlobResolver | null = null;
+
+export function setExternalMediaBlobResolver(resolver: ExternalMediaBlobResolver | null): void {
+  externalMediaBlobResolver = resolver;
+}
+
+async function readMediaBlob(storageKey: string): Promise<Blob | null> {
+  if (externalMediaBlobResolver) {
+    try {
+      const blob = await externalMediaBlobResolver(storageKey);
+      if (blob) return blob;
+    } catch {
+      /* 外部解析失败 → 回退本桶 */
+    }
+  }
+  return store.getItem<Blob>(storageKey);
+}
+
+/**
  * 解析 storageKey → blob URL
  * 优先取内存缓存,缓存未命中则从 localforage 加载 Blob 并创建 URL
  */
@@ -78,7 +102,7 @@ export async function resolveMediaUrl(storageKey?: string, fallback = ''): Promi
   if (!storageKey) return safeFallback;
   const cached = objectUrls.get(storageKey);
   if (cached) return cached;
-  const blob = await store.getItem<Blob>(storageKey);
+  const blob = await readMediaBlob(storageKey);
   if (!blob) return safeFallback;
   const url = URL.createObjectURL(blob);
   objectUrls.set(storageKey, url);
@@ -87,7 +111,7 @@ export async function resolveMediaUrl(storageKey?: string, fallback = ''): Promi
 
 /** 直接读取 Blob(不创建 URL) */
 export async function getMediaBlob(storageKey: string): Promise<Blob | null> {
-  return store.getItem<Blob>(storageKey);
+  return readMediaBlob(storageKey);
 }
 
 /**

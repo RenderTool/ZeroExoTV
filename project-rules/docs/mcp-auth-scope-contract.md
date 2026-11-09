@@ -35,7 +35,13 @@ asset.read      asset.write
 workbench.read  workbench.write
 ```
 
-## 4. 工具权限矩阵（24 槽位）
+## 4. 工具权限矩阵（24 槽位，M1 历史记录）
+
+> **2026-11-09 更新**：下表是 M1 当时的契约快照，**不再是当前工具清单**。当前实际注册 **46 个工具**（read 20 / write 26），以 `mcp-server --selfcheck` 的 `tools/readTools/writeTools/toolNames` 与前端 `src/features/mcp-settings/mcp-client.ts` 的 `MCP_TOOLS` 为准，两边必须一一对应。
+>
+> 2026-11-09 新增 10 个工具（全部复用现有能力位，**未新增 bit**，已签发 token 仍有效）：
+> `set_segment_duration`(workbench.write) / `set_shot_guide`(workbench.write) / `list_history`(asset.read) / `get_guide`(asset.read) / `run_generation`(workbench.write) / `get_job`(workbench.read) / `list_jobs`(workbench.read) / `sync_job_results`(workbench.write) / `verify_output`(workbench.read) / `get_param_schema`(workbench.read)。
+> 其中 `run_generation` / `get_job` / `sync_job_results` 等会代前端访问 ComfyUI `/zeroexo/v1/jobs`，满足「部署后只有网页 + 打包 MCP」的约束；详见 `project-rules/specs/mcp-e2e-guide/spec.md`。
 
 M1 实现 20 个工具（读 9 / 写 11），M2 预留 4 槽位。**所有写类工具必须携带 `baseVersion`（读后写乐观锁）**；M1 **不提供任何 delete 类工具**。
 

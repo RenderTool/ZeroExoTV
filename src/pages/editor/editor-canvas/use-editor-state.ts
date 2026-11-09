@@ -19,7 +19,7 @@ import { updateProject } from '@zeroexo/plugin-persistence';
 import { DirectProvider } from '@zeroexo/plugin-ai-provider';
 import type { AIProvider } from '@zeroexo/plugin-ai-provider';
 import { useAiConfigStore, resolveModelRequestConfig } from '@/features/ai-config/use-ai-config-store.js';
-import { ApiError } from '@/services/api-client.js';
+import { ApiError, getToken } from '@/services/api-client.js';
 import i18n from '@/i18n/config';
 import { syncProjectFromCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud } from '@/services/sync/sync-service.js';
 import { debugLog } from '@/services/sync/sync-utils.js';
@@ -31,6 +31,7 @@ import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js'
 import { createColorCardExtension } from '@/features/canvas-nodes/color-card/color-card-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
 import { setCurrentCanvasId } from '@/shared/current-canvas-id.js';
+import { getCurrentCanvasDocId, MAIN_CANVAS_DOC_ID } from '@/shared/current-canvas-doc.js';
 import { PROJECT_RELOAD_EVENT } from '@/services/sync/broadcast-channel-service.js';
 import { collectImageStorageKeys, getProject, scheduleDeferredCleanup } from '@zeroexo/plugin-persistence';
 import type { GraphModel } from '@zeroexo/core';
@@ -306,6 +307,13 @@ export function useEditorState(canvasId: string): {
         // 事件驱动等待首份内容（非轮询）：本地有快照时只给 Y.Doc 短暂窗口（300ms），
         // 避免弱网下首屏变慢；本地无快照时才等云端播种（3s）。
         const seedFromYDoc = async (hasLocalSaved: boolean): Promise<boolean> => {
+          // 2026-11-07 修复「子画布生成任务刷新后串到主画布同 id 节点」：
+          // 本地版无云端（getToken() 恒 null），Y.Doc 只是本机 IndexedDB 影子，且 docName 是
+          // 项目级 canvas:<projectId>（主画布与画布副本共用）。副本内容一旦被推进来，
+          // 刷新后就会被当作主画布播种 → 副本里的 loading/预览/错误落到主画布同 id 节点。
+          // 本地快照（PersistencePlugin/localforage）才是主画布权威，故本地模式不播种 Y.Doc；
+          // 仅真正有云端（有 token）时才把 Y.Doc 当第一播种源。
+          if (!getToken()) return false;
           // 纯本地新项目（无 cloudId）：云端永远不会播种，空等无意义，直接降级。
           try {
             const localMeta = await getProject(canvasId);
@@ -591,6 +599,8 @@ export function useEditorState(canvasId: string): {
     let unsubRemote: (() => void) | undefined;
     unsubRemote = subscribeRemote((remote: CanvasGraphPayload) => {
       if (!isInitialized) return;
+      // 副本文档：Y.Doc 是主画布的项目级文档，远端主画布快照不得覆盖副本内容
+      if (getCurrentCanvasDocId() !== MAIN_CANVAS_DOC_ID) return;
       // suppressNextSync 防止 replaceState 触发 onChanged → pushGraph 回环
       suppressNextSync = true;
       ed.plugins.persistence?.suppressNextSave();
@@ -643,6 +653,9 @@ export function useEditorState(canvasId: string): {
     const pushYjs = (skipResourceSync: boolean) => {
       dragPushTimer = null;
       dragPushPending = false;
+      // 2026-11-07 文档作用域：画布副本是独立文档（canvas-store 落盘），不得写进
+      // 项目级 Y.Doc（否则刷新后被当作主画布播种，见 seedFromYDoc 注释）。
+      if (getCurrentCanvasDocId() !== MAIN_CANVAS_DOC_ID) return;
       // Agent 批量执行期间抑制推送：每个 op 都触发 onGraphChanged → pushYjs，
       // N 个操作会导致 N 次 syncProjectResourcesToCloud(全量节点扫描+blob哈希) + N 次 pushGraph(图序列化+WS广播)。
       // 由 executeCanvasOp 的 _agentBatching 标志抑制，完成后 onBatchEnd 单次 flush。

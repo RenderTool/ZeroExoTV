@@ -12,6 +12,7 @@
 | `subject-pages/` | 主体库页面化三层规格 |
 | `20261104-ghost-nodes/` | 幽灵节点取证 / 修复规格 + 任务 |
 | `comfyui-global-workflows/` | ComfyUI 全局地址/约定工作流接入规格 |
+| `mcp-e2e-guide/` | MCP 全流程能力补齐 + 引导数据 E2E（调研 / 3 服务拓扑 / 10 个新工具 / 实测结论，2026-11-09 已落地） |
 
 **引用纪律**：源码与测试多处把这些 spec 标为「唯一判定来源」（如 `drag-spec.md`、`rail-visual-spec.md §5`）。
 2026-11-06 已把全部注释路径批量同步为 `project-rules/specs/...`；**后续新增引用必须写完整新路径**，不要再写回 `specs/`。

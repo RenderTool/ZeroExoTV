@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { syncWorkbenchSendContext } from './workbench-send.js';
 import { sendAssetToWorkbench } from './send-to-workbench.js';
-import { WORKBENCH_ADD_REF_EVENT } from '@/features/canvas-tabs/workbench-slot-bus.js';
+import { WORKBENCH_ADD_REF_EVENT, WORKBENCH_SET_GUIDE_EVENT } from '@/features/canvas-tabs/workbench-slot-bus.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 
 // 统一导航入口 mock：发送到导演台 = 跳转导演台并聚焦当前片段（2026-11-05 约定：
@@ -36,6 +36,74 @@ function openLibAsset(): Asset {
     data: { kind: 'image', dataUrl: 'data:image/png;base64,x', storageKey: 'open-1' },
   } as unknown as Asset;
 }
+
+/** 生成产物形态：视频 + 自带引导数据 */
+function videoWithGuide(): Asset {
+  return {
+    id: 'asset-video-1',
+    title: '片段 1 · 5s',
+    scope: 'project',
+    projectId: 'proj-1',
+    data: {
+      kind: 'video',
+      url: '',
+      storageKey: 'cas:abc.mp4',
+      guide: { id: 'gd_abc12345', frames: 22, sha256: 'ff' },
+    },
+  } as unknown as Asset;
+}
+
+describe('sendAssetToWorkbench：发送引导数据（2026-11-07 独立引导槽）', () => {
+  it('mode=guide → 发引导槽事件（id/帧数/来源资产），不占参考槽、不重复发入槽事件', () => {
+    syncWorkbenchSendContext({ projectId: 'proj-1', activeShotId: 'shot-1', segmentAssets: [], tier: 'h3' });
+    const msg = messageSpy();
+    const guides: Array<{ projectId: string; guide: { id: string; frames?: number; fromAssetId?: string } }> = [];
+    const refs = vi.fn();
+    const onGuide = (e: Event) => guides.push((e as CustomEvent<typeof guides[number]>).detail);
+    window.addEventListener(WORKBENCH_SET_GUIDE_EVENT, onGuide);
+    window.addEventListener(WORKBENCH_ADD_REF_EVENT, refs);
+    try {
+      sendAssetToWorkbench(videoWithGuide(), msg, t, { mode: 'guide' });
+    } finally {
+      window.removeEventListener(WORKBENCH_SET_GUIDE_EVENT, onGuide);
+      window.removeEventListener(WORKBENCH_ADD_REF_EVENT, refs);
+    }
+    expect(guides).toHaveLength(1);
+    expect(guides[0]!.projectId).toBe('proj-1');
+    expect(guides[0]!.guide.id).toBe('gd_abc12345');
+    expect(guides[0]!.guide.frames).toBe(22);
+    expect(guides[0]!.guide.fromAssetId).toBe('asset-video-1');
+    expect(refs).not.toHaveBeenCalled();
+    expect(msg.success).toHaveBeenCalledTimes(1);
+    expect(navMock.navigateToView).toHaveBeenCalledWith('director', { shotId: 'shot-1', projectId: 'proj-1' });
+  });
+
+  it('素材没有引导数据 → 明确提示，不发事件', async () => {
+    syncWorkbenchSendContext({ projectId: 'proj-1', activeShotId: 'shot-1', segmentAssets: [], tier: 'h3' });
+    const msg = messageSpy();
+    const listener = vi.fn();
+    window.addEventListener(WORKBENCH_SET_GUIDE_EVENT, listener);
+    try {
+      sendAssetToWorkbench(openLibAsset(), msg, t, { mode: 'guide' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      window.removeEventListener(WORKBENCH_SET_GUIDE_EVENT, listener);
+    }
+    expect(listener).not.toHaveBeenCalled();
+    expect(msg.warning).toHaveBeenCalledWith('该素材没有引导');
+  });
+
+  it('无选中片段 → 先提示，不写引导槽', () => {
+    const listener = vi.fn();
+    window.addEventListener(WORKBENCH_SET_GUIDE_EVENT, listener);
+    try {
+      sendAssetToWorkbench(videoWithGuide(), messageSpy(), t, { mode: 'guide' });
+    } finally {
+      window.removeEventListener(WORKBENCH_SET_GUIDE_EVENT, listener);
+    }
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
 
 afterEach(() => {
   syncWorkbenchSendContext(null);
@@ -99,7 +167,7 @@ describe('sendAssetToWorkbench：事件目标 = 宿主快照（projectId 修复�
       window.removeEventListener(WORKBENCH_ADD_REF_EVENT, listener);
     }
     expect(listener).not.toHaveBeenCalled();
-    expect(msg.info).toHaveBeenCalledWith('该资产已在当前片段素材池，复用原槽位');
+    expect(msg.info).toHaveBeenCalledWith('已在导演台，无需重复发送');
   });
 });
 

@@ -277,6 +277,7 @@ export class ReactGraphStore {
    *  算法与参数语义见 focus-geometry.ts computeFocusTarget,禁止在调用方复制 targetK 计算
    *  @param capsuleHeight 胶囊菜单高度(px),有胶囊菜单时传入以确保缩放包含菜单区域
    *  @param paddingRatio 聚焦缩放系数(0~1),越小节点周边留白越大(默认 0.82)
+   *  @param forcedK 强制缩放（画布结构定位用 1=100%）
    */
   focusOnBounds = (
     bounds: FocusBounds,
@@ -284,8 +285,9 @@ export class ReactGraphStore {
     durationMs = 400,
     capsuleHeight = 0,
     paddingRatio = 0.82,
+    forcedK?: number,
   ): void => {
-    const target = computeFocusTarget(bounds, containerSize, capsuleHeight, paddingRatio);
+    const target = computeFocusTarget(bounds, containerSize, capsuleHeight, paddingRatio, forcedK);
     // FocusModel:按节点规模决策动画档位(>120 降帧,>800 直接跳转),见 focus-model.ts
     const strategy = resolveFocusAnimation(this.graph.nodes.length, durationMs);
     this.animateViewport(target.x, target.y, target.k, strategy.durationMs, strategy.frameIntervalMs);
@@ -298,6 +300,7 @@ export class ReactGraphStore {
    *  @param paddingRatio 聚焦缩放系数(0~1),越小节点周边留白越大(默认 0.82);
    *         例:堆叠模式传 0.8 得到比基准更小的缩放、节点外边空间更大
    *  注: 胶囊菜单在节点上方,中心点使用节点实际中心(不偏移),缩放范围包含胶囊菜单区域
+   *  @param forcedK 强制缩放（画布结构定位用 1=100%）；不传则自动适配
    */
   focusOnNode = (
     nodeId: string,
@@ -307,6 +310,7 @@ export class ReactGraphStore {
     durationMs = 400,
     capsuleHeight = 0,
     paddingRatio = 0.82,
+    forcedK?: number,
   ): void => {
     const node = this.getNode(nodeId);
     if (!node) return;
@@ -319,6 +323,7 @@ export class ReactGraphStore {
       durationMs,
       capsuleHeight,
       paddingRatio,
+      forcedK,
     );
   };
 

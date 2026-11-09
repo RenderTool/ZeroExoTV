@@ -41,12 +41,12 @@ interface GridContextValue {
   onOpenItem: (item: PageItem) => void;
   onRenameItem: (item: PageItem) => void;
   onDeleteItem: (item: PageItem) => void;
-  onDownloadItem?: (item: PageItem) => void;
+  onDownloadItem?: (item: PageItem, opts?: { withGuide?: boolean }) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
   /** 发送到画布(征集 #87 验收轮十三:仅画布内嵌入时提供) */
   onSendToCanvas?: (item: PageItem) => void;
   /** 发送到导演台当前片段（2026-11-05 约定：仅画布内嵌时提供） */
-  onSendToDirector?: (item: PageItem) => void;
+  onSendToDirector?: (item: PageItem, mode?: 'video' | 'guide') => void;
 }
 
 const GridContext = createContext<GridContextValue>(null as any);
@@ -100,10 +100,10 @@ const CardItem = memo(function CardItem({ index }: { index: number }) {
         onOpen={() => ctxOnOpenItem(item)}
         onRename={() => ctxOnRenameItem(item)}
         onDelete={() => ctxOnDeleteItem(item)}
-        onDownload={ctxOnDownloadItem ? () => ctxOnDownloadItem(item) : undefined}
+        onDownload={ctxOnDownloadItem ? (opts) => ctxOnDownloadItem(item, opts) : undefined}
         onContextMenu={(e) => ctxOnContextMenu(e, item)}
         onSendToCanvas={ctxOnSendToCanvas ? () => ctxOnSendToCanvas(item) : undefined}
-        onSendToDirector={ctxOnSendToDirector ? () => ctxOnSendToDirector(item) : undefined}
+        onSendToDirector={ctxOnSendToDirector ? (mode) => ctxOnSendToDirector(item, mode) : undefined}
         scopeView={ctxScopeView}
         theme={ctxTheme}
         t={ctxT}
@@ -130,10 +130,10 @@ interface MasonryListInnerProps {
   onOpenItem: (item: PageItem) => void;
   onRenameItem: (item: PageItem) => void;
   onDeleteItem: (item: PageItem) => void;
-  onDownloadItem?: (item: PageItem) => void;
+  onDownloadItem?: (item: PageItem, opts?: { withGuide?: boolean }) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
   onSendToCanvas?: (item: PageItem) => void;
-  onSendToDirector?: (item: PageItem) => void;
+  onSendToDirector?: (item: PageItem, mode?: 'video' | 'guide') => void;
 }
 
 const MasonryListInner = memo(function MasonryListInner({
@@ -218,10 +218,10 @@ interface AssetLibraryGridViewProps {
   onOpenItem: (item: PageItem) => void;
   onRenameItem: (item: PageItem) => void;
   onDeleteItem: (item: PageItem) => void;
-  onDownloadItem?: (item: PageItem) => void;
+  onDownloadItem?: (item: PageItem, opts?: { withGuide?: boolean }) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
   onSendToCanvas?: (item: PageItem) => void;
-  onSendToDirector?: (item: PageItem) => void;
+  onSendToDirector?: (item: PageItem, mode?: 'video' | 'guide') => void;
   /** 空态「＋」点击触发上传（2026-11-04：与工具行上传按钮共用同一文件选择入口） */
   onUploadClick?: () => void;
   onDragEnter: (e: React.DragEvent) => void;

@@ -1,10 +1,8 @@
 /**
  * scope-capsule-tabs - 资产库「公共资产 / 本项目」胶囊分段控件
  *
- * 视觉沿用顶部页签(canvas-tab-bar)胶囊分段控件：
- * 容器深色 #1a1a1a / 浅色 rgba(0,0,0,.05)、border-radius 10、padding 3、gap 2、
- * 选中块深色 rgba(255,255,255,.10)（浅色 #fff）+ 0 1px 2px 轻投影。
- * 每段右侧带实时数量徽标（如「公共资产 12」），数量由调用方按数据实时计算传入。
+ * 视觉与交互统一由 capsule-tabs.tsx 的 CapsuleTabs 提供（2026-11-07 抽出）：
+ * 抽屉「历史」按来源分 Tab 复用同一控件，两处切换体验完全一致。
  *
  * 无项目上下文（projectCount=null，主页等场外空间）时「本项目」段置灰，
  * 提示「进入项目后可用」，不产生"本项目段展示公共内容"的假页面。
@@ -13,6 +11,7 @@
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { AssetScope } from '@/features/asset-picker/index.js';
+import { CapsuleTabs, type CapsuleSegment } from './capsule-tabs.js';
 
 /** 胶囊分段键：用户两作用域 + 主体（抽屉内）+ 开源库（只读，排最后） */
 export type ScopeCapsuleTab = AssetScope | 'openlib' | 'subject';
@@ -54,15 +53,8 @@ export function ScopeCapsuleTabs({
   theme,
 }: ScopeCapsuleTabsProps): React.ReactElement {
   const { t } = useTranslation();
-  const isDark = theme.mode === 'dark';
 
-  const segments: Array<{
-    key: ScopeCapsuleTab;
-    label: string;
-    count: number | null;
-    disabled: boolean;
-    disabledHint?: string;
-  }> = [
+  const segments: CapsuleSegment[] = [
     { key: 'library', label: t('assetLibrary.scopeCapsuleLibrary', '全局'), count: libraryCount, disabled: false },
     {
       key: 'project',
@@ -92,76 +84,11 @@ export function ScopeCapsuleTabs({
   }
 
   return (
-    <div
-      data-testid="scope-capsule-tabs"
-      role="tablist"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 2,
-        padding: 3,
-        borderRadius: 10,
-        background: isDark ? '#1a1a1a' : 'rgba(0,0,0,0.05)',
-        flexShrink: 0,
-      }}
-    >
-      {segments.map((seg) => {
-        const active = value === seg.key;
-        return (
-          <button
-            key={seg.key}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            aria-disabled={seg.disabled || undefined}
-            data-scope={seg.key}
-            data-active={active || undefined}
-            disabled={seg.disabled}
-            title={seg.disabled ? seg.disabledHint : seg.label}
-            onClick={() => { if (!seg.disabled) onChange(seg.key); }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              height: 26,
-              padding: '0 12px',
-              border: 'none',
-              borderRadius: 8,
-              cursor: seg.disabled ? 'not-allowed' : 'pointer',
-              fontSize: 12,
-              fontWeight: active ? 600 : 400,
-              whiteSpace: 'nowrap',
-              background: active ? (isDark ? 'rgba(255,255,255,0.10)' : '#ffffff') : 'transparent',
-              boxShadow: active ? `0 1px 2px ${isDark ? 'rgba(0,0,0,0.40)' : 'rgba(0,0,0,0.12)'}` : 'none',
-              color: seg.disabled
-                ? theme.toolbar.textMuted
-                : active ? theme.toolbar.text : theme.toolbar.textMuted,
-              opacity: seg.disabled ? 0.45 : 1,
-              transition: 'all 0.15s',
-            }}
-          >
-            {seg.label}
-            {seg.count !== null && (
-              <span
-                data-scope-count={seg.key}
-                style={{
-                  fontSize: 10,
-                  lineHeight: '14px',
-                  padding: '0 5px',
-                  borderRadius: 999,
-                  fontVariantNumeric: 'tabular-nums',
-                  background: active
-                    ? (isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.08)')
-                    : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'),
-                  color: active ? theme.toolbar.text : theme.toolbar.textMuted,
-                }}
-              >
-                {seg.count}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <CapsuleTabs
+      value={value}
+      onChange={(key) => onChange(key as ScopeCapsuleTab)}
+      segments={segments}
+      theme={theme}
+    />
   );
 }

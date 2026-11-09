@@ -274,9 +274,9 @@ export function NodeCapsuleToolbar({
   const showGroupAgg = isMultiSelect && !isPreview;
   const showArrangeAgg = isMultiSelect || isSingleGroup;
   const showAlignAgg = isMultiSelect || isSingleGroup;
-  const showSizeAgg = isMultiSelect || isSingleGroup;
+  const showSizeAgg = false; // 尺寸基准本版本隐藏，待重新设计
   const showLayerAgg = false;
-  const showStackAgg = isMultiSelect && stackableCount > 0 && !!onStackSelected;
+  const showStackAgg = false; // 本版本不启用堆叠，批量堆叠入口隐藏
   // 摇杆导航按钮: 仅单选非组非预览节点时显示
   const showNavButton = hasNodeTools && !isGroupNode && !isMultiSelect && !isPreview;
 
@@ -520,23 +520,6 @@ export function NodeCapsuleToolbar({
         </div>
       ) : null}
       {showArrangeAgg ? renderAggButton('arrange', <LayoutGrid size={16} />, t('toolbar.arrange')) : null}
-      {/* Plan#84 入口 A2：多选/单选节点都能直接另存为画布副本（组走 getGroupTools 的同名工具，不重复） */}
-      {(showGroupAgg || (showNodeTools && !isGroupNode)) && onCreateCanvasCopy ? (
-        <div style={{ position: 'relative' }}>
-          <button
-            type="button"
-            data-capsule-action="canvas-copy"
-            title={t('canvasCopy.createTitle', '把选中的节点另存为项目里的另一块画布（主画布不动）')}
-            onClick={(e) => { e.stopPropagation(); onCreateCanvasCopy(); }}
-            onPointerDown={(e) => e.stopPropagation()}
-            style={aggButtonStyle(false, nodeAccent, textColor, hoverBg)}
-            onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          >
-            <PictureInPicture2 size={16} />
-          </button>
-        </div>
-      ) : null}
       {showAlignAgg ? renderAggButton('align', <AlignCenterVertical size={16} />, t('toolbar.align')) : null}
       {showSizeAgg ? renderAggButton('size', <Scaling size={16} />, t('toolbar.unify')) : null}
       {showLayerAgg ? renderAggButton('layer', <Layers size={16} />, t('toolbar.layer')) : null}
@@ -573,6 +556,25 @@ export function NodeCapsuleToolbar({
         </div>
       ) : null}
       {isMixedSelection && showArrangeAgg ? null : null}
+
+      {/* 另存画布固定在导航左侧：导航始终最右，避免截帧/导航顺序错位 */}
+      {(showGroupAgg || isPreview || (showNodeTools && !isGroupNode)) && onCreateCanvasCopy ? (
+        <div style={{ position: 'relative', marginLeft: 2 }}>
+          <button
+            type="button"
+            data-capsule-action="canvas-copy"
+            title={t('canvasCopy.createShort', '另存画布')}
+            aria-label={t('canvasCopy.createShort', '另存画布')}
+            onClick={(e) => { e.stopPropagation(); onCreateCanvasCopy(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={aggButtonStyle(false, nodeAccent, textColor, hoverBg)}
+            onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <PictureInPicture2 size={16} />
+          </button>
+        </div>
+      ) : null}
 
       {/* 导航按钮 — 与堆叠同组(征集#45 H3):前置工具非堆叠时才补分隔线 */}
       {showNavButton ? (

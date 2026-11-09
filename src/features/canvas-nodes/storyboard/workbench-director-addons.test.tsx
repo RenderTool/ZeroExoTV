@@ -82,12 +82,12 @@ describe('storyboard-video-stage：预览区零按钮化', () => {
     expect(stage.querySelectorAll('button button').length).toBe(0);
   });
 
-  it('generating 覆盖层无 button（有视频时控制条按钮在覆盖层外，且不嵌套）', () => {
-    const { container } = renderStage({ videoStorageKey: 'video:k1', videoStatus: 'generating', videoProgress: 0.4 });
-    const overlay = container.querySelector('[data-video-status="generating"]') as HTMLElement;
-    expect(overlay).toBeTruthy();
-    expect(overlay.textContent).toContain('40%');
-    expect(overlay.querySelectorAll('button').length).toBe(0);
+  it('生成中不再渲染全屏状态遮罩：有视频时只剩控制条按钮，且互不嵌套', () => {
+    const { container } = renderStage({ videoStorageKey: 'video:k1', videoStatus: 'generating' });
+    // 2026-11-07 用户指令：生成中画面保持干净，状态由占位区角标承担
+    expect(container.querySelector('[data-video-status="generating"]')).toBeNull();
+    expect(container.querySelector('video')).toBeTruthy();
+    expect(container.querySelectorAll('[data-video-control-bar] button').length).toBeGreaterThan(0);
     expect(container.querySelectorAll('button button').length).toBe(0);
   });
 

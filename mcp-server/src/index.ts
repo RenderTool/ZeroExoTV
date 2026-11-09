@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * zeroexo-mcp-server 入口。
  * 默认 stdio（本地 Agent spawn）；--http [--port N] 开 StreamableHTTP（远程 Agent，需 Authorization Bearer）。
@@ -13,9 +14,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { bootstrapToken } from "./auth.js";
-import { startFileServer } from "./file-server.js";
+import { startFileServer, handleFsRequest, fsServerPort, ensureFsRoot } from "./file-server.js";
 import { dataRoot, paths } from "./config.js";
-import { TOOL_REGISTRY, type Ctx } from "./tools/_register.js";
+import { TOOL_REGISTRY, TOOL_ACCESS, type Ctx } from "./tools/_register.js";
 import { SERVER_INSTRUCTIONS } from "./guides/instructions.js";
 import { buildStateOverview } from "./guides/state-overview.js";
 import { registerGuidePrompts, registerGuideResources } from "./guides/register.js";
@@ -28,6 +29,7 @@ import { registerWorkbenchTools } from "./tools/workbench.js";
 import { registerStoryboardIngestTools } from "./tools/storyboard-ingest.js";
 import { registerCanvasTools } from "./tools/canvases.js";
 import { registerPlanTools } from "./tools/plan.js";
+import { registerDirectorOpsTools } from "./tools/director-ops.js";
 
 /**
  * 连接即概览：把「当前数据状态」拼进 initialize 的 instructions。
@@ -69,6 +71,7 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerStoryboardIngestTools(server, ctx);
   registerCanvasTools(server, ctx);
   registerPlanTools(server, ctx);
+  registerDirectorOpsTools(server, ctx);
   return server;
 }
 
@@ -84,7 +87,7 @@ async function stampServerInfo(httpPort: number): Promise<void> {
       version: "0.1.0",
       dataRoot: dataRoot(),
       serverEntry: fileURLToPath(import.meta.url),
-      tools: 20,
+      tools: TOOL_REGISTRY.length,
       transports: ["stdio", "streamable-http"],
       httpPort,
       stampedAt: new Date().toISOString(),
@@ -122,7 +125,7 @@ async function selfcheck(): Promise<void> {
   await buildServer(ctx); // 触发注册
   const bootstrapped = await bootstrapToken(dataRoot());
   await stampServerInfo(8787);
-  const read = 9;
+  const read = TOOL_REGISTRY.filter((n) => TOOL_ACCESS[n] === "read").length;
   const write = TOOL_REGISTRY.length - read;
   process.stdout.write(
     JSON.stringify(
@@ -220,6 +223,26 @@ async function main(): Promise<void> {
     httpServer.listen(port, () => {
       process.stderr.write(`[zeroexo-mcp-server] StreamableHTTP listening on http://localhost:${port}/mcp\n`);
     });
+
+    // T0（2026-11-09）：fs REST 并入 MCP 同一进程 —— 服务数保持 3（MCP / 网页 / ComfyUI）。
+    // Vite 插件探测 8790 /health 在线后会跳过 spawn，不再多起一个 fs-server 子进程。
+    const fsPort = fsServerPort();
+    const fsAlready = await fetch(`http://127.0.0.1:${fsPort}/health`).then((r) => r.ok, () => false);
+    if (fsAlready) {
+      process.stderr.write(`[zeroexo-mcp-server] fs REST ${fsPort} 已在线，跳过（不重复监听）\n`);
+    } else {
+      try {
+        await ensureFsRoot();
+        const fsHttp = http.createServer((req, res) => { void handleFsRequest(req, res); });
+        await new Promise<void>((resolve, reject) => {
+          fsHttp.once("error", reject);
+          fsHttp.listen(fsPort, "127.0.0.1", resolve);
+        });
+        process.stderr.write(`[zeroexo-mcp-server] fs REST listening on http://127.0.0.1:${fsPort} (same process)\n`);
+      } catch (err) {
+        process.stderr.write(`[zeroexo-mcp-server][warn] fs REST ${fsPort} 启动失败（不阻断 MCP）: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
     return;
   }
 

@@ -1,4 +1,4 @@
-﻿// TODO(拆分): 该文件超过 1000 行，计划按「状态层/交互层/渲染层」拆分，见 DESIGN.md
+// TODO(拆分): 该文件超过 1000 行，计划按「状态层/交互层/渲染层」拆分，见 DESIGN.md
 /**
  * use-asset-library - 资产库业务逻辑 Hook
  *
@@ -15,13 +15,16 @@ import { useAssets } from '@/features/asset-picker/use-assets.js';
 import { addAssets as storeAddAssets, upsertAsset, filterAssetsStrictScope, countAssetsByScope, resolveUploadScope, type UpdateAssetInput, type AssetScopeCounts } from '@/features/asset-picker/asset-store.js';
 import { deleteAssetsWithUndo } from './delete-with-undo.jsx';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
-import type { AssetScope } from '@/features/asset-picker/index.js';
+import type { AssetScope, Asset } from '@/features/asset-picker/index.js';
+import { downloadAsset } from '@/features/asset-picker/index.js';
+import { downloadGuideFile } from '@/shared/utils/guide-file.js';
+import { getGuideMeta } from '@/features/asset-picker/guide.js';
+import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-resolve.js';
 import { onAssetCreated } from '@/services/sync/sync-service.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useAssetUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
 import { useAuth } from '@/features/auth/auth-store.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
-import { apiPost, getToken } from '@/services/api-client.js';
+import { apiPost } from '@/services/api-client.js';
 import { chapterDetectPipeline } from '@/shared/utils/chapter-detect-pipeline.js';
 import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 import type { AssetCategory, ViewMode } from '@/shared/components/index.js';
@@ -121,7 +124,7 @@ export interface UseAssetLibraryReturn {
   handleToggleSelectAll: () => void;
   handleBatchDelete: () => void;
   handleSendToCanvas: (item: SendToCanvasItem) => void;
-  handleDownloadItem: (item: { type: 'asset'; data: any }) => void;
+  handleDownloadItem: (item: { type: 'asset'; data: any }, opts?: { withGuide?: boolean }) => void | Promise<void>;
   handleRenameItem: () => Promise<void>;
   handleOpenItem: (item: PageItem) => void;
 
@@ -793,31 +796,28 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   }, [props.onSendToCanvas]);
 
   // ── 下载 ──
-  // 私有资源依赖 JWT 鉴权,a.href 无法携带 Authorization header,统一经 fetch + blob 下载
-  const handleDownloadItem = useCallback(async (item: { type: 'asset'; data: any }): Promise<void> => {
-    const download = async (url: string, filename: string): Promise<void> => {
-      const token = getToken();
-      const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    };
-    if (item.type === 'asset') {
-      const assetData = item.data;
-      const d = assetData.data;
-      const cover = d.kind === 'image' ? d.dataUrl : d.kind === 'video' ? d.url : undefined;
-      const url = getResourceUrl(d.storageKey, 'full') || cover;
-      if (!url) return;
-      await download(url, assetData.title);
+  // 2026-11-07 修复：生成产物只有 storageKey（image:/video:/audio:/cas:），
+  // 统一由 downloadAsset 按 storageKey 读盘后触发下载；无文件时明确提示，不再静默无反应。
+  // withGuide=true：视频 + 引导数据分两个文件落盘（需求 1）。
+  const handleDownloadItem = useCallback(async (
+    item: { type: 'asset'; data: any },
+    opts?: { withGuide?: boolean },
+  ): Promise<void> => {
+    if (item.type !== 'asset') return;
+    const ok = await downloadAsset(item.data as Asset).catch(() => false);
+    if (!ok) {
+      antdMessage.error(t('assetLibrary.downloadFailed', '下载失败：文件不存在或已被清理'));
+      return;
     }
-  }, []);
+    if (!opts?.withGuide) return;
+    const guide = getGuideMeta(item.data) ?? await resolveGuideForAsset(item.data as Asset);
+    if (!guide?.id) {
+      antdMessage.warning(t('assetLibrary.guideMissing', '该视频没有引导数据'));
+      return;
+    }
+    const saved = await downloadGuideFile(guide, `${item.data.title ?? '视频'} 引导`).catch(() => false);
+    if (!saved) antdMessage.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
+  }, [antdMessage, t]);
 
   // ── 重命名 ──
   const handleRenameItem = useCallback(async () => {

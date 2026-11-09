@@ -28,6 +28,7 @@ import {
   startProtocolDirectorRun,
 } from './openai-protocol-client.js';
 import { useDirectorRun, type DirectorRunCallbacks } from './use-director-run.js';
+import { setCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 
 const mockedStart = vi.mocked(startProtocolDirectorRun);
 const mockedStatus = vi.mocked(fetchProtocolVideoStatus);
@@ -72,6 +73,7 @@ const RUNNING_STATUS = {
 beforeEach(() => {
   vi.useFakeTimers();
   window.sessionStorage.clear(); // 刷新续接用 sessionStorage：用例之间必须隔离
+  setCurrentCanvasDocId('main');
   mockedStart.mockResolvedValue({ jobId: 'job-1', segmentShotIds: ['s1', 's2', 's3'], totalFrames: 90, warnings: [] });
   mockedStatus.mockResolvedValue(RUNNING_STATUS);
   mockedCancel.mockResolvedValue();
@@ -81,6 +83,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
   window.sessionStorage.clear();
+  setCurrentCanvasDocId('main');
 });
 
 async function startAndWaitRunning(callbacks: DirectorRunCallbacks) {
@@ -211,6 +214,42 @@ describe('刷新续接：生成中刷新页面不丢作业', () => {  const KEY 
     expect(hook.result.current.phase).toBe('idle');
     expect(mockedStatus).not.toHaveBeenCalled();
     expect(window.sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('子画布发起的任务：当前在主画布时不续接（保留记录，等回到发起文档）', async () => {
+    setCurrentCanvasDocId('main');
+    window.sessionStorage.setItem(KEY, JSON.stringify({
+      mode: 'openai', jobId: 'job-copy', segmentShotIds: ['s1'], projectId: 'p1',
+      canvasId: 'sc-copy', at: Date.now(),
+    }));
+    const hook = renderHook(() => useDirectorRun({
+      getBridgeConfig: () => ({ mode: 'openai', channel: CHANNEL }),
+      callbacks: makeCallbacks(),
+      pollIntervalMs: 50,
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); });
+    expect(hook.result.current.phase).toBe('idle');
+    expect(mockedStatus).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(KEY)).toBeTruthy();
+    setCurrentCanvasDocId('main');
+  });
+
+  it('同一画布文档内恢复：记录 canvasId 与当前文档一致 → 继续轮询', async () => {
+    setCurrentCanvasDocId('sc-copy');
+    window.sessionStorage.setItem(KEY, JSON.stringify({
+      mode: 'openai', jobId: 'job-copy', segmentShotIds: ['s1'], projectId: 'p1',
+      canvasId: 'sc-copy', at: Date.now(),
+    }));
+    mockedStatus.mockResolvedValue(RUNNING_STATUS);
+    const hook = renderHook(() => useDirectorRun({
+      getBridgeConfig: () => ({ mode: 'openai', channel: CHANNEL }),
+      callbacks: makeCallbacks(),
+      pollIntervalMs: 50,
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(120); });
+    expect(hook.result.current.phase).toBe('running');
+    expect(mockedStatus).toHaveBeenCalled();
+    setCurrentCanvasDocId('main');
   });
 
   it('取消后清掉续接记录（下次刷新不再复活）', async () => {

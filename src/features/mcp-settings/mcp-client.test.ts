@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   MCP_AUDIT_DIR,
+  MCP_TOOLS,
   MCP_SERVER_INFO_PATH,
   MCP_TOKENS_PATH,
   buildStdioConfig,
@@ -191,9 +192,10 @@ describe('自检（验收⑤）', () => {
     void raw;
     const report = await runSelfcheck(fs);
     expect(report.ok).toBe(true);
-    expect(report.tools).toBe(20);
-    expect(report.readTools).toBe(9);
-    expect(report.writeTools).toBe(11);
+    // 2026-11-09：不再硬编码 21/9/12，跟前端工具清单同源（新增 MCP 工具不会让自检说谎）
+    expect(report.tools).toBe(MCP_TOOLS.length);
+    expect(report.readTools).toBe(MCP_TOOLS.filter((t) => t.access === 'read').length);
+    expect(report.writeTools).toBe(MCP_TOOLS.filter((t) => t.access === 'write').length);
     expect(report.dataRoot).toBe('D:\\Test');
     expect(report.auditFiles).toBe(1);
     expect(report.tokenCount).toBe(1);

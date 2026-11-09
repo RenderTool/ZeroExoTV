@@ -69,35 +69,24 @@ export interface LinkSubjectStateMediaResult {
  * 纯数据变换 + CAS 记账，不落盘；调用方负责持久化（onChange / updateStoryboardContainer）。
  * 找不到目标树/状态 → throw（调用方给错误提示，不静默失败）。
  *
- * stateId = SUBJECT_BASE_STATE_ID（2026-11-06）：基础状态不是 states[] 节点，
- * 写槽位 = baseState.referenceImages[0]，与状态同一入口——媒体写入不另造第二条路径
- * （旧版基础状态走 setBaseImage 直写，既不记账也不能挂音频）。
+ * 2026-11-08 数据层统一：基础状态已是 states[0] 真节点（id = SUBJECT_BASE_STATE_ID），
+ * 所有状态走同一条 states[].media[0] 写入路径，不再有 baseState.referenceImages 分叉。
  */
 export async function linkSubjectStateMedia(params: LinkSubjectStateMediaParams): Promise<LinkSubjectStateMediaResult> {
   const { trees, projectId, rootId, stateId, asset } = params;
-  const isBase = stateId === SUBJECT_BASE_STATE_ID;
   // 先定位目标（找不到 → throw，不静默失败）
   const tree = trees.find((tr) => tr.rootId === rootId);
-  const targetState = isBase ? undefined : (tree?.states ?? []).find((n) => n.id === stateId);
-  if (!tree || (!isBase && !targetState)) {
+  const targetState = (tree?.states ?? []).find((n) => n.id === stateId);
+  if (!tree || !targetState) {
     throw new Error(`[subject-state-media] target state not found: ${rootId}/${stateId}`);
   }
   // 旧首槽（记账基准；与 replaced 分离：同 key 重挂时 replaced=null 但旧槽仍在，
   // 必须据此跳过重复 register，否则 refCount 会重复 ++）
-  const oldSlot: SubjectNodeMediaRef | null = isBase
-    ? (tree.baseState?.referenceImages ?? [])[0] ?? null
-    : (Array.isArray(targetState!.media) ? targetState!.media[0] : undefined) ?? null;
+  const oldSlot: SubjectNodeMediaRef | null = (Array.isArray(targetState.media) ? targetState.media[0] : undefined) ?? null;
   let replaced: SubjectNodeMediaRef | null = null;
   if (oldSlot && oldSlot.key && (!asset || oldSlot.key !== asset.storageKey)) replaced = oldSlot;
   const next = trees.map((tr) => {
     if (tr.rootId !== rootId) return tr;
-    if (isBase) {
-      const cur = tr.baseState?.referenceImages ?? [];
-      const baseRef: SubjectNodeMediaRef[] = asset
-        ? [{ key: asset.storageKey, type: asset.kind, origin: asset.origin }, ...cur.slice(1)]
-        : [];
-      return { ...tr, baseState: { ...tr.baseState, referenceImages: baseRef } };
-    }
     const states = tr.states.map((n) => {
       if (n.id !== stateId) return n;
       const media = Array.isArray(n.media) ? n.media : [];
@@ -161,10 +150,7 @@ export async function releaseSubjectStateMediaRefs(params: {
   };
   for (const tr of trees ?? []) {
     if (rootId && tr.rootId !== rootId) continue;
-    // 基础状态槽位（2026-11-06）：整树删除（stateId 缺省）或显式指定 __base__ 时才动
-    if (!stateId || stateId === SUBJECT_BASE_STATE_ID) {
-      for (const m of tr.baseState?.referenceImages ?? []) await releaseOne(tr.rootId, SUBJECT_BASE_STATE_ID, m);
-    }
+    // 基础状态已在 states[0]，与其余状态同一循环（id 仍是 __base__，CAS 记账不变）
     for (const n of tr.states ?? []) {
       if (stateId && n.id !== stateId) continue;
       for (const m of n.media ?? []) await releaseOne(tr.rootId, n.id, m);
@@ -185,15 +171,17 @@ export function findSubjectMediaUsage(trees: SubjectTree[], storageKey: string):
   if (!storageKey) return [];
   const out: SubjectMediaUsage[] = [];
   for (const tr of trees ?? []) {
-    for (const m of tr.baseState?.referenceImages ?? []) {
-      if (m && m.key === storageKey) {
-        out.push({ rootId: tr.rootId, treeName: tr.name, stateId: SUBJECT_BASE_STATE_ID, stateName: '基础状态', kind: m.type });
-      }
-    }
     for (const n of tr.states ?? []) {
       for (const m of n.media ?? []) {
         if (m && m.key === storageKey) {
-          out.push({ rootId: tr.rootId, treeName: tr.name, stateId: n.id, stateName: n.state || `#${n.step ?? '?'}`, kind: m.type });
+          const isBase = n.id === SUBJECT_BASE_STATE_ID;
+          out.push({
+            rootId: tr.rootId,
+            treeName: tr.name,
+            stateId: n.id,
+            stateName: n.state || (isBase ? '基础状态' : `#${n.step ?? '?'}`),
+            kind: m.type,
+          });
         }
       }
     }

@@ -118,6 +118,8 @@ describe('资产库卡片：悬浮动作按钮已移除', () => {
     // 旧版悬浮动作区 = 两个 28×28 按钮（发送飞机 + 导演台/下载），移除后仅剩底部更多菜单按钮
     const buttons = container.querySelectorAll('button');
     expect(buttons).toHaveLength(1);
+    // 「更多」也移到封面右下角（与历史卡同位），标题行不再挂操作
+    expect(container.querySelector('[data-card-cover] [data-card-more]')).toBeTruthy();
     // 抽屉专属快捷动作（showQuickActions）在列表页缺省关闭
     expect(container.querySelector('[data-card-action]')).toBeNull();
     expect(container.textContent).not.toContain('当前没有打开的画布');

@@ -17,6 +17,7 @@ import { cardCoverMetrics, CARD_COVER_TRANSITION, useMasonryColumnWidth } from '
 import { ImageOff } from 'lucide-react';
 import {
   getOpenLibMeta,
+  openLibSiteUrl,
   queryOpenLib,
   type OpenLibEntry,
   type OpenLibGalleryId,
@@ -32,7 +33,7 @@ export const OPEN_LIB_PAGE_SIZE = 60;
 export async function resolveOpenLibImageUrl(entry: OpenLibEntry): Promise<string> {
   const raw = entry.imageUrl ?? '';
   if (/^https?:/i.test(raw)) return raw;
-  if (raw.startsWith('/')) return raw; // bundled thumbs（public/openlib，随 dist 分发，非 Chromium 亦可读）
+  if (raw.startsWith('/')) return openLibSiteUrl(raw); // bundled thumbs：兼容 GitHub Pages 子路径
   if (raw.startsWith('cas:')) {
     const url = await resolveMediaUrl(raw);
     return url || entry.cdnUrl || raw;

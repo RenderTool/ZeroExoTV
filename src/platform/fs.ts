@@ -216,15 +216,18 @@ export async function ensureDir(path: string): Promise<void> {
 export async function writeFile(path: string, data: string | Blob): Promise<void> {
   if (httpFs.online) {
     if (typeof data !== 'string') data = await data.text();
-    return httpFs.writeFile(path, data);
+    await httpFs.writeFile(path, data);
+  } else {
+    const i = path.lastIndexOf('/');
+    const dir = i < 0 ? await getRoot() : await walk(path.slice(0, i), true);
+    const name = path.slice(i + 1);
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await (fh as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable();
+    await w.write(data as string);
+    await w.close(); // 关闭即提交，中途异常不会留下半文件
   }
-  const i = path.lastIndexOf('/');
-  const dir = i < 0 ? await getRoot() : await walk(path.slice(0, i), true);
-  const name = path.slice(i + 1);
-  const fh = await dir.getFileHandle(name, { create: true });
-  const w = await (fh as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable();
-  await w.write(data as string);
-  await w.close(); // 关闭即提交，中途异常不会留下半文件
+  // 自己写文件后刷新 watcher 指纹基线，避免把自己写的误判为外部变更（导演台改时间整页刷新 BUG）
+  void import('./watcher.js').then((m) => m.touchBaseline(path)).catch(() => undefined);
 }
 
 export async function readFile(path: string): Promise<string | null> {

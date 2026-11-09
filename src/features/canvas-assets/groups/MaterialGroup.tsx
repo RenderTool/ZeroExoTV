@@ -1,4 +1,4 @@
-﻿/**
+/**
  * canvas-assets/groups/MaterialGroup - 画布资产抽屉「素材」分组
  *
  * 数据驱动：数据/actions 来自 store。
@@ -8,10 +8,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Input, Modal, Tooltip } from 'antd';
-import { CheckSquare, Download, FileSearch, Pencil, Square, Trash2, X } from 'lucide-react';
+import { CheckSquare, Download, FileSearch, Pencil, Send, Square, Trash2, X } from 'lucide-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { AssetCardGrid } from '@/features/asset-library/cards/asset-card.js';
+import { getGuideMeta } from '@/features/asset-picker/guide.js';
+import { downloadAssetsAsZip } from '@/features/asset-picker/services/download-asset.js';
 import { buildSendMenuItems, cardActionBtnStyle, SEND_ACTION_LABEL_KEYS } from '@/features/asset-library/cards/card-send-actions.js';
 import { MediaLightbox, type MediaLightboxItem, type MediaLightboxKind } from '@/shared/components/media-lightbox.js';
 import { UploadDropZone } from '@/shared/components/upload-drop-zone.js';
@@ -59,7 +61,7 @@ export function MaterialGroup({ store, theme }: {
 
   // 2026-11-05 约定：抽屉用户资产（公共/本项目）补齐「发送到导演台」，与开源库同一执行器
   // sendAssetToWorkbench（不要复制第二份逻辑）；槽位与提示词引用行为与资产库页完全一致
-  const sendItemToDirector = (asset: Asset) => void sendAssetToWorkbench(asset, message, t);
+  const sendItemToDirector = (asset: Asset, mode?: 'video' | 'guide') => void sendAssetToWorkbench(asset, message, t, { mode });
 
   // 2026-11-05 约定：点卡片任意位置直接开大图（图片/视频/文本统一走 MediaLightbox 壳）
   const [lightbox, setLightbox] = useState<{ items: MediaLightboxItem[]; index: number } | null>(null);
@@ -249,6 +251,19 @@ export function MaterialGroup({ store, theme }: {
               <Button size="small" data-batch-select-all disabled={assets.length === 0} onClick={toggleAssetSelectAll}>
                 {allSelected ? t('common.batchSelectNone', '取消全选') : t('common.batchSelectAll', '全选')}
               </Button>
+              <Button
+                size="small"
+                data-batch-download
+                disabled={noneSelected}
+                onClick={() => {
+                  void downloadAssetsAsZip(assetSelectedAssets, `assets-${Date.now()}`).then((n) => {
+                    if (n > 0) message.success(t('assetLibrary.batchDownloaded', { n, defaultValue: `已打包下载 ${n} 项` }));
+                    else message.warning(t('assetLibrary.batchDownloadEmpty', '没有可下载的文件'));
+                  });
+                }}
+              >
+                {t('assetLibrary.batchDownload', '打包下载')}
+              </Button>
               <Button size="small" data-batch-send-canvas disabled={noneSelected} onClick={handleBatchSendToCanvas}>
                 {t(SEND_ACTION_LABEL_KEYS.sendToCanvas)}
               </Button>
@@ -300,6 +315,12 @@ export function MaterialGroup({ store, theme }: {
                       ? [{ key: 'editImage', icon: <Pencil size={13} />, label: t('assetLibrary.editImage', '编辑'), onClick: () => editImageAsset(asset) }]
                       : []),
                     { key: 'download', icon: <Download size={13} />, label: t('common.download'), onClick: () => void handleDownloadItem({ type: 'asset', data: asset }) },
+                    ...(getGuideMeta(asset.data)
+                      ? [
+                        { key: 'download-with-guide', icon: <Download size={13} />, label: t('assetLibrary.downloadVideoWithGuide', '下载视频+引导'), onClick: () => void handleDownloadItem({ type: 'asset', data: asset }, { withGuide: true }) },
+                        { key: 'send-guide', icon: <Send size={13} />, label: t('assetLibrary.sendGuideToDirector', '发送引导数据到导演台当前片段'), onClick: () => sendItemToDirector(asset, 'guide') },
+                      ]
+                      : []),
                     { key: 'rename', icon: <Pencil size={13} />, label: t('assetLibrary.rename'), onClick: () => { setRenameItemTarget({ type: 'asset', id: asset.id, name: asset.title }); setRenameItemOpen(true); } },
                     { key: 'delete', icon: <Trash2 size={13} />, label: t('assetLibrary.delete'), danger: true, onClick: () => void handleDeleteAsset(asset) },
                   ],
@@ -315,14 +336,14 @@ export function MaterialGroup({ store, theme }: {
                 onOpen={() => openCard(asset)}
                 onRename={() => { setRenameItemTarget({ type: 'asset', id: asset.id, name: asset.title }); setRenameItemOpen(true); }}
                 onDelete={() => void handleDeleteAsset(asset)}
-                onDownload={() => void handleDownloadItem({ type: 'asset', data: asset })}
+                onDownload={(opts) => void handleDownloadItem({ type: 'asset', data: asset }, opts)}
                 onContextMenu={(e) => e.preventDefault()}
                 // 2026-11-05 用户纠偏：抽屉卡片必须保留「发送到画布 / 发送到导演台」快捷按钮
                 // （列表页通过缺省 showQuickActions=false 保持无按钮；这里是唯一显式打开处）
                 // 2026-11-06：多选态下隐藏卡内快捷按钮——一个时刻只留一套操作，不与批量条抢入口
                 showQuickActions={!assetMultiSelect}
                 onSendToCanvas={() => sendToCanvas({ type: 'asset', id: asset.id, data: asset })}
-                onSendToDirector={() => sendItemToDirector(asset)}
+                onSendToDirector={(mode) => sendItemToDirector(asset, mode)}
                 onEditImage={asset.kind === 'image' ? () => editImageAsset(asset) : undefined}
                 theme={theme}
                 t={t}

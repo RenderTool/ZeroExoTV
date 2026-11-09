@@ -80,32 +80,62 @@ export interface ToolInfo {
   access: 'read' | 'write';
 }
 
+/**
+ * 与服务端 `TOOL_REGISTRY` 一一对应（2026-11-09 全量同步：21 → 45）。
+ * 新增 MCP 工具必须同时加进这里，否则设置页自检与权限清单会漂移。
+ */
 export const MCP_TOOLS: ToolInfo[] = [
   { name: 'list_projects', access: 'read' },
   { name: 'get_project', access: 'read' },
   { name: 'open_project', access: 'read' },
   { name: 'list_episodes', access: 'read' },
   { name: 'get_script', access: 'read' },
+  { name: 'normalize_script', access: 'read' },
   { name: 'list_subjects', access: 'read' },
   { name: 'list_assets', access: 'read' },
+  { name: 'read_asset', access: 'read' },
   { name: 'get_workbench', access: 'read' },
   { name: 'ingest_storyboard_images', access: 'read' },
+  { name: 'list_canvases', access: 'read' },
+  { name: 'get_canvas', access: 'read' },
+  { name: 'validate_project', access: 'read' },
+  { name: 'list_history', access: 'read' },
+  { name: 'get_guide', access: 'read' },
+  { name: 'get_job', access: 'read' },
+  { name: 'list_jobs', access: 'read' },
+  { name: 'verify_output', access: 'read' },
+  { name: 'get_param_schema', access: 'read' },
   { name: 'create_project', access: 'write' },
+  { name: 'update_project_meta', access: 'write' },
+  { name: 'set_script_meta', access: 'write' },
   { name: 'create_episode', access: 'write' },
+  { name: 'update_episode', access: 'write' },
+  { name: 'patch_episode', access: 'write' },
+  { name: 'merge_episode', access: 'write' },
+  { name: 'set_episode_meta', access: 'write' },
   { name: 'import_script', access: 'write' },
   { name: 'split_script_to_shots', access: 'write' },
   { name: 'upsert_subject', access: 'write' },
+  { name: 'set_subject_image', access: 'write' },
   { name: 'link_subject_to_shot', access: 'write' },
   { name: 'upload_asset', access: 'write' },
   { name: 'attach_asset_to_slot', access: 'write' },
+  { name: 'import_media_to_cas', access: 'write' },
   { name: 'set_shared_params', access: 'write' },
   { name: 'set_shot_prompt', access: 'write' },
   { name: 'add_segment', access: 'write' },
+  { name: 'patch_canvas_nodes', access: 'write' },
+  { name: 'scaffold_episode', access: 'write' },
+  { name: 'apply_shot_prompts', access: 'write' },
+  { name: 'set_segment_duration', access: 'write' },
+  { name: 'set_shot_guide', access: 'write' },
+  { name: 'run_generation', access: 'write' },
+  { name: 'sync_job_results', access: 'write' },
+  { name: 'repair_asset_storage_keys', access: 'write' },
 ];
 
-/** M2 预留槽位（契约 §4 #21-23 + update_project_meta）：页面置灰展示 */
+/** M2 预留槽位（契约 §4 #22-23 + get_asset_binary / remove_asset_ref）：页面置灰展示 */
 export const MCP_RESERVED_TOOLS: ToolInfo[] = [
-  { name: 'update_project_meta', access: 'write' },
   { name: 'export_director_pack', access: 'read' },
   { name: 'get_asset_binary', access: 'read' },
   { name: 'remove_asset_ref', access: 'write' },

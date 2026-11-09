@@ -26,6 +26,7 @@ import {
   createSubjectNode,
   createSubjectTree,
   buildDefaultStateName,
+  migrateSubjectTrees,
   nextStateStep,
   type SubjectTree,
 } from './subject-tree-types';
@@ -42,7 +43,7 @@ import type { ProductionItem, ProductionItemKind } from '../production-manager/p
 /** 容器读出（subjectTree/entities 为 unknown[]，在此收口类型断言） */
 async function readTreesForLink(pid: string): Promise<SubjectTree[]> {
   const container = await readStoryboardContainer(pid);
-  return (container?.subjectTree as SubjectTree[] | undefined) ?? [];
+  return migrateSubjectTrees(container?.subjectTree);
 }
 async function readEntitiesForLink(pid: string): Promise<ProductionItem[]> {
   const container = await readStoryboardContainer(pid);
@@ -196,13 +197,15 @@ function SubjectLinkDialog({ projectId, payload, onClose }: SubjectLinkDialogPro
   const ensureTreeAndSend = useCallback(async (item: ProductionItem) => {
     const current = await readTreesForLink(projectId);
     const tr = createSubjectTree(item.kind, item.name, item.id);
-    tr.baseState.prompt = buildBaseStatePrompt(item.kind, {
+    const base = tr.states[0]!;
+    base.fullPrompt = buildBaseStatePrompt(item.kind, {
       roleDesc: (item as { consistency?: string }).consistency || '',
       name: item.name,
     });
+    base.deltaPrompt = base.fullPrompt;
     const imgs = (item as { images?: Array<{ storageKey: string; prompt?: string }> }).images;
     if (imgs && imgs.length > 0) {
-      tr.baseState.referenceImages = imgs.map((r) => ({ key: r.storageKey, type: 'image' as const, prompt: r.prompt }));
+      base.media = imgs.map((r) => ({ key: r.storageKey, type: 'image' as const, prompt: r.prompt }));
     }
     const nextTrees = [...current, tr];
     await updateStoryboardContainer(projectId, { subjectTree: nextTrees });

@@ -12,7 +12,7 @@
 import type { CSSProperties } from 'react';
 
 export interface SidebarAnimatedIconProps {
-  type: 'home' | 'canvas' | 'assets' | 'openlib' | 'publicPrompts' | 'policies' | 'help';
+  type: 'home' | 'canvas' | 'assets' | 'openlib' | 'prompts' | 'publicPrompts' | 'policies' | 'help';
   size?: number;
   active?: boolean;
   hovered?: boolean;
@@ -27,6 +27,8 @@ const ICON_PATHS: Record<string, string> = {
   assets: 'M2 4a2 2 0 1 0 4 0a2 2 0 1 0-4 0M14 5l3-3 3 3M14 10l3-3 3 3M17 14V2M17 14H7l-5 8h20ZM8 14v8M9 14l5 8',
   // 开源资产库: lucide globe(地球，与抽屉/独立页 Globe 语义一致，2026-11-05 任务D)
   openlib: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
+  // 提示词: lucide book-open（只读预设/提示词库）
+  prompts: 'M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z',
   publicPrompts: 'M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z',
   policies: 'M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V7m0 15h12M8 7h8M8 11h8M8 15h4',
   help: 'M12 22c5.5 0 10-4.5 10-10S17.5 2 12 2 2 6.5 2 12s4.5 10 10 10zM9.1 9a3 3 0 1 1 5.8 1c0 2-3 2.5-3 4M12 17h.01',

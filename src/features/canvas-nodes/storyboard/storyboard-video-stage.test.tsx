@@ -1,4 +1,4 @@
-﻿/**
+/**
  * StoryboardVideoStage — 媒体与状态占位互斥回归断言（2026-11-05）
  *
  * 断言（对应「预览图片消失」回归的验收口径）：
@@ -108,6 +108,37 @@ describe('StoryboardVideoStage 媒体/占位互斥', () => {
   });
 });
 
+describe('StoryboardVideoStage 点击片段起播（2026-11-07 用户反馈）', () => {
+  it('autoPlayKey 变化 → 当前片段从 0 起播；切到另一片段后源就绪仍起播', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const { rerender } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStorageKey: 'video:a.mp4',
+      videoStatus: 'done',
+      autoPlayKey: 0,
+    }));
+    expect(play).not.toHaveBeenCalled();
+    rerender(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStorageKey: 'video:a.mp4',
+      videoStatus: 'done',
+      autoPlayKey: 1,
+    }));
+    expect(play).toHaveBeenCalledTimes(1);
+    // 换片段（<video> 按 storageKey 重挂载 + 源异步解析）→ 新片段也要起播
+    rerender(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStorageKey: 'video:b.mp4',
+      videoStatus: 'done',
+      autoPlayKey: 2,
+    }));
+    expect(play).toHaveBeenCalledTimes(2);
+    play.mockRestore();
+    pause.mockRestore();
+  });
+});
+
 describe('StoryboardVideoStage 实时预览角标（2026-11-05 修复：文本标签不压画面）', () => {
   const liveFrame = {
     livePreview: { image: 'data:image/webp;base64,zz', step: 2, totalSteps: 25, segmentIndex: 1 },
@@ -159,5 +190,52 @@ describe('StoryboardVideoStage 实时预览角标（2026-11-05 修复：文本�
     expect(container.querySelector('[data-live-preview-badge]')).toBeNull();
     const ph = container.querySelector('[data-placeholder-status]') as HTMLElement;
     expect(ph.querySelector('[data-generating-skeleton]')).toBeTruthy();
+  });
+});
+
+describe('导演台：播放控制条只在成片后出现（2026-11-07 用户反馈）', () => {
+  it('生成中 + 实时帧：帧与进度角标仍在，但不渲染播放键/时间码/进度条', () => {
+    const { container } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      hideControlBarWhenNoVideo: true,
+      videoStatus: 'generating',
+      placeholderStatus: 'generating',
+      livePreview: { image: 'data:image/webp;base64,zz', step: 2, totalSteps: 25, segmentIndex: 1 },
+    }));
+    expect(container.querySelector('[data-live-preview-frame]')).toBeTruthy();
+    expect(container.querySelector('[data-live-preview-badge]')).toBeTruthy();
+    expect(container.querySelector('[data-video-control-bar]')).toBeNull();
+    expect(container.textContent).not.toContain('00:00');
+  });
+
+  it('成片后控制条出现；切回生成中后消失，不残留上一条成片的时间码', () => {
+    const { container, rerender } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      hideControlBarWhenNoVideo: true,
+      videoStorageKey: 'video:done.mp4',
+      videoStatus: 'done',
+    }));
+    expect(container.querySelector('[data-video-control-bar]')).toBeTruthy();
+    expect(container.textContent).toContain('00:00 / 00:00');
+    rerender(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      hideControlBarWhenNoVideo: true,
+      videoStatus: 'generating',
+      placeholderStatus: 'generating',
+    }));
+    expect(container.querySelector('[data-video-control-bar]')).toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+  });
+
+  it('未开启开关的调用方（出片工作台整轨播放）占位态仍保留控制条', () => {
+    const { container } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      placeholderStatus: 'idle',
+      placeholderTitle: '#3 中景',
+      playbackMode: 'all',
+      sequenceDuration: 42,
+      onTogglePlay: () => {},
+    }));
+    expect(container.querySelector('[data-video-control-bar]')).toBeTruthy();
   });
 });

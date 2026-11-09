@@ -3,7 +3,7 @@
  *
  * 来源：后端 `zeroexo_backend/.../skills/storyboard_assistant/references/asset-prompts.md`
  * （模板A 人形 Lineup / 模板B 巨兽 / 模板C 场景 / 模板D 道具）—— 保持一致，禁随意改写措辞。
- * 用途：手动建树时给 baseState.prompt 一个「模板参数化」起点（替代旧逻辑用一句话 consistency 顶替）；
+ * 用途：手动建树时给基础状态（states[0]）的 fullPrompt 一个「模板参数化」起点；
  * 有完整描述(roleDesc)才填充角色描述槽；无描述则返回模板骨架（占位符），提示后续由 AI/用户完善。
  * 色卡/质量标签等按 kind 内置（项目色卡在使用时由生成层锁定）。
  */

@@ -12,6 +12,7 @@ import type { ImageNodeData, VideoNodeData, AudioNodeData } from '@zeroexo/plugi
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview } from '@zeroexo/plugin-nodes';
+import { canvasDocNodeKey, getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
@@ -19,6 +20,8 @@ import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, asse
 import { CanvasOpExecutor } from './canvas-op-executor.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
 import { LOCAL_VIDEO_MODEL_KEY, generateLocalMiniMaxVideo } from './local-minimax-video.js';
+import { fetchZeroexoJob, zeroexoOutputViewUrl } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 // 本地版（Plan#83）：生成任务原本走后端 Agent 调度（agentClient.send + SSE）。
 // 直接负本地渠道（ComfyUI / 外接 API）的提交链路属 Phase 2 T2.4，尚未接入；
 import type { AgentTaskHandlers } from '../agent-client-types.js';
@@ -280,11 +283,14 @@ export function useAiGeneration({
     async (nodeId: string, mode: GenerationMode, prompt: string): Promise<void> => {
       const provider = refs.aiProvider;
       if (!provider || !refs.commandQueue || !refs.store) return;
+      // 任务归属在发起时固化：切换画布文档后不得把状态/预览写进另一份文档的同 id 节点
+      const jobDocId = getCurrentCanvasDocId();
+      const jobKey = canvasDocNodeKey(nodeId, jobDocId);
       // 取消该节点上正在进行的请求(若有)
-      const prevCtl = nodeAbortControllersRef.current.get(nodeId);
+      const prevCtl = nodeAbortControllersRef.current.get(jobKey);
       if (prevCtl) prevCtl.abort();
       const ctl = new AbortController();
-      nodeAbortControllersRef.current.set(nodeId, ctl);
+      nodeAbortControllersRef.current.set(jobKey, ctl);
       // 从 graph 读取节点自身配置(支持重试非选中节点,避免依赖 selectedNodeData)
       const nodeRec = refs.store.getGraph().nodes.find((n: any) => n.id === nodeId);
       const nodeData = (nodeRec?.data ?? {}) as Partial<ImageNodeData> & Partial<VideoNodeData> & Partial<AudioNodeData>;
@@ -319,8 +325,8 @@ export function useAiGeneration({
           taskLabel,
         } as Record<string, unknown>),
       );
-      // 新一次生成：先清掉上一次的实时预览帧
-      clearGeneratingPreview(nodeId);
+      // 新一次生成：先清掉上一次的实时预览帧（只清本画布文档的，副本同 id 不受影响）
+      clearGeneratingPreview(nodeId, jobDocId);
       try {
         // 连线自动参考图(征集#51):连入本节点的图片自动作为参考图(图生图/图生视频),无需手动 @
         const refImages: string[] = [];
@@ -433,7 +439,13 @@ export function useAiGeneration({
                 params,
                 nodeId,
                 onPreview: (frame) => {
-                  if (frame.image) setGeneratingPreview(nodeId, frame.image);
+                  if (frame.image) setGeneratingPreview(nodeId, frame.image, jobDocId);
+                },
+                onJobSubmitted: (jobId) => {
+                  // 把 jobId 写节点数据，刷新后能恢复
+                  refs.commandQueue?.execute(
+                    new UpdateNodeDataCommand(nodeId, { generationJobId: jobId } as Record<string, unknown>),
+                  );
                 },
                 signal: ctl.signal,
               }).catch((err: unknown) => {
@@ -456,6 +468,12 @@ export function useAiGeneration({
                 signal: ctl.signal,
               });
           const url = URL.createObjectURL(result.blob);
+          // 2026-11-09：本机插件每段视频默认都产出 guide，画布节点这条落库链路以前把它丢了，
+          // 导致历史里没有「含引导」角标、也无法发送引导到导演台。与外部渠道 union 收窄取出。
+          const resultGuide = (result as { guide?: { id: string; path?: string; frames?: number; sha256?: string } }).guide;
+          const guideMeta = resultGuide
+            ? { id: resultGuide.id, path: resultGuide.path, frames: resultGuide.frames, sha256: resultGuide.sha256 }
+            : undefined;
           refs.commandQueue.execute(
             new UpdateNodeDataCommand(nodeId, {
               content: url,
@@ -466,6 +484,7 @@ export function useAiGeneration({
               mimeType: result.mimeType,
               bytes: result.bytes,
               generationId: result.generationId,
+              guide: guideMeta,
               errorDetails: undefined,
               errorType: undefined,
             } as Record<string, unknown>),
@@ -475,6 +494,7 @@ export function useAiGeneration({
             nodeId, kind: 'video', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
             content: url, width: result.width, height: result.height, durationMs: result.durationMs, bytes: result.bytes, mimeType: result.mimeType,
             jobId: result.generationId, model: (nodeData?.model as string) ?? undefined, prompt: fullPrompt,
+            guide: guideMeta,
           }).catch((err) => console.warn('[history] 视频产出落库失败:', err));
           // AI 生成视频:以基准宽度为约束,按视频宽高比计算高度
           if (result.width && result.height) {
@@ -595,10 +615,10 @@ export function useAiGeneration({
         );
       } finally {
         // 生成结束（成功/失败/取消）：清掉实时预览帧，节点回到成品或错误态
-        clearGeneratingPreview(nodeId);
+        clearGeneratingPreview(nodeId, jobDocId);
         // 清理 AbortController(仅当仍是当前这个)
-        if (nodeAbortControllersRef.current.get(nodeId) === ctl) {
-          nodeAbortControllersRef.current.delete(nodeId);
+        if (nodeAbortControllersRef.current.get(jobKey) === ctl) {
+          nodeAbortControllersRef.current.delete(jobKey);
         }
       }
     },
@@ -608,7 +628,7 @@ export function useAiGeneration({
   const handlePromptStop = useCallback(
     (nodeId: string): void => {
       // 触发 AbortController → 上游 fetch 抛 AbortError → catch 中识别为取消
-      const ctl = nodeAbortControllersRef.current.get(nodeId);
+      const ctl = nodeAbortControllersRef.current.get(canvasDocNodeKey(nodeId));
       if (ctl) ctl.abort();
       // 立即切回 idle(防止 provider 重试中的延迟)
       if (refs.commandQueue) {
@@ -619,6 +639,76 @@ export function useAiGeneration({
     },
     [refs.commandQueue],
   );
+
+  // 刷新续接：页面加载时扫描 status='loading' 的本机视频节点，自动向后端查作业状态恢复
+  useEffect(() => {
+    let cancelled = false;
+    const recover = async () => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const ep = useComfyuiEndpointStore.getState();
+      const base = ep.address?.replace(/\/+$/, '');
+      if (!base) return;
+      const graph = store.getGraph();
+      const loadingVideoNodes = graph.nodes.filter((n: NodeRecord) => {
+        const data = (n.data ?? {}) as Record<string, unknown>;
+        return n.type === 'video' && data.status === 'loading' && typeof data.generationJobId === 'string';
+      });
+      if (loadingVideoNodes.length === 0) return;
+      for (const node of loadingVideoNodes) {
+        if (cancelled) return;
+        const jobId = (node.data as Record<string, unknown>).generationJobId as string;
+        try {
+          const status = await fetchZeroexoJob(base, jobId);
+          if (cancelled) return;
+          if (status.state === 'success') {
+            const out = status.outputs?.find((o) => o.kind === 'video') ?? status.outputs?.[0];
+            const url = out ? zeroexoOutputViewUrl(base, out.path) : null;
+            q.execute(
+              new UpdateNodeDataCommand(node.id, {
+                status: 'success',
+                content: url ?? '',
+                generationId: jobId,
+                errorDetails: undefined,
+                errorType: undefined,
+              } as Record<string, unknown>),
+            );
+          } else if (status.state === 'error' || status.state === 'cancelled') {
+            q.execute(
+              new UpdateNodeDataCommand(node.id, {
+                status: 'error',
+                errorDetails: status.error ?? '作业失败',
+                errorType: 'NETWORK_ERROR',
+              } as Record<string, unknown>),
+            );
+          } else {
+            // 还在跑：刷新后 WS 预览帧断了，标记为 idle 让用户重新点生成
+            q.execute(
+              new UpdateNodeDataCommand(node.id, {
+                status: 'idle',
+                errorDetails: undefined,
+                errorType: undefined,
+              } as Record<string, unknown>),
+            );
+          }
+        } catch {
+          if (cancelled) return;
+          // 查不到作业（可能后端没了）：直接标记为 idle
+          q.execute(
+            new UpdateNodeDataCommand(node.id, {
+              status: 'idle',
+              errorDetails: undefined,
+              errorType: undefined,
+            } as Record<string, unknown>),
+          );
+        }
+      }
+    };
+    // 延迟 500ms 等 store 就绪
+    const timer = setTimeout(() => void recover(), 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [refs.store, refs.commandQueue]);
 
   // nodeActionBus 事件:监听节点内重试/取消按钮,对接生成/停止逻辑
   useEffect(() => {

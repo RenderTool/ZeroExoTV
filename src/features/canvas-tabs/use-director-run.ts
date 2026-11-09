@@ -39,6 +39,7 @@ import {
 import { buildDirectorPack, buildRunOverrides, createDefaultRefMediaResolver, type RefMediaResolver } from './director-pack-builder.js';
 import { durationToFrames } from '@/entities/director-params.js';
 import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
+import { getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
 import {
   cancelZeroexoJob,
@@ -47,6 +48,7 @@ import {
   uploadZeroexoReference,
   zeroexoOutputViewUrl,
 } from './zeroexo-jobs-client.js';
+import { ensureComfyuiMachineInfo, shouldUseLowVram } from './vram-mode.js';
 import { createPreviewClientId, DirectorPreviewSocket, type DirectorPreviewFrame } from './comfyui-ws-client.js';
 import { newMediaKey, putMedia, resolveMediaUrl } from '@/platform/media.js';
 import { isAuthorized } from '@/platform/fs.js';
@@ -64,8 +66,13 @@ export type DirectorBridgeConfig =
 export interface DirectorRunCallbacks {
   /** 段状态变化（选中段进入生成 / 完成 / 失败 / 已取消） */
   onSegmentState(shotId: string, state: 'generating' | 'done' | 'failed' | 'cancelled' | 'interrupted'): void;
-  /** 段完成并已落库（视频 storageKey + 首帧缩略） */
-  onSegmentDone(shotId: string, payload: { videoStorageKey: string; firstFrameKey?: string; firstFrameUrl?: string }): void;
+  /** 段完成并已落库（视频 storageKey + 首帧缩略 + 本机 guide） */
+  onSegmentDone(shotId: string, payload: {
+    videoStorageKey: string;
+    firstFrameKey?: string;
+    firstFrameUrl?: string;
+    guide?: { id: string; path?: string; frames?: number; sha256?: string };
+  }): void;
   /** 预览区自动跟随最新完成段 */
   onFollowSegment(shotId: string): void;
   /** 非致命提示（下载失败/引导缺失等，不打断运行） */
@@ -141,6 +148,8 @@ interface ResumedRun {
   jobs?: Array<{ segIndex: number; jobId: string; shotId: string }>;
   segmentShotIds: string[];
   projectId: string;
+  /** 发起时的画布文档（main / sc…）：副本任务不得在刷新后回写到主画布同 id 片段 */
+  canvasId?: string;
   at: number;
 }
 
@@ -284,9 +293,15 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     setState((s) => ({ ...s, ...p }));
   }, []);
 
-  /** 段完成：下载（按传输模式）→ 落库（video + 首帧）→ 回调宿主 */
+  /** 段完成：下载（按传输模式）→ 落库（video + 首帧 + guide）→ 回调宿主 */
   const processDoneSegment = useCallback(
-    async (segIndex: number, shotId: string, downloadUrl: string, projectId: string) => {
+    async (
+      segIndex: number,
+      shotId: string,
+      downloadUrl: string,
+      projectId: string,
+      guide?: { id?: string; path?: string; frames?: number; sha256?: string } | null,
+    ) => {
       const cfg = cfgRef.current();
       try {
         const videoBlob =
@@ -301,6 +316,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         // 历史分组（抽屉「历史」）：生成产物必须落成项目资产（origin='generation'），
         // 只 putMedia 不会进资产库 —— 这是「完成的在抽屉里看不到」的根因。
         const meta = shotMeta.current.get(shotId);
+        const guideMeta = guide?.id
+          ? { id: guide.id, path: guide.path, frames: guide.frames, sha256: guide.sha256 }
+          : undefined;
         await autoLandGenerationBlob({
           projectId,
           nodeId: shotId,
@@ -312,6 +330,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           jobId: activeJob.current?.jobId || undefined,
           provider: cfg?.mode === 'openai' ? 'openai' : cfg?.mode === 'zeroexo' ? 'zeroexo' : 'comfyui-direct',
           prompt: meta?.prompt,
+          guide: guideMeta,
+          // 抽屉「历史」来源 Tab：导演台段落产物归到「从导演台」（画布节点产物缺省 canvas）
+          originSource: 'director',
         }).catch(() => undefined);
         let firstFrameKey: string | undefined;
         let firstFrameUrl: string | undefined;
@@ -322,7 +343,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           firstFrameKey = imgKey.storageKey;
           firstFrameUrl = await resolveMediaUrl(imgKey.storageKey);
         }
-        cbRef.current.onSegmentDone(shotId, { videoStorageKey: videoKey.storageKey, firstFrameKey, firstFrameUrl });
+        cbRef.current.onSegmentDone(shotId, { videoStorageKey: videoKey.storageKey, firstFrameKey, firstFrameUrl, guide: guideMeta });
         cbRef.current.onFollowSegment(shotId);
       } catch (err) {
         cbRef.current.onNotice(
@@ -402,7 +423,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           doneIndexes.current.add(segIndex);
           const out = (status.outputs ?? []).find((o) => o.kind === 'video') ?? status.outputs?.[0];
           const url = out ? zeroexoOutputViewUrl(cfg.baseUrl, out.path) : null;
-          if (url) void processDoneSegment(segIndex, item.shotId, url, job.projectId);
+          if (url) void processDoneSegment(segIndex, item.shotId, url, job.projectId, status.guide);
           else cbRef.current.onNotice('error', `第 ${segIndex} 段已完成，但插件没返回可取的视频路径`);
         }
       } else if (status.state === 'error') {
@@ -542,15 +563,41 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
             return Number.isFinite(n) ? n : d;
           };
           const continuityOn = p.continuityEnabled === true;
+          /**
+           * 引导解析（2026-11-09）：优先级 = 片段显式引导槽 > 时间线上一段产物自带 guide。
+           * 插件对每段视频都默认产出 guide，用户用不用由「段间引导」开关决定。
+           * 按 runArgs.shots 全序找前一段（不是本次勾选下标），所以单独重跑第 3 段
+           * 也能拿到第 2 段的引导；上一段还没产物时退回服务端 LAST_GUIDE 兜底。
+           */
+          const guideFor = (shot: RunShotLike): { id?: string; usePrev: boolean } => {
+            const explicit = shot.guide?.id;
+            if (explicit) return { id: explicit, usePrev: false };
+            // 段级开关优先（含「本次运行断开衔接」的投影 false）；段上没设置才回落全局主开关
+            const enabled = shot.continuation
+              ? shot.continuation.enabled === true
+              : continuityOn;
+            const idx = runArgs.shots.findIndex((s) => s.id === shot.id);
+            if (!enabled || idx <= 0) return { usePrev: false };
+            const prevGuideId = runArgs.shots[idx - 1]?.media?.guide?.id;
+            return prevGuideId ? { id: prevGuideId, usePrev: false } : { usePrev: true };
+          };
           // 实时预览：v1 作业同样支持 clientId → /ws minimax_director_preview
           const previewClientId = createPreviewClientId();
           const socket = new DirectorPreviewSocket(cfg.baseUrl, previewClientId, {
-            onFrame: (frame) => {
-              if (frame.image) setState((st) => ({ ...st, preview: frame }));
-            },
+            onFrame: (frame) => setState((st) => ({
+              ...st,
+              preview: {
+                ...frame,
+                // 2026-11-07：换段时旧帧不得滞留；progress-only 帧仅同段才沿用上一张图
+                image: frame.image ?? (frame.segmentIndex === st.preview?.segmentIndex ? st.preview?.image ?? null : null),
+              },
+            })),
           });
           socket.connect();
           previewSocket.current = socket;
+          // 显存策略属于服务层：读一次机器信息，auto 时低显存机器自动走低显存链
+          await ensureComfyuiMachineInfo(cfg.baseUrl);
+          const useLowVram = shouldUseLowVram();
           const submitted: Array<{ jobId: string; shotId: string }> = [];
           for (const [i, shot] of selected.entries()) {
             // 参考图：插件节点只收一张 → 取该片段第一张图片参考（其余槽位生成本身不支持）
@@ -564,8 +611,10 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
                 )) ?? '';
               }
             }
+            const guide = guideFor(shot);
             const job = await submitZeroexoJob(cfg.baseUrl, {
               clientJobId: `zx_${runArgs.projectId}_${shot.id}_${Date.now()}`,
+              clientId: previewClientId,
               project: runArgs.projectId,
               episode: runArgs.episode,
               params: {
@@ -578,8 +627,11 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
                 cfg: num('cfg', 1),
                 seed: num('seed', 0),
                 frame_rate: 24,
+                // 引导帧数：插件默认 22（5/22/39/56 档位），与「是否使用引导」无关
                 guide_frames: num('continuityOverlapFrames', 22),
-                use_prev_guide: continuityOn && i > 0,
+                use_prev_guide: guide.usePrev,
+                use_low_vram: useLowVram,
+                ...(guide.id ? { guide_id: guide.id } : {}),
                 reference_image: referenceImage,
               },
             });
@@ -627,7 +679,17 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           // 实时预览：先建 /ws（clientId 同源），提交时带给桥接 → H3 节点帧定向发回本端
           const previewClientId = createPreviewClientId();
           const socket = new DirectorPreviewSocket(cfg.baseUrl, previewClientId, {
-            onFrame: (frame) => setState((s) => (s.phase === 'running' || s.phase === 'queued' ? { ...s, preview: frame } : s)),
+            onFrame: (frame) => setState((s) => {
+              if (s.phase !== 'running' && s.phase !== 'queued') return s;
+              return {
+                ...s,
+                preview: {
+                  ...frame,
+                  // 2026-11-07：换段时旧帧不得滞留；progress-only 帧仅同段才沿用上一张图
+                  image: frame.image ?? (frame.segmentIndex === s.preview?.segmentIndex ? s.preview?.image ?? null : null),
+                },
+              };
+            }),
           });
           socket.connect();
           previewSocket.current = socket;
@@ -653,6 +715,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
             : undefined,
           segmentShotIds,
           projectId: runArgs.projectId,
+          canvasId: getCurrentCanvasDocId(),
           at: Date.now(),
         });
         patch({
@@ -732,6 +795,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     const saved = readResumableRun();
     if (!saved) return;
     if (Date.now() - saved.at > 6 * 60 * 60 * 1000) { clearResumableRun(); return; }
+    // 文档归属校验：在子画布发起的任务，刷新后（或切回主画布时）不得续接到主画布同 id 片段。
+    // 记录保留，等用户重新打开发起它的那份画布文档时再续接。
+    if (saved.canvasId && saved.canvasId !== getCurrentCanvasDocId()) return;
     statusFailures.current = 0;
     if (saved.mode === 'zeroexo' && saved.jobs?.length) {
       zeroexoJobs.current = new Map(saved.jobs.map((j) => [j.segIndex, { jobId: j.jobId, shotId: j.shotId }]));

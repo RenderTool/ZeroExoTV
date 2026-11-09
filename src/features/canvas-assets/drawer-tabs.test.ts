@@ -16,14 +16,14 @@ import { DRAWER_TAB_DEFS, DRAWER_MODULE_GROUPS, resolveDrawerModule } from './ta
 const readSrc = (rel: string): string => readFileSync(resolve(process.cwd(), rel), 'utf-8');
 
 describe('抽屉页签顺序（资产置顶）', () => {
-  it('顺序固定为 资产 → 历史 → 层级 → 画布 → 本剧信息', () => {
-    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'history', 'hierarchy', 'canvases', 'scriptMeta']);
+  it('顺序固定为 资产 → 历史 → 画布（层级/子画布合并）→ 本剧信息', () => {
+    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'history', 'canvasStructure', 'scriptMeta']);
   });
 });
 
 describe('按模块独立挂载（层级/子画布只在画布模块）', () => {
   it('画布模块含画布专属分组，不含本剧信息', () => {
-    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['material', 'history', 'hierarchy', 'canvases']);
+    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['material', 'history', 'canvasStructure']);
     expect(resolveDrawerModule('canvas')).toBe('canvas');
     expect(resolveDrawerModule('canvas:sc123')).toBe('canvas');
   });
@@ -35,7 +35,7 @@ describe('按模块独立挂载（层级/子画布只在画布模块）', () => 
     }
   });
 
-  it('主体库（storyboard）模块只有 资产/历史（不挂本剧信息）', () => {
+  it('主体库（storyboard）模块只有 资产/提示词/历史（不挂本剧信息）', () => {
     for (const key of ['storyboard:node-1', 'storyboard']) {
       expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['material', 'history']);
     }
@@ -51,7 +51,7 @@ describe('挂载接线（静态守卫，防回退）', () => {
     const panel = readSrc('src/features/canvas-assets/CanvasAssetsPanel.tsx');
     expect(panel).toContain('store.visibleGroups.includes');
     expect(panel).toContain('resolveDrawerModule(activeTabKey)');
-    expect(panel).toContain('<HierarchyGroup');
+    expect(panel).toContain('CanvasStructureGroup');
     // store 的 activeGroup 必须由 visibleGroups 派生（否则非画布模块仍可能停在层级/画布）
     const store = readSrc('src/features/canvas-assets/store.ts');
     expect(store).toContain('visibleGroups.includes(groupByModule[drawerModule])');

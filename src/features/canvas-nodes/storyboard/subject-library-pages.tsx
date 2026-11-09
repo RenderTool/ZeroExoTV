@@ -70,6 +70,7 @@ import {
   findTreeForItem,
   firstCoverMediaKeyOfState,
   nextStateStep,
+  nonBaseStates,
   subjectCoverCandidates,
   treeEpisodeRank,
   type SubjectNodeMediaRef,
@@ -156,22 +157,20 @@ const KIND_FILTERS: Array<{ key: 'all' | ProductionItemKind; labelKey: string }>
 ];
 
 /** 剧集摘要（空 = 全部；悬空编号只过滤显示，不清数据） */
-function episodesSummary(node: Pick<SubjectTreeNode, 'appearEpisodes'>, episodes: Array<{ number: number }>, t: ReturnType<typeof useTranslation>['t']): string {
+function episodesSummary(node: { appearEpisodes?: number[] }, episodes: Array<{ number: number }>, t: ReturnType<typeof useTranslation>['t']): string {
   const valid = new Set(episodes.map((e) => e.number));
   const picked = (node.appearEpisodes ?? []).filter((n) => valid.has(n)).sort((a, b) => a - b);
   return picked.length > 0 ? picked.map((n) => `第 ${n} 集`).join('、') : t('subject.appearEpisodesAll', '全部');
 }
 
 /**
- * 某状态（含基础状态 __base__）的首个媒体槽位（2026-11-06 单一口径）：
- * 基础状态 = baseState.referenceImages[0]，状态 = states[].media[0]；
+ * 某状态的首个媒体槽位（2026-11-08 数据层统一）：
+ * 基础状态已是 states[0]，所有状态一律取 states[].media[0]，无分叉。
  * 无媒体 / 无 key → null（上层走「待补媒体」占位）。状态卡、编辑页、来源面板共用。
  */
 function slotMediaOf(tree: SubjectTree | undefined | null, stateId: string): SubjectNodeMediaRef | null {
   if (!tree) return null;
-  const list = stateId === SUBJECT_BASE_STATE_ID
-    ? (tree.baseState?.referenceImages ?? [])
-    : ((tree.states ?? []).find((n) => n.id === stateId)?.media ?? []);
+  const list = (tree.states ?? []).find((n) => n.id === stateId)?.media ?? [];
   const m = list[0];
   return m?.key ? m : null;
 }
@@ -689,72 +688,72 @@ function StateGridCard({
           position: 'absolute', inset: 0, background: UI_CARD_HOVER_OVERLAY,
           opacity: hover ? 1 : 0, transition: 'opacity .3s', pointerEvents: 'none',
         }} />
-        {/* 卡内动作：封面右上角，覆盖层按钮保证任何封面上都可读 */}
-        <div
-          data-state-actions
-          style={{
-            position: 'absolute', top: 6, right: 6, zIndex: 3,
-            display: 'flex', alignItems: 'center', gap: 2,
-            opacity: active ? 1 : 0, transition: 'opacity .2s',
-          }}
-        >
-          <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
-            <IconButton
-              theme={theme}
-              size="sm"
-              variant="overlay"
-              aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
-              data-state-action="cover"
-              data-cover-active={isCover ? '1' : undefined}
-              style={isCover ? { color: theme.toolbar.accent } : undefined}
-              onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
-            >
-              <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title={t('subject.editState', '编辑状态')}>
-            <IconButton
-              theme={theme}
-              size="sm"
-              variant="overlay"
-              aria-label={t('subject.editState', '编辑状态')}
-              data-state-action="edit"
-              onClick={(e) => { e.stopPropagation(); onClick(); }}
-            >
-              <Pencil size={13} />
-            </IconButton>
-          </Tooltip>
-          {onDelete && (
-            <Tooltip title={t('subject.deleteState', '删除状态')}>
-              <IconButton
-                theme={theme}
-                size="sm"
-                variant="overlay"
-                aria-label={t('subject.deleteState', '删除状态')}
-                data-state-action="delete"
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              >
-                <Trash2 size={13} />
-              </IconButton>
-            </Tooltip>
-          )}
-        </div>
       </CardShell>
       <div data-state-info style={{
         display: 'flex', flexDirection: 'column', gap: 2,
         paddingLeft: UI_CARD_INFO_PADDING_X, paddingRight: UI_CARD_INFO_PADDING_X,
       }}>
-        <span data-state-name style={uiCardNameStyle(theme)}>{title}</span>
-        <span style={{
-          display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6,
-          ...uiCardMetaStyle(theme),
-        }}>
-          <span data-state-episodes>{episodesText}</span>
-          {dead && <span aria-hidden style={{ opacity: 0.45 }}>·</span>}
-          <span data-state-ready style={dead ? { color: theme.toolbar.danger } : undefined}>
-            {dead ? deadText : ''}
+        <div style={{ display: 'flex', alignItems: 'center', height: 24 }}>
+          <span data-state-name style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}>{title}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{
+            display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6,
+            ...uiCardMetaStyle(theme),
+          }}>
+            <span data-state-episodes>{episodesText}</span>
+            {dead && <span aria-hidden style={{ opacity: 0.45 }}>·</span>}
+            <span data-state-ready style={dead ? { color: theme.toolbar.danger } : undefined}>
+              {dead ? deadText : ''}
+            </span>
           </span>
-        </span>
+          {/* 与主体库卡片同一位置：信息行右下角动作区，hover/focus 出现；不再盖在封面右上角 */}
+          <div
+            data-state-actions
+            style={{
+              display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
+              opacity: active ? 1 : 0, transition: 'opacity .2s',
+            }}
+          >
+            <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
+              <IconButton
+                theme={theme}
+                size="sm"
+                aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
+                data-state-action="cover"
+                data-cover-active={isCover ? '1' : undefined}
+                style={isCover ? { color: theme.toolbar.accent } : undefined}
+                onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
+              >
+                <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title={t('subject.editState', '编辑状态')}>
+              <IconButton
+                theme={theme}
+                size="sm"
+                aria-label={t('subject.editState', '编辑状态')}
+                data-state-action="edit"
+                onClick={(e) => { e.stopPropagation(); onClick(); }}
+              >
+                <Pencil size={13} />
+              </IconButton>
+            </Tooltip>
+            {onDelete && (
+              <Tooltip title={t('subject.deleteState', '删除状态')}>
+                <IconButton
+                  theme={theme}
+                  size="sm"
+                  aria-label={t('subject.deleteState', '删除状态')}
+                  data-state-action="delete"
+                  onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                >
+                  <Trash2 size={13} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -983,24 +982,20 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   // 状态编辑页 → 登记「当前打开状态」（资产发送直达用）
   const openState = level.view === 'state' ? level : null;
   const openTree = level.view !== 'list' ? trees.find((tr) => tr.rootId === level.rootId) : undefined;
-  const openNode = openState && openState.stateId !== SUBJECT_BASE_STATE_ID
-    ? openTree?.states.find((n) => n.id === openState.stateId)
-    : undefined;
+  // 基础状态也是 states[0] 真节点：所有状态走同一查找路径
+  const openNode = openState ? openTree?.states.find((n) => n.id === openState.stateId) : undefined;
   const openStateName = openState
-    ? (openState.stateId === SUBJECT_BASE_STATE_ID ? t('subject.baseState', BASE_BALL) : (openNode?.state ?? ''))
+    ? (openNode?.state?.trim()
+      || (openState.stateId === SUBJECT_BASE_STATE_ID ? t('subject.baseState', BASE_BALL) : ''))
     : undefined;
   useEffect(() => {
-    if (!openState || !projectId || !openTree) return;
-    if (openState.stateId !== SUBJECT_BASE_STATE_ID) {
-      if (!openNode) return; // 目标状态已不存在：不登记 → 发送走选择弹层
-      setCurrentSubjectStateContext({
-        projectId, rootId: openState.rootId, stateId: openState.stateId,
-        subjectName: openTree.name, stateName: openNode.state || openStateName || '',
-      });
-      return () => clearCurrentSubjectStateContext(projectId, openState.rootId, openState.stateId);
-    }
-    // 基础状态不是 states[] 节点：不提供直达绑定（资产发送走选择弹层）
-    return undefined;
+    // 2026-11-08：基础状态已是 states[0] 真节点，与其余状态同样支持「资产发送直达」
+    if (!openState || !projectId || !openTree || !openNode) return;
+    setCurrentSubjectStateContext({
+      projectId, rootId: openState.rootId, stateId: openState.stateId,
+      subjectName: openTree.name, stateName: openNode.state || openStateName || '',
+    });
+    return () => clearCurrentSubjectStateContext(projectId, openState.rootId, openState.stateId);
   }, [openState, openNode, openTree, projectId, openStateName]);
 
   // ===== 列表数据 =====
@@ -1104,11 +1099,13 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       } else {
         const kind = card.kind ?? 'character';
         const tr = createSubjectTree(kind, card.name, card.id);
-        tr.baseState.prompt = buildBaseStatePrompt(kind, {
+        const base = tr.states[0]!;
+        base.fullPrompt = buildBaseStatePrompt(kind, {
           roleDesc: card.content || card.prompt || '', name: card.name,
         });
+        base.deltaPrompt = base.fullPrompt;
         if (card.referenceImages && card.referenceImages.length > 0) {
-          tr.baseState.referenceImages = card.referenceImages.map((r) => ({
+          base.media = card.referenceImages.map((r) => ({
             key: r.storageKey, type: 'image' as const, prompt: r.prompt,
           }));
         }
@@ -1320,18 +1317,19 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     (tree: SubjectTree): string | null => resolveSubjectCover(itemOfTree(tree), subjectCoverCandidates(tree)).key,
     [itemOfTree],
   );
-  const stateMediaKey = (tree: SubjectTree, stateId: string): string | null => (stateId === SUBJECT_BASE_STATE_ID
-    ? firstCoverMediaKeyOfState(tree.baseState?.referenceImages)
-    : firstCoverMediaKeyOfState((tree.states ?? []).find((n) => n.id === stateId)?.media));
+  const stateMediaKey = (tree: SubjectTree, stateId: string): string | null =>
+    firstCoverMediaKeyOfState((tree.states ?? []).find((n) => n.id === stateId)?.media);
 
   const toggleCover = useCallback((tree: SubjectTree, stateId: string) => {
     const item = itemOfTree(tree);
     if (!item) { antdMessage.warning(t('subject.coverNoItem', '该主体还未入库，无法设置封面')); return; }
     const key = stateMediaKey(tree, stateId);
     if (!key) { antdMessage.warning(t('subject.coverNoMedia', '该状态还没有图片，先补一张图再设为封面')); return; }
-    const label = stateId === SUBJECT_BASE_STATE_ID
-      ? t('subject.baseState', BASE_BALL)
-      : ((tree.states ?? []).find((n) => n.id === stateId)?.state || t('subject.stateLabelN', { n: 1, defaultValue: '状态' }));
+    const node = (tree.states ?? []).find((n) => n.id === stateId);
+    const label = node?.state?.trim()
+      || (stateId === SUBJECT_BASE_STATE_ID
+        ? t('subject.baseState', BASE_BALL)
+        : t('subject.stateLabelN', { n: 1, defaultValue: '状态' }));
     const isCancel = coverKeyOfTree(tree) === key;
     onUpdateItem?.(item.id, { coverKey: isCancel ? null : key });
     antdMessage.success(isCancel
@@ -1644,15 +1642,15 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       </div>
     );
   } else if (level.view === 'subject') {
-    // 基础状态槽位 = referenceImages[0]（2026-11-06：不再只认图，语音同样上卡）
-    const baseSlot = slotMediaOf(openTree, SUBJECT_BASE_STATE_ID);
     const coverKey = coverKeyOfTree(openTree);
     // 无图状态与「无封面」都是 null，必须先排空才不会被误判成封面
     const isCoverState = (stateId: string): boolean => {
       const k = stateMediaKey(openTree, stateId);
       return Boolean(k) && k === coverKey;
     };
-    const stateCountText = t('subject.stateCount', { n: openTree.states.length, defaultValue: `${openTree.states.length} 状态` });
+    // 计数只算迭代状态（基础状态是 states[0]，不计入「N 状态」）
+    const stateCount = nonBaseStates(openTree).length;
+    const stateCountText = t('subject.stateCount', { n: stateCount, defaultValue: `${stateCount} 状态` });
     const stateFrame = frame(STATE_MAX_WIDTH);
     content = (
       <div data-subject-page="subject" data-root-id={openTree.rootId} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -1662,7 +1660,16 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           pad={pagePad}
         >
           <SubjectBreadcrumb theme={theme} subjectName={openTree.name} compact={compactBreadcrumb} onLibrary={goLibrary} onSubject={goSubject} />
-          <span data-state-count={openTree.states.length} style={{ fontSize: 12, color: theme.toolbar.textMuted, flexShrink: 0 }}>
+          {/* 主体名与状态名分离：主体名在主体页改，状态编辑页只管状态自己的三项 */}
+          <Input
+            size="small"
+            data-field="subject-name"
+            aria-label={t('subject.subjectNameLabel', '主体名')}
+            value={openTree.name}
+            onChange={(e) => renameTree(openTree.rootId, e.target.value)}
+            style={{ width: 160, flexShrink: 0 }}
+          />
+          <span data-state-count={stateCount} style={{ fontSize: 12, color: theme.toolbar.textMuted, flexShrink: 0 }}>
             {stateCountText}
           </span>
         </SubjectPageHeader>
@@ -1678,27 +1685,18 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         </div>
         <div style={scrollStyle}>
           <div style={{ ...stateFrame.content, paddingTop: 16 }}>
+            {/* 2026-11-08：基础状态是 states[0]，与其余状态共用同一张卡组件、同一个 map */}
             <SubjectStateGrid>
-              <StateGridCard
-                stateId={SUBJECT_BASE_STATE_ID}
-                title={t('subject.baseState', BASE_BALL)}
-                thumbKey={baseSlot?.key}
-                thumbKind={slotMediaKind(baseSlot)}
-                emptyLabel={t('subject.noCover', '暂无封面')}
-                episodesText={t('subject.appearEpisodesAll', '全部')}
-                deadText={t('subject.mediaDead', '引用已失效')}
-                theme={theme}
-                isCover={isCoverState(SUBJECT_BASE_STATE_ID)}
-                onToggleCover={() => toggleCover(openTree, SUBJECT_BASE_STATE_ID)}
-                onClick={() => applyLevel({ view: 'state', rootId: openTree.rootId, stateId: SUBJECT_BASE_STATE_ID }, { push: true })}
-              />
               {(openTree.states ?? []).map((node) => {
+                const isBase = node.id === SUBJECT_BASE_STATE_ID;
                 const first = (node.media ?? [])[0];
                 return (
                   <StateGridCard
                     key={node.id}
                     stateId={node.id}
-                    title={node.state || t('subject.stateLabelN', { n: node.step ?? 1, defaultValue: `状态${node.step ?? 1}` })}
+                    title={node.state?.trim() || (isBase
+                      ? t('subject.baseState', BASE_BALL)
+                      : t('subject.stateLabelN', { n: node.step ?? 1, defaultValue: `状态${node.step ?? 1}` }))}
                     thumbKey={first?.key}
                     thumbKind={slotMediaKind(first ?? null)}
                     emptyLabel={t('subject.noCover', '暂无封面')}
@@ -1708,7 +1706,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     isCover={isCoverState(node.id)}
                     onToggleCover={() => toggleCover(openTree, node.id)}
                     onClick={() => applyLevel({ view: 'state', rootId: openTree.rootId, stateId: node.id }, { push: true })}
-                    onDelete={() => handleDeleteState(openTree.rootId, node)}
+                    onDelete={isBase ? undefined : () => handleDeleteState(openTree.rootId, node)}
                   />
                 );
               })}
@@ -1718,11 +1716,10 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       </div>
     );
   } else {
-    // ===== 状态编辑页 =====
-    const isBase = level.stateId === SUBJECT_BASE_STATE_ID;
-    const node = isBase ? null : openNode;
+    // ===== 状态编辑页（基础状态是 states[0]，与其它状态完全同一套取值/写回）=====
+    const node = openNode;
     const editFrame = frame(960);
-    if (!isBase && !node) {
+    if (!node) {
       content = (
         <div data-subject-page="missing" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <SubjectPageHeader theme={theme} maxWidth={maxWidthFor(LIST_MAX_WIDTH)} pad={pagePad}>
@@ -1737,11 +1734,11 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       const slotMedia = slotMediaOf(openTree, level.stateId);
       const slotKind = slotMediaKind(slotMedia);
       const hasMedia = Boolean(slotMedia);
-      const promptValue = isBase ? (openTree.baseState.prompt ?? '') : (node!.fullPrompt || node!.deltaPrompt || '');
+      const promptValue = node.fullPrompt || node.deltaPrompt || '';
+      const stateName = node.state ?? '';
       const validEpisodes = episodes.slice().sort((a, b) => a.number - b.number);
-      const selectedEpisodes = (node?.appearEpisodes ?? []).filter((n) => validEpisodes.some((e) => e.number === n));
+      const selectedEpisodes = (node.appearEpisodes ?? []).filter((n) => validEpisodes.some((e) => e.number === n));
       const toggleEpisode = (n: number) => {
-        if (!node) return;
         const next = selectedEpisodes.includes(n) ? selectedEpisodes.filter((x) => x !== n) : [...selectedEpisodes, n].sort((a, b) => a - b);
         updateNode(openTree.rootId, node.id, { appearEpisodes: next });
       };
@@ -1804,55 +1801,51 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     </CardShell>
                   </div>
 
-                  {/* 右列：状态名 / 备注 / 出现集数 */}
+                  {/* 右列：状态名 / 提示词 / 出现集数（基础状态与更多状态同一套表单） */}
                   <div style={editPaneStyle}>
                     <div>
                       <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
                       <Input
                         data-field="name"
                         aria-label={t('subject.stateNameLabel', '状态名')}
-                        value={isBase ? openTree.name : node!.state}
-                        onChange={(e) => {
-                          if (isBase) renameTree(openTree.rootId, e.target.value);
-                          else updateNode(openTree.rootId, node!.id, { state: e.target.value });
-                        }}
+                        value={stateName}
+                        placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
+                        onChange={(e) => updateNode(openTree.rootId, node.id, { state: e.target.value })}
                       />
                     </div>
 
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <div style={labelStyle} title={t('subject.stateRemarkHint', '给 AI 的补充说明')}>
-                          {isBase ? t('subject.basePrompt', '完整提示词') : t('subject.stateRemark', '备注')}
+                        <div style={labelStyle} title={t('subject.stateRemarkHint', '该状态的生成提示词')}>
+                          {t('subject.statePromptLabel', '提示词')}
                         </div>
-                        {isBase && (
-                          <Button
-                            size="small"
-                            type="text"
-                            data-copy-base-prompt
-                            disabled={!promptValue.trim()}
-                            onClick={() => {
-                              if (!navigator.clipboard) {
-                                antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
-                                return;
-                              }
-                              void navigator.clipboard.writeText(promptValue).then(
-                                () => antdMessage.success(t('subject.promptCopied', '已复制完整提示词')),
-                                () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
-                              );
-                            }}
-                          >
-                            {t('subject.copyPrompt', '复制')}
-                          </Button>
-                        )}
+                        <Button
+                          size="small"
+                          type="text"
+                          data-copy-base-prompt
+                          disabled={!promptValue.trim()}
+                          onClick={() => {
+                            if (!navigator.clipboard) {
+                              antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
+                              return;
+                            }
+                            void navigator.clipboard.writeText(promptValue).then(
+                              () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
+                              () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
+                            );
+                          }}
+                        >
+                          {t('subject.copyPrompt', '复制')}
+                        </Button>
                       </div>
                       <Input.TextArea
                         data-field="prompt"
-                        aria-label={isBase ? t('subject.basePrompt', '完整提示词') : t('subject.stateRemark', '备注')}
+                        aria-label={t('subject.statePromptLabel', '提示词')}
                         value={promptValue}
-                        onChange={(e) => {
-                          if (isBase) updateTree(openTree.rootId, (tr) => ({ ...tr, baseState: { ...tr.baseState, prompt: e.target.value } }));
-                          else updateNode(openTree.rootId, node!.id, { fullPrompt: e.target.value, deltaPrompt: e.target.value });
-                        }}
+                        onChange={(e) => updateNode(openTree.rootId, node.id, {
+                          fullPrompt: e.target.value,
+                          deltaPrompt: e.target.value,
+                        })}
                         autoSize={{ minRows: 8, maxRows: 18 }}
                         placeholder={t('subject.statePromptPlaceholder', '描述该状态的形象/动作/差异，AI 会结合基础形态自动完善…')}
                         style={{ minHeight: 200, lineHeight: 1.6 }}
@@ -1864,51 +1857,49 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                       </div>
                     </div>
 
-                    {/* 出现集数（多选；基础状态无此项） */}
-                    {!isBase && (
-                      <div data-episodes-field>
-                        <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
-                        {validEpisodes.length === 0 ? (
-                          <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
-                        ) : (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                            {validEpisodes.map((ep) => {
-                              const checked = selectedEpisodes.includes(ep.number);
-                              return (
-                                <div
-                                  key={ep.number}
-                                  data-episode-option={ep.number}
-                                  role="checkbox"
-                                  aria-checked={checked}
-                                  tabIndex={0}
-                                  onClick={() => toggleEpisode(ep.number)}
-                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEpisode(ep.number); } }}
-                                  style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 8, height: 32, fontSize: 12,
-                                    padding: '0 12px', borderRadius: 6, cursor: 'pointer', boxSizing: 'border-box',
-                                    border: `1px solid ${checked ? theme.toolbar.accent : theme.toolbar.border}`,
-                                    background: 'transparent',
-                                    color: checked ? theme.toolbar.accent : theme.toolbar.text,
-                                    transition: 'border-color .15s ease, color .15s ease',
-                                  }}
-                                  onMouseEnter={(e) => { if (!checked) e.currentTarget.style.borderColor = theme.toolbar.accent; }}
-                                  onMouseLeave={(e) => { if (!checked) e.currentTarget.style.borderColor = theme.toolbar.border; }}
-                                >
-                                  {/* 勾选框自身吞掉点击：切换只由外层 chip 或 checkbox 触发一次 */}
-                                  <span data-episode-checkbox style={{ display: 'inline-flex' }} onClick={(e) => e.stopPropagation()}>
-                                    <Checkbox checked={checked} onChange={() => toggleEpisode(ep.number)} tabIndex={-1} />
-                                  </span>
-                                  {displayEpisodeTitle(ep.title, ep.number)}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        <div style={{ ...hintStyle, marginTop: 8 }}>
-                          {t('subject.appearEpisodesHint', '勾选该状态出现的集数；未选 = 全部剧集')}
+                    {/* 出现集数：每个状态（含基础状态）独立，控件同一套 */}
+                    <div data-episodes-field>
+                      <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
+                      {validEpisodes.length === 0 ? (
+                        <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                          {validEpisodes.map((ep) => {
+                            const checked = selectedEpisodes.includes(ep.number);
+                            return (
+                              <div
+                                key={ep.number}
+                                data-episode-option={ep.number}
+                                role="checkbox"
+                                aria-checked={checked}
+                                tabIndex={0}
+                                onClick={() => toggleEpisode(ep.number)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEpisode(ep.number); } }}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 8, height: 32, fontSize: 12,
+                                  padding: '0 12px', borderRadius: 6, cursor: 'pointer', boxSizing: 'border-box',
+                                  border: `1px solid ${checked ? theme.toolbar.accent : theme.toolbar.border}`,
+                                  background: 'transparent',
+                                  color: checked ? theme.toolbar.accent : theme.toolbar.text,
+                                  transition: 'border-color .15s ease, color .15s ease',
+                                }}
+                                onMouseEnter={(e) => { if (!checked) e.currentTarget.style.borderColor = theme.toolbar.accent; }}
+                                onMouseLeave={(e) => { if (!checked) e.currentTarget.style.borderColor = theme.toolbar.border; }}
+                              >
+                                {/* 勾选框自身吞掉点击：切换只由外层 chip 或 checkbox 触发一次 */}
+                                <span data-episode-checkbox style={{ display: 'inline-flex' }} onClick={(e) => e.stopPropagation()}>
+                                  <Checkbox checked={checked} onChange={() => toggleEpisode(ep.number)} tabIndex={-1} />
+                                </span>
+                                {displayEpisodeTitle(ep.title, ep.number)}
+                              </div>
+                            );
+                          })}
                         </div>
+                      )}
+                      <div style={{ ...hintStyle, marginTop: 8 }}>
+                        {t('subject.appearEpisodesHint', '勾选该状态出现的集数；未选 = 全部剧集')}
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               </section>

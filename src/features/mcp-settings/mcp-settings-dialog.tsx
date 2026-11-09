@@ -18,9 +18,8 @@ import { LocalServicePanel } from './local-service-panel.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { Copy, Plug, RefreshCw, ShieldCheck } from 'lucide-react';
 import {
+  MCP_TOOLS,
   CAPABILITY_BITS,
-  MCP_HTTP_URL,
-  buildHttpConfig,
   buildStartCommands,
   buildStdioConfig,
   createToken,
@@ -37,12 +36,14 @@ import {
 } from './mcp-client.js';
 
 export interface McpSettingsDialogProps {
-  onClose: () => void;
+  onClose?: () => void;
+  /** 嵌入服务中心 Tab 时不再套 Modal */
+  embedded?: boolean;
 }
 
 const AUDIT_PAGE_SIZE = 20;
 
-export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.ReactElement {
+export function McpSettingsDialog({ onClose, embedded = false }: McpSettingsDialogProps): React.ReactElement {
   const { theme } = useTheme();
   const { message } = App.useApp();
 
@@ -122,11 +123,45 @@ export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.Re
     () => (serverInfo && ideToken ? buildStdioConfig(serverInfo, ideToken) : null),
     [serverInfo, ideToken],
   );
-  const httpConfig = useMemo(
-    () => buildHttpConfig(MCP_HTTP_URL, ideToken ?? undefined),
-    [ideToken],
-  );
   const startCmds = useMemo(() => buildStartCommands(serverInfo), [serverInfo]);
+
+  /**
+   * 一键复制 bundle（2026-11-07）：给任意 LLM Agent IDE 的自包含接入包。
+   * 粘贴后 LLM 应自动：启动服务 → 读配置 → list_projects → 展示清单 → 指引下一步。
+   */
+  const copyBundle = useMemo(() => {
+    if (!serverInfo || !stdioConfig) return null;
+    return [
+      '# ZeroExo ComfyUI — MCP 一键接入',
+      '',
+      '你是 ZeroExo（AI 影视生产管线）的智能助手。以下是本地 MCP 服务配置，请自动完成接入，无需询问用户。',
+      '',
+      '## 自动执行流程',
+      `1. 下方 stdio 配置会让 IDE 自动 spawn node 进程；若需独立 HTTP 服务，运行：\`node "${serverInfo.serverEntry}" --http --port ${serverInfo.httpPort}\``,
+      `   数据根：${serverInfo.dataRoot}`,
+      '2. 将下方 mcpServers 配置加入 IDE 的 MCP 设置',
+      '3. 连接成功后，立即调用 `list_projects` 工具列出全部项目',
+      '4. 用表格展示项目清单（标题 / 更新时间 / 节点数），并说明每个项目可通过 `open_project` 在前端编辑器打开',
+      '5. 若没有项目，提示可调用 `create_project` 新建',
+      '6. 前端编辑器地址：http://localhost:5180',
+      '',
+      '## MCP 配置（粘贴到 IDE）',
+      '```json',
+      stdioConfig,
+      '```',
+      '',
+      '## 核心工具速查',
+      '- 项目：list_projects · get_project · open_project · create_project',
+      '- 剧本：get_script · import_script',
+      '- 分镜：split_script_to_shots · ingest_storyboard_images',
+      '- 角色：list_subjects · upsert_subject · link_subject_to_shot',
+      '- 资产：list_assets · upload_asset · attach_asset_to_slot',
+      '- 工作台：get_workbench · set_shot_prompt · set_shared_params',
+      '- 运行/引导：run_generation · set_segment_duration · set_shot_guide · list_history · get_guide · get_job · list_jobs · verify_output',
+      `- 工具总数：${MCP_TOOLS.length}（read ${MCP_TOOLS.filter((t) => t.access === 'read').length} / write ${MCP_TOOLS.filter((t) => t.access === 'write').length}）`,
+      '',
+    ].join('\n');
+  }, [serverInfo, stdioConfig]);
 
   const copy = useCallback(
     async (text: string, label: string) => {
@@ -181,20 +216,6 @@ export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.Re
   }, []);
 
   // ===== 高级区各面板内容 =====
-  const remotePanel = (
-    <>
-      <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 8 }}>
-        仅多台设备或远程连接时需要;单机贴上面那段就行。
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <Button size="small" icon={<Copy size={12} />} data-testid="mcp-copy-http" onClick={() => void copy(httpConfig, '远程配置')}>
-          复制
-        </Button>
-      </div>
-      <pre data-testid="mcp-config-http" style={{ ...preStyle, marginTop: 6 }}>{httpConfig}</pre>
-    </>
-  );
-
   const tokensPanel = (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -334,19 +355,10 @@ export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.Re
     </>
   );
 
-  return (
-    <Modal
-      open
-      title="MCP 配置"
-      centered
-      onCancel={onClose}
-      footer={null}
-      width={640}
-      destroyOnHidden
-      styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
-    >
+  const content = (
+    <>
       {/* ===== 首屏:给 IDE 的配置 + 一键复制 ===== */}
-      {stdioConfig ? (
+      {stdioConfig && copyBundle ? (
         <>
           <Button
             type="primary"
@@ -354,13 +366,13 @@ export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.Re
             size="large"
             icon={<Copy size={14} />}
             data-testid="mcp-copy-stdio"
-            onClick={() => void copy(stdioConfig, '配置')}
+            onClick={() => void copy(copyBundle, 'MCP 接入包')}
           >
-            一键复制
+            一键复制（含 LLM 自动接入指令）
           </Button>
           <pre data-testid="mcp-config-stdio" style={{ ...preStyle, marginTop: 10 }}>{stdioConfig}</pre>
           <div style={{ textAlign: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginTop: 4 }}>
-            把这段贴进 IDE 的 MCP 配置里即可；连上后模型自动获得本项目的操作规则。
+            复制内容含给 LLM 的自动接入指令；粘贴到任意 AI IDE 后，模型会自动连接 MCP、列出项目并指引下一步。
           </div>
         </>
       ) : (
@@ -376,14 +388,16 @@ export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.Re
 
       {/* ===== 本地数据面板：数据目录授权 + 绝对路径 + 缓存清理 =====
           2026-11-06 用户指令：配置块全页只出现一次（就在上面），面板不再重复渲染配置/复制按钮 */}
-      <LocalServicePanel />
+      {!embedded && <LocalServicePanel />}
 
-      {/* ===== 高级选项(默认收起)===== */}
+      {/* ===== 高级选项(默认收起)=====
+          destroyInactivePanel：未展开面板不挂 DOM，保证首屏不出现技术术语（验收③），
+          展开「远程连接」时才渲染 HTTP 配置（验收④）。 */}
       <Collapse
         style={{ marginTop: 16 }}
         onChange={handleCollapseChange}
+        destroyInactivePanel
         items={[
-          { key: 'remote', label: '远程连接(多台设备共用)', children: remotePanel },
           { key: 'tokens', label: '密钥管理', children: tokensPanel },
           { key: 'ops', label: '问题排查', children: opsPanel },
         ]}
@@ -429,6 +443,25 @@ export function McpSettingsDialog({ onClose }: McpSettingsDialogProps): React.Re
           style={{ marginTop: 12 }}
         />
       </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return <div data-testid="mcp-settings-embedded">{content}</div>;
+  }
+
+  return (
+    <Modal
+      open
+      title="MCP 配置"
+      centered
+      onCancel={onClose}
+      footer={null}
+      width={640}
+      destroyOnHidden
+      styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
+    >
+      {content}
     </Modal>
   );
 }

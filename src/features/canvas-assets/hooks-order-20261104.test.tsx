@@ -35,6 +35,8 @@ vi.mock('antd', () => ({
   },
   Button: ({ children }: { children?: React.ReactNode }) => <button type="button">{children}</button>,
   Pagination: () => <div data-testid="pagination" />,
+  Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  Dropdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('react-i18next', () => ({

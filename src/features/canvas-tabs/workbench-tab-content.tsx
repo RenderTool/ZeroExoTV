@@ -26,9 +26,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Modal } from 'antd';
+import { App, Button, Checkbox, Modal } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { History, Trash2 } from 'lucide-react';
+import { History, Link2, Link2Off, Star, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
@@ -37,15 +37,18 @@ import {
   ensureWorkbenchContainer,
   readStoryboardContainer,
   readWorkbenchContainer,
+  snapshotWorkbenchForRun,
   updateWorkbenchContainer,
   type WorkbenchContainer,
   type WorkbenchSharedParams,
 } from '@/entities/slot-containers.js';
 import {
+  SNAPSHOT_KEEP_COUNT,
   deleteSnapshotFile,
   listSnapshots,
   pruneDuplicateSnapshots,
   restoreSnapshot,
+  setSnapshotFavorite,
   type SnapshotListItem,
 } from '@/entities/snapshot-store.js';
 import {
@@ -64,7 +67,7 @@ import { StoryboardMergedTab } from '@/features/canvas-nodes/storyboard/storyboa
 /* 2026-11-04 批量复用 dry-run 预检：DirectorBatchPanel（独立简化勾选页）已删除——
    勾选在轨道行、确认/运行收敛到 dry-run 预检，不留两套并行 UI */
 import type { TimelineClipData } from '@/features/canvas-nodes/storyboard/timeline-constants.js';
-import { DIRECTOR_ARROW_SIZE, DIRECTOR_ARROW_GLYPH, DIRECTOR_CARD_GAP, DIRECTOR_CARD_WIDTH_BASE, TRACK_CLIP_TOP, directorArrowTone, directorCardHeight } from '@/features/canvas-nodes/storyboard/timeline-constants.js';
+import { DIRECTOR_ARROW_SIZE, DIRECTOR_CARD_GAP, DIRECTOR_CARD_WIDTH_BASE, TRACK_CLIP_TOP, directorArrowTone, directorCardHeight } from '@/features/canvas-nodes/storyboard/timeline-constants.js';
 import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { readScript, watchScript } from '@/entities/script-store.js';
@@ -74,7 +77,7 @@ import type {
   WorkbenchShotReference,
   WorkbenchTrack,
 } from '@/features/canvas-nodes/storyboard/workbench-types.js';
-import { WORKBENCH_ADD_REF_EVENT, type WorkbenchAddRefDetail } from './workbench-slot-bus.js';
+import { WORKBENCH_ADD_REF_EVENT, WORKBENCH_SET_GUIDE_EVENT, type WorkbenchAddRefDetail, type WorkbenchSetGuideDetail } from './workbench-slot-bus.js';
 import { syncWorkbenchSendContext } from '@/features/canvas-assets/workbench-send.js';
 import { DirectorPromptPanel } from './director-prompt-panel.jsx';
 import { DirectorParamsButton, DirectorRunButton } from './director-run-params-row.js';
@@ -105,6 +108,9 @@ function toRunShot(s: WorkbenchShot): RunShotLike {
     references: (s.references ?? [])
       .filter((r) => r.kind === 'image' || r.kind === 'video' || r.kind === 'audio')
       .map((r) => ({ id: r.id, kind: r.kind as 'image' | 'video' | 'audio', title: r.title, storageKey: r.storageKey, url: r.url })),
+    guide: s.guide ? { id: s.guide.id, frames: s.guide.frames, sha256: s.guide.sha256 } : undefined,
+    // 2026-11-09：产物自带 guide 一起带进运行参数，重跑单段时才能接续上一段
+    media: s.media?.guide ? { guide: { id: s.media.guide.id } } : undefined,
   };
 }
 
@@ -183,9 +189,25 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [versions, setVersions] = useState<Array<SnapshotListItem<WorkbenchContainer>> | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [versionConfirm, setVersionConfirm] = useState<{ kind: 'restore' | 'delete'; snap: SnapshotListItem<WorkbenchContainer> } | null>(null);
+  /** 版本多选（2026-11-07 用户指令：版本历史支持批量操作） */
+  const [versionSelected, setVersionSelected] = useState<Set<string>>(new Set());
+  const [versionBatchConfirmOpen, setVersionBatchConfirmOpen] = useState(false);
+  const toggleVersionSelected = useCallback((fileName: string, checked: boolean): void => {
+    setVersionSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(fileName); else next.delete(fileName);
+      return next;
+    });
+  }, []);
   /** 片段列表（本地受控；防抖写回容器） */
   const [shots, setShots] = useState<WorkbenchShot[]>([]);
   const [activeShotId, setActiveShotId] = useState<string | null>(null);
+  /** 点击片段 = 右侧预览区立即从 0 播放（自增令牌；源异步解析后由预览组件起播） */
+  const [previewAutoPlayKey, setPreviewAutoPlayKey] = useState(0);
+  const selectShotAndPlay = useCallback((shotId: string) => {
+    setActiveShotId(shotId);
+    setPreviewAutoPlayKey((k) => k + 1);
+  }, []);
   // 2026-11-04 约定（偏好记忆）：时间线缩放持久化到全局偏好 store——
   // 页签切换会卸载本组件，此前缩放只活在本地 useState，切走即回 40；现存 store，切回/刷新都保留
   const pixelsPerSecond = useViewPrefsStore((s) => s.workbench.pixelsPerSecond);
@@ -215,6 +237,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [episodeContext, setEpisodeContext] = useState<{ activeEpisodeId: string | null; numberById: Record<string, number> }>({ activeEpisodeId: null, numberById: {} });
   /** dry-run 预检弹层：片段表 + pack 摘要 + 本次运行断开的衔接列表（执行按钮保留 dry-run 语义，不发起真实生成） */
   const [dryRun, setDryRun] = useState<{ summary: PackSummary; disconnects: Array<{ fromNo: number; toNo: number }>; selectedIds: string[]; continuationOff: ReadonlySet<string> } | null>(null);
+  /** 片段选择面板（2026-11-07 统一生成入口：点"生成"弹出，默认勾选当前段，可全选/按需勾选） */
+  const [runPickerOpen, setRunPickerOpen] = useState(false);
+  const [runPickerSelection, setRunPickerSelection] = useState<ReadonlySet<string>>(new Set());
   const dirtyRef = useRef(false);
   const shotsRef = useRef<WorkbenchShot[]>([]);
   shotsRef.current = shots;
@@ -272,6 +297,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (!projectId) return;
     setVersionsOpen(true);
     setVersions(null);
+    setVersionSelected(new Set());
     try {
       // 历史垃圾清理：同内容 hash 只保留最新一份（旧实现每次自动保存都落一份）
       await pruneDuplicateSnapshots(projectId, 'workbench');
@@ -283,11 +309,45 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     }
   }, [projectId, message]);
 
+  /** 星标收藏版本（2026-11-08）：收藏项跳过一切自动回收，且不占 30 份配额 */
+  const toggleVersionFavorite = useCallback(async (snap: SnapshotListItem<WorkbenchContainer>): Promise<void> => {
+    if (!projectId) return;
+    const next = !snap.favorite;
+    try {
+      await setSnapshotFavorite(projectId, 'workbench', snap.fileName, next);
+      setVersions((prev) => prev?.map((v) => (v.fileName === snap.fileName ? { ...v, favorite: next } : v)) ?? prev);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : String(err));
+    }
+  }, [projectId, message]);
+
   /** 删除某份版本（仅删该快照文件，不改当前内容） */
   const deleteVersion = useCallback((snap: SnapshotListItem<WorkbenchContainer>): void => {
     if (!projectId) return;
     setVersionConfirm({ kind: 'delete', snap });
   }, [projectId]);
+
+  /** 批量删除选中的版本（只作用于勾选项） */
+  const deleteSelectedVersions = useCallback(async (): Promise<void> => {
+    if (!projectId || versionSelected.size === 0) return;
+    setVersionBatchConfirmOpen(false);
+    const names = [...versionSelected];
+    let done = 0;
+    let failed = 0;
+    for (const fileName of names) {
+      try {
+        await deleteSnapshotFile(projectId, 'workbench', fileName);
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setVersionSelected(new Set());
+    const list = await listSnapshots<WorkbenchContainer>(projectId, 'workbench', { withSize: true }).catch(() => null);
+    if (list) setVersions([...list].reverse());
+    if (failed === 0) message.success(t('director.batchDeleteVersionsDone', { n: done, defaultValue: '已删除 {{n}} 个版本' }));
+    else message.warning(t('director.batchDeleteVersionsPartial', { done, failed, defaultValue: '已删除 {{done}} 个版本，{{failed}} 个失败' }));
+  }, [projectId, versionSelected, message, t]);
 
   /** 恢复某份版本：先自动存当前版（pre-restore），再写回容器 */
   const restoreVersion = useCallback((snap: SnapshotListItem<WorkbenchContainer>): void => {
@@ -472,7 +532,10 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       const shot = shotsRef.current.find((s) => s.id === activeShotId) ?? shotsRef.current[0];
       if (!shot) return; // 无片段（理论不到达：抽屉侧已拦 no-active-shot）
       const existing = (shot.references ?? []).find((r) => r.id === detail.ref.id);
+      // 发送源视频 = 切回源视频变体：同一来源的引导槽必须清掉，避免同格隐藏
+      const clearGuide = shot.guide?.fromAssetId === detail.ref.id;
       if (existing) {
+        if (clearGuide) updateShot(shot.id, { guide: undefined });
         message.info(t('workbench.slotReused', '该资产已在片段素材池，复用原槽位'));
         return;
       }
@@ -481,11 +544,33 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         storageKey: detail.ref.storageKey, url: detail.ref.url, slotNo: detail.ref.slotNo,
       };
       (shotRef as WorkbenchShotReference & { originScope?: string }).originScope = detail.ref.originScope;
-      updateShot(shot.id, { references: [...(shot.references ?? []), shotRef] });
+      updateShot(shot.id, {
+        references: [...(shot.references ?? []), shotRef],
+        ...(clearGuide ? { guide: undefined } : {}),
+      });
       message.success(t('workbench.addedToSegment', '已送入当前片段素材池'));
     };
     window.addEventListener(WORKBENCH_ADD_REF_EVENT, onAddRef);
     return () => window.removeEventListener(WORKBENCH_ADD_REF_EVENT, onAddRef);
+  }, [projectId, activeShotId, updateShot, message, t]);
+
+  // ===== 引导槽（2026-11-07）：发送引导数据 → 覆盖当前片段唯一引导槽 =====
+  // 独立槽位类型：不占 9 张参考图上限；每段至多一个，重复发送即替换（需求 3/5）。
+  useEffect(() => {
+    const onSetGuide = (e: Event) => {
+      const detail = (e as CustomEvent<WorkbenchSetGuideDetail>).detail;
+      if (!detail || detail.projectId !== (projectId ?? '')) return;
+      const shot = shotsRef.current.find((s) => s.id === activeShotId) ?? shotsRef.current[0];
+      if (!shot) return;
+      // 引导是视频槽的变体：同一格切换，源视频不能继续占一个参考槽
+      const references = detail.guide.fromAssetId
+        ? (shot.references ?? []).filter((r) => r.id !== detail.guide.fromAssetId)
+        : shot.references;
+      updateShot(shot.id, { guide: { ...detail.guide }, ...(references ? { references } : {}) });
+      message.success(t('workbench.guideSent', '已送入当前片段引导槽（重复发送会替换）'));
+    };
+    window.addEventListener(WORKBENCH_SET_GUIDE_EVENT, onSetGuide);
+    return () => window.removeEventListener(WORKBENCH_SET_GUIDE_EVENT, onSetGuide);
   }, [projectId, activeShotId, updateShot, message, t]);
 
   /** 选择运行：dry-run（本仓库无导演台生成链路——只产出 pack 结构摘要，不发起真实生成）。
@@ -576,6 +661,23 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     }
   }, []);
 
+  /**
+   * 衔接图标直接点击 = 切换该交界（2026-11-07 用户指令）：
+   * - 链接模式内 → 与点片段一致，写草稿（完成后统一落盘）；
+   * - 模式外 → 立即写持久值（continuation.enabled），图标同步变链接/断开。
+   */
+  const toggleContinuityDirect = useCallback((shotId: string) => {
+    if (continuityDraft) {
+      toggleShotContinuity(shotId);
+      return;
+    }
+    const idx = shotsRef.current.findIndex((s) => s.id === shotId);
+    const shot = idx >= 0 ? shotsRef.current[idx] : undefined;
+    if (idx <= 0 || !shot) return;
+    const next = !segmentContinuityEnabled(toRunShot(shot), idx);
+    updateShot(shot.id, { continuation: { enabled: next } });
+  }, [continuityDraft, toggleShotContinuity, updateShot]);
+
   /** 进入链接模式：快照草稿（段 2..N 的前侧交界当前持久值） */
   const enterContinuityMode = useCallback(() => {
     const draft: Record<string, boolean> = {};
@@ -660,11 +762,17 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     callbacks: {
       onSegmentState: (shotId, state) => {
         updateShot(shotId, { status: state });
+        // 发起生成任务时自动存一份版本快照（2026-11-07：版本=任务记录，而非编辑记录）
+        if (state === 'generating' && projectId) {
+          const shot = shotsRef.current.find((s) => s.id === shotId);
+          void snapshotWorkbenchForRun(projectId, shot?.number ?? 0).catch(() => undefined);
+        }
       },
       onSegmentDone: (shotId, payload) => {
         const media: NonNullable<WorkbenchShot['media']> = {
           storageKey: payload.videoStorageKey,
           source: 'generated',
+          ...(payload.guide ? { guide: payload.guide } : {}),
         };
         updateShot(shotId, {
           status: 'done',
@@ -887,6 +995,27 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const selectedShot = shots.find((s) => s.id === activeShotId) ?? shots[0];
   const selectedShotIndex = selectedShot ? shots.findIndex((s) => s.id === selectedShot.id) : 0;
 
+  /**
+   * 2026-11-07 修复（运行中点选「没运行到的片段」串帧 + 假播放器进度条）：
+   * 1) 只有 done + completed + 有 storageKey 的片段才有可播放视频；生成中/排队/
+   *    未运行/失败/已中断一律不把旧成片 key 交给播放器（否则显示上一条成片 + 假进度）。
+   * 2) /ws 实时帧带 1 基段号，必须映射回 shotId 且等于当前选中的片段才允许显示；
+   *    否则用户点选未运行片段时，右侧会错误盖着正在生成的那一帧。
+   */
+  const completedVideoKey = selectedShot?.status === 'done'
+    && selectedShot.clipState === 'completed'
+    && selectedShot.media?.storageKey
+    ? selectedShot.media.storageKey
+    : undefined;
+  const previewFrame = comfyRun.preview;
+  const previewFrameShotId = previewFrame?.segmentIndex
+    ? comfyRun.segmentShotIds[previewFrame.segmentIndex - 1]
+    : undefined;
+  const canShowLiveFrame = (comfyRun.phase === 'running' || comfyRun.phase === 'queued')
+    && !!previewFrame?.image
+    && !!selectedShot
+    && (previewFrameShotId ?? runningShotId) === selectedShot.id;
+
   // 2026-11-05 固定宽度卡片（220px 基准修订）：WorkbenchMultiTrack 实测导轨容器宽度后回传最终
   // 卡片宽（220/180/160 降级；初始 = 基准 220）。覆盖层（箭头/勾选块/引导缩略）与卡片同 pitch 铺排。
   const [directorCardWidth, setDirectorCardWidth] = useState<number>(DIRECTOR_CARD_WIDTH_BASE);
@@ -896,34 +1025,43 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   /** hover 命中哪条衔接箭头：仅 hover 的箭头 opacity 回 1，静息按主题 token */
   const [hoveredArrowId, setHoveredArrowId] = useState<string | null>(null);
 
-  // ===== 段间衔接标记 =====
-  // 2026-11-05 图标重做：旧的 ⇄ 双向箭头在时间轴上语义不对（衔接有方向：前段 → 本段），
-  // 且两条对称箭头在小尺寸下显拥挤。现改为「起点圆点 + 连接线 + 单箭头」：
-  // 圆点落在前段一侧、箭头指向本段，读起来就是“延续过去”。
+  // ===== 段间衔接标记（2026-11-07 用户指令：箭头改链接图标，断开为红色断链，点击即切换）=====
+  // 每个可用交界（段 2..N）常显一枚图标：开启 = 绿色链接，断开 = 红色断链；
+  // 图标本身可点，直接切换衔接开/关（链接模式内写草稿，模式外立即落盘）。
   // 占位 34×22 不变（交界间隙中心 + 卡片垂直居中），不随卡片 220/180/160 档位变化。
-  // x = 下标×pitch − 间隙/2 − 占位半宽(17)；y = 卡片顶 + 卡片高/2 − 占位半高(11)。
   const continuityArrows = useMemo(() => {
-    const items: Array<{ id: string; x: number; fromNo: number; toNo: number }> = [];
+    const items: Array<{ id: string; x: number; fromNo: number; toNo: number; on: boolean }> = [];
     shots.forEach((s, i) => {
-      // 2026-11-04 链接模式草稿：模式内箭头按草稿实时渲染（取消回滚后恢复持久态）
+      // 2026-11-04 链接模式草稿：模式内图标按草稿实时渲染（取消回滚后恢复持久态）
       // 2026-11-05 固定宽度片段卡片：交界 x = 卡片下标 × pitch（随容器 220/180/160）
-      if (i > 0 && continuityOn(s, i)) {
-        items.push({ id: s.id, x: i * directorCardPitch, fromNo: shots[i - 1]!.number, toNo: s.number });
+      if (i > 0) {
+        items.push({ id: s.id, x: i * directorCardPitch, fromNo: shots[i - 1]!.number, toNo: s.number, on: continuityOn(s, i) });
       }
     });
     if (items.length === 0) return null;
     const arrowTone = directorArrowTone(theme.mode === 'dark');
     const arrowTop = TRACK_CLIP_TOP + directorCardHeightPx / 2 - DIRECTOR_ARROW_SIZE.height / 2;
+    const linkOn = '#00c758';
+    const linkOff = '#ef4444';
     return (
       <div data-director-continuity-overlay style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
         {items.map((it) => {
           const hovered = hoveredArrowId === it.id;
           return (
-            <span
+            <button
+              type="button"
               key={`joint-${it.id}`}
               data-continuity-arrow={it.id}
+              data-continuity-on={it.on ? 'true' : 'false'}
               data-continuity-arrow-hovered={hovered ? 'true' : 'false'}
-              title={t('workbench.multitrack.jointTip', '段间衔接：片段 {{from}} → 片段 {{to}}', { from: it.fromNo, to: it.toNo })}
+              title={it.on
+                ? t('workbench.multitrack.jointOff', '断开衔接')
+                : t('workbench.multitrack.jointOn', '开启衔接')}
+              aria-label={it.on
+                ? t('workbench.multitrack.jointOff', '断开衔接')
+                : t('workbench.multitrack.jointOn', '开启衔接')}
+              onClick={(e) => { e.stopPropagation(); toggleContinuityDirect(it.id); }}
+              onPointerDown={(e) => e.stopPropagation()}
               onMouseEnter={() => setHoveredArrowId(it.id)}
               onMouseLeave={() => setHoveredArrowId((prev) => (prev === it.id ? null : prev))}
               style={{
@@ -932,9 +1070,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 top: arrowTop,
                 width: DIRECTOR_ARROW_SIZE.width,
                 height: DIRECTOR_ARROW_SIZE.height,
+                padding: 0,
                 opacity: hovered ? 1 : arrowTone.opacityRest,
-                // 2026-11-06 用户指令：箭头改项目同款深色胶囊（底 + 细描边 + 圆角 + 阴影），
-                // 绿色 glyph / 34×22 占位 / hover 透明度契约全部保留；border-box 保证加边不撑大命中区
+                // 项目同款深色胶囊（底 + 细描边 + 圆角 + 阴影）；border-box 保证加边不撑大命中区
                 boxSizing: 'border-box',
                 background: arrowTone.surface,
                 border: `1px solid ${hovered ? arrowTone.hoverBorder : arrowTone.border}`,
@@ -943,26 +1081,18 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 transition: 'opacity 0.12s, border-color 0.12s, box-shadow 0.12s',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 pointerEvents: 'auto',
+                cursor: 'pointer',
+                color: it.on ? linkOn : linkOff,
+                fontFamily: 'inherit',
               }}
             >
-              <svg
-                width={DIRECTOR_ARROW_GLYPH.width}
-                height={DIRECTOR_ARROW_GLYPH.height}
-                viewBox={`${-DIRECTOR_ARROW_GLYPH.width / 2} ${-DIRECTOR_ARROW_GLYPH.height / 2} ${DIRECTOR_ARROW_GLYPH.width} ${DIRECTOR_ARROW_GLYPH.height}`}
-                aria-hidden="true"
-              >
-                {/* 连接线 + 右向箭头头 */}
-                <path d="M -6.5 0 L 6 0 M 2.6 -3.4 L 6 0 L 2.6 3.4"
-                  fill="none" stroke={arrowTone.glyph} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                {/* 起点：前段一侧的实心圆点 */}
-                <circle cx="-8.6" cy="0" r="1.7" fill={arrowTone.glyph} />
-              </svg>
-            </span>
+              {it.on ? <Link2 size={13} color={linkOn} strokeWidth={2.2} /> : <Link2Off size={13} color={linkOff} strokeWidth={2.2} />}
+            </button>
           );
         })}
       </div>
     );
-  }, [shots, t, continuityOn, directorCardPitch, directorCardHeightPx, hoveredArrowId, theme.mode]);
+  }, [shots, t, continuityOn, toggleContinuityDirect, directorCardPitch, directorCardHeightPx, hoveredArrowId, theme.mode]);
 
   // ===== 批量勾选层（2026-11-04 批量复用 dry-run 预检） =====
   // 勾选来源 = 轨道行：批量模式下每个片段左上叠一个勾选块（绝对定位纯视觉，不挤布局），
@@ -1005,55 +1135,12 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     );
   }, [trackMode, shots, runSelection, toggleRunSelection, t, directorCardPitch, theme.mode]);
 
-  // ===== 引导缩略层（2026-11-05 真实运行）：段 N≥2 的卡片左上叠前段尾部 22 帧动画 WebP =====
-  // 数据 = GET /zeroexo/h3/guidance?jobId=&segment=N（data URI）；404 → 灰块「…」+ title 未就绪，不报错。
-  // 挂在该段卡片左缘（与衔接箭头同 x、箭头下方），仅运行期间渲染。
-  const guidanceOverlay = useMemo(() => {
-    const guidanceEntries = Object.entries(comfyRun.guidance);
-    if (guidanceEntries.length === 0) return null;
-    const items: Array<{ segNo: number; x: number; image: string | null }> = [];
-    // 2026-11-05 固定宽度片段卡片：引导缩略 x = 卡片下标 × pitch（等宽卡片铺排，随容器 220/180/160）
-    shots.forEach((s, i) => {
-      const segNo = comfyRun.segmentShotIds.indexOf(s.id) + 1;
-      if (segNo >= 2) {
-        const g = comfyRun.guidance[segNo];
-        if (g) items.push({ segNo, x: i * directorCardPitch, image: g.image });
-      }
-    });
-    if (items.length === 0) return null;
-    return (
-      <div data-director-guidance-overlay style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
-        {items.map((it) => (
-          <span
-            key={`guide-${it.segNo}`}
-            data-guidance-chip={it.segNo}
-            title={it.image
-              ? t('director.guidanceTip', '第 {{n}} 段引导：前段尾部 22 帧动画', { n: it.segNo })
-              : t('director.guidanceNotReady', '引导未就绪')}
-            style={{
-              position: 'absolute', left: it.x + 24, top: 20, width: 48, height: 28,
-              borderRadius: 4, overflow: 'hidden', background: 'rgba(15,23,42,0.9)',
-              border: '1px solid rgba(0,199,88,0.55)',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            {it.image ? (
-              <img src={it.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <span style={{ fontSize: 9, color: '#9ca3af' }}>···</span>
-            )}
-          </span>
-        ))}
-      </div>
-    );
-  }, [comfyRun.guidance, comfyRun.segmentShotIds, shots, t, directorCardPitch]);
-
-  // 注入活动轨 clip 内容层的覆盖物：衔接箭头（常显）+ 批量勾选块（仅批量模式）+ 引导缩略（运行期）
+  // 注入活动轨 clip 内容层的覆盖物：衔接箭头（常显）+ 批量勾选块（仅批量模式）
   const railContentOverlay = useMemo(
-    () => (continuityArrows || batchCheckOverlay || guidanceOverlay
-      ? <>{continuityArrows}{batchCheckOverlay}{guidanceOverlay}</>
+    () => (continuityArrows || batchCheckOverlay
+      ? <>{continuityArrows}{batchCheckOverlay}</>
       : null),
-    [continuityArrows, batchCheckOverlay, guidanceOverlay],
+    [continuityArrows, batchCheckOverlay],
   );
 
   if (!isActive) return null;
@@ -1092,14 +1179,20 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           promptRatioDefault={0.75}
           promptRatioStorageKey={`zerovideo.director.promptRatio:${projectId}`}
           videoStageProps={{
-            // 有产物就允许播放（不依赖 clipState：恢复/导入/旧数据可能只写了 media）
-            videoStorageKey: selectedShot.media?.storageKey,
-            videoStatus: selectedShot.media?.storageKey ? 'done' : 'idle',
+            // 导演台：无成片时隐藏播放控制条（播放/时间码/进度条只在生成完成后出现）
+            hideControlBarWhenNoVideo: true,
+            // 生成中/未运行/失败一律没有可播放视频；只有完成段才交给播放器
+            videoStorageKey: completedVideoKey,
+            videoStatus: completedVideoKey
+              ? 'done'
+              : selectedShot.status === 'generating' ? 'generating' : 'idle',
+            // 点击片段/片段缩略播放键 → 预览区从 0 起播（2026-11-07 用户反馈修复）
+            autoPlayKey: previewAutoPlayKey,
             /* 2026-11-04 第十二条：预览占位只显示状态（单行文案+小图标），不回显提示词；
                状态跟随当前激活片段（selectedShot 切换即联动）。
                未生成 / 生成中（·detail 预留，dry-run 阶段无真实进度）/ 已生成 · Ns / 生成失败（+原因一行）。 */
             placeholderStatus:
-              selectedShot.status === 'done'
+              completedVideoKey
                 ? 'done'
                 : selectedShot.status === 'generating'
                   ? 'generating'
@@ -1134,12 +1227,12 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             /* 2026-11-05 实时预览：直连 /ws 帧按 ≤10fps 刷新在占位卡上（badge 带步进/段号）；
                OpenAI 兼容渠道无 ws → 只标「仅进度」，不假装实时帧 */
             livePreview:
-              (comfyRun.phase === 'running' || comfyRun.phase === 'queued') && comfyRun.preview?.image
+              canShowLiveFrame && previewFrame?.image
                 ? {
-                    image: comfyRun.preview.image,
-                    step: comfyRun.preview.step,
-                    totalSteps: comfyRun.preview.totalSteps,
-                    segmentIndex: comfyRun.preview.segmentIndex,
+                    image: previewFrame.image,
+                    step: previewFrame.step,
+                    totalSteps: previewFrame.totalSteps,
+                    segmentIndex: previewFrame.segmentIndex,
                   }
                 : null,
             progressOnly:
@@ -1187,20 +1280,16 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               // 2026-11-04：再点「链接」退出 = 取消语义（回滚草稿），与 Esc 一致
               onToggle: () => (trackMode === 'continuity' ? cancelContinuityMode() : enterContinuityMode()),
             },
-            // 2026-11-04 批量复用 dry-run 预检：「批量」= 轨道勾选模式开关（勾选在轨道行，
-            // 「生成」进入与「运行选中」同一个 dry-run 预检页，确认/运行都在预检页完成）
-            batchEntry: {
-              active: trackMode === 'batch',
-              onToggle: () => (trackMode === 'batch' ? exitBatchMode() : setTrackMode('batch')),
-            },
+            // 2026-11-07 统一生成入口：批量按钮已移除，所有生成走「生成」按钮 → 片段选择面板
+            // batchEntry: { active: trackMode === 'batch', onToggle: ... },
             clipLabelMode: 'director',
             // 2026-11-04 导演台导轨零基线：去白色竖线（聚焦轨 borderLeft）+ 片段起点=刻度 0
             // + 横向滚动统一外层容器
             zeroBaseRail: true,
             // 2026-11-05 220px 卡片修订：接收 multitrack 实测容器后的最终卡片宽，覆盖层与卡片同 pitch
             onDirectorCardWidthChange: setDirectorCardWidth,
-            /* 2026-11-05 参考图修订：缩略框中央播放键 = 打开右侧预览并切到该段 */
-            onDirectorPlay: setActiveShotId,
+            /* 2026-11-05 参考图修订：缩略框中央播放键 = 打开右侧预览并切到该段；2026-11-07 同时起播 */
+            onDirectorPlay: selectShotAndPlay,
             // 拖拽（2026-11-04 实时预览，project-rules/specs/director-h3-workspace/drag-spec.md）：
             // 幽灵跟手 + 预览顺序实时让位 + 整段占位框；中点判定 ±8px 容差；drop 提交唯一一次
             onMoveShotBetweenTracks: handleMoveShotBetweenTracks,
@@ -1261,7 +1350,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 )}
                 <DirectorRunButton
                   runDisabled={!selectedShot || runPhaseActive}
-                  onRun={() => handleRun([selectedShot.id])}
+                  onRun={() => {
+                    // 统一入口：打开片段选择面板，默认勾选当前片段
+                    setRunPickerSelection(new Set(selectedShot.id ? [selectedShot.id] : []));
+                    setRunPickerOpen(true);
+                  }}
                   accentColor={theme.toolbar.accent}
                 />
               </>
@@ -1279,7 +1372,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 ? toggleShotContinuity(shotId)
                 : trackMode === 'batch'
                   ? toggleRunSelection(shotId)
-                  : setActiveShotId(shotId),
+                  : selectShotAndPlay(shotId),
             onInsertAt: handleInsertAt,
             // 2026-11-05 导演台：不接 onTrim（时长不可拖拽，只来自参数）
             // 单删/批量删统一经 guardDeleteShots 把关：剩最后一个拒绝并轻提示（删不准到 0）
@@ -1332,6 +1425,19 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             ? t('director.deleteVersionBody', '只删除这份历史快照，当前内容不受影响。')
             : t('director.restoreVersionBody', '当前内容会先自动存一份快照，恢复后可再次切换回来。')}
         </ConfirmDialog>
+        {/* 版本批量删除确认：只作用于勾选项 */}
+        <ConfirmDialog
+          open={versionBatchConfirmOpen}
+          title={t('director.batchDeleteVersionsTitle', { n: versionSelected.size, defaultValue: '删除选中的 {{n}} 个版本？' })}
+          confirmLabel={t('director.deleteVersionOk', '删除')}
+          cancelLabel={t('director.restoreVersionCancel', '取消')}
+          danger
+          zIndex={21000}
+          onConfirm={() => void deleteSelectedVersions()}
+          onClose={() => setVersionBatchConfirmOpen(false)}
+        >
+          {t('director.batchDeleteVersionsBody', '只删除这些历史快照，当前内容不受影响。')}
+        </ConfirmDialog>
         {/* 版本（快照）面板：workbench 每次写盘自动落 pre-save/auto 快照，可查看/恢复 */}
         <Modal
           open={versionsOpen}
@@ -1350,58 +1456,211 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               {t('director.versionsEmpty', '还没有版本记录，修改片段后会自动生成')}
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
-              {versions.map((v) => {
-                const reasonText = v.reason === 'auto' ? t('director.versionReasonAuto', '自动')
-                  : v.reason === 'pre-save' ? t('director.versionReasonPreSave', '保存前')
-                  : v.reason === 'manual' ? t('director.versionReasonManual', '手动')
-                  : t('director.versionReasonPreRestore', '恢复前');
-                return (
-                  <div
-                    key={v.fileName}
-                    data-version-row={v.fileName}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-                      borderRadius: 8, border: '1px solid rgba(128,128,128,0.25)',
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12 }}>{new Date(v.createdAt).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, opacity: 0.6 }}>
-                        {reasonText} · {t('director.versionShots', { n: (v.entity?.shots ?? []).length, defaultValue: '{{n}} 个片段' })}
-                        {typeof v.entity?.totalDuration === 'number' ? ` · ${v.entity.totalDuration.toFixed(1)}s` : ''}
+            <>
+              {/* 批量操作条（2026-11-07）：只作用于勾选的版本 */}
+              <div
+                data-version-batch-bar
+                style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, padding: '0 2px' }}
+              >
+                <Checkbox
+                  checked={versions.length > 0 && versionSelected.size === versions.length}
+                  indeterminate={versionSelected.size > 0 && versionSelected.size < versions.length}
+                  onChange={(e) => setVersionSelected(e.target.checked ? new Set(versions.map((v) => v.fileName)) : new Set())}
+                >
+                  {t('director.versionSelectAll', '全选')}
+                </Checkbox>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>
+                  {t('director.versionSelectedCount', { n: versionSelected.size, defaultValue: '已选 {{n}} 个' })}
+                </span>
+                <span data-version-cap style={{ fontSize: 12, opacity: 0.65 }}>
+                  {t('director.versionsCount', {
+                    n: versions.filter((v) => !v.favorite).length,
+                    max: SNAPSHOT_KEEP_COUNT,
+                    defaultValue: '{{n}} / {{max}} 个版本',
+                  })}
+                </span>
+                {versions.some((v) => v.favorite) && (
+                  <span data-version-favorite-count style={{ fontSize: 12, opacity: 0.65 }}>
+                    {t('director.versionFavoriteCount', {
+                      n: versions.filter((v) => v.favorite).length,
+                      defaultValue: '已收藏 {{n}} 个',
+                    })}
+                  </span>
+                )}
+                <span style={{ flex: 1 }} />
+                <Button
+                  size="small"
+                  danger
+                  data-version-batch-delete
+                  disabled={versionSelected.size === 0}
+                  onClick={() => setVersionBatchConfirmOpen(true)}
+                >
+                  {t('director.versionBatchDelete', '批量删除')}
+                </Button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
+                {versions.map((v) => {
+                  const reasonText = v.reason === 'auto' ? t('director.versionReasonAuto', '自动')
+                    : v.reason === 'pre-save' ? t('director.versionReasonPreSave', '保存前')
+                    : v.reason === 'manual' ? t('director.versionReasonManual', '手动')
+                    : t('director.versionReasonPreRestore', '恢复前');
+                  return (
+                    <div
+                      key={v.fileName}
+                      data-version-row={v.fileName}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${v.favorite ? 'rgba(245,158,11,0.45)' : 'rgba(128,128,128,0.25)'}`,
+                      }}
+                    >
+                      <Checkbox
+                        data-version-check={v.fileName}
+                        checked={versionSelected.has(v.fileName)}
+                        onChange={(e) => toggleVersionSelected(v.fileName, e.target.checked)}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12 }}>{new Date(v.createdAt).toLocaleString()}</div>
+                        <div style={{ fontSize: 11, opacity: 0.6 }}>
+                          {reasonText} · {t('director.versionShots', { n: (v.entity?.shots ?? []).length, defaultValue: '{{n}} 个片段' })}
+                          {typeof v.entity?.totalDuration === 'number' ? ` · ${v.entity.totalDuration.toFixed(1)}s` : ''}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        data-version-favorite={v.fileName}
+                        data-favorited={v.favorite ? 'true' : undefined}
+                        aria-pressed={!!v.favorite}
+                        onClick={() => void toggleVersionFavorite(v)}
+                        title={v.favorite
+                          ? t('director.versionUnfavorite', '取消收藏')
+                          : t('director.versionFavorite', '收藏（不自动回收）')}
+                        style={{
+                          height: 26, width: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          borderRadius: 6, cursor: 'pointer', border: '1px solid rgba(128,128,128,0.35)',
+                          background: 'transparent', color: v.favorite ? '#f59e0b' : 'inherit', padding: 0,
+                        }}
+                      >
+                        <Star size={12} fill={v.favorite ? '#f59e0b' : 'none'} />
+                      </button>
+                      <button
+                        type="button"
+                        data-version-delete={v.fileName}
+                        onClick={() => void deleteVersion(v)}
+                        title={t('director.deleteVersionOk', '删除')}
+                        style={{
+                          height: 26, width: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          borderRadius: 6, cursor: 'pointer', border: '1px solid rgba(128,128,128,0.35)',
+                          background: 'transparent', color: 'inherit', padding: 0,
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        data-version-restore={v.fileName}
+                        onClick={() => void restoreVersion(v)}
+                        style={{
+                          height: 26, padding: '0 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                          border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit',
+                        }}
+                      >
+                        {t('director.versionRestore', '恢复')}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      data-version-delete={v.fileName}
-                      onClick={() => void deleteVersion(v)}
-                      title={t('director.deleteVersionOk', '删除')}
-                      style={{
-                        height: 26, width: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        borderRadius: 6, cursor: 'pointer', border: '1px solid rgba(128,128,128,0.35)',
-                        background: 'transparent', color: 'inherit', padding: 0,
-                      }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      data-version-restore={v.fileName}
-                      onClick={() => void restoreVersion(v)}
-                      style={{
-                        height: 26, padding: '0 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                        border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit',
-                      }}
-                    >
-                      {t('director.versionRestore', '恢复')}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </Modal>
+        {/* 片段选择面板（2026-11-07 统一生成入口）：点「生成」弹出，默认勾选当前段，
+            可全选/按需勾选；确认后进入 dry-run 预检。替代原导轨批量模式按钮。 */}
+        <Modal
+          open={runPickerOpen}
+          onCancel={() => setRunPickerOpen(false)}
+          centered
+          width={520}
+          title={t('director.runPickerTitle', '选择要生成的片段')}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  size="small"
+                  onClick={() => setRunPickerSelection(new Set(shots.map((s) => s.id)))}
+                >
+                  {t('director.runPickerSelectAll', '全选')}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => setRunPickerSelection(new Set())}
+                >
+                  {t('director.runPickerSelectNone', '全不选')}
+                </Button>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button size="small" onClick={() => setRunPickerOpen(false)}>
+                  {t('common.cancel', '取消')}
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={runPickerSelection.size === 0}
+                  onClick={() => {
+                    setRunPickerOpen(false);
+                    handleRun([...runPickerSelection]);
+                  }}
+                >
+                  {t('director.runPickerConfirm', '确认 ({{n}} 段)', { n: runPickerSelection.size })}
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 400, overflowY: 'auto' }}>
+            {shots.map((shot) => (
+              <label
+                key={shot.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                  borderRadius: 8, border: '1px solid rgba(128,128,128,0.20)', cursor: 'pointer',
+                  opacity: runPickerSelection.has(shot.id) ? 1 : 0.7,
+                }}
+              >
+                <Checkbox
+                  checked={runPickerSelection.has(shot.id)}
+                  onChange={(e) => {
+                    setRunPickerSelection((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(shot.id);
+                      else next.delete(shot.id);
+                      return next;
+                    });
+                  }}
+                />
+                <span style={{ fontWeight: 600, fontSize: 13 }}>
+                  {t('director.shotNumber', '片段 {{n}}', { n: shot.number })}
+                </span>
+                <span style={{ opacity: 0.55, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                  {shot.duration}s
+                </span>
+                <span style={{
+                  flex: 1, opacity: 0.5, fontSize: 12, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {shot.imagePrompt || '—'}
+                </span>
+                {shot.status === 'done' && (
+                  <span style={{ fontSize: 11, color: '#52c41a' }}>✓ 已生成</span>
+                )}
+                {shot.status === 'generating' && (
+                  <span style={{ fontSize: 11, color: '#1890ff' }}>生成中</span>
+                )}
+              </label>
+            ))}
+          </div>
+        </Modal>
+
         {/* 运行预检（2026-11-05 起确认 = 真实提交）：槽位表 / 每段帧数 / 延续关系 / 本次断开的衔接；
             「确认运行」→ 组装导演包 → POST /zeroexo/h3/pack → /run → 轮询落库。
             2026-11-04 批量复用：批量「生成」与「运行选中」打开的是同一个预检弹层（同一组件同一渲染）。 */}

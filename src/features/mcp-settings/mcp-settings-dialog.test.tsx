@@ -102,7 +102,10 @@ describe('MCP 设置页(一键复制版)', () => {
     fireEvent.click(btn);
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     const copied = (writeText.mock.calls as unknown as string[][])[0]![0]!;
-    const cfg = JSON.parse(copied); // 合法 JSON
+    // 2026-11-07 起「一键复制」给的是自包含接入包（含给 LLM 的指令），配置在其中的 json 代码块里
+    const jsonBlock = /```json\n([\s\S]*?)\n```/.exec(copied)?.[1];
+    expect(jsonBlock).toBeTruthy();
+    const cfg = JSON.parse(jsonBlock!); // 合法 JSON
     const server = cfg.mcpServers.zeroexo;
     expect(server.command).toBe('node');
     expect(Array.isArray(server.args)).toBe(true);
@@ -131,13 +134,11 @@ describe('MCP 设置页(一键复制版)', () => {
     }
   });
 
-  it('④ 远程(HTTP)配置折进「高级选项」,展开后可见且含 Bearer', async () => {
+  it('④ 本版本隐藏「远程连接(多台设备共用)」', async () => {
     renderDialog();
     await waitReady();
-    expect(screen.queryByTestId('mcp-config-http')).toBeNull(); // 默认收起
-    fireEvent.click(screen.getByText('远程连接(多台设备共用)'));
-    await waitFor(() => expect(screen.getByTestId('mcp-config-http')).toBeTruthy());
-    expect(screen.getByTestId('mcp-config-http').textContent).toContain('Bearer zxp_AUTO_GENERATED_RAW');
+    expect(screen.queryByText('远程连接(多台设备共用)')).toBeNull();
+    expect(screen.queryByTestId('mcp-config-http')).toBeNull();
   });
 
   it('⑤ 密钥管理:新建后原文仅显示一次,「我已保存」后消失', async () => {
@@ -179,8 +180,8 @@ describe('MCP 设置页(一键复制版)', () => {
     await waitReady();
     // 2026-11-06 用户指令：原先首屏与「本地数据面板」各有一份 mcpServers 配置块 → 合并为一份
     expect(screen.getAllByTestId('mcp-config-stdio')).toHaveLength(1);
+    expect(screen.getAllByTestId('mcp-copy-stdio')).toHaveLength(1);
     const text = document.body.textContent ?? '';
-    expect(text.match(/贴进 IDE/g) ?? []).toHaveLength(1);
     // 数据目录 / 绝对路径合并为一块：面板只剩一个「数据目录」小节标题
     expect(text.match(/数据目录/g) ?? []).toHaveLength(1);
   });

@@ -385,12 +385,14 @@ function SubjectDetailView({
     const t = createSubjectTree(card.kind, card.name, card.id);
     // Plan#71 T2: 手动建树不再用一句话 consistency 顶替基础提示词 →
     // 用后端 asset-prompts 同源模板参数化填充(角色 Lineup/道具 Prop/场景 Environment)
-    t.baseState.prompt = buildBaseStatePrompt(card.kind, {
+    const base = t.states[0]!;
+    base.fullPrompt = buildBaseStatePrompt(card.kind, {
       roleDesc: card.content || card.prompt || '',
       name: card.name,
     });
+    base.deltaPrompt = base.fullPrompt;
     if (card.referenceImages && card.referenceImages.length > 0) {
-      t.baseState.referenceImages = card.referenceImages.map((r) => ({
+      base.media = card.referenceImages.map((r) => ({
         key: r.storageKey, type: 'image' as const, prompt: r.prompt,
       }));
     }

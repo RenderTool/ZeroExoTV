@@ -11,3 +11,5 @@ export type { AssetLibraryModalsProps } from './asset-library-modals.js';
 export { MultiSelectCheckbox } from './multi-select-checkbox.js';
 export { ScopeCapsuleTabs } from './scope-capsule-tabs.js';
 export type { ScopeCapsuleTabsProps } from './scope-capsule-tabs.js';
+export { CapsuleTabs } from './capsule-tabs.js';
+export type { CapsuleSegment, CapsuleTabsProps } from './capsule-tabs.js';

@@ -24,14 +24,12 @@ function makeTree(over: Partial<SubjectTree>): SubjectTree {
     name: '老张',
     kind: 'character',
     aliases: ['张爷'],
-    baseState: {
-      prompt: '模板',
-      templateType: 'character_lineup',
-      templateReason: 't',
-      referenceImages: [{ key: 'res/base.png', type: 'image' }],
-      aiStableKey: 'k',
-    },
     states: [
+      {
+        id: '__base__', state: '', type: 'image', deltaPrompt: '模板', fullPrompt: '模板',
+        recognitionTerms: [], media: [{ key: 'res/base.png', type: 'image' }],
+        source: 'user', baseRef: 'root-laozhang', aiStableKey: 'k',
+      },
       {
         id: 'st-injured',
         state: '受伤',
@@ -230,7 +228,6 @@ describe('T4 collectSubjectSources —— subjectTree 并入（Spec §5.4 数据
       name: '老张',
       kind: 'character',
       aliases: ['张爷'],
-      baseState: { prompt: 'p', templateType: 'character_lineup', templateReason: 't', referenceImages: [{ key: 'k', type: 'image' }], aiStableKey: 'a' },
       states: [
         { id: 'st-injured', state: '受伤', type: 'image', deltaPrompt: '', fullPrompt: '', recognitionTerms: [], media: [{ key: 'm', type: 'image' }], source: 'user', baseRef: 'root-laozhang' },
       ],
@@ -247,7 +244,6 @@ describe('T4 collectSubjectSources —— subjectTree 并入（Spec §5.4 数据
       name: '老张',
       kind: 'character',
       aliases: [],
-      baseState: { prompt: 'p', templateType: 'character_lineup', templateReason: 't', referenceImages: [{ key: 'k', type: 'image' }], aiStableKey: 'a' },
       states: [],
     };
     const sources = collectSubjectSources([], undefined, undefined, [tree]);
@@ -260,7 +256,6 @@ describe('T4 collectSubjectSources —— subjectTree 并入（Spec §5.4 数据
       name: '老张',
       kind: 'character',
       aliases: [],
-      baseState: { prompt: 'p', templateType: 'character_lineup', templateReason: 't', referenceImages: [{ key: 'k', type: 'image' }], aiStableKey: 'a' },
       states: [{ id: 'st-injured', state: '受伤', type: 'image', deltaPrompt: '', fullPrompt: '', recognitionTerms: [], media: [{ key: 'm', type: 'image' }], source: 'user', baseRef: 'root-laozhang' }],
     };
     const oldEntity = { id: 'old-entity', name: '老张', kind: 'character' as const, description: '', states: [{ id: 'st-old', name: '已删状态', description: '', prompt: '', shots: [] }] };

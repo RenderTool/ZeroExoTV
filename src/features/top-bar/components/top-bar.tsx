@@ -11,7 +11,7 @@
  * 移动端导航抽屉(MobileNavDrawer)改由 EditorPage 注入,统一与主页/创作/画布列表保持一致。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -24,12 +24,11 @@ import {
 } from '@/shared/components/index.js';
 import { TopBarIconButton, TOPBAR_ICON_GAP } from '@/shared/components/topbar-icon-button.js';
 import type { ShortcutEntry } from '@zeroexo/plugin-keyboard';
-import { getRootPathHint, restoreRoot, rootName } from '@/platform/fs.js';
-import { loadServerInfo } from '@/features/mcp-settings/mcp-client.js';
+
 import { TitleEditor } from './title-editor.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { CanvasTabBar } from '@/features/canvas-tabs/canvas-tab-bar.js';
-import { ComfyuiConnectButton } from '@/features/canvas-tabs/comfyui-connect-button.js';
+import { openServiceCenter } from '@/features/service-center/service-center-events.js';
 
 /** 路径中间省略：超长时保留头尾，完整路径仍在 tooltip 内可看 */
 export function middleEllipsis(value: string, max = 44): string {
@@ -72,7 +71,7 @@ export interface TopBarProps {
   /** 层级/资产抽屉(资产任何时刻可打开,2026-08-29 迁至标题旁) */
   isHierarchyOpen?: boolean;
   onToggleHierarchy?: () => void;
-  /** 打开「MCP 配置/数据目录」面板（复用全局 McpSettingsDialog：数据目录授权/绝对路径 + MCP 配置一键复制） */
+  /** @deprecated 服务入口已合并；保留旧测试兼容 */
   onRequestMcp?: () => void;
 }
 
@@ -94,7 +93,6 @@ export function TopBar({
   isHierarchyOpen,
   onToggleHierarchy,
   keyboardShortcuts,
-  onRequestMcp,
 }: TopBarProps): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -116,48 +114,6 @@ export function TopBar({
       return next;
     });
   }, []);
-
-  // 2026-11-05 「悬浮提示带真实信息」：数据根绝对路径（FSA 无盘符时用已持久化的用户填写值）+ MCP 服务状态。
-  // 数据根：优先用户登记的绝对路径 → 已授权目录名 → 未选择（null）。
-  const [dataRootPath, setDataRootPath] = useState<string | null>(null);
-  const [mcpReady, setMcpReady] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const [hint, info] = await Promise.all([
-        getRootPathHint().catch(() => null),
-        loadServerInfo().catch(() => null),
-      ]);
-      await restoreRoot(false).catch(() => null);
-      if (!alive) return;
-      setDataRootPath(hint || rootName() || null);
-      setMcpReady(info !== null);
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  const dataPathLabel = dataRootPath ?? '未选择数据目录';
-  const dataRootTooltip = (
-    <div data-testid="topbar-data-root-tooltip" style={{ maxWidth: 320 }}>
-      <div style={{ wordBreak: 'break-all' }}>{middleEllipsis(dataPathLabel)}</div>
-      {dataRootPath && dataPathLabel.length > 44 && (
-        // 中间省略后的完整路径（小字、可换行）
-        <div style={{ fontSize: 11, opacity: 0.72, wordBreak: 'break-all' }}>{dataPathLabel}</div>
-      )}
-      <div style={{ fontSize: 11, opacity: 0.72, marginTop: 2 }}>
-        {dataRootPath ? '点击更换数据目录' : '点击选择数据目录'}
-      </div>
-    </div>
-  );
-
-  const mcpTooltip = (
-    <div data-testid="topbar-mcp-tooltip" style={{ maxWidth: 320 }}>
-      <div>MCP 服务：{mcpReady ? '已连接' : '未配置'}</div>
-      <div style={{ fontSize: 11, opacity: 0.72, wordBreak: 'break-all' }}>
-        数据根：{middleEllipsis(dataPathLabel)}
-      </div>
-    </div>
-  );
 
   // 2026-09-01 约定：桌面端高 48——LOGO 按钮 36×36/r10/图标30 与主页同规格、水平距左 12 同主页，
   // 但垂直留白收紧（用户二次拍板：Head 占比过多，内容区优先；放弃主页 68px 的 LOGO 区高度照搬）
@@ -305,20 +261,12 @@ export function TopBar({
                 onClick={() => setShortcutsOpen(true)}
                 color={theme.toolbar.text}
               />
-              {/* 数据目录（2026-11-05 约定：画布内也要能打开数据目录/MCP 面板；与管理页同一 McpSettingsDialog） */}
+              {/* 服务：ComfyUI / MCP / 数据目录 / 插件统一入口 */}
               <TopBarIconButton
-                action="dataRoot"
-                tooltip={dataRootTooltip}
-                testId="topbar-data-root-btn"
-                onClick={onRequestMcp}
-                color={theme.toolbar.text}
-              />
-              {/* MCP 配置（同一面板：数据目录 + MCP 配置一键复制） */}
-              <TopBarIconButton
-                action="mcp"
-                tooltip={mcpTooltip}
-                testId="topbar-mcp-btn"
-                onClick={onRequestMcp}
+                action="services"
+                tooltip="服务（ComfyUI / MCP / 数据目录 / 插件）"
+                testId="topbar-services-btn"
+                onClick={openServiceCenter}
                 color={theme.toolbar.text}
               />
               {/* 本地版（Plan#83）：协作入口随 collaboration 链路移除 */}
@@ -339,8 +287,6 @@ export function TopBar({
               </Badge>
             </Tooltip>
             {/* 本地版（Plan#83）：Agent 面板开关随 canvas-agent 链路移除 */}
-            {/* ComfyUI 全局唯一入口（地址只在此处配置；导演台等其他功能从这里读） */}
-            <ComfyuiConnectButton />
           </>
         )}
       </div>

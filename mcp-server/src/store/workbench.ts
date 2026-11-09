@@ -34,6 +34,10 @@ export interface WorkbenchShot {
   references: WorkbenchShotReference[];
   paramValues: Record<string, unknown>;
   continuation?: { enabled: boolean };
+  /** 2026-11-09：与前端 workbench-types.ts 对齐，MCP 侧新增可读写字段（旧数据缺省兼容） */
+  guide?: { id: string; title?: string; frames?: number; sha256?: string; fromAssetId?: string; createdAt?: string } | null;
+  media?: { storageKey?: string; guide?: { id?: string; path?: string; frames?: number; sha256?: string } | null; [k: string]: unknown } | null;
+  negativePrompt?: string;
 }
 
 /** 片段参考素材：与前端 workbench-types.ts 的 WorkbenchShotReference 同形 */
@@ -213,7 +217,7 @@ export async function readWorkbench(root: string, projectId: string): Promise<Wo
   }
 }
 
-type WbOpts = { baseVersion: number; dryRun?: boolean };
+export type WbOpts = { baseVersion: number; dryRun?: boolean };
 
 async function updateWorkbench(
   root: string,
@@ -232,6 +236,19 @@ async function updateWorkbench(
       wb.totalDuration = wb.shots.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
     },
   });
+}
+
+/**
+ * 2026-11-09：给新增 MCP 工具复用的通用写入口。
+ * 复用完整 mutate（含公共提示词迁移、rebuildMainTrack、totalDuration），
+ * 避免新工具另造一条写路径导致轨道与片段时长不同步。
+ */
+export function mutateWorkbench(
+  root: string,
+  projectId: string,
+  opts: WbOpts & { mutate: (wb: WorkbenchContainer) => void },
+): Promise<UpdateResult<WorkbenchContainer>> {
+  return updateWorkbench(root, projectId, opts);
 }
 
 function findShot(wb: WorkbenchContainer, shotId: string): WorkbenchShot {

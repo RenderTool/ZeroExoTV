@@ -14,6 +14,7 @@
  */
 import { getMediaBlob, getImageVariantBlob, getVideoThumbBlob, casVariantPath, CAS_KEY_PATTERN } from '@zeroexo/plugin-persistence';
 import { readFileHandle } from '@/platform/fs.js';
+import { getMediaBlob as getPlatformMediaBlob } from '@/platform/media.js';
 
 export type MediaKind = 'image' | 'video' | 'audio';
 export type MediaVariant = 'thumb' | 'preview' | 'orig' | 'videothumb';
@@ -31,6 +32,13 @@ export async function resolveMediaBlob(
     // 注意不能按 kind 一刀切：video:/image: 键的持久化 poster 派生档是合法数据源。
     const isNonImageMedia = /\.(mp4|webm|mov|mkv|mp3|wav|aac|ogg|flac|opus|m4a)$/i.test(storageKey);
     if ((variant === 'thumb' || variant === 'preview') && isNonImageMedia) return null;
+    // 2026-11-07：导演台成片/首帧走 platform/media 写磁盘（video:assets/...），
+    // 不是 persistence 的 media_files 桶；orig 必须先读磁盘，否则视频永远解析成
+    // `.lf/zeroexo/media_files/video%3A...` 404，右侧预览/成片都看不到。
+    if (variant === 'orig') {
+      const diskBlob = await getPlatformMediaBlob(storageKey);
+      if (diskBlob) return diskBlob;
+    }
     // CAS 派生档（图片入库时自动生成）：命中即返回，缺失返回 null 让变体链继续回退
     if (variant === 'thumb' || variant === 'preview') {
       const casMatch = CAS_KEY_PATTERN.exec(storageKey);

@@ -163,11 +163,13 @@ describe('副本页签挂在画布区第二层（主画布固定）', () => {
 });
 
 describe('抽屉「画布」分组复用主页卡片', () => {
-  it('DRAWER_TAB_DEFS 含 canvases 分组，且渲染分支真实接到组件', () => {
-    expect(read('features/canvas-assets/tab-defs.ts')).toContain("{ key: 'canvases', labelKey: 'canvasCopy.drawerTab' }");
+  it('DRAWER_TAB_DEFS 含 canvasStructure 合并入口，且渲染分支真实接到组件', () => {
+    expect(read('features/canvas-assets/tab-defs.ts')).toContain("{ key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab' }");
     const panel = read('features/canvas-assets/CanvasAssetsPanel.tsx');
-    expect(panel).toContain("activeGroup === 'canvases'");
-    expect(panel).toContain('<CanvasCopiesGroup');
+    expect(panel).toContain("activeGroup === 'canvasStructure'");
+    expect(panel).toContain('<CanvasStructureGroup');
+    const structure = read('features/canvas-assets/groups/CanvasStructureGroup.tsx');
+    expect(structure).toContain('<CanvasCopiesGroup');
     // 2026-11-06 分组清单单一来源下放到 tab-defs：store 由 DRAWER_MODULE_GROUPS 派生（不再自带分组字面量）
     expect(read('features/canvas-assets/tab-defs.ts')).toContain('DRAWER_MODULE_GROUPS');
     expect(read('features/canvas-assets/store.ts')).toContain('DRAWER_MODULE_GROUPS');

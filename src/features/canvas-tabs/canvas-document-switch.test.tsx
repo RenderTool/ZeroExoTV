@@ -38,6 +38,7 @@ vi.mock('@zeroexo/plugin-persistence', () => ({
 // 切文档时会退出「图片节点内编辑」；这里只关心调用，不引入节点包整条依赖链
 vi.mock('@zeroexo/plugin-nodes', () => ({
   closeImageNodeEdit: vi.fn(),
+  setGeneratingPreviewCanvas: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -50,6 +51,7 @@ vi.mock('@/shared/view-prefs.js', () => ({
 
 import { useCanvasDocumentSwitch } from './use-canvas-document-switch.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
+import { getCurrentCanvasDocId, setCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 
 function makeEditor(calls: string[]) {
   const listeners = new Set<() => void>();
@@ -90,6 +92,7 @@ afterEach(() => {
   canvasStoreMock.getCanvas.mockClear();
   canvasStoreMock.saveCanvas.mockClear();
   useCanvasTabStore.setState({ activeTabKey: 'canvas', openCanvasTabs: [] });
+  setCurrentCanvasDocId('main');
 });
 
 describe('画布文档切换（同一编辑器）', () => {
@@ -114,6 +117,8 @@ describe('画布文档切换（同一编辑器）', () => {
     expect(calls.indexOf('pause')).toBeLessThan(calls.indexOf('replaceState'));
     expect(calls).toContain('setViewport');
     expect(canvasStoreMock.getCanvas).toHaveBeenCalledWith('p1', 'sc1');
+    // 文档作用域：换图前已切到副本，生成任务/预览/Yjs 推送都按 sc1 识别
+    expect(getCurrentCanvasDocId()).toBe('sc1');
   });
 
   it('副本编辑走 canvas-store 防抖保存（不是持久化插件）', async () => {
@@ -165,5 +170,6 @@ describe('画布文档切换（同一编辑器）', () => {
     // 切回主画布前先写盘副本
     expect(canvasStoreMock.saveCanvas).toHaveBeenCalled();
     expect(calls.indexOf('resume')).toBeGreaterThan(calls.lastIndexOf('replaceState'));
+    expect(getCurrentCanvasDocId()).toBe('main');
   });
 });

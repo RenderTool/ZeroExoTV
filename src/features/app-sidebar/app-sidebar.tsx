@@ -36,7 +36,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  // 本地版（Plan#83 约定）：主页与公共提示词已去掉；首页=画布列表
+  // 本地版（Plan#83 约定）：主页已去掉；首页=画布列表
   { key: 'canvas', label: '项目', iconType: 'canvas' },
   { key: 'assets', label: '资产', iconType: 'assets' },
   // 2026-11-05 任务D 约定：开源资产库入口 = 侧栏图标按钮（与「资产」同级，
