@@ -43,8 +43,9 @@ jobs:
 
       - name: Package MCP
         run: |
-          pnpm --filter @zeroexo/mcp-server build
           cd mcp-server
+          npm install --no-audit --no-fund
+          npm run build
           npm pack --pack-destination ../dist/downloads
           cd ..
           MCP_VERSION=$(node -p "require('./mcp-server/package.json').version")
