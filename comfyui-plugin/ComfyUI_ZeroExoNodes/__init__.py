@@ -148,7 +148,38 @@ def substitute(node: Any, params: dict[str, Any]) -> Any:
     return node
 
 
-def load_template(kind: str) -> dict[str, Any]:
+def apply_model_overrides(template: dict[str, Any], models: Any) -> dict[str, Any]:
+    """把前端选择的模型文件名写进模板；加载器节点不变，只换权重文件。"""
+    if not isinstance(models, dict):
+        return template
+    unet = str(models.get("unet") or "").strip()
+    video_vae = str(models.get("videoVae") or "").strip()
+    audio_vae = str(models.get("audioVae") or "").strip()
+    clip = str(models.get("clip") or "").strip()
+    clip_type = str(models.get("clipType") or "").strip()
+    for node in template.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        cls = node.get("class_type")
+        if cls == "UNETLoader" and unet:
+            inputs["unet_name"] = unet
+        elif cls == "CLIPLoader" and clip:
+            inputs["clip_name"] = clip
+            if clip_type:
+                inputs["type"] = clip_type
+        elif cls == "VAELoader":
+            current = str(inputs.get("vae_name") or "").lower()
+            if "audio" in current and audio_vae:
+                inputs["vae_name"] = audio_vae
+            elif "video" in current and video_vae:
+                inputs["vae_name"] = video_vae
+    return template
+
+
+
     path = os.path.join(TEMPLATE_DIR, f"{kind}.json")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -518,6 +549,7 @@ async def submit_job(request):
         template = substitute(load_template(template_kind), params)
     except FileNotFoundError:
         return web.json_response({"ok": False, "error": f"缺少模板 templates/{template_kind}.json"}, status=400)
+    template = apply_model_overrides(template, body.get("models"))
 
     job_id = body.get("clientJobId") or f"zx_{uuid.uuid4().hex[:12]}"
     # 前端 /ws clientId 透传：引擎的 minimax_director_preview/progress 按 server.client_id 定向发送

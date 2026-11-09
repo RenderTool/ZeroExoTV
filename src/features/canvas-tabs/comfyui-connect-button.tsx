@@ -24,6 +24,8 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Input, Popover, Select, Space, Tooltip, Typography } from 'antd';
+import { fetchBridgeModels } from './comfyui-bridge-client.js';
+import { pickDefaultModels, useComfyuiConnectionStore } from './comfyui-connection.js';
 import { TopBarIcon, topBarButtonStyle } from '@/shared/components/topbar-icon-button.js';
 import {
   applyConnectionResult,
@@ -50,6 +52,11 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(ep.address);
   const [testing, setTesting] = useState(false);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const modelSel = useComfyuiConnectionStore((s) => s.models);
+  const availableModels = useComfyuiConnectionStore((s) => s.availableModels);
+  const setModel = useComfyuiConnectionStore((s) => s.setModel);
+  const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
   const [testResult, setTestResult] = useState<EndpointTestResult | null>(null);
   /** 直连测试通过但桥接插件 /zeroexo/h3/* 未响应（一行短提示，测试后出现） */
   const [bridgeWarn, setBridgeWarn] = useState(false);
@@ -84,6 +91,23 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
     if (!draft.trim()) return;
     ep.applyAddress(draft);
   }, [draft, ep]);
+
+  const reloadModels = useCallback(async () => {
+    if (!ep.address) return;
+    setRefreshingModels(true);
+    try {
+      const models = await fetchBridgeModels(ep.address);
+      const defaults = pickDefaultModels(models, modelSel);
+      setConnectedModels(true, { unet: models.unet, vae: models.vae, clip: models.clip });
+      for (const slot of ['unet', 'videoVae', 'audioVae', 'clip'] as const) {
+        setModel(slot, defaults[slot]);
+      }
+    } catch {
+      setConnectedModels(true);
+    } finally {
+      setRefreshingModels(false);
+    }
+  }, [ep.address, modelSel, setConnectedModels, setModel]);
 
   const statusWord = !ep.connected
     ? null
@@ -236,6 +260,53 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
           )}
         </div>
       )}
+      {(ep.connected || availableModels.unet.length > 0 || availableModels.vae.length > 0) && (
+        <div
+          data-testid="comfyui-model-config"
+          style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 6, borderTop: '1px solid rgba(128,128,128,0.18)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text strong style={{ fontSize: 12 }}>{t('director.modelConfig', '模型配置')}</Text>
+            <Button
+              type="link"
+              size="small"
+              loading={refreshingModels}
+              style={{ padding: 0, fontSize: 11 }}
+              onClick={() => void reloadModels()}
+            >
+              {t('director.modelRefresh', '刷新列表')}
+            </Button>
+          </div>
+          {([
+            ['unet', t('director.modelUnet', '视频主模型'), availableModels.unet],
+            ['videoVae', t('director.modelVideoVae', '视频 VAE'), availableModels.vae],
+            ['audioVae', t('director.modelAudioVae', '音频 VAE'), availableModels.vae],
+            ['clip', t('director.modelClip', '文本编码器'), availableModels.clip],
+          ] as const).map(([slot, label, options]) => (
+            <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Text style={{ width: 76, flexShrink: 0, fontSize: 11 }}>{label}</Text>
+              <Select
+                size="small"
+                data-testid={`comfyui-model-${slot}`}
+                value={modelSel[slot] || undefined}
+                placeholder={options.length ? t('director.modelPick', '选择模型') : t('director.modelEmpty', '连接后读取列表')}
+                options={options.map((name) => ({ value: name, label: name }))}
+                onChange={(value) => setModel(slot, value)}
+                showSearch
+                optionFilterProp="label"
+                style={{ flex: 1, minWidth: 0 }}
+                popupMatchSelectWidth={false}
+              />
+            </div>
+          ))}
+          {availableModels.unet.length === 0 && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {t('director.modelListHint', '点「刷新列表」从当前 ComfyUI 读取 diffusion_models / vae / text_encoders。')}
+            </Text>
+          )}
+        </div>
+      )}
+
       {/* 自动连接失败：不弹窗，只在面板留一行可读原因 + 「重试」（手动永远放行） */}
       {!testResult && autoState.failureMessage && (
         <div data-testid="comfyui-auto-fail" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

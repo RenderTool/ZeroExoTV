@@ -14,6 +14,7 @@ Route table (all JSON unless noted):
 from __future__ import annotations
 
 import json as _json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -514,6 +515,28 @@ def _install_cors_middleware() -> None:
     _CORS_MIDDLEWARE_INSTALLED = True
 
 
+def _raise_upload_limit() -> None:
+    """导演包含视频/音频，默认 100MB 会在 aiohttp 层直接 413（根本没有 CORS 响应）。
+
+    ComfyUI 的 ``--max-upload-size`` 默认 100MB；插件在 app 层抬高到 1GB，
+    让云端镜像不依赖启动参数也不会在导入包时 413。
+    """
+    server = getattr(PromptServer, "instance", None)
+    app = getattr(server, "app", None)
+    if app is None:
+        return
+    try:
+        want = int(os.environ.get("ZEROEXO_MAX_PACK_MB", "1024")) * 1024 * 1024
+    except ValueError:
+        want = 1024 * 1024 * 1024
+    try:
+        current = int(getattr(app, "_client_max_size", 0) or 0)
+        if current < want:
+            app._client_max_size = want
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def register_routes() -> bool:
     global _REGISTERED
     if _REGISTERED:
@@ -522,6 +545,7 @@ def register_routes() -> bool:
     if server is None:
         log.warning("ZeroExo bridge: PromptServer not ready, routes not registered")
         return False
+    _raise_upload_limit()
     _install_cors_middleware()
     routes = server.routes
     _register(routes, "GET", "/zeroexo/h3/health", health)

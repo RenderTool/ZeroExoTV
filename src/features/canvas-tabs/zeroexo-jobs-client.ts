@@ -122,7 +122,7 @@ async function jobFetch(url: string, init?: RequestInit): Promise<Response> {
 async function submitJob(
   baseUrl: string,
   kind: 'reference_video' | 'qwen_image_edit',
-  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: object },
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; models?: Record<string, string>; params: object },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
   const res = await jobFetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs`, {
     method: 'POST',
@@ -141,7 +141,7 @@ async function submitJob(
 /** 提交参考生视频作业 */
 export async function submitZeroexoJob(
   baseUrl: string,
-  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: ZeroexoJobParams },
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; models?: Record<string, string>; params: ZeroexoJobParams },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
   return submitJob(baseUrl, 'reference_video', body);
 }

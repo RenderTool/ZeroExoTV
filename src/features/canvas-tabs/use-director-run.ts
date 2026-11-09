@@ -48,6 +48,7 @@ import {
   uploadZeroexoReference,
   zeroexoOutputViewUrl,
 } from './zeroexo-jobs-client.js';
+import { useComfyuiConnectionStore } from './comfyui-connection.js';
 import { ensureComfyuiMachineInfo, shouldUseLowVram } from './vram-mode.js';
 import { createPreviewClientId, DirectorPreviewSocket, type DirectorPreviewFrame } from './comfyui-ws-client.js';
 import { newMediaKey, putMedia, resolveMediaUrl } from '@/platform/media.js';
@@ -617,6 +618,11 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
               clientId: previewClientId,
               project: runArgs.projectId,
               episode: runArgs.episode,
+              models: {
+                ...useComfyuiConnectionStore.getState().models,
+                clipType: 'minimax',
+                weightDtype: 'default',
+              },
               params: {
                 prompt: (shot.imagePrompt ?? '').trim() || `第 ${i + 1} 段`,
                 negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ''),

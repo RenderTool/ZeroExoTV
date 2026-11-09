@@ -49,8 +49,17 @@ export async function applyConnectionResult(
   }
   ep.markTested(result.address, result.backend, result.models, result.machine);
   if (result.backend === 'zeroexo') {
-    // 重写版插件（/zeroexo/v1/jobs）：不依赖桥接模型四件套，直接视为可运行
-    prefs.setConnected(true);
+    // 重写版插件（/zeroexo/v1/jobs）：仍需展示/选择模型；插件同样提供 /zeroexo/h3/models
+    try {
+      const models = await fetchBridgeModels(result.address, prefs.token || undefined);
+      const defaults = pickDefaultModels(models, prefs.models);
+      prefs.setConnected(true, { unet: models.unet, vae: models.vae, clip: models.clip });
+      for (const slot of ['unet', 'videoVae', 'audioVae', 'clip'] as const) {
+        prefs.setModel(slot, defaults[slot]);
+      }
+    } catch {
+      prefs.setConnected(true);
+    }
     return { bridgeMissing: false };
   }
   if (result.backend !== 'direct') {
