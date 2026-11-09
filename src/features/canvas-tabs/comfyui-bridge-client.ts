@@ -33,9 +33,10 @@ export function normalizeBaseUrl(raw: string): string {
   return url.replace(/\/+$/, '');
 }
 
+/** 桥接 token 走标准 Authorization；避免自定义 X-ZeroExo-Token 触发额外 CORS 预检 */
 function bridgeHeaders(token?: string, extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { ...extra };
-  if (token) headers['X-ZeroExo-Token'] = token;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
 

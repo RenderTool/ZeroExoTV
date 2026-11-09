@@ -462,6 +462,47 @@ def _register(routes, method: str, path: str, handler) -> None:
 
 
 _REGISTERED = False
+_CORS_MIDDLEWARE_INSTALLED = False
+
+
+def _install_cors_middleware() -> None:
+    """ComfyUI 的全局 CORS 中间件会覆盖路由级 header；在 app 层补 PNA 与预检头。
+
+    GitHub Pages（HTTPS）访问本机/局域网 ComfyUI 属于 Private Network Access，
+    Chrome 要求 OPTIONS 响应带 Access-Control-Allow-Private-Network。
+    """
+    global _CORS_MIDDLEWARE_INSTALLED
+    if _CORS_MIDDLEWARE_INSTALLED:
+        return
+    server = getattr(PromptServer, "instance", None)
+    app = getattr(server, "app", None)
+    if app is None or not hasattr(app, "middlewares"):
+        return
+
+    @web.middleware
+    async def zeroexo_cors(request, handler):
+        # 必须包在 ComfyUI 自带 CORS 中间件外层：它在 OPTIONS 时直接返回，
+        # 不会进入内层插件路由，也不认识 Private Network Access。
+        if request.method == "OPTIONS":
+            response = web.Response(status=204)
+        else:
+            response = await handler(request)
+        if not isinstance(response, web.StreamResponse):
+            return response
+        origin = request.headers.get("Origin")
+        response.headers["Access-Control-Allow-Origin"] = origin or "*"
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, Authorization, X-ZeroExo-Token, Accept, Origin, X-Requested-With"
+        )
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE, PUT, PATCH"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        if origin:
+            response.headers.setdefault("Vary", "Origin")
+        return response
+
+    app.middlewares.insert(0, zeroexo_cors)
+    _CORS_MIDDLEWARE_INSTALLED = True
 
 
 def register_routes() -> bool:
@@ -472,6 +513,7 @@ def register_routes() -> bool:
     if server is None:
         log.warning("ZeroExo bridge: PromptServer not ready, routes not registered")
         return False
+    _install_cors_middleware()
     routes = server.routes
     _register(routes, "GET", "/zeroexo/h3/health", health)
     _register(routes, "GET", "/zeroexo/h3/models", models)

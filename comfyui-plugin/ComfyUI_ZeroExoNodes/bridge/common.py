@@ -60,7 +60,11 @@ def check_auth(request) -> web.Response | None:
     token = os.environ.get(TOKEN_ENV) or ""
     if not token:
         return None
-    if request.headers.get(AUTH_HEADER, "") == token:
+    header_token = request.headers.get(AUTH_HEADER, "")
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        header_token = auth[7:].strip()
+    if header_token == token:
         return None
     return json_error(401, f"missing or invalid {AUTH_HEADER}")
 

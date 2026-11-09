@@ -34,6 +34,8 @@ def apply_cors(response: web.Response, request: web.Request | None = None) -> we
     response.headers["Access-Control-Allow-Methods"] = ALLOW_METHODS
     response.headers["Access-Control-Allow-Headers"] = ALLOW_HEADERS
     response.headers["Access-Control-Max-Age"] = MAX_AGE_SEC
+    # Chrome Private Network Access: HTTPS(GitHub Pages) -> http://127.0.0.1 必须显式放行
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
     if request is not None and request.headers.get("Origin"):
         # 回显 Origin 时必须声明 Vary，避免缓存把 A 站点的响应给 B 站点
         response.headers.setdefault("Vary", "Origin")
