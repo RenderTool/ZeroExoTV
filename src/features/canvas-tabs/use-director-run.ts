@@ -256,9 +256,12 @@ export function needsZeroexoForGuides(
   mode: 'direct' | 'zeroexo' | 'openai',
   shots: Array<{ id: string; guide?: { id?: string } | null }>,
   selectedIds: string[],
+  continuityEnabled = false,
 ): boolean {
   if (mode !== 'direct') return false;
-  return shots.some((s) => selectedIds.includes(s.id) && Boolean(s.guide?.id));
+  // 显式引导槽，或本次开着段间衔接：都要「上一段产出的引导」当输入。
+  // 桥接（官方 director 节点）既不读引导输入，也不产出 gd_ 引导文件 → 历史里下一段永远没有引导可接。
+  return continuityEnabled || shots.some((s) => selectedIds.includes(s.id) && Boolean(s.guide?.id));
 }
 
 export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
@@ -540,16 +543,24 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       }
       // 片段引导槽只有插件作业通道（/zeroexo/v1/jobs）会真正送进引擎：
       // 桥接走官方 director 节点，timeline 里没有显式引导字段，继续用桥接等于把用户的引导数据丢掉。
-      const hasExplicitGuide = needsZeroexoForGuides(resolved.mode, runArgs.shots, runArgs.selectedIds);
-      const cfg = (hasExplicitGuide && resolved.mode === 'direct'
+      const continuityOn = runArgs.shared.params?.['continuityEnabled'] === true;
+      const needsJobChannel = needsZeroexoForGuides(
+        resolved.mode, runArgs.shots, runArgs.selectedIds, continuityOn,
+      );
+      const cfg = (needsJobChannel && resolved.mode === 'direct'
         ? { mode: 'zeroexo' as const, baseUrl: resolved.baseUrl }
         : resolved);
       if (!isAuthorized()) {
         patch({ phase: 'error', error: '本地资产库未授权：生成结果需要落盘到项目资产，请先登录' });
         return false;
       }
-      if (resolved.mode === 'direct' && hasExplicitGuide) {
-        cbRef.current.onNotice('info', '本次运行含片段引导槽：已改走插件作业通道（桥接不支持显式引导）');
+      if (resolved.mode === 'direct' && needsJobChannel) {
+        cbRef.current.onNotice(
+          'info',
+          continuityOn
+            ? '本次开了段间衔接：已改走插件作业通道（桥接不产出引导数据，历史里下一段接不上）'
+            : '本次运行含片段引导槽：已改走插件作业通道（桥接不支持显式引导）',
+        );
       }
       stopPolling();
       stopPreview();

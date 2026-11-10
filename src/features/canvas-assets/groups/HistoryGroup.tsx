@@ -256,8 +256,11 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
             </ThumbBadge>
           </button>
         )}
-        {/* hover 操作（右下角）：定位 / 加入资产库 / 下载 */}
+        {/* hover 操作（右下角）：定位 / 加入资产库 / 下载。
+            2026-11-10：整条操作区吞掉 click —— 否则点空白处会冒泡到封面「打开大图」，
+            表现为「发送到导演台后顺手打开一次视频」。 */}
         <div
+          onClick={(e) => e.stopPropagation()}
           style={{
             position: 'absolute', right: 6, bottom: 6, zIndex: 2,
             display: 'flex', gap: 6,

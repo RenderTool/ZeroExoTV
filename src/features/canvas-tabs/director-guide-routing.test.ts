@@ -15,11 +15,15 @@ describe('needsZeroexoForGuides', () => {
     expect(needsZeroexoForGuides('direct', shots, ['b'])).toBe(true);
   });
 
+  it('direct + 开着段间衔接 → 也必须切（桥接不产出引导数据，下一段接不上）', () => {
+    expect(needsZeroexoForGuides('direct', [{ id: 'a' }], ['a'], true)).toBe(true);
+  });
+
   it('direct + 引导在未选中的段上 → 不切（只跑选中的段）', () => {
     expect(needsZeroexoForGuides('direct', shots, ['a'])).toBe(false);
   });
 
-  it('没有引导 / 已经是 zeroexo / openai → 不切', () => {
+  it('没有引导 / 没有衔接 / 已经是 zeroexo / openai → 不切', () => {
     expect(needsZeroexoForGuides('direct', [{ id: 'a' }], ['a'])).toBe(false);
     expect(needsZeroexoForGuides('zeroexo', shots, ['b'])).toBe(false);
     expect(needsZeroexoForGuides('openai', shots, ['b'])).toBe(false);
