@@ -755,36 +755,43 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     const cfg = cfgRef.current();
     if (!job || !cfg || canceled.current) return;
     canceled.current = true;
+
+    // 先本地落「已取消」并停轮询/预览，再通知后端。
+    // 后端 cancel 慢/超时/404 都不能让片段一直停在「生成中」。
+    const pendingZeroexoJobs = [...zeroexoJobs.current.values()];
+    job.segmentShotIds.forEach((shotId, i) => {
+      if (!doneIndexes.current.has(i + 1)) cbRef.current.onSegmentState(shotId, 'cancelled');
+    });
+    stopPolling();
+    stopPreview();
+    activeJob.current = null;
+    zeroexoJobs.current = new Map();
+    clearResumableRun();
+    setState((s) => ({
+      ...s,
+      phase: 'canceled',
+      canceledKept: doneIndexes.current.size,
+      preview: null,
+      currentSegment: null,
+    }));
+
     try {
       if (cfg.mode === 'openai' && job.mode === 'openai') {
         await cancelProtocolVideoJob(cfg.channel, job.jobId);
       } else if (cfg.mode === 'direct' && job.mode === 'direct') {
         await cancelBridgeJob(cfg.baseUrl, job.jobId, cfg.token);
       } else if (cfg.mode === 'zeroexo' && job.mode === 'zeroexo') {
-        // 一段一个作业：逐段取消（失败不阻断，本地仍落「已取消」）
-        for (const item of zeroexoJobs.current.values()) {
+        for (const item of pendingZeroexoJobs) {
           await cancelZeroexoJob(cfg.baseUrl, item.jobId).catch(() => undefined);
         }
-        zeroexoJobs.current = new Map();
       }
     } catch (err) {
-      // 取消请求本身失败（ComfyUI 不响应/404）也不能停在「生成中」：本地仍落到确定状态
+      // 后端未确认也保持本地已取消，只给一次性提示
       cbRef.current.onNotice(
         'warning',
         `取消请求失败（后端未确认）：${err instanceof Error ? err.message : String(err)}，本地已按「已取消」处理`,
       );
     }
-    /* 2026-11-05 修复（取消后片段卡片一直显示生成中）：此前 cancel 只改总状态、漏了段条目——
-       进行中的段从未被回写。现在不等轮询，立即把未完成的段置「已取消」（cancelled）；
-       已完成段（doneIndexes，1 基段号）保持「完成」且产物不动 */
-    job.segmentShotIds.forEach((shotId, i) => {
-      if (!doneIndexes.current.has(i + 1)) cbRef.current.onSegmentState(shotId, 'cancelled');
-    });
-    stopPolling(); // 停轮询
-    stopPreview(); // 停 WS 预览订阅，不再收帧
-    activeJob.current = null;
-    clearResumableRun();
-    setState((s) => ({ ...s, phase: 'canceled', canceledKept: doneIndexes.current.size, preview: null }));
   }, [stopPolling, stopPreview]);
 
   const reset = useCallback(() => {
