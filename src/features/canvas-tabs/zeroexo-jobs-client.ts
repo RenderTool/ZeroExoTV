@@ -36,6 +36,18 @@ export interface ZeroexoJobParams {
   use_low_vram?: boolean;
 }
 
+/** Krea2 文生图作业参数（无参考图；仅线上 ComfyUI） */
+export interface Krea2JobParams {
+  prompt: string;
+  negative_prompt?: string;
+  seed: number;
+  steps: number;
+  cfg: number;
+  eta: number;
+  width: number;
+  height: number;
+}
+
 export type ZeroexoJobState = 'queued' | 'running' | 'success' | 'error' | 'cancelled';
 
 /** 图像编辑（Qwen Image 2.1）作业参数（2026-11-07） */
@@ -62,6 +74,10 @@ export interface QwenImageJobParams {
 /** 画布图像节点的「本机 Qwen 图像编辑」伪模型 key */
 export const LOCAL_IMAGE_MODEL_KEY = 'zeroexo:qwen-image-2.1';
 export const LOCAL_IMAGE_MODEL_LABEL = 'QwenImage2.1';
+
+/** Krea2 文生图伪模型 key（仅线上 ComfyUI：需要 krea2 底模 + RES4LYF 采样器） */
+export const KREA2_MODEL_KEY = 'zeroexo:krea2';
+export const KREA2_MODEL_LABEL = 'Krea2';
 
 /** 画布视频节点的「本机」伪模型 key（node.data.model 存它即走 /zeroexo/v1/jobs） */
 export const LOCAL_VIDEO_MODEL_KEY = 'zeroexo:minimax-h3';
@@ -121,7 +137,7 @@ async function jobFetch(url: string, init?: RequestInit): Promise<Response> {
 /** 提交单段作业（一个片段 = 一个 ComfyUI prompt） */
 async function submitJob(
   baseUrl: string,
-  kind: 'reference_video' | 'qwen_image_edit',
+  kind: 'reference_video' | 'qwen_image_edit' | 'krea2_t2i',
   body: { clientJobId?: string; clientId?: string; project: string; episode: string; models?: Record<string, string>; params: object },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
   const res = await jobFetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs`, {
@@ -154,9 +170,40 @@ export async function submitQwenImageJob(
   return submitJob(baseUrl, 'qwen_image_edit', body);
 }
 
-/** 查询作业状态 */
+/** 提交 Krea2 文生图作业（仅线上 ComfyUI） */
+export async function submitKrea2Job(
+  baseUrl: string,
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: Krea2JobParams },
+): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
+  return submitJob(baseUrl, 'krea2_t2i', body);
+}
+
+/**
+ * 提交前预热一次连接（GET，不关心返回体）。
+ *
+ * 为什么需要：浏览器对同一 origin 复用 keep-alive 连接，云网关 / 反代空闲一段时间后会
+ * 静默把它关掉，而浏览器只对 GET 做透明重试、**POST 不重试**。于是「空闲后第一次提交作业」
+ * 必然抛 TypeError: Failed to fetch，用户表现为「第一次点生成必失败、第二次才成功」。
+ * 提交前先打一个 GET，把连接换成新的，再发 POST。
+ *
+ * 不放在 submitJob 里：GET 会改变既有单测里 fetch 的调用序列，且上传也要预热（见调用方）。
+ */
+export async function warmZeroexoConnection(baseUrl: string): Promise<void> {
+  const url = `${trimBase(baseUrl)}/zeroexo/v1/health`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await fetch(url);
+      return; // 有响应即说明连接可用（4xx/5xx 也代表网络通）
+    } catch {
+      /* 旧连接已被关：重试一次即换新连接 */
+    }
+  }
+}
+
+/** 查询作业状态（GET 天然幂等：keep-alive 被关时换连接重试一次，避免一次抖动打死整次生成） */
 export async function fetchZeroexoJob(baseUrl: string, jobId: string): Promise<ZeroexoJobStatus> {
-  const res = await fetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs/${encodeURIComponent(jobId)}`);
+  const url = `${trimBase(baseUrl)}/zeroexo/v1/jobs/${encodeURIComponent(jobId)}`;
+  const res = await fetch(url).catch(() => fetch(url));
   if (!res.ok) throw new Error(`/zeroexo/v1/jobs/${jobId} ${await readError(res)}`);
   const data = (await res.json().catch(() => null)) as ZeroexoJobStatus | null;
   if (!data) throw new Error('作业状态响应不是 JSON');
@@ -201,7 +248,11 @@ export async function uploadZeroexoReference(
     const form = new FormData();
     form.append('image', new File([blob], filename, { type: blob.type || 'image/png' }));
     form.append('overwrite', 'true');
-    const res = await fetch(`${trimBase(baseUrl)}/upload/image`, { method: 'POST', body: form });
+    const url = `${trimBase(baseUrl)}/upload/image`;
+    const post = (): Promise<Response> => fetch(url, { method: 'POST', body: form });
+    // 上传是 POST：keep-alive 被网关关掉时浏览器不重试，第一次必然 Failed to fetch；
+    // 同一文件 + overwrite=true 天然幂等，所以这里可以安全重试一次（否则参考图会被静默丢掉 → 退化成文生图）
+    const res = await post().catch(() => post());
     if (!res.ok) return null;
     const data = (await res.json().catch(() => null)) as { name?: string; subfolder?: string } | null;
     if (!data?.name) return null;

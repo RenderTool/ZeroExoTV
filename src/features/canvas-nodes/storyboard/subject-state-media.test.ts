@@ -36,6 +36,7 @@ vi.mock('@/entities/cas-store.js', () => ({
 }));
 
 import {
+  deleteSubjectHistoryMedia,
   linkSubjectStateMedia,
   findSubjectMediaUsage,
   releaseSubjectStateMediaRefs,
@@ -455,6 +456,77 @@ describe('来源面板 @ 形态契约（fs 断言，2026-11-05 约定；2026-11-
     expect(src).not.toMatch(/padding: '0 10px 8px', borderTop/);
     // 集数下拉触发按钮加宽（minWidth ≥ 200）
     expect(src).toMatch(/minWidth: 2\d0/);
+  });
+});
+
+describe('deleteSubjectHistoryMedia（永久删除历史图 + 封面回退）', () => {
+  function treeWithHistory(opts: { media: 'image' | 'none'; cover?: string } = { media: 'image' }): SubjectTree {
+    const tr = makeTree();
+    const s = stateOf(tr, 0);
+    tr.states = [{
+      ...s,
+      media: opts.media === 'image' ? [{ key: CAS_B, type: 'image' as const }] : [],
+      mediaHistory: [{ key: CAS_A, type: 'image' as const }, { key: CAS_MP3, type: 'audio' as const }],
+    }];
+    if (opts.cover) tr.coverKey = opts.cover;
+    return tr;
+  }
+
+  it('移除条目 + 释放 CAS 引用（不是只从数组抹掉）', async () => {
+    const tr = treeWithHistory();
+    const target = stateOf(tr, 0);
+    const { trees } = await deleteSubjectHistoryMedia({
+      trees: [tr], projectId: PROJECT, rootId: tr.rootId, stateId: target.id, key: CAS_A,
+    });
+    const node = firstTree(trees).states[0] as SubjectTreeNode;
+    expect(node.mediaHistory?.map((m) => m.key)).toEqual([CAS_MP3]);
+    expect(releaseCalls).toHaveLength(1);
+    expect(releaseCalls[0]?.hash).toBe('aaaa1111aaaa1111aaaa1111aaaa1111');
+    expect(releaseCalls[0]?.ref).toMatchObject({
+      assetId: `subject-state:${tr.rootId}/${target.id}`,
+      projectId: PROJECT,
+      kind: 'image',
+    });
+  });
+
+  it('删的正好是封面 → 封面回退到当前槽位图片', async () => {
+    const tr = treeWithHistory({ media: 'image', cover: CAS_A });
+    const target = stateOf(tr, 0);
+    const { trees } = await deleteSubjectHistoryMedia({
+      trees: [tr], projectId: PROJECT, rootId: tr.rootId, stateId: target.id, key: CAS_A,
+    });
+    expect(firstTree(trees).coverKey).toBe(CAS_B);
+  });
+
+  it('删的正好是封面且没有可用图片 → 封面置空（不残留已删 key）', async () => {
+    const tr = treeWithHistory({ media: 'none', cover: CAS_A });
+    const target = stateOf(tr, 0);
+    const { trees } = await deleteSubjectHistoryMedia({
+      trees: [tr], projectId: PROJECT, rootId: tr.rootId, stateId: target.id, key: CAS_A,
+    });
+    expect(firstTree(trees).coverKey).toBeNull();
+  });
+
+  it('删的不是封面 → 封面不动；重复删同一 key 幂等且不重复释放', async () => {
+    const tr = treeWithHistory({ media: 'none', cover: CAS_B });
+    const target = stateOf(tr, 0);
+    const once = await deleteSubjectHistoryMedia({
+      trees: [tr], projectId: PROJECT, rootId: tr.rootId, stateId: target.id, key: CAS_A,
+    });
+    expect(firstTree(once.trees).coverKey).toBe(CAS_B);
+    expect(releaseCalls).toHaveLength(1);
+    const twice = await deleteSubjectHistoryMedia({
+      trees: once.trees, projectId: PROJECT, rootId: tr.rootId, stateId: target.id, key: CAS_A,
+    });
+    expect(firstTree(twice.trees).states[0]?.mediaHistory?.map((m) => m.key)).toEqual([CAS_MP3]);
+    expect(releaseCalls).toHaveLength(1);
+  });
+
+  it('目标状态不存在 → throw（不静默失败）', async () => {
+    const tr = treeWithHistory();
+    await expect(deleteSubjectHistoryMedia({
+      trees: [tr], projectId: PROJECT, rootId: tr.rootId, stateId: 'nope', key: CAS_A,
+    })).rejects.toThrow(/target state not found/);
   });
 });
 

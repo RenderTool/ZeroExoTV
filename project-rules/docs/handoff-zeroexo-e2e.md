@@ -125,6 +125,6 @@ MCP / 协议侧：
    - `split_script_to_shots` 支持 HTML 剧本按 `script-scene-heading` 切场。
 3. **按新契约重做 ZV-005 导入**：项目 `z6GrKXXM6HxK` —— 剧本 11 场（HTML）、主体 16 + 18 张 CAS 图、
    导演台 35 段（每段双轨提示词 + 主体引用，共 136 条）、主轨 35 clips；联调参数按「越小越快」：
-   16:9 / scaleFactor 0.5（432×240）/ 49 帧 / steps 1 / cfg 1 / seed 1 / 引导关（22 帧）。
+   16:9 / scaleFactor 0.5（当时显示 432×240；2026-11-10 起按官方 MP 表换算为 608×352）/ 49 帧 / steps 1 / cfg 1 / seed 1 / 引导关（22 帧）。
 
 未做：本轮不重启 ComfyUI、不跑真实生成；页面验证由用户打开 `http://localhost:5180/#/editor/z6GrKXXM6HxK` 核对。

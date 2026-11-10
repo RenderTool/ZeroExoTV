@@ -42,9 +42,12 @@ export {
   useGeneratingPreviewStore,
   setGeneratingPreview,
   clearGeneratingPreview,
+  setGeneratingProgress,
+  clearGeneratingProgress,
   setGeneratingPreviewCanvas,
   generatingPreviewKey,
 } from './generating-preview-store.js';
+export type { GeneratingProgress } from './generating-preview-store.js';
 export type { BaseNodeViewProps, AIStateViewProps, PinHandlers, NodeActionEvent } from './base-node-view.js';
 export { NODE_ICONS } from './icons.js';
 

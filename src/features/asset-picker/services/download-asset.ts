@@ -9,9 +9,10 @@
  * - 返回 false 表示没有任何可下载文件，调用方必须给出可读提示（不再静默）。
  */
 
-import type { Asset } from '../index.js';
+import type { Asset, GuideMeta } from '../index.js';
 import { getMediaBlob } from '@/platform/media.js';
 import { resolveContentUrl } from '@zeroexo/plugin-nodes';
+import { fetchGuideBlob } from '@/shared/utils/guide-file.js';
 import JSZip from 'jszip';
 
 function extFromMime(mime: string | undefined, kind: string): string {
@@ -99,24 +100,66 @@ export async function downloadAsset(asset: Asset): Promise<boolean> {
   return true;
 }
 
-/** 批量打包下载（生成产物 / 素材 / 历史共用）；返回成功打包数量 */
-export async function downloadAssetsAsZip(assets: Asset[], filename = 'zeroexo-assets'): Promise<number> {
+interface BundleFile { blob: Blob; filename: string }
+
+/** 多文件只触发一次浏览器下载，规避连续 a.click 被浏览器多文件拦截 */
+export async function downloadFilesAsZip(files: BundleFile[], filename: string): Promise<number> {
+  if (files.length === 0) return 0;
   const zip = new JSZip();
   const used = new Map<string, number>();
+  for (const file of files) {
+    const n = (used.get(file.filename) ?? 0) + 1;
+    used.set(file.filename, n);
+    const dot = file.filename.lastIndexOf('.');
+    const base = dot > 0 ? file.filename.slice(0, dot) : file.filename;
+    const ext = dot > 0 ? file.filename.slice(dot) : '';
+    zip.file(n === 1 ? file.filename : `${base} (${n})${ext}`, file.blob);
+  }
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  triggerDownload(blob, `${filename}.zip`);
+  return files.length;
+}
+
+/** 视频 + 引导：打包成单个 zip（引导取不到时退回单文件下载，不丢视频） */
+export async function downloadAssetWithGuide(
+  asset: Asset,
+  guide: GuideMeta | { id?: string } | null | undefined,
+): Promise<{ ok: boolean; guideOk: boolean }> {
+  const file = await resolveAssetFile(asset).catch(() => null);
+  if (!file) return { ok: false, guideOk: false };
+  const guideBlob = guide?.id ? await fetchGuideBlob(guide).catch(() => null) : null;
+  if (!guideBlob) {
+    triggerDownload(file.blob, file.filename);
+    return { ok: true, guideOk: false };
+  }
+  const dot = file.filename.lastIndexOf('.');
+  const base = dot > 0 ? file.filename.slice(0, dot) : file.filename;
+  const count = await downloadFilesAsZip(
+    [file, { blob: guideBlob, filename: `${base} 引导.safetensors` }],
+    base,
+  );
+  return { ok: count > 0, guideOk: count > 1 };
+}
+
+/** 批量打包下载（生成产物 / 素材 / 历史共用，含每项自带引导）；返回成功打包的资产数 */
+export async function downloadAssetsAsZip(assets: Asset[], filename = 'zeroexo-assets'): Promise<number> {
+  const files: BundleFile[] = [];
   let count = 0;
   for (const asset of assets) {
     const file = await resolveAssetFile(asset).catch(() => null);
     if (!file) continue;
-    const dot = file.filename.lastIndexOf('.');
-    const base = dot > 0 ? file.filename.slice(0, dot) : file.filename;
-    const ext = dot > 0 ? file.filename.slice(dot) : '';
-    const n = (used.get(file.filename) ?? 0) + 1;
-    used.set(file.filename, n);
-    zip.file(n === 1 ? file.filename : `${base} (${n})${ext}`, file.blob);
+    files.push(file);
     count += 1;
+    const guide = (asset.data as { guide?: { id?: string } } | undefined)?.guide;
+    if (guide?.id) {
+      const gb = await fetchGuideBlob(guide).catch(() => null);
+      if (gb) {
+        const dot = file.filename.lastIndexOf('.');
+        const base = dot > 0 ? file.filename.slice(0, dot) : file.filename;
+        files.push({ blob: gb, filename: `${base} 引导.safetensors` });
+      }
+    }
   }
-  if (count === 0) return 0;
-  const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-  triggerDownload(blob, `${filename}.zip`);
-  return count;
+  const packed = await downloadFilesAsZip(files, filename);
+  return packed > 0 ? count : 0;
 }

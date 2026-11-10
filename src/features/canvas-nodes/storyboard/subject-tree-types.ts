@@ -7,7 +7,7 @@
  *   states[0] 恒为基础状态，id 恒为 SUBJECT_BASE_STATE_ID（'__base__'，真实节点而非虚拟槽）。
  *
  * 核心原则：
- * 1. 先出三视图定妆图锁定形象 → 状态在定妆图基础上迭代差异
+ * 1. 先出定妆参考图锁定形象 → 状态在定妆图基础上迭代差异
  * 2. 差异提示词不重复基础特征，只写 delta
  * 3. 基础状态的提示词/定妆图/状态名/出现集数与其它状态走同一批字段：
  *    fullPrompt / media / state / appearEpisodes；templateType、templateReason
@@ -71,7 +71,7 @@ export interface SubjectBaseState {
    * 用户可命名为「正常人类」「女鬼」等；空 = 回落展示「基础状态」，不再复用主体名。
    */
   name?: string;
-  /** 完整的三视图定妆提示词（高度参数化的定妆模板，根据 templateType 选择对应模板） */
+  /** 完整的定妆参考提示词（高度参数化的定妆模板，根据 templateType 选择对应模板；画面数量由模板写死） */
   prompt: string;
   /** 使用的模板类型 */
   templateType: SubjectTemplateType;

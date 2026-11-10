@@ -47,3 +47,44 @@ describe('AIStateView 生成中实时预览', () => {
     expect(container.querySelector('[data-generating-preview]')).toBeNull();
   });
 });
+
+describe('AIStateView 采样进度', () => {
+  it('status=loading 且传 progress → 渲染进度条与按步数计算的宽度', () => {
+    const { container } = render(
+      <AIStateView
+        status="loading"
+        accentColor="#ff6a00"
+        emptyIcon={null}
+        hasContent={false}
+        onReplace={() => undefined}
+        backgroundColor="#000"
+        skeleton="media"
+        skeletonKind="video"
+        progress={{ step: 3, totalSteps: 8, phaseLabel: '采样' }}
+      >
+        <div />
+      </AIStateView>,
+    );
+    const bar = container.querySelector('[data-generating-progress-bar]') as HTMLElement;
+    expect(bar).toBeTruthy();
+    expect(bar.style.width).toBe('38%');
+    expect(container.querySelector('[data-generating-progress-text]')).toBeTruthy();
+  });
+
+  it('未传 progress 时不渲染进度条（不影响其他生成节点）', () => {
+    const { container } = render(
+      <AIStateView
+        status="loading"
+        accentColor="#ff6a00"
+        emptyIcon={null}
+        hasContent={false}
+        onReplace={() => undefined}
+        backgroundColor="#000"
+        skeleton="media"
+      >
+        <div />
+      </AIStateView>,
+    );
+    expect(container.querySelector('[data-generating-progress]')).toBeNull();
+  });
+});

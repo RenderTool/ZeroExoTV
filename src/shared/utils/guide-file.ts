@@ -3,7 +3,7 @@
  *
  * 引导数据落在 ComfyUI 的 `output/zeroexo/guides/gd_xxx.safetensors`，
  * 浏览器经 ComfyUI 原生 `/view` 读取（与视频产物同一取回通道）。
- * 导出「视频+引导」时单独触发一次下载（.safetensors 文件），与视频分两个文件。
+ * 「下载视频+引导」由打包下载统一入 zip；本文件保留单文件下载能力供其他入口使用。
  */
 
 import type { GuideMeta } from '@/features/asset-picker/index.js';

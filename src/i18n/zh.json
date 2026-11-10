@@ -857,6 +857,7 @@
     "generateImage": "生图",
     "retry": "重试",
     "generating": "生成中",
+    "sampling": "采样 {{step}} / {{total}}",
     "cancelGeneration": "取消生成",
     "genLoader": {
       "image": {
@@ -1071,7 +1072,7 @@
   },
   "promptLibrary": {
     "title": "提示词",
-    "subtitle": "只读预设 · 角色三视图",
+    "subtitle": "只读预设 · 角色定妆参考图",
     "searchPlaceholder": "搜索提示词",
     "countUnit": "条",
     "readonly": "只读预设",
@@ -1165,8 +1166,8 @@
     "filterMaterial": "素材",
     "filterHistory": "历史",
     "filterScriptMeta": "本剧信息",
-    "historyTabImage": "图片产出",
-    "historyTabVideo": "视频生成",
+    "historyTabImage": "图片",
+    "historyTabVideo": "视频",
     "historyTabAll": "全部",
     "historySourceCanvas": "从画布生成",
     "historySourceDirector": "从导演台",
@@ -2585,7 +2586,7 @@
     "mediaVideo": "视频",
     "mediaAudio": "音频",
     "basePrompt": "完整提示词",
-    "basePromptPlaceholder": "完整三视图/多角度参考提示词（可按 kind 使用模板后由 AI 参数化填充）",
+    "basePromptPlaceholder": "完整定妆参考提示词（画面数量按模板写死，可按 kind 使用模板后由 AI 参数化填充）",
     "recognition": "LLM识别语",
     "deleteSubject": "删除主体",
     "newState": "新状态",

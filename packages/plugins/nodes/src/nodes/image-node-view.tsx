@@ -16,6 +16,7 @@ import type { ImageNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '../base-node-view.js';
+import { generatingPreviewKey, useGeneratingPreviewStore } from '../generating-preview-store.js';
 import { replaceNodeImage } from '../utils/replace-node-image.js';
 import { planOnloadResize } from '../utils/media-fit.js';
 import { IMAGE_DEFAULT_SIZE, IMAGE_LONG_SIDE, MEDIA_MIN_SIZE } from '../utils/node-contracts.js';
@@ -73,6 +74,9 @@ export function ImageNodeView({
 }: ImageNodeViewProps): React.ReactElement {
   const data = (node.data ?? {}) as Partial<ImageNodeData>;
   const status = data.status ?? 'idle';
+  /** 生成中实时预览帧 / 采样步进（app 侧按 ComfyUI /ws 的 progress 与 PREVIEW_IMAGE 写入） */
+  const generatingPreview = useGeneratingPreviewStore((s) => s.byNode[generatingPreviewKey(s.canvasDocId, node.id)]);
+  const generatingProgress = useGeneratingPreviewStore((s) => s.progressByNode[generatingPreviewKey(s.canvasDocId, node.id)]);
   const { t } = useTranslation();
   const { theme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -274,6 +278,8 @@ export function ImageNodeView({
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
           skeleton="media" skeletonKind="image"
+          previewImage={status === 'loading' ? generatingPreview : undefined}
+          progress={status === 'loading' ? generatingProgress : undefined}
         >
           <div
             ref={mediaRef}
@@ -340,6 +346,8 @@ export function ImageNodeView({
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         skeleton="media" skeletonKind="image"
+        previewImage={status === 'loading' ? generatingPreview : undefined}
+        progress={status === 'loading' ? generatingProgress : undefined}
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >

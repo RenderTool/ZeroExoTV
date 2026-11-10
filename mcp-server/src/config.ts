@@ -64,6 +64,13 @@ export const paths = {
   tokens(root = dataRoot()) {
     return path.join(root, ".mcp", "tokens.json");
   },
+  /**
+   * 前端广播的「当前打开项目」（画布切项目时写）：Agent 先报出它再问用户是否操作，
+   * 不要让用户重复说「帮我操作 XX 项目」。
+   */
+  currentProject(root = dataRoot()) {
+    return path.join(root, ".lf", "zeroexo", "app_meta", "current-project.json");
+  },
   auditDir(root = dataRoot()) {
     return path.join(root, ".audit");
   },

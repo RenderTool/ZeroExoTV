@@ -46,8 +46,10 @@ export function LocalH3ParamForm({
       const ratio = w / h;
       const nearest = RATIO_OPTIONS.reduce((best, opt) =>
         Math.abs(opt.ratio - ratio) < Math.abs(best.ratio - ratio) ? opt : best, RATIO_OPTIONS[0]!);
-      const base = resolveVideoSize(nearest.value, 1).width || w;
-      const scaleFactor = Math.min(SCALE_FACTOR_MAX, Math.max(SCALE_FACTOR_MIN, w / base));
+      const base = resolveVideoSize(nearest.value, 1);
+      // 系数是像素量（面积）倍数、不是边长倍数：旧 size 字符串按面积比反推
+      const areaRatio = (w * h) / Math.max(1, base.width * base.height);
+      const scaleFactor = Math.min(SCALE_FACTOR_MAX, Math.max(SCALE_FACTOR_MIN, areaRatio));
       return { aspect: nearest.value, scaleFactor: Math.round(scaleFactor * 100) / 100 };
     }
     return { aspect: '16:9', scaleFactor: 1 };

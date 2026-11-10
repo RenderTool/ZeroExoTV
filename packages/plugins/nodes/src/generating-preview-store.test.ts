@@ -7,13 +7,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   clearGeneratingPreview,
+  clearGeneratingProgress,
   generatingPreviewKey,
   setGeneratingPreview,
+  setGeneratingProgress,
   setGeneratingPreviewCanvas,
   useGeneratingPreviewStore,
+  type GeneratingProgress,
 } from './generating-preview-store.js';
 
-function state(): { byNode: Record<string, string>; canvasDocId: string } {
+function state(): { byNode: Record<string, string>; progressByNode: Record<string, GeneratingProgress>; canvasDocId: string } {
   return useGeneratingPreviewStore.getState();
 }
 
@@ -48,5 +51,25 @@ describe('generating-preview-store 文档作用域', () => {
     clearGeneratingPreview('n1', 'main');
     expect(state().byNode[generatingPreviewKey('main', 'n1')]).toBeUndefined();
     expect(state().byNode[generatingPreviewKey('sc-copy', 'n1')]).toBe('b');
+  });
+});
+
+describe('采样进度状态', () => {
+  it('帧步数与阶段进度合并写入，互不覆盖', () => {
+    setGeneratingProgress('n1', { step: 3, totalSteps: 8 });
+    setGeneratingProgress('n1', { phaseLabel: '采样', overallValue: 3, overallMax: 8 });
+    expect(state().progressByNode[generatingPreviewKey('main', 'n1')]).toEqual({
+      step: 3, totalSteps: 8, phaseLabel: '采样', overallValue: 3, overallMax: 8,
+    });
+  });
+
+  it('clear / 切画布都清掉进度', () => {
+    setGeneratingProgress('n1', { step: 1, totalSteps: 8 }, 'main');
+    setGeneratingProgress('n1', { step: 2, totalSteps: 8 }, 'sc-copy');
+    clearGeneratingProgress('n1', 'main');
+    expect(state().progressByNode[generatingPreviewKey('main', 'n1')]).toBeUndefined();
+    expect(state().progressByNode[generatingPreviewKey('sc-copy', 'n1')]?.step).toBe(2);
+    setGeneratingPreviewCanvas('main');
+    expect(Object.keys(state().progressByNode)).toHaveLength(0);
   });
 });

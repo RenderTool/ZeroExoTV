@@ -12,6 +12,7 @@ import {
   probeZeroexoPlugin,
   submitZeroexoJob,
   uploadZeroexoReference,
+  warmZeroexoConnection,
   zeroexoOutputViewUrl,
   LOCAL_VIDEO_MODEL_KEY,
   type ZeroexoJobState,
@@ -25,6 +26,7 @@ import {
   createPreviewClientId,
   DirectorPreviewSocket,
   type DirectorPreviewFrame,
+  type DirectorProgressInfo,
 } from '@/features/canvas-tabs/comfyui-ws-client.js';
 
 /** 伪模型 key：node.data.model 里存这个值即走本机链路（与 dock 下拉共用同一常量） */
@@ -48,8 +50,12 @@ export interface LocalVideoRequest {
   nodeId?: string;
   /** 实时预览帧回调（引擎按步解码，经 /ws 的 minimax_director_preview 推送） */
   onPreview?: (frame: DirectorPreviewFrame) => void;
-  /** 作业提交成功回调（拿到 jobId 后立刻回写节点，供刷新后续接恢复） */
-  onJobSubmitted?: (jobId: string) => void;
+  /** 采样阶段进度回调（/ws 的 minimax_director_progress） */
+  onProgress?: (info: DirectorProgressInfo) => void;
+  /** 提交成功回调（jobId/clientId/base 写进节点，刷新后续接预览与进度） */
+  onJobSubmitted?: (job: { jobId: string; clientId: string; base: string }) => void;
+  /** 刷新续接：跳过提交，直接接回这个作业 */
+  resume?: { jobId: string; clientId: string };
   signal?: AbortSignal;
 }
 
@@ -116,6 +122,9 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
   if (!ep.connected && !(await probeZeroexoPlugin(base))) {
     throw new Error('尚未连接 ComfyUI：先在右上角连接本机 ComfyUI');
   }
+  // 空闲后 keep-alive 会被网关静默关掉，浏览器不重试 POST → 参考图上传会静默失败（参考被丢）。
+  // 先打一个 GET 预热连接；不要只靠 ensureComfyuiMachineInfo（有缓存时它一个请求都不发）。
+  await warmZeroexoConnection(base);
   // 尺寸以节点参数面板的「比例 + 尺寸系数」为准（与导演台同一套换算），没有再退回字符串尺寸
   const aspect = typeof req.params?.aspect === 'string' ? req.params.aspect : '';
   const scale = Number(req.params?.scaleFactor);
@@ -131,65 +140,70 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
   const cfg = Math.max(0, Math.min(20, asNumber(req.params?.cfg, 1)));
   const seed = resolveSeed(req.params?.seed);
 
-  // 参考图：连入的图片全部上传（最多 9 张，支持分镜图/站位锁定图等多参考）
-  const referenceNames: string[] = [];
-  for (const [i, dataUrl] of (req.referenceImages ?? [])
-    .filter((u) => typeof u === 'string' && u.startsWith('data:'))
-    .slice(0, 9)
-    .entries()) {
-    const blob = await (await fetch(dataUrl)).blob();
-    const name = await uploadZeroexoReference(base, blob, `canvas_ref_${Date.now()}_${i}.png`);
-    if (name) referenceNames.push(name);
-  }
-  const referenceImage = referenceNames[0] ?? '';
-
-  const clientId = createPreviewClientId();
+  const clientId = req.resume?.clientId ?? createPreviewClientId();
   // 先连 /ws 再提交：引擎的预览事件按提交时携带的 client_id 定向发送
   let previewSocket: DirectorPreviewSocket | null = null;
-  if (req.onPreview) {
+  if (req.onPreview || req.onProgress) {
     let lastAt = 0;
     previewSocket = new DirectorPreviewSocket(base, clientId, {
       onFrame: (frame) => {
-        if (!frame.image) return;
         const now = Date.now();
         if (now - lastAt < 200) return; // 至多 5fps 回写节点，避免高频重渲染
         lastAt = now;
+        // 无图帧（progress-only）也带 step/段号，不能再丢弃
         req.onPreview?.(frame);
       },
+      onProgress: (info) => req.onProgress?.(info),
     });
     previewSocket.connect();
   }
   try {
-    await ensureComfyuiMachineInfo(base);
-    const useLowVram = shouldUseLowVram();
-    const submitted = await submitZeroexoJob(base, {
-      clientJobId: `zx_canvas_${Date.now()}`,
-      clientId,
-      project: getCurrentCanvasId() ?? 'canvas',
-      episode: 'canvas',
-      params: {
-        prompt: req.prompt,
-        negative_prompt: '',
-        width,
-        height,
-        frames,
-        steps,
-        cfg,
-        seed,
-        frame_rate: 24,
-        guide_frames: 22,
-        use_prev_guide: false,
-        use_low_vram: useLowVram,
-        ...(req.guideId ? { guide_id: req.guideId } : {}),
-        reference_image: referenceImage,
-      },
-    });
+    let jobId = req.resume?.jobId ?? '';
+    let state: ZeroexoJobState = 'queued';
+    if (!req.resume) {
+      // 参考图：连入的图片全部上传（最多 9 张，支持分镜图/站位锁定图等多参考）
+      const referenceNames: string[] = [];
+      for (const [i, dataUrl] of (req.referenceImages ?? [])
+        .filter((u) => typeof u === 'string' && u.startsWith('data:'))
+        .slice(0, 9)
+        .entries()) {
+        const blob = await (await fetch(dataUrl)).blob();
+        const name = await uploadZeroexoReference(base, blob, `canvas_ref_${Date.now()}_${i}.png`);
+        if (name) referenceNames.push(name);
+      }
+      const referenceImage = referenceNames[0] ?? '';
+      await ensureComfyuiMachineInfo(base);
+      const useLowVram = shouldUseLowVram();
+      const submitted = await submitZeroexoJob(base, {
+        clientJobId: `zx_canvas_${Date.now()}`,
+        clientId,
+        project: getCurrentCanvasId() ?? 'canvas',
+        episode: 'canvas',
+        params: {
+          prompt: req.prompt,
+          negative_prompt: '',
+          width,
+          height,
+          frames,
+          steps,
+          cfg,
+          seed,
+          frame_rate: 24,
+          guide_frames: 22,
+          use_prev_guide: false,
+          use_low_vram: useLowVram,
+          ...(req.guideId ? { guide_id: req.guideId } : {}),
+          reference_image: referenceImage,
+        },
+      });
+      jobId = submitted.jobId;
+      state = submitted.state;
+      // 提交成功立刻回调，外部把 jobId/clientId 写到节点数据（刷新后续接用）
+      req.onJobSubmitted?.({ jobId, clientId, base });
+    }
 
-    if (req.nodeId) activeLocalJobs.set(canvasDocNodeKey(req.nodeId, jobCanvasDocId), { base, jobId: submitted.jobId });
-    // 提交成功立刻回调，外部把 jobId 写到节点数据（刷新后续接用）
-    req.onJobSubmitted?.(submitted.jobId);
+    if (req.nodeId) activeLocalJobs.set(canvasDocNodeKey(req.nodeId, jobCanvasDocId), { base, jobId });
 
-    let state: ZeroexoJobState = submitted.state;
     const startAt = Date.now();
     let outputs: Array<{ kind: string; path: string }> = [];
     let guide: LocalVideoResult['guide'];
@@ -198,7 +212,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
         if (req.signal?.aborted) throw new DOMException('aborted', 'AbortError');
         if (Date.now() - startAt > MAX_WAIT_MS) throw new Error('本机生成超时（45 分钟）');
         await sleep(POLL_MS, req.signal);
-        const status = await fetchZeroexoJob(base, submitted.jobId);
+        const status = await fetchZeroexoJob(base, jobId);
         state = status.state;
         outputs = status.outputs ?? [];
         if (status.guide?.id) {
@@ -214,7 +228,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
       }
     } catch (err) {
       // 用户中止 / 轮询异常：尽量把服务端作业也停掉，避免白占队列
-      await cancelZeroexoJob(base, submitted.jobId).catch(() => undefined);
+      await cancelZeroexoJob(base, jobId).catch(() => undefined);
       throw err;
     }
 
@@ -232,7 +246,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
       durationMs: Math.round(seconds * 1000),
       mimeType: blob.type || 'video/mp4',
       bytes: blob.size,
-      generationId: submitted.jobId,
+      generationId: jobId,
       canvasDocId: jobCanvasDocId,
       guide,
     };

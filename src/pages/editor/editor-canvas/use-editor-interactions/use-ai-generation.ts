@@ -62,6 +62,29 @@ export function buildTemplateParams(
   return { params, fallback };
 }
 
+/**
+ * 本机 H3 视频：参数面板把 aspect / scaleFactor / size / steps / seed / seconds 存在
+ * node.data.paramValues，而 buildTemplateParams 只有 1024×1024 兜底。不合并就会恒生成 1:1
+ * 且丢掉步数/种子/时长，这里统一给出提交用的尺寸、时长与参数。
+ */
+export function resolveLocalVideoRequest(
+  nodeData: Record<string, unknown>,
+  baseParams: Record<string, unknown>,
+  fallbackSize?: { width: number; height: number },
+  fallbackSeconds = 5,
+): { size?: string; seconds: number; params: Record<string, unknown> } {
+  const pv = (nodeData.paramValues ?? {}) as Record<string, unknown>;
+  const size = typeof pv.size === 'string' && /^\d+\s*[x×]\s*\d+$/i.test(pv.size)
+    ? pv.size
+    : fallbackSize ? `${fallbackSize.width}x${fallbackSize.height}` : undefined;
+  const seconds = Number(pv.seconds);
+  return {
+    size,
+    seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : fallbackSeconds,
+    params: { ...baseParams, ...pv },
+  };
+}
+
 /** 一键同款，复原完整生成链路 */
 export async function handleReplayGeneration(
   nodeId: string,
@@ -85,17 +108,28 @@ export async function handleReplayGeneration(
   const srcNode = store.getGraph().nodes.find((n: any) => n.id === nodeId) as NodeRecord | undefined;
   const srcData = (srcNode?.data ?? {}) as Record<string, any>;
   const generationId = srcData?.generationId as string | undefined;
-  if (!srcNode || !generationId) {
+  const pv = (srcData.paramValues ?? {}) as Record<string, any>;
+  const isLocalVideo = srcNode?.type === 'video' && Object.keys(pv).length > 0;
+  if (!srcNode || (!generationId && !isLocalVideo)) {
     message.info(t('editor.replayNoRecord'));
     return;
   }
 
   let record: any;
-  try {
-    record = await apiGet(`/ai/generations/${generationId}`);
-  } catch {
-    message.warning(t('editor.replayNoRecord'));
-    return;
+  if (isLocalVideo) {
+    // 本机 H3 无云端生成历史（generationId 是 ComfyUI jobId）：参数快照就在节点 paramValues 里
+    record = { prompt: srcData.prompt ?? '', params: { ...pv, _inputs: [] }, model: srcData.model };
+  } else {
+    try {
+      record = await apiGet(`/ai/generations/${generationId}`);
+    } catch {
+      message.warning(t('editor.replayNoRecord'));
+      return;
+    }
+    if (!record) {
+      message.warning(t('editor.replayNoRecord'));
+      return;
+    }
   }
 
   const params = (record?.params ?? {}) as Record<string, any>;
@@ -141,7 +175,9 @@ export async function handleReplayGeneration(
         ...(record.negativePrompt ? { negativePrompt: record.negativePrompt } : {}),
         status: 'idle',
         ...(modelValue ? { model: modelValue } : {}),
-        ...cleanParams,
+        ...(isLocalVideo
+          ? { model: srcData.model, paramValues: { ...pv } }
+          : cleanParams),
       },
     } as NodeRecord),
   ];

@@ -49,6 +49,7 @@ import {
 } from '@/platform/watcher.js';
 import { ServiceCenterDialog } from '@/features/service-center/service-center-dialog.js';
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
+import { publishCurrentProject } from '@/platform/current-project.js';
 
 type Route =
   | { name: 'canvas'; canvasId?: string }
@@ -171,6 +172,9 @@ export function App(): React.ReactElement {
     const pid = (route.name === 'assets' || route.name === 'openlib') ? null : route.canvasId ?? null;
     activeProjectIdRef.current = pid;
     setWatchTarget(pid);
+    // 把「当前打开的项目」广播到数据根：MCP 的 get_current_project 读它，
+    // Agent 才能先报出「你正在看的是 X」再由用户确认，而不是反问用户操作哪个项目。
+    void publishCurrentProject(pid);
   }, [route]);
 
   // projects.json 外部变化时递增 → CanvasPage remount → useProjects().refresh() 重载项目列表

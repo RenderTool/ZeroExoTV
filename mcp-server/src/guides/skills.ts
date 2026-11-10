@@ -89,7 +89,7 @@ const SUBJECTS = `# 技能：主体库（subjects）
 
 | 类型 | 规格 | 说明 |
 |---|---|---|
-| 角色定妆 | 16:9，左特写 + 右三视图 | 一张图锁脸+服；多形态各一张（stateTag=美艳/恶鬼/定妆） |
+| 角色定妆 | 16:9，画面固定 3 个：正面大头特写 + 正面全身 + 背面全身 | 一张图锁脸+服；多形态各一张（stateTag=美艳/恶鬼/定妆）；不要写「三视图」，模型会自己加侧视图 |
 | 场景 | 4:3，2×2 宫格，空场景 | 每段只投一格；宫格裁切顺序：左上=视角1 右上=视角2 左下=视角3 右下=视角4 |
 | 道具 | 单品居中 | 干净背景，无手无人物 |
 
@@ -164,8 +164,8 @@ const PARAMS = `# 技能：参数与 H3 延续法（params）
 
 \`set_shared_params({ presetId:"h3", params:{…} })\` 的键必须来自 DIRECTOR_PARAM_SCHEMA：
 
-- 画面：\`aspect\`（16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9）、\`scaleFactor\`（0.1–2，基准 864×480），
-  同步落 \`width\`/\`height\`（= aspect × scaleFactor 的 32 对齐结果）。
+- 画面：\`aspect\`（16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9）、\`scaleFactor\`（0.1–2，像素量倍数：×1 = 0.4MP = 864×480），
+  同步落 \`width\`/\`height\`（官方 MP 公式：面积 = 0.4MP×系数×1024²，按比例开方后 32 对齐；×0.5 = 608×352、×1.5 = 1056×608）。
 - 采样：\`steps\`、\`cfg\`、\`seed\`、\`sampler\`、\`scheduler\`、\`shift_video\`、\`shift_audio\`、\`frame_rate\`（恒 24）。
 - 时长：\`total_frames\`（24fps，17k+5 吸附：8s=192 / 10s=243 / 12s=294 / 15s=362）。
 - 引导：\`continuityEnabled\`（主开关）、\`continuityOverlapFrames\`（5/22/39/56，默认 22）、\`continuityMode\`（guide|continue）、\`continuityRedraw\`（0.10）、\`refImageSize\`（match|1024|1280|1536|max）。
@@ -178,12 +178,18 @@ const PARAMS = `# 技能：参数与 H3 延续法（params）
 - 生产值不许模型自定：\`aspect\`、\`scaleFactor\`、\`steps\`、\`cfg\`、\`seed\`、\`continuityOverlapFrames\`、每段时长，逐项确认后才写。
 - 用户说「按默认」时才用：16:9 / 864×480 / steps 8 / cfg 1.0 / seed 0 / 引导 22 帧。
 
+### 图片（QwenImage2.1）与视频不是一套默认
+
+- **图片默认 25 步**（视频才是 8 步），cfg 1.0；用户说「按默认」才用这组。
+- 尺寸：最长边 ≤2048、16 对齐；有参考图可「跟随原图」，否则按比例选 1K/2K 档。**用户必须明确说尺寸或明确同意推荐值**，不要替他拍板。
+- 提示词：有输入图时必须点名「参考图1」（前端已自动加前缀），否则 Qwen 会当文生图重画；角色定妆写死「画面共几个」（正面特写 + 正面全身 + 背面全身，共 3 个画面），不要写「三视图」这类会诱导模型加侧视图的名字。
+
 ## 3. 自检/联调用小参数（用户明确同意后才用）
 
 联调只验链路，不验画质，**越小越快**：
 
 \`\`\`json
-{ "aspect": "16:9", "scaleFactor": 0.5, "width": 432, "height": 240,
+{ "aspect": "16:9", "scaleFactor": 0.5, "width": 608, "height": 352,
   "total_frames": 49, "steps": 1, "cfg": 1.0, "seed": 1,
   "continuityEnabled": false, "continuityOverlapFrames": 22, "frame_rate": 24 }
 \`\`\`

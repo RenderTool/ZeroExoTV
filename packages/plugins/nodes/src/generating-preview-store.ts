@@ -13,9 +13,20 @@ import { create } from 'zustand';
 /** 主画布文档 id（与 app 侧 MAIN_CANVAS_DOC_ID 同值；插件包不反向 import src） */
 export const DEFAULT_CANVAS_DOC_ID = 'main';
 
+/** 采样进度（由 /ws 的 preview/progress 事件写入，不进 node.data） */
+export interface GeneratingProgress {
+  step: number | null;
+  totalSteps: number | null;
+  phaseLabel?: string;
+  overallValue?: number;
+  overallMax?: number;
+}
+
 interface GeneratingPreviewState {
   /** key = `${canvasDocId}:${nodeId}` */
   byNode: Record<string, string>;
+  /** 同键的采样进度 */
+  progressByNode: Record<string, GeneratingProgress>;
   /** 当前编辑器装载的画布文档 id（main / sc…） */
   canvasDocId: string;
 }
@@ -27,14 +38,16 @@ export function generatingPreviewKey(canvasDocId: string, nodeId: string): strin
 
 export const useGeneratingPreviewStore = create<GeneratingPreviewState>(() => ({
   byNode: {},
+  progressByNode: {},
   canvasDocId: DEFAULT_CANVAS_DOC_ID,
 }));
 
 /** 切换画布文档：更新当前文档并清空旧文档的预览帧（不跨文档复显） */
 export function setGeneratingPreviewCanvas(canvasDocId: string): void {
   useGeneratingPreviewStore.setState((s) => {
-    if (s.canvasDocId === canvasDocId && Object.keys(s.byNode).length === 0) return s;
-    return { byNode: {}, canvasDocId: canvasDocId || DEFAULT_CANVAS_DOC_ID };
+    if (s.canvasDocId === canvasDocId && Object.keys(s.byNode).length === 0
+      && Object.keys(s.progressByNode).length === 0) return s;
+    return { byNode: {}, progressByNode: {}, canvasDocId: canvasDocId || DEFAULT_CANVAS_DOC_ID };
   });
 }
 
@@ -52,5 +65,29 @@ export function clearGeneratingPreview(nodeId: string, canvasDocId?: string): vo
     const next = { ...s.byNode };
     delete next[key];
     return { byNode: next };
+  });
+}
+
+/** 写入采样进度（值未变时不触发重渲染） */
+export function setGeneratingProgress(nodeId: string, patch: Partial<GeneratingProgress>, canvasDocId?: string): void {
+  useGeneratingPreviewStore.setState((s) => {
+    const key = generatingPreviewKey(canvasDocId ?? s.canvasDocId, nodeId);
+    const prev = s.progressByNode[key];
+    // 帧事件带 step、progress 事件带 phase/总进度，两者合并而不是互相覆盖
+    const next: GeneratingProgress = { step: null, totalSteps: null, ...prev, ...patch };
+    if (prev && prev.step === next.step && prev.totalSteps === next.totalSteps
+      && prev.phaseLabel === next.phaseLabel && prev.overallValue === next.overallValue
+      && prev.overallMax === next.overallMax) return s;
+    return { progressByNode: { ...s.progressByNode, [key]: next } };
+  });
+}
+
+export function clearGeneratingProgress(nodeId: string, canvasDocId?: string): void {
+  useGeneratingPreviewStore.setState((s) => {
+    const key = generatingPreviewKey(canvasDocId ?? s.canvasDocId, nodeId);
+    if (!(key in s.progressByNode)) return s;
+    const next = { ...s.progressByNode };
+    delete next[key];
+    return { progressByNode: next };
   });
 }

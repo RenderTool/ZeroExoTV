@@ -15,7 +15,7 @@
 import {
   Settings2,
   Pencil, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
-  Heading1, History,
+  Heading1, History, Download,
 } from 'lucide-react';
 import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
 import { AddNodeCommand, AddEdgeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
@@ -313,6 +313,27 @@ function createDetailTool(): ToolDefinition {
 }
 
 /**
+ * 胶囊常驻「下载」（2026-11-10 用户拍板）
+ *
+ * 图片 / 视频 / 音频节点都放这一个工具，位置与图标完全一致，不依赖 hover 才出现。
+ * 具体下载（媒体二进制 + 引导打包）由 app 层 `downloadNodeAsFile` 执行：
+ * 插件包不反向 import src，所以这里只发事件。
+ */
+function createDownloadTool(): ToolDefinition {
+  return {
+    id: 'download',
+    label: '',
+    title: '',
+    icon: <Download size={14} />,
+    group: 'basic',
+    visible: (node: NodeRecord) => hasMediaContent(node.data as Record<string, unknown> | null | undefined),
+    run: (node: NodeRecord, ctx: ToolContext) => {
+      ctx.eventBus.emit('node:download', { node });
+    },
+  };
+}
+
+/**
  * 图片节点工具(完整工具集)
  *
  * 工具顺序:
@@ -325,6 +346,8 @@ function createDetailTool(): ToolDefinition {
 export function getImageTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: true }),
+    // 常驻下载（2026-11-10 用户拍板）：图片/视频/音频同一位置、同一图标，不依赖 hover
+    createDownloadTool(),
     // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
     createReplayTool(),
     ...buildImageEditTools(),
@@ -335,6 +358,7 @@ export function getImageTools(): ToolDefinition[] {
 export function getVideoTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: true }),
+    createDownloadTool(),
     // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
     createReplayTool(),
     // 截帧:截取视频首帧/尾帧/当前帧,并在画布上生成新图片节点
@@ -674,6 +698,7 @@ async function captureAndCreateImageNode(
 export function getAudioTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: true }),
+    createDownloadTool(),
     // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
     createReplayTool(),
   ];

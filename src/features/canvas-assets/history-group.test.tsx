@@ -226,7 +226,7 @@ describe('空态（两分类各自独立文案，「还没有生成记录」语�
     const store = mkStore([]);
     render(<HistoryGroup store={store} theme={theme} />);
     expect(screen.getByText('还没有图片生成记录，在画布上调用 API 生成图片后自动收录')).toBeTruthy();
-    fireEvent.click(screen.getByText('视频生成'));
+    fireEvent.click(screen.getByRole('button', { name: /^视频/ }));
     expect(screen.getByText('还没有视频生成记录，在画布上调用 API 生成视频后自动收录')).toBeTruthy();
   });
 
@@ -383,7 +383,7 @@ describe('历史来源 Tab（2026-11-07：从画布生成 / 从导演台）', ()
 
     fireEvent.click(container.querySelector('[data-scope="director"]') as Element);
     // 2026-11-08：导演台只有视频 → 不渲染类型分类，直接列出该来源全部
-    expect(screen.queryByText('图片产出')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^图片/ })).toBeNull();
     expect(screen.queryByText('全部')).toBeNull();
     expect(container.querySelector('[data-history-card="h-director"]')).toBeTruthy();
     expect(container.querySelector('[data-history-card="h-legacy"]')).toBeTruthy();
@@ -413,7 +413,7 @@ describe('历史「全部」与导演台免分类（2026-11-08）', () => {
     expect(container.querySelector('[data-history-card="all-c-video"]')).toBeTruthy();
     expect(container.querySelector('[data-history-card="all-d-video"]')).toBeNull();
 
-    fireEvent.click(screen.getByText(/图片产出/));
+    fireEvent.click(screen.getByRole('button', { name: /^图片/ }));
     expect(container.querySelector('[data-history-card="all-c-img"]')).toBeTruthy();
     expect(container.querySelector('[data-history-card="all-c-video"]')).toBeNull();
   });
@@ -470,7 +470,7 @@ describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', 
     expect(src).toContain("historySource === 'canvas' ? () => handleLocate(asset) : undefined");
   });
 
-  it('图片产出即使带 generation 元数据也不套用视频引导角标/下载菜单', () => {
+  it('图片分类即使带 generation 元数据也不套用视频引导角标/下载菜单', () => {
     const img = mkAsset({ id: 'img-like-guide' });
     const { container } = render(<HistoryGroup store={mkStore([img])} theme={theme} />);
     expect(container.querySelector('[data-guide-download]')).toBeNull();

@@ -12,7 +12,7 @@
 | MCP | http://localhost:8787/mcp | `cd mcp-server; $env:ZEROEXO_MCP_TOKEN='zxp_e2e_smoke_token'; node dist/index.js --http` |
 
 数据根 `D:\Test`。项目：
-- `z6GrKXXM6HxK`（ZX_TEST_E2E）：剧本 1 集/11 场（HTML 块，标题已剥离）、主体 16（全有图，图只在 CAS+主体库，不进素材库）、导演台 35 段（官方四段式提示词、references 带 `@PictureN`、32 键参数：16:9 / scaleFactor 0.5（432×240）/ 49 帧 / steps 1 / seed 1）。
+- `z6GrKXXM6HxK`（ZX_TEST_E2E）：剧本 1 集/11 场（HTML 块，标题已剥离）、主体 16（全有图，图只在 CAS+主体库，不进素材库）、导演台 35 段（官方四段式提示词、references 带 `@PictureN`、32 键参数：16:9 / scaleFactor 0.5（当时显示 432×240；现按官方 MP 表为 608×352）/ 49 帧 / steps 1 / seed 1）。
 - `B52u16jvXDD1C04ZDn1GD`（test）：旧数据，勿动。
 
 构建：`cd mcp-server; node node_modules/typescript/bin/tsc -p tsconfig.json`（**不要用 pnpm build**，会触发 install 失败）。

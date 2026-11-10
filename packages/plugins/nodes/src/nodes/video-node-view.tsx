@@ -89,6 +89,7 @@ export function VideoNodeView({
   /** 生成中实时预览帧（app 侧按 /ws minimax_director_preview 写入，不进 node.data/撤销栈）；
    *  键带画布文档 id，副本与主画布同 node id 时不会串帧 */
   const generatingPreview = useGeneratingPreviewStore((s) => s.byNode[generatingPreviewKey(s.canvasDocId, node.id)]);
+  const generatingProgress = useGeneratingPreviewStore((s) => s.progressByNode[generatingPreviewKey(s.canvasDocId, node.id)]);
   const { t } = useTranslation();
   const { theme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -558,6 +559,7 @@ export function VideoNodeView({
           taskLabel={(data.taskLabel as string) ?? undefined}
           skeleton="media" skeletonKind="video"
           previewImage={status === 'loading' ? generatingPreview : undefined}
+          progress={status === 'loading' ? generatingProgress : undefined}
         >
           {renderContent()}
         </AIStateView>
@@ -608,6 +610,7 @@ export function VideoNodeView({
         skeleton="media" skeletonKind="video"
         // 画布视频节点：生成中把 /ws 实时帧铺在节点内容区（此前只在 contentOnly 分支传了 previewImage）
         previewImage={status === 'loading' ? generatingPreview : undefined}
+        progress={status === 'loading' ? generatingProgress : undefined}
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >

@@ -7,6 +7,9 @@
 export const QWEN_MAX_EDGE = 2048;
 export const QWEN_MAX_PIXELS = QWEN_MAX_EDGE * QWEN_MAX_EDGE;
 
+/** 默认采样步数（2026-11-10 用户拍板：图片 25 步，视频仍是 8 步，两者不要混用） */
+export const QWEN_DEFAULT_STEPS = 25;
+
 /** 夹取到 64..2048，并按 16 对齐（ComfyUI latent 步长 16） */
 export function clampQwenEdge(value: number, fallback = 1024): number {
   const n = Number.isFinite(value) ? value : fallback;

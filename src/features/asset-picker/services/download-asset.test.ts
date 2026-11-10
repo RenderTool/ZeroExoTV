@@ -7,10 +7,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mediaMock = vi.hoisted(() => ({ getMediaBlob: vi.fn() }));
+const guideMock = vi.hoisted(() => ({ fetchGuideBlob: vi.fn() }));
 vi.mock('@/platform/media.js', () => ({ getMediaBlob: mediaMock.getMediaBlob }));
 vi.mock('@zeroexo/plugin-nodes', () => ({ resolveContentUrl: vi.fn(async () => '') }));
+vi.mock('@/shared/utils/guide-file.js', () => ({ fetchGuideBlob: guideMock.fetchGuideBlob }));
 
-import { downloadAsset } from './download-asset.js';
+import { downloadAsset, downloadAssetWithGuide, downloadFilesAsZip } from './download-asset.js';
 import type { Asset } from '../index.js';
 
 function videoAsset(overrides: Partial<Asset> = {}, data: Record<string, unknown> = {}): Asset {
@@ -86,5 +88,36 @@ describe('downloadAsset', () => {
     const ok = await downloadAsset(asset);
     expect(ok).toBe(true);
     expect(clicked[0]?.download).toBe('提示词.txt');
+  });
+});
+
+describe('打包下载（视频 + 引导只触发一次浏览器下载）', () => {
+  beforeEach(() => guideMock.fetchGuideBlob.mockReset());
+
+  it('引导可取回 → 打成 zip，返回 ok + guideOk', async () => {
+    mediaMock.getMediaBlob.mockResolvedValue(new Blob(['video-bytes'], { type: 'video/mp4' }));
+    guideMock.fetchGuideBlob.mockResolvedValue(new Blob(['guide-bytes']));
+    const res = await downloadAssetWithGuide(videoAsset(), { id: 'gd_abc123' });
+    expect(res).toEqual({ ok: true, guideOk: true });
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]?.download).toBe('片段 1.zip');
+  });
+
+  it('引导取不到 → 仍下载视频单文件，不让视频丢失', async () => {
+    mediaMock.getMediaBlob.mockResolvedValue(new Blob(['video-bytes'], { type: 'video/mp4' }));
+    guideMock.fetchGuideBlob.mockResolvedValue(null);
+    const res = await downloadAssetWithGuide(videoAsset(), { id: 'gd_abc123' });
+    expect(res).toEqual({ ok: true, guideOk: false });
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]?.download).toBe('片段 1.mp4');
+  });
+
+  it('downloadFilesAsZip 同名文件自动加序号，不互相覆盖', async () => {
+    const n = await downloadFilesAsZip([
+      { blob: new Blob(['a']), filename: 'a.mp4' },
+      { blob: new Blob(['b']), filename: 'a.mp4' },
+    ], 'bundle');
+    expect(n).toBe(2);
+    expect(clicked[0]?.download).toBe('bundle.zip');
   });
 });

@@ -846,6 +846,7 @@
     "generateImage": "Gen Image",
     "retry": "Retry",
     "generating": "Generating",
+    "sampling": "Sampling {{step}} / {{total}}",
     "cancelGeneration": "Cancel generation",
     "genLoader": {
       "image": {
@@ -1154,8 +1155,8 @@
     "filterMaterial": "Materials",
     "filterHistory": "History",
     "filterScriptMeta": "Script info",
-    "historyTabImage": "Image Outputs",
-    "historyTabVideo": "Video Generations",
+    "historyTabImage": "Image",
+    "historyTabVideo": "Video",
     "historyTabAll": "All",
     "historySourceCanvas": "From Canvas",
     "historySourceDirector": "From Director",
@@ -2574,7 +2575,7 @@
     "mediaVideo": "Video",
     "mediaAudio": "Audio",
     "basePrompt": "Full prompt",
-    "basePromptPlaceholder": "Complete three-view / multi-angle reference prompt (template applied by kind, then AI parameterizes)",
+    "basePromptPlaceholder": "Complete makeup/reference prompt (view count is fixed by the template; apply a template by kind, then let AI fill the parameters)",
     "recognition": "LLM recognition terms",
     "deleteSubject": "Delete subject",
     "newState": "New state",

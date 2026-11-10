@@ -138,11 +138,11 @@ describe('clampScaleFactor（0.1–2 夹取，非法回退 1）', () => {
     expect(clampScaleFactor('')).toBe(1);        // 空串回退默认
   });
 
-  it('历史枚举值自然兼容；换算实时跟随（×0.5 → 432×240，×1.5 → 1296×720）', () => {
+  it('历史枚举值自然兼容；换算实时跟随（×0.5 → 608×352，×1.5 → 1056×608）', () => {
     expect(clampScaleFactor(0.5)).toBe(0.5);
     expect(clampScaleFactor(1.25)).toBe(1.25);
-    expect(resolveVideoSize('16:9', 0.5)).toEqual({ width: 432, height: 240 });
-    expect(resolveVideoSize('16:9', 1.5)).toEqual({ width: 1296, height: 720 });
+    expect(resolveVideoSize('16:9', 0.5)).toEqual({ width: 608, height: 352 });
+    expect(resolveVideoSize('16:9', 1.5)).toEqual({ width: 1056, height: 608 });
     // 超限输入也先夹取再换算：×3 → 按 ×2 算
     expect(resolveVideoSize('16:9', 3)).toEqual(resolveVideoSize('16:9', 2));
   });
@@ -160,25 +160,29 @@ describe('视频尺寸换算（比例 × 系数 → 宽高，32 对齐）', () =
     expect(sq.width % 32).toBe(0);
   });
 
-  it('×1 各比例均 32 对齐且 ≥32；缩放档为基准宽高的精确线性缩放（16:9 命中对照表）', () => {
-    // 基准（×1）= 面积 864×480 推出的宽高取整到 32 的倍数，恒 32 对齐
-    for (const a of DIRECTOR_ASPECT_OPTIONS) {
-      const { width, height } = resolveVideoSize(a, 1);
-      expect(width % 32).toBe(0);
-      expect(height % 32).toBe(0);
-      expect(width).toBeGreaterThanOrEqual(32);
-      expect(height).toBeGreaterThanOrEqual(32);
-    }
-    // 16:9 缩放档精确命中对照表（864/480 × f 取整）
-    expect(resolveVideoSize('16:9', 0.5)).toEqual({ width: 432, height: 240 });
-    expect(resolveVideoSize('16:9', 1.5)).toEqual({ width: 1296, height: 720 });
-    // 所有缩放结果都 ≥32（系数最小 0.1 时 864×0.1≈86 仍 >32）
+  it('各比例 × 各系数恒 32 对齐且 ≥32（缩放档也验，修前只验了 ×1）', () => {
     for (const a of DIRECTOR_ASPECT_OPTIONS) {
       for (const f of DIRECTOR_SCALE_OPTIONS) {
         const { width, height } = resolveVideoSize(a, f);
+        expect(width % 32).toBe(0);
+        expect(height % 32).toBe(0);
         expect(width).toBeGreaterThanOrEqual(32);
         expect(height).toBeGreaterThanOrEqual(32);
       }
+    }
+    const min = resolveVideoSize('16:9', 0.1);
+    expect(min.width % 32).toBe(0);
+    expect(min.height % 32).toBe(0);
+  });
+
+  it('官方 16:9 Size Settings Reference：系数 = MP/0.4 逐行命中，×1 = 0.4MP = 864×480', () => {
+    // 0.9MP 以上超出系数上限 2（=0.8MP），此处覆盖官方表在合法区间内的全部行
+    const rows: Array<[number, number, number]> = [
+      [0.2, 608, 352], [0.3, 736, 416], [0.4, 864, 480], [0.5, 960, 544],
+      [0.6, 1056, 608], [0.7, 1152, 640], [0.8, 1216, 672],
+    ];
+    for (const [mp, w, h] of rows) {
+      expect(resolveVideoSize('16:9', mp / 0.4)).toEqual({ width: w, height: h });
     }
   });
 

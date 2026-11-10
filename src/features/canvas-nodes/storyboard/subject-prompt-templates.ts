@@ -2,7 +2,9 @@
  * subject-prompt-templates - 基础形态(初始状态)提示词模板（Plan#71 T2）
  *
  * 来源：后端 `zeroexo_backend/.../skills/storyboard_assistant/references/asset-prompts.md`
- * （模板A 人形 Lineup / 模板B 巨兽 / 模板C 场景 / 模板D 道具）—— 保持一致，禁随意改写措辞。
+ * （模板A 人形 / 模板B 巨兽 / 模板C 场景 / 模板D 道具）。
+ * 2026-11-10 修订：画面数量必须写死（共几个画面、每个是什么），禁止用「三视图 / Lineup Sheet」
+ * 这类名字诱导模型自己加一个侧面视图。
  * 用途：手动建树时给基础状态（states[0]）的 fullPrompt 一个「模板参数化」起点；
  * 有完整描述(roleDesc)才填充角色描述槽；无描述则返回模板骨架（占位符），提示后续由 AI/用户完善。
  * 色卡/质量标签等按 kind 内置（项目色卡在使用时由生成层锁定）。
@@ -13,10 +15,10 @@ function descSlot(desc: string, placeholder: string): string {
   return desc ? desc : placeholder;
 }
 
-/** 模板A：人形角色 Cinematic Character Lineup Sheet */
-function characterLineup(desc: string): string {
-  return `专业电影级角色定妆参考图（Cinematic Character Lineup Sheet）。
-画面布局：16:9 横向宽银幕构图。左侧 正面大头特写，右侧为三视图（正面、背面）。
+/** 模板A：人形角色 定妆参考图（正面特写 + 正背全身，画面数量固定） */
+function characterFrontBack(desc: string): string {
+  return `专业电影级角色定妆参考图（正面特写 + 正背全身）。
+画面布局：16:9 横向宽银幕构图。画面中固定 3 个画面，数量不得增减：① 左侧 1 个正面大头特写；② 右侧 1 个正面全身；③ 右侧 1 个背面全身。禁止侧面视图、其它机位、第四个人物、多角度拼版。
 
 角色描述：${descSlot(desc, '[英文，精确到年龄/朝代/民族/职业/身材/脸型/发型/服装/标志性特征]')}
 角色一致性：严格锁定同一真人演员。
@@ -24,7 +26,7 @@ function characterLineup(desc: string): string {
 
 左侧特写：构图 微侧15°，中性自然表情，真实眼神；质感 极致写实皮肤，强调骨相与真实肤质；镜头 85mm 人像镜头，浅景深，电影级布光。
 
-右侧三视图：身高对齐，底部平齐，真实演员试装照风格；服装 高级电影戏服质感，真实布料纹理、自然褶皱、缝线细节、哑光材质。
+右侧全身：只有正面全身与背面全身这 2 个视图；身高对齐，底部平齐，真实演员试装照风格；服装 高级电影戏服质感，真实布料纹理、自然褶皱、缝线细节、哑光材质。
 
 灯光：自然主义布光，柔和侧光塑造面部结构，配合暖调补光。
 色彩：自然暖调，暖黄基底，真实肤色，还原故事氛围生活气息。
@@ -98,13 +100,13 @@ export function buildBaseStatePrompt(
   const desc = (opts.roleDesc ?? '').trim() || (opts.name ?? '').trim();
   switch (kind) {
     case 'character':
-      return characterLineup(desc);
+      return characterFrontBack(desc);
     case 'prop':
       return propDetail(desc);
     case 'scene':
       return environmentPanorama(desc);
     default:
-      return characterLineup(desc);
+      return characterFrontBack(desc);
   }
 }
 

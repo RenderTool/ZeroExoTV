@@ -348,8 +348,13 @@ export const DIRECTOR_SCALE_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5] as const;
 const ASPECT_RATIO: Record<DirectorAspect, number> = {
   '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:3': 4 / 3, '3:4': 3 / 4, '21:9': 21 / 9,
 };
-/** 基准像素量 = 节点默认 864×480（nodes/director_common.py L61-62） */
-const BASE_PIXELS = 864 * 480;
+/**
+ * 官方 Size Settings Reference：1 MP = 1024² 像素，按面积开方求宽高再就近对齐 ×32。
+ * ×1 对应 0.4MP（16:9 → 864×480，即节点默认 nodes/director_common.py L61-62）；
+ * 系数语义 = 像素量倍数（×0.5 → 0.2MP、×1.5 → 0.6MP），不是宽高倍数。
+ */
+const PIXELS_PER_MEGAPIXEL = 1024 * 1024;
+const BASE_MEGAPIXELS = 0.4;
 const round32 = (n: number): number => Math.max(32, Math.round(n / 32) * 32);
 
 /** 尺寸系数范围（2026-11-04 约定：自由数字输入，不再固定档位） */
@@ -368,19 +373,21 @@ export function clampScaleFactor(n: unknown): number {
 }
 
 /**
- * 宽度/高度 = f(比例, 系数)：基准（×1）宽高 32 对齐取整后**线性缩放**（2026-11-04 对照表约定：
- * ×0.5 → 432×240 = 864×0.5 / 480×0.5；×1.5 → 1296×720 = 864×1.5 / 480×1.5）。
- * 系数读取时经 clampScaleFactor 夹取（×3 按 ×2 算）。所有结果 32 对齐且 ≥32。
+ * 宽度/高度 = f(比例, 尺寸系数)：官方 Size Settings Reference 换算（2026-11-10 对齐）。
+ * 面积 = 0.4MP × 系数 × 1024² → w = √(面积 × r)、h = √(面积 / r) → 各自就近对齐 ×32。
+ * 16:9 命中官方表：×0.5 → 608×352(0.2MP)、×1 → 864×480(0.4MP)、×1.25 → 960×544(0.5MP)、
+ * ×1.5 → 1056×608(0.6MP)、×2 → 1216×672(0.8MP)。
+ * 系数经 clampScaleFactor 夹取（×3 按 ×2 算）；所有结果恒 32 对齐且 ≥32
+ * （MiniMax H3 VAE÷16 再 2×2 patch，非 32 倍数会被节点拒收）。
  */
 export function resolveVideoSize(aspect: string, scaleFactor: number): { width: number; height: number } {
   const r = ASPECT_RATIO[aspect as DirectorAspect] ?? 16 / 9;
   const f = clampScaleFactor(scaleFactor);
-  const w0 = Math.sqrt(BASE_PIXELS * r);
-  // 基准（×1）取整到 32 的倍数（16:9 → 864×480），线性缩放后普通取整（2026-11-04 对照表约定：
-  // ×0.5 → 432×240、×1.5 → 1296×720 精确命中；×1 各比例恒 32 对齐，缩放档为宽高精确缩放结果）。
-  const bw = round32(w0);
-  const bh = round32(w0 / r);
-  return { width: Math.max(32, Math.round(bw * f)), height: Math.max(32, Math.round(bh * f)) };
+  const total = BASE_MEGAPIXELS * f * PIXELS_PER_MEGAPIXEL;
+  return {
+    width: round32(Math.sqrt(total * r)),
+    height: round32(Math.sqrt(total / r)),
+  };
 }
 
 /**

@@ -7,6 +7,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { paths } from "../config.js";
+import { readCurrentProject } from "../store/current-project.js";
 
 interface ProjectMeta {
   id: string;
@@ -104,6 +105,13 @@ export async function buildStateOverview(root: string, limit = 10): Promise<stri
   if (metas.length === 0) {
     return `# 当前数据状态（自动读取）\n\n数据根 ${root} 下还没有项目。先 create_project，再走技能流程（zeroexo://skills/pipeline）。`;
   }
+  // 当前打开项目置顶提示：用户多半已经开在网页里，Agent 先报出来再问「是否操作它」
+  const current = await readCurrentProject(root).catch(() => null);
+  const currentLine = current
+    ? current.source === "open"
+      ? `\n当前打开（用户在网页里正开着）：${current.title || current.projectId}（${current.projectId}）——动手前先确认是不是操作它。`
+      : `\n最近修改的项目：${current.title || current.projectId}（${current.projectId}）——没有打开记录，先确认是不是操作它。`
+    : "";
   const lines: OverviewLine[] = [];
   for (const meta of metas.slice(0, limit)) {
     const line = await projectLine(meta, root);
@@ -121,5 +129,5 @@ export async function buildStateOverview(root: string, limit = 10): Promise<stri
     })
     .join("\n");
   const more = metas.length > lines.length ? `\n（另有 ${metas.length - lines.length} 个项目未列出，list_projects 查全量）` : "";
-  return `# 当前数据状态（自动读取，数据根 ${root}）\n\n${body}${more}\n\n读 zeroexo://skills/pipeline 按流程推进；改完数据跑 validate_project 自检。`;
+  return `# 当前数据状态（自动读取，数据根 ${root}）${currentLine}\n\n${body}${more}\n\n读 zeroexo://skills/pipeline 按流程推进；改完数据跑 validate_project 自检。`;
 }

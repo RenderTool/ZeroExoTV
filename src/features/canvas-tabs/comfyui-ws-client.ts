@@ -49,6 +49,20 @@ interface DirectorPreviewSocketHandlers {
   onProgress?: (info: DirectorProgressInfo) => void;
 }
 
+/** 标准 ComfyUI 采样进度（文本 `progress` 事件，任何 KSampler 都会发） */
+export interface ComfyuiStepProgress {
+  /** 已完成步数（ComfyUI 的 value 从 1 开始） */
+  step: number;
+  totalSteps: number;
+}
+
+export interface ComfyuiPreviewSocketHandlers {
+  /** 采样步数（文本 progress 事件） */
+  onStep?: (progress: ComfyuiStepProgress) => void;
+  /** 采样预览（二进制 PREVIEW_IMAGE 帧，dataURL） */
+  onPreviewImage?: (dataUrl: string) => void;
+}
+
 function toWsUrl(baseUrl: string, clientId: string): string {
   const url = new URL(baseUrl);
   const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -111,8 +125,21 @@ export class DirectorPreviewSocket {
     }, 2000);
   }
 
+  /** 二进制帧（标准 ComfyUI latent 预览）：默认忽略，子类按需解析 */
+  protected onBinary(_raw: ArrayBuffer): void {
+    /* 导演台只吃 minimax_director_* 事件 */
+  }
+
+  /** 非导演台文本事件：默认忽略，子类按需解析 */
+  protected onTextMessage(_msg: { type?: unknown; data?: unknown }): void {
+    /* 导演台只吃 minimax_director_* 事件 */
+  }
+
   private handleMessage(raw: unknown): void {
-    if (typeof raw !== 'string') return; // 二进制帧（标准 latent 预览）忽略
+    if (typeof raw !== 'string') {
+      this.onBinary(raw as ArrayBuffer);
+      return;
+    }
     let msg: { type?: unknown; data?: unknown };
     try {
       msg = JSON.parse(raw) as { type?: unknown; data?: unknown };
@@ -155,6 +182,8 @@ export class DirectorPreviewSocket {
         totalSteps: null,
         segmentIndex: info.segment,
       });
+    } else {
+      this.onTextMessage(msg);
     }
   }
 
@@ -199,4 +228,65 @@ export class DirectorPreviewSocket {
     this.ws?.close();
     this.ws = null;
   }
+}
+
+/**
+ * ComfyuiPreviewSocket — 标准 ComfyUI 采样预览 + 步进（图片等非导演台作业用）。
+ *
+ * 与导演台 socket 共用同一套连接生命周期（同 clientId / 断线重连 / close），
+ * 只解析 ComfyUI 原生事件：
+ * - 文本 `progress`：{ value, max } → step/totalSteps（任何 KSampler 都会发）；
+ * - 二进制 `PREVIEW_IMAGE`：4 字节事件类型 + 4 字节图片格式（1=jpeg 2=png）+ 图像字节。
+ * 注意：`--preview-method none` 时没有二进制预览帧，但步数 progress 不受影响。
+ */
+export class ComfyuiPreviewSocket extends DirectorPreviewSocket {
+  private lastPreviewAt = 0;
+
+  constructor(
+    baseUrl: string,
+    clientId: string,
+    private readonly previewHandlers: ComfyuiPreviewSocketHandlers,
+  ) {
+    // 借用连接与重连；导演台帧通道不用，onFrame 给空实现
+    super(baseUrl, clientId, { onFrame: () => undefined });
+  }
+
+  protected override onTextMessage(msg: { type?: unknown; data?: unknown }): void {
+    if (msg.type !== 'progress') return;
+    const d = (msg.data ?? {}) as Record<string, unknown>;
+    const value = typeof d.value === 'number' ? d.value : null;
+    const max = typeof d.max === 'number' ? d.max : null;
+    if (value === null || max === null || max <= 0) return;
+    this.previewHandlers.onStep?.({ step: Math.min(value, max), totalSteps: max });
+  }
+
+  protected override onBinary(raw: ArrayBuffer): void {
+    if (!this.previewHandlers.onPreviewImage) return;
+    const dataUrl = decodePreviewFrame(raw);
+    if (!dataUrl) return;
+    // 预览帧可能每步推一张：最多 10fps 回写，避免高频 setState
+    const now = Date.now();
+    if (now - this.lastPreviewAt < 100) return;
+    this.lastPreviewAt = now;
+    this.previewHandlers.onPreviewImage(dataUrl);
+  }
+}
+
+/** ComfyUI BinaryEventTypes：1=PREVIEW_IMAGE；图片格式 1=JPEG 2=PNG */
+function decodePreviewFrame(raw: ArrayBuffer): string | null {
+  if (!(raw instanceof ArrayBuffer) || raw.byteLength <= 8) return null;
+  const view = new DataView(raw);
+  if (view.getUint32(0) !== 1) return null;
+  const imageType = view.getUint32(4);
+  const mime = imageType === 2 ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${bytesToBase64(new Uint8Array(raw, 8))}`;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }

@@ -10,7 +10,7 @@
  *
  * 结构（2026-11-07 用户指令：来源 Tab）：
  *   第一层「从画布生成 / 从导演台」来源胶囊（与抽屉素材「全局/本项目」同款 CapsuleTabs）；
- *   第二层「图片产出 / 视频生成」两个子分类（CategoryChips）+ 网格卡片 + 分页（>50）。
+ *   第二层「图片 / 视频」两个子分类（CategoryChips）+ 网格卡片 + 分页（>50）。
  *   来源由 data.originSource 决定（存量记录按 provider/标题兜底，见 getHistorySource）。
  * 卡片：缩略图懒加载（IntersectionObserver，进入视口才解析 blob URL）+
  *       相对时间（hover title 显示绝对时间）+ 尺寸/时长 + hover 操作（定位/加入资产库/下载）。
@@ -27,6 +27,7 @@ import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { usePreviewImage, nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { downloadAssetsAsZip } from '@/features/asset-picker/services/download-asset.js';
+import { deleteAssetsWithUndo } from '@/features/asset-library/delete-with-undo.jsx';
 import { assetMayHaveGuide } from '@/features/asset-picker/services/guide-resolve.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 import { MultiSelectCheckbox } from '@/features/asset-library/components/multi-select-checkbox.js';
@@ -396,10 +397,10 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
   onFocusNode?: (nodeId: string) => void;
 }): React.ReactElement {
   const { t } = useTranslation();
-  const { message: antdMessage } = App.useApp();
+  const { message: antdMessage, modal: antdModal } = App.useApp();
   /** 第一层：来源 Tab（从画布生成 / 从导演台） */
   const [historySource, setHistorySourceState] = useState<HistorySource>(readInitialHistorySource);
-  /** 第二层：类型 chips（图片产出 / 视频生成） */
+  /** 第二层：类型 chips（图片 / 视频） */
   const [historyKind, setHistoryKind] = useState<HistoryKind>('image');
   const [page, setPage] = useState(1);
   /** 历史多选（2026-11-07 用户指令：导出只能作用于选中的项目，且目标由用户选择） */
@@ -441,10 +442,33 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
     setSelectedIds(allSelected ? new Set() : new Set(items.map((a) => a.id)));
   };
 
+  const batchDelete = (): void => {
+    if (selectedAssets.length === 0) return;
+    antdModal.confirm({
+      title: t('assetLibrary.batchDeleteTitle', '删除选中的历史产出？'),
+      content: t('assetLibrary.batchDeleteBody', '删除后可在提示条中撤销；素材文件不会立即从磁盘移除。'),
+      okText: t('common.delete', '删除'),
+      okType: 'danger',
+      cancelText: t('common.cancel', '取消'),
+      centered: true,
+      onOk: async () => {
+        await deleteAssetsWithUndo({
+          assets: selectedAssets,
+          projectId,
+          message: antdMessage,
+          t,
+          onRestored: () => { void store.refreshAssets(); },
+        });
+        await store.refreshAssets();
+        exitSelect();
+      },
+    });
+  };
+
   const kindChips = [
     { key: 'all', label: t('assetLibrary.historyTabAll', { defaultValue: '全部' }), count: sourceCounts[historySource].total },
-    { key: 'image', label: t('assetLibrary.historyTabImage', { defaultValue: '图片产出' }), count: sourceCounts[historySource].image },
-    { key: 'video', label: t('assetLibrary.historyTabVideo', { defaultValue: '视频生成' }), count: sourceCounts[historySource].video },
+    { key: 'image', label: t('assetLibrary.historyTabImage', { defaultValue: '图片' }), count: sourceCounts[historySource].image },
+    { key: 'video', label: t('assetLibrary.historyTabVideo', { defaultValue: '视频' }), count: sourceCounts[historySource].video },
   ];
 
   const handleLocate = (asset: Asset): void => {
@@ -554,6 +578,15 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
                 {t('assetLibrary.addToScope', { defaultValue: '加入资产库' })}
               </Button>
             </Dropdown>
+            <Button
+              size="small"
+              danger
+              data-history-batch-delete
+              disabled={selectedAssets.length === 0}
+              onClick={batchDelete}
+            >
+              {t('common.delete', '删除')}
+            </Button>
             <Button size="small" onClick={exitSelect}>{t('common.batchCancel', '取消')}</Button>
           </span>
         </ToolbarRow>

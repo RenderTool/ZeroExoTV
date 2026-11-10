@@ -157,6 +157,19 @@ export function saveComfyuiEndpoint(prefs: ComfyuiEndpointPrefs): void {
 
 export type EndpointBackend = 'direct' | 'openai' | 'zeroexo';
 
+/**
+ * 是否本机 ComfyUI（localhost / 127.0.0.1 / [::1]）。
+ * 用途：只在本机不存在的模型（如 Krea2）不能在本机模式露出，避免用户点了必然失败。
+ */
+export function isLocalComfyuiAddress(address: string): boolean {
+  try {
+    const host = new URL(address).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return true;
+  }
+}
+
 export type EndpointTestResult =
   | { kind: 'ok'; backend: EndpointBackend; address: string; version?: string; models: string[]; machine?: ComfyuiMachineInfo }
   | { kind: 'fail'; failure: 'unreachable' | 'cors' | 'rejected'; message: string };

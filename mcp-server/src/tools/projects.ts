@@ -1,9 +1,10 @@
-/** 项目域：list_projects / get_project / open_project / create_project */
+/** 项目域：list_projects / get_current_project / get_project / open_project / create_project */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot, frontendBaseUrl } from "../config.js";
 import { createProject, getProjectOverview, readProjectsMeta, updateProjectMeta } from "../store/projects.js";
+import { readCurrentProject } from "../store/current-project.js";
 import { defTool, type Ctx } from "./_register.js";
 
 export function registerProjectTools(server: McpServer, ctx: Ctx): void {
@@ -19,6 +20,26 @@ export function registerProjectTools(server: McpServer, ctx: Ctx): void {
       return visible.map((m) => ({
         id: m.id, title: m.title, updatedAt: m.updatedAt, nodeCount: m.nodeCount, tags: m.tags,
       }));
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "get_current_project",
+    description:
+      "取用户此刻在网页里打开的项目（前端切项目时广播到数据根）。用户没点名项目时先调它，" +
+      "然后把项目名报给用户、问一句「是否操作这个项目」再继续；source=recent 表示只是最近修改过、没有打开记录，" +
+      "更要先确认。返回 null 时才用 list_projects 让用户挑。",
+    bits: ["project.read"],
+    schema: {},
+    handler: async (_args, token) => {
+      const current = await readCurrentProject(dataRoot());
+      if (!current) {
+        return { project: null, hint: "没有打开/修改过的项目：用 list_projects 让用户挑一个，或 create_project 新建。" };
+      }
+      if (token.projectIds !== "*" && !token.projectIds.includes(current.projectId)) {
+        return { project: null, hint: `当前打开的项目 ${current.projectId} 不在本 token 作用域内：用 list_projects 让用户挑。` };
+      }
+      return { project: current };
     },
   });
 

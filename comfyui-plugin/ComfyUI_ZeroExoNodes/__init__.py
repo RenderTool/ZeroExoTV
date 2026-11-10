@@ -91,6 +91,18 @@ IMAGE_VISIBLE_PARAMS = {
     "height": {"type": "integer", "default": 1008, "min": 64, "max": 2048},
 }
 
+# Krea2 文生图可见参数（仅线上 ComfyUI：需要 krea2 底模 + ClownsharK 采样器）
+KREA2_VISIBLE_PARAMS = {
+    "prompt": {"type": "string", "default": ""},
+    "negative_prompt": {"type": "string", "default": ""},
+    "width": {"type": "integer", "default": 1024, "min": 64, "max": 2048},
+    "height": {"type": "integer", "default": 1024, "min": 64, "max": 2048},
+    "steps": {"type": "integer", "default": 10, "min": 1, "max": 100},
+    "cfg": {"type": "number", "default": 1.0},
+    "seed": {"type": "integer", "default": 1, "min": 0},
+    "eta": {"type": "number", "default": 0.55},
+}
+
 # 模板非可见占位符兜底：模板里出现的 __zx:<name>__ 都必须有值，
 # 否则替换后留下字面量，INT/FLOAT 校验直接失败。
 TEMPLATE_DEFAULTS = {
@@ -116,6 +128,8 @@ TEMPLATE_DEFAULTS = {
     "edit_prompt": "",
     "edit_mode": False,
     "use_llm_enhance": False,
+    # Krea2 文生图模板占位符（width/height/steps/cfg/seed/eta 由可见参数提供）
+    "eta": 0.55,
 }
 
 _PLACEHOLDER = re.compile(r"__zx:(\w+)__")
@@ -289,7 +303,8 @@ def refresh_job(job: dict[str, Any]) -> dict[str, Any]:
     if state != "success":
         return job
     output_dir = folder_paths.get_output_directory()
-    out_kind = "image" if job.get("kind") == "qwen_image_edit" else "video"
+    image_kinds = ("qwen_image_edit", "krea2_t2i")
+    out_kind = "image" if job.get("kind") in image_kinds else "video"
     outputs: list[dict[str, Any]] = []
     for node_out in (entry.get("outputs") or {}).values():
         for item in node_out.get("images") or []:
@@ -305,7 +320,7 @@ def refresh_job(job: dict[str, Any]) -> dict[str, Any]:
         job["error"] = "执行完成但没有产物（工作流节点校验未通过，详见 ComfyUI 控制台）"
         return job
     job["state"] = "success"
-    if job.get("kind") != "qwen_image_edit":
+    if job.get("kind") not in image_kinds:
         job["guide"] = guide_meta(job.get("guidePath") or "")
         # 记录本 project/episode 的最新引导：use_prev_guide=true 的下一段取它（2026-11-07）
         if job.get("guide") and job["guide"].get("path"):

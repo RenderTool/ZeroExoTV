@@ -98,6 +98,9 @@
 | 引导帧数 | `continuityOverlapFrames` → `guide_frames` | `use-director-run.ts:627` | `22` | 插件档位 5/22/39/56（`snap_guide_frames`），默认 22 |
 | 宽高 | 无 `resolution` 键 | `resolveVideoSize` | **86×64** | `aspect` + `scaleFactor` 派生后钳到插件 min=64；前端 `StartRunArgs.width/height`（`use-director-run.ts:81-92`） |
 
+> 2026-11-10 口径变更：尺寸系数改为官方 MP 面积换算（×1 = 0.4MP = 864×480、×0.5 = 608×352、×1.5 = 1056×608）。
+> 下表与后文实测记录中的 86×48 / 86×64 / 173×96 均为**旧线性换算**时期的历史结果；新口径下最小系数 0.1 也得到 32 对齐且 ≥64 的尺寸，不再触发 min=64 钳位。
+
 **MCP 侧注意**：`set_shared_params` 的 `params: z.record(z.unknown())`（`mcp-server/src/tools/workbench.ts:31`）**无白名单**，可直接写 `steps/scaleFactor/refImageSize`；但 MCP **不自动派生 width/height**，新增 `run_generation` 必须自己调用等价 `resolveVideoSize` 逻辑。
 `validate_project` 要求 `Object.keys(params).length >= 20`（`plan.ts:158`），`set_shared_params` 会先铺 32 键默认值，天然满足。
 

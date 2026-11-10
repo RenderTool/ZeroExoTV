@@ -79,6 +79,7 @@ import {
 } from './subject-tree-types';
 import { buildBaseStatePrompt } from './subject-prompt-templates';
 import {
+  deleteSubjectHistoryMedia,
   linkSubjectStateMedia,
   releaseSubjectStateMediaRefs,
   useSubjectMediaLinkEventStore,
@@ -1387,6 +1388,29 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }
   }, [projectId, commitTrees, antdMessage, t]);
 
+  /** 永久删除一张历史图（2026-11-10）：二次确认 → 移除条目 + 释放 CAS 引用 + 封面回退 */
+  const deleteHistoryMedia = useCallback((rootId: string, stateId: string, ref: SubjectNodeMediaRef) => {
+    antdModal.confirm({
+      centered: true, okType: 'danger',
+      title: t('subject.deleteHistoryTitle', '永久删除这张历史图片？'),
+      content: t('subject.deleteHistoryDesc', '会同时释放它的存储引用，文件不可恢复。'),
+      okText: t('subject.deleteHistoryOk', '永久删除'),
+      cancelText: t('common.cancel', '取消'),
+      onOk: async () => {
+        try {
+          const { trees: linked } = await deleteSubjectHistoryMedia({
+            trees: treesRef.current, projectId: projectId ?? undefined,
+            rootId, stateId, key: ref.key,
+          });
+          commitTrees(linked);
+          antdMessage.success(t('subject.deleteHistoryDone', '已永久删除'));
+        } catch (err) {
+          antdMessage.error(err instanceof Error ? err.message : t('subjectCreate.saveFailed', '保存失败'));
+        }
+      },
+    });
+  }, [antdModal, projectId, commitTrees, antdMessage, t]);
+
   // ===== 工具栏片段（整页与抽屉共用同一实现，2026-11-06）=====
   /** 按集筛选：选项来自剧本真实集数；落位由调用处决定（旧版自带 marginLeft:auto，抽屉里被右边缘裁成半截） */
   const episodeFilter = (
@@ -1821,20 +1845,38 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                           {(openNode?.mediaHistory ?? []).map((ref, i) => (
-                            <Tooltip key={`${ref.key}-${i}`} title={t('subject.restoreMedia', '恢复这张图')}>
-                              <button
-                                type="button"
-                                data-media-history-item
-                                aria-label={t('subject.restoreMedia', '恢复这张图')}
-                                onClick={() => { void restoreMedia(openTree.rootId, level.stateId, ref); }}
-                                style={{
-                                  width: 54, height: 54, padding: 0, overflow: 'hidden',
-                                  borderRadius: 6, border: '1px solid rgba(128,128,128,0.28)', cursor: 'pointer',
-                                }}
-                              >
-                                <SubjectMediaThumb storageKey={ref.key} kind={slotMediaKind(ref)} dark={isDark} fill />
-                              </button>
-                            </Tooltip>
+                            <div key={`${ref.key}-${i}`} style={{ position: 'relative', width: 54, height: 54 }}>
+                              <Tooltip title={t('subject.restoreMedia', '恢复这张图')}>
+                                <button
+                                  type="button"
+                                  data-media-history-item
+                                  aria-label={t('subject.restoreMedia', '恢复这张图')}
+                                  onClick={() => { void restoreMedia(openTree.rootId, level.stateId, ref); }}
+                                  style={{
+                                    width: 54, height: 54, padding: 0, overflow: 'hidden',
+                                    borderRadius: 6, border: '1px solid rgba(128,128,128,0.28)', cursor: 'pointer',
+                                  }}
+                                >
+                                  <SubjectMediaThumb storageKey={ref.key} kind={slotMediaKind(ref)} dark={isDark} fill />
+                                </button>
+                              </Tooltip>
+                              <Tooltip title={t('subject.deleteHistory', '永久删除这张图')}>
+                                <button
+                                  type="button"
+                                  data-media-history-delete
+                                  aria-label={t('subject.deleteHistory', '永久删除这张图')}
+                                  onClick={() => deleteHistoryMedia(openTree.rootId, level.stateId, ref)}
+                                  style={{
+                                    position: 'absolute', top: -6, right: -6, width: 18, height: 18, padding: 0,
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    borderRadius: 9, border: 'none', cursor: 'pointer',
+                                    background: 'rgba(0,0,0,0.62)', color: '#fff',
+                                  }}
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                              </Tooltip>
+                            </div>
                           ))}
                         </div>
                       </div>

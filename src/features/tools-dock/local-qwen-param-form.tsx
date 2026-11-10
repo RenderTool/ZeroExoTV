@@ -16,7 +16,7 @@ import {
 } from '@/features/generator-settings/settings-popover-shell.js';
 import { AspectRatioPicker, type RatioOption } from '@/features/generator-settings/aspect-ratio-picker.js';
 import { useLastSeed } from '@/shared/last-seed-store.js';
-import { clampQwenSize } from '@/features/canvas-tabs/qwen-limits.js';
+import { clampQwenSize, QWEN_DEFAULT_STEPS } from '@/features/canvas-tabs/qwen-limits.js';
 
 const RATIOS = [
   { key: '1:1', ratio: 1 },
@@ -62,7 +62,7 @@ export function LocalQwenParamForm({
   const clamped = clampQwenSize(Number(paramValues.width ?? fallback.width), Number(paramValues.height ?? fallback.height));
   const width = clamped.width;
   const height = clamped.height;
-  const steps = Number(paramValues.steps ?? 8);
+  const steps = Number(paramValues.steps ?? QWEN_DEFAULT_STEPS);
   const cfg = Number(paramValues.cfg ?? 1);
   const denoise = Number(paramValues.denoise ?? 1);
   const seed = Number(paramValues.seed ?? -1);

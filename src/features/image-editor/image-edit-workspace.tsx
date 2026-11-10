@@ -21,6 +21,7 @@ import { CropDialog, SplitDialog, MaskEditDialog } from '@zeroexo/plugin-image-e
 import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 import { applyCrop, applyMaskEdit, applySplit } from './image-edit-actions.js';
 import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
+import { QWEN_DEFAULT_STEPS } from '@/features/canvas-tabs/qwen-limits.js';
 
 export type ImageEditTool = 'crop' | 'split' | 'maskEdit';
 
@@ -205,7 +206,7 @@ export function ImageEditWorkspace({
         prompt: payload.prompt,
         referenceImages: [dataUrl],
         maskDataUrl: payload.maskDataUrl,
-        params: { steps: 8, cfg: 1, denoise: 1, use_llm_enhance: false, sizeMode: 'source' },
+        params: { steps: QWEN_DEFAULT_STEPS, cfg: 1, denoise: 1, use_llm_enhance: false, sizeMode: 'source' },
       });
       const ids = await applyMaskEdit({
         node: resolveEditNode(),

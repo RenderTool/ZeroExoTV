@@ -826,6 +826,7 @@
     "generateImage": "画像生成",
     "retry": "再試行",
     "generating": "生成中",
+    "sampling": "サンプリング {{step}} / {{total}}",
     "cancelGeneration": "生成をキャンセル",
     "genLoader": {
       "image": {
@@ -1040,7 +1041,7 @@
   },
   "promptLibrary": {
     "title": "プロンプト",
-    "subtitle": "読み取り専用プリセット · キャラクター三面図",
+    "subtitle": "読み取り専用プリセット · キャラクター設定参考図",
     "searchPlaceholder": "プロンプトを検索",
     "countUnit": "件",
     "readonly": "読み取り専用",
@@ -1123,8 +1124,8 @@
     "filterMaterial": "素材",
     "filterHistory": "履歴",
     "filterScriptMeta": "本作の情報",
-    "historyTabImage": "画像产出",
-    "historyTabVideo": "動画生成",
+    "historyTabImage": "画像",
+    "historyTabVideo": "動画",
     "historyTabAll": "すべて",
     "historySourceCanvas": "キャンバスから生成",
     "historySourceDirector": "監督台から",
@@ -2552,7 +2553,7 @@
     "mediaVideo": "動画",
     "mediaAudio": "音声",
     "basePrompt": "完全プロンプト",
-    "basePromptPlaceholder": "完全な三面図・多角度リファレンスプロンプト（kind に応じてテンプレート適用後、AI がパラメータ化）",
+    "basePromptPlaceholder": "完全な設定参考プロンプト（画面数はテンプレートで固定。kind に応じてテンプレート適用後、AI がパラメータ化）",
     "recognition": "LLM認識語",
     "deleteSubject": "主体を削除",
     "newState": "新規状態",

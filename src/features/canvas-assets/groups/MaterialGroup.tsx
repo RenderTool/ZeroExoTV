@@ -31,6 +31,8 @@ import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { AddTile, CategoryChips, EmptyState, SearchBox, SkeletonGrid, SCROLL_AREA_STYLE, ToolbarRow } from '../components/common.js';
 import { FocusScrollIntoView } from '@/features/canvas-assets/components/focus-scroll-into-view.js';
+import { isAuthorized, pickRoot, restoreRoot, withPermissionPrompt } from '@/platform/fs.js';
+import { reloadWithDisk } from '@/platform/boot.js';
 
 const KIND_OPTIONS = [
   { key: 'all', labelKey: 'assetLibrary.filterAll' },
@@ -58,6 +60,27 @@ export function MaterialGroup({ store, theme }: {
     handleBatchDeleteAssets, handleBatchSendToCanvas, handleBatchSendToDirector,
   } = store;
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 空列表不等于「没有素材」：数据目录未授权 / 8790 离线时写入与读取都会静默失败。
+  // 这里把真实状态显示出来，并提供一次用户手势即可恢复的入口（与 MCP 服务无关）。
+  const [storageState, setStorageState] = useState<{ authorized: boolean } | null>(null);
+  useEffect(() => {
+    const check = (): void => {
+      void isAuthorized().catch(() => false).then((authorized) => setStorageState({ authorized }));
+    };
+    check();
+    window.addEventListener('focus', check);
+    return () => window.removeEventListener('focus', check);
+  }, []);
+  const reauthorize = useCallback(async () => {
+    try {
+      const restored = await withPermissionPrompt(() => restoreRoot(true));
+      if (!restored) await withPermissionPrompt(() => pickRoot());
+      reloadWithDisk();
+    } catch (err) {
+      message.warning(`没能恢复目录授权：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [message]);
 
   // 2026-11-05 约定：抽屉用户资产（公共/本项目）补齐「发送到导演台」，与开源库同一执行器
   // sendAssetToWorkbench（不要复制第二份逻辑）；槽位与提示词引用行为与资产库页完全一致
@@ -285,7 +308,23 @@ export function MaterialGroup({ store, theme }: {
         {loadingAssets && assets.length === 0 ? (
           <SkeletonGrid theme={theme} />
         ) : assets.length === 0 ? (
-          <EmptyState theme={theme} />
+          storageState && !storageState.authorized ? (
+            <div data-storage-warning style={{ padding: '36px 24px', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
+              <div style={{ fontSize: 13, color: theme.toolbar.text, marginBottom: 8 }}>数据目录未就绪，素材无法写入或读取</div>
+              <div style={{ lineHeight: 1.8 }}>
+                本地数据服务（8790）未在线，且浏览器目录授权未恢复（刷新后需重新授权）。<br />
+                这是浏览器的目录授权，与 MCP 服务无关。
+              </div>
+              <Button size="small" type="primary" style={{ marginTop: 14 }} onClick={() => void reauthorize()}>
+                重新授权 / 选择目录
+              </Button>
+              <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.7 }}>
+                也可以用 pnpm dev 启动本地数据服务，或到「服务 → 数据目录」重新选择文件夹。
+              </div>
+            </div>
+          ) : (
+            <EmptyState theme={theme} />
+          )
         ) : (
           // 2026-11-05 用户定稿：抽屉素材同样改瀑布流（列数按抽屉实测宽度取断点）
           <MasonryGrid paddingX={20} paddingBottom={16}>

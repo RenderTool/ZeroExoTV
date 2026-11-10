@@ -16,8 +16,7 @@ import { addAssets as storeAddAssets, upsertAsset, filterAssetsStrictScope, coun
 import { deleteAssetsWithUndo } from './delete-with-undo.jsx';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import type { AssetScope, Asset } from '@/features/asset-picker/index.js';
-import { downloadAsset } from '@/features/asset-picker/index.js';
-import { downloadGuideFile } from '@/shared/utils/guide-file.js';
+import { downloadAssetWithGuide } from '@/features/asset-picker/services/download-asset.js';
 import { getGuideMeta } from '@/features/asset-picker/guide.js';
 import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-resolve.js';
 import { onAssetCreated } from '@/services/sync/sync-service.js';
@@ -798,25 +797,25 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   // ── 下载 ──
   // 2026-11-07 修复：生成产物只有 storageKey（image:/video:/audio:/cas:），
   // 统一由 downloadAsset 按 storageKey 读盘后触发下载；无文件时明确提示，不再静默无反应。
-  // withGuide=true：视频 + 引导数据分两个文件落盘（需求 1）。
+  // withGuide=true：视频 + 引导数据打包成单个 zip 一次落盘，规避浏览器多文件拦截。
   const handleDownloadItem = useCallback(async (
     item: { type: 'asset'; data: any },
     opts?: { withGuide?: boolean },
   ): Promise<void> => {
     if (item.type !== 'asset') return;
-    const ok = await downloadAsset(item.data as Asset).catch(() => false);
+    const guide = opts?.withGuide
+      ? (getGuideMeta(item.data) ?? await resolveGuideForAsset(item.data as Asset).catch(() => null))
+      : undefined;
+    const { ok, guideOk } = await downloadAssetWithGuide(item.data as Asset, guide)
+      .catch(() => ({ ok: false, guideOk: false }));
     if (!ok) {
       antdMessage.error(t('assetLibrary.downloadFailed', '下载失败：文件不存在或已被清理'));
       return;
     }
-    if (!opts?.withGuide) return;
-    const guide = getGuideMeta(item.data) ?? await resolveGuideForAsset(item.data as Asset);
-    if (!guide?.id) {
-      antdMessage.warning(t('assetLibrary.guideMissing', '该视频没有引导数据'));
-      return;
+    if (opts?.withGuide && !guideOk) {
+      if (guide?.id) antdMessage.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
+      else antdMessage.warning(t('assetLibrary.guideMissing', '该视频没有引导数据'));
     }
-    const saved = await downloadGuideFile(guide, `${item.data.title ?? '视频'} 引导`).catch(() => false);
-    if (!saved) antdMessage.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
   }, [antdMessage, t]);
 
   // ── 重命名 ──

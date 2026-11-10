@@ -793,15 +793,15 @@ describe('DirectorParamsButton/RunButton/Panel 单测（比例/系数/运行链�
 
   it('×系数：越界输入 blur 夹取（9 → 2）；非法输入 blur 回退默认（abc → 1）；chip 同步换算', async () => {
     const { onSharedChange } = renderGroup({ scaleFactor: 1.5 });
-    expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1296×720'); // ×1.5
+    expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1056×608'); // ×1.5 = 0.6MP
     const input = panel().querySelector('input[data-param-key="scaleFactor"]') as HTMLInputElement;
 
-    // 越界 → 夹到上限 2（864×2=1728 / 480×2=960）
+    // 越界 → 夹到上限 2（0.8MP → 1216×672）
     fireEvent.change(input, { target: { value: '9' } });
     fireEvent.blur(input);
     await waitFor(() => expect(onSharedChange).toHaveBeenLastCalledWith({ params: { scaleFactor: 2 } }));
     await waitFor(() =>
-      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1728×960'));
+      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1216×672'));
 
     // 非法 → 回退默认 1
     fireEvent.change(input, { target: { value: 'abc' } });

@@ -25,11 +25,11 @@ import { promoteAssetToScope } from '@/features/asset-picker/services/cas-upload
 import { onAssetCreated } from '@/services/sync/sync-service.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useAssetUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
-import { downloadAsset } from '@/features/asset-picker/services/download-asset.js';
-import { downloadGuideFile } from '@/shared/utils/guide-file.js';
+import { downloadAssetWithGuide } from '@/features/asset-picker/services/download-asset.js';
 import { getGuideMeta } from '@/features/asset-picker/guide.js';
 import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-resolve.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
+import { isAuthorized } from '@/platform/fs.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { getOpenLibMeta } from '@/features/open-library/open-library.js';
 import { countHistoryByKind, libraryCasHashes } from './history-utils.js';
@@ -266,7 +266,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     return countAssetsByScope(base, getCurrentCanvasId());
   }, [assets]);
 
-  // ===== 历史分组派生（2026-11-04 本地版重建：图片产出 / 视频生成，scope='project' 的本项目资产） =====
+  // ===== 历史分组派生（2026-11-04 本地版重建：图片 / 视频，scope='project' 的本项目资产） =====
   const historyProjectId = getCurrentCanvasId();
   const allAssets = useMemo(() => (Array.isArray(assets) ? assets : []), [assets]);
   const historyCounts = useMemo(() => countHistoryByKind(allAssets, historyProjectId), [allAssets, historyProjectId]);
@@ -336,6 +336,12 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
 
   /** 素材上传（复用独立上传队列） */  const handleUpload = useCallback(async (files: FileList) => {
     if (files.length === 0) return;
+    // 未授权 / 8790 离线时 CAS 与素材记录都写不进盘，旧行为只会显示「该文件夹暂无内容」。
+    // 这里直接给出真实原因与恢复入口（浏览器目录授权与 MCP 服务无关）。
+    if (!(await isAuthorized().catch(() => false))) {
+      antdMessage.error('数据目录未授权且本地数据服务未在线：请在「服务 → 数据目录」重新选择/授权目录，或用 pnpm dev 启动本地数据服务（与 MCP 服务无关）');
+      return;
+    }
     try {
       const inputs = await uploadFiles(Array.from(files));
       if (inputs.length === 0) {
@@ -348,6 +354,10 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       const uploadScopeTab: AssetScope = materialScopeTab === 'project' ? 'project' : 'library';
       const uploadScope = resolveUploadScope(uploadScopeTab, getCurrentCanvasId());
       const created = await storeAddAssets(inputs.map((i) => ({ ...i, ...uploadScope })));
+      if (created.length === 0) {
+        antdMessage.warning('没有新增素材：文件可能已存在，或当前分组与上传归属不一致（试试切到「全局」查看）');
+        return;
+      }
       for (const a of created) onAssetCreated(a.id);
       await refreshAssets();
       setGroupForModule('material');
@@ -470,19 +480,18 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   ) => {
     try {
       if (item.type !== 'asset') return;
-      const ok = await downloadAsset(item.data);
+      const guide = opts?.withGuide
+        ? (getGuideMeta(item.data) ?? await resolveGuideForAsset(item.data).catch(() => null))
+        : undefined;
+      const { ok, guideOk } = await downloadAssetWithGuide(item.data, guide);
       if (!ok) {
         antdMessage.error(t('assetLibrary.downloadFailed', '下载失败：文件不存在或已被清理'));
         return;
       }
-      if (!opts?.withGuide) return;
-      const guide = getGuideMeta(item.data) ?? await resolveGuideForAsset(item.data);
-      if (!guide?.id) {
-        antdMessage.warning(t('assetLibrary.guideMissing', '该视频没有引导数据'));
-        return;
+      if (opts?.withGuide && !guideOk) {
+        if (guide?.id) antdMessage.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
+        else antdMessage.warning(t('assetLibrary.guideMissing', '该视频没有引导数据'));
       }
-      const saved = await downloadGuideFile(guide, `${item.data.title ?? '视频'} 引导`).catch(() => false);
-      if (!saved) antdMessage.error(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接'));
     } catch (err) {
       antdMessage.error(err instanceof Error ? err.message : t('assetLibrary.downloadFailed', '下载失败：文件不存在或已被清理'));
     }

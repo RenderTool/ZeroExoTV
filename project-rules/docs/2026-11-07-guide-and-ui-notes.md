@@ -45,6 +45,9 @@ Y.Doc，刷新后 `seedFromYDoc` 又把它当主画布播种。任何按 `nodeId
 - 下载：素材卡菜单、历史卡下载菜单、画布节点右键均提供「下载视频」/「下载视频+引导」；
   引导文件按 `gd_xxx` → ComfyUI `output/zeroexo/guides/gd_xxx.safetensors` 经 `/view` 取回，
   以 `.safetensors` 单独落盘（`src/shared/utils/guide-file.ts`，id 白名单防路径穿越）。
+- 2026-11-10 口径变更（S-18）：「下载视频+引导」不再连续触发两次下载，改由
+  `downloadFilesAsZip` / `downloadAssetWithGuide` 打成单个 zip 一次落盘，批量打包也把每项
+  `data.guide` 入包，规避浏览器多文件拦截。上面「单独落盘」是当时实现的历史记录。
 - 发送到导演台：带 guide 的素材菜单新增「发送引导数据到导演台当前片段」；卡片导演台快捷按钮
   也会点开「发送视频 / 发送引导数据」二选一。宿主写入当前片段引导槽（`WORKBENCH_SET_GUIDE_EVENT`），
   重复发送覆盖，不占参考图槽位。

@@ -5,7 +5,7 @@
  * 从 use-editor-interactions.ts 按功能域拆分
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   AddNodeCommand,
   AddEdgeCommand,
@@ -16,17 +16,18 @@ import {
 } from '@zeroexo/core';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, type ReferenceItem } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, setGeneratingProgress, clearGeneratingProgress, type ReferenceItem } from '@zeroexo/plugin-nodes';
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { cancelLocalJob, generateLocalMiniMaxVideo } from '../interactions/local-minimax-video.js';
 import { generateLocalQwenImage } from '../interactions/local-qwen-image.js';
+import { generateKrea2Image } from '../interactions/local-krea2-image.js';
 import { canvasDocNodeKey, getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
-import { buildTemplateParams, promptTitleSummary, collectInputReferences, formatInputRefs } from './use-ai-generation.js';
+import { buildTemplateParams, promptTitleSummary, collectInputReferences, formatInputRefs, resolveLocalVideoRequest } from './use-ai-generation.js';
 import { IMAGE_PROMPT_REVERSE_PRESET, contentToDataUrl } from './helpers.js';
 // 本地版（Plan#83）：前端不含 Agent/LLM。原本「节点生成 = 投递 Agent 会话」，
 // 现改为：图/音/视频直负本地渠道属 Phase 2 T2.4（未接入，调用即报错）；
@@ -89,6 +90,108 @@ export function useAgentBridgeHooks(
     };
     clean();
     return store.subscribeGraph(clean);
+  }, [refs.store, refs.commandQueue]);
+
+  /**
+   * 刷新续接（2026-11-10 用户要求）：画布重开后，`status=loading` 且带 `localJob` 的节点
+   * 用原 clientId 重新连 /ws（ComfyUI 按提交时的 sid 定向推送，所以能继续收到预览与步进），
+   * 同时继续轮询作业状态，完成后把产物写回节点。
+   */
+  const resumedJobsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const store = refs.store;
+    const queue = refs.commandQueue;
+    if (!store || !queue) return;
+    const scan = (): void => {
+      for (const raw of store.getGraph().nodes) {
+        const node = raw as NodeRecord;
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        const job = data.localJob as { jobId?: string; clientId?: string; base?: string; kind?: string; model?: string } | undefined;
+        if (!job?.jobId || !job.clientId) continue;
+        const key = canvasDocNodeKey(node.id);
+        if (resumedJobsRef.current.has(key)) continue;
+        if (data.status !== 'loading') {
+          // 作业已结束/被取消：清掉残留身份，避免下次刷新又接一次
+          queue.execute(new UpdateNodeDataCommand(node.id, { localJob: undefined } as Record<string, unknown>));
+          continue;
+        }
+        resumedJobsRef.current.add(key);
+        const docId = getCurrentCanvasDocId();
+        const pv = (data.paramValues ?? {}) as Record<string, unknown>;
+        const nodeId = node.id;
+        const finish = (patch: Record<string, unknown>): void => {
+          queue.execute(new UpdateNodeDataCommand(nodeId, { ...patch, localJob: undefined } as Record<string, unknown>));
+        };
+        const onPreview = (url: string): void => setGeneratingPreview(nodeId, url, docId);
+        const onStep = (p: { step: number; totalSteps: number }): void =>
+          setGeneratingProgress(nodeId, { step: p.step, totalSteps: p.totalSteps }, docId);
+        const fail = (err: unknown): void => {
+          finish({
+            status: 'error',
+            errorDetails: err instanceof Error ? err.message : String(err),
+            errorType: 'NETWORK_ERROR',
+          });
+        };
+        const resume = { jobId: job.jobId, clientId: job.clientId };
+        if (job.kind === 'video') {
+          const localVideo = resolveLocalVideoRequest(data, {}, undefined, 5);
+          void generateLocalMiniMaxVideo({
+            prompt: String(data.prompt ?? ''),
+            size: localVideo.size,
+            seconds: localVideo.seconds,
+            params: localVideo.params,
+            nodeId,
+            resume,
+            onPreview: (frame) => {
+              if (frame.image) onPreview(frame.image);
+              if (frame.step != null || frame.totalSteps != null) onStep({ step: frame.step ?? 0, totalSteps: frame.totalSteps ?? 0 });
+            },
+            onProgress: (info) => setGeneratingProgress(nodeId, {
+              phaseLabel: info.phaseLabel, overallValue: info.overallValue, overallMax: info.overallMax,
+            }, docId),
+          }).then((result) => {
+            const url = URL.createObjectURL(result.blob);
+            finish({
+              content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height,
+              durationMs: result.durationMs, mimeType: result.mimeType, bytes: result.bytes,
+              generationId: result.generationId, guide: result.guide, errorDetails: undefined, errorType: undefined,
+            });
+            void autoLandGenerationOutput({
+              nodeId, kind: 'video', title: (data.title as string) || '',
+              content: url, width: result.width, height: result.height, durationMs: result.durationMs,
+              bytes: result.bytes, mimeType: result.mimeType, jobId: result.generationId,
+              model: (data.model as string) ?? undefined, prompt: String(data.prompt ?? ''), guide: result.guide,
+            }).catch(() => undefined);
+          }).catch(fail);
+        } else {
+          const isKrea2 = job.model === KREA2_MODEL_KEY;
+          const run = isKrea2
+            ? generateKrea2Image({
+                prompt: String(data.prompt ?? ''), aspect: pv.aspect as string | undefined, params: pv,
+                nodeId, resume, onPreview, onProgress: onStep,
+              })
+            : generateLocalQwenImage({ prompt: String(data.prompt ?? ''), params: pv, nodeId, resume, onPreview, onProgress: onStep });
+          void run.then((result) => {
+            const url = URL.createObjectURL(result.blob);
+            finish({
+              content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height,
+              mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
+              errorDetails: undefined, errorType: undefined,
+            });
+            void autoLandGenerationOutput({
+              nodeId, kind: 'image', title: (data.title as string) || '',
+              content: url, width: result.width, height: result.height, bytes: result.bytes,
+              mimeType: result.mimeType, jobId: result.generationId,
+              model: isKrea2 ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY, prompt: String(data.prompt ?? ''),
+            }).catch(() => undefined);
+          }).catch(fail);
+        }
+      }
+    };
+    scan();
+    // 图可能异步装载：后续每次图变化都再扫一遍（resumedJobsRef 防重复）
+    const unsub = store.subscribeGraph(scan);
+    return () => { unsub?.(); };
   }, [refs.store, refs.commandQueue]);
 
   /** 保存节点到素材库 */
@@ -295,13 +398,17 @@ export function useAgentBridgeHooks(
         || (!modelValue && mode === 'video'));
       const isLocalImageModel = mode === 'image' && (modelValue === LOCAL_IMAGE_MODEL_KEY
         || modelValue.startsWith('zeroexo:qwen'));
+      // Krea2 只有线上 ComfyUI 有底模 + RES4LYF 采样器
+      const isKrea2Model = mode === 'image' && modelValue === KREA2_MODEL_KEY;
       const taskLabel = isLocalVideoModel ? LOCAL_VIDEO_MODEL_LABEL
-        : isLocalImageModel ? LOCAL_IMAGE_MODEL_LABEL
-          : (modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined);
+        : isKrea2Model ? KREA2_MODEL_LABEL
+          : isLocalImageModel ? LOCAL_IMAGE_MODEL_LABEL
+            : (modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined);
       refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, {
         prompt, status: 'loading', errorDetails: undefined, errorType: undefined, taskLabel,
       } as any));
       clearGeneratingPreview(nodeId, jobDocId);
+      clearGeneratingProgress(nodeId, jobDocId);
 
       try {
         const { refImages, refVideos, refAudios, effectivePrompt } = await collectInputReferences(mentionedRefs, prompt);
@@ -337,17 +444,36 @@ export function useAgentBridgeHooks(
         if (mode === 'image') {
           const data = nodeData;
           const sizeStr = fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined;
-          if (isLocalImageModel) {
+          if (isLocalImageModel || isKrea2Model) {
             const pv = (nodeData.paramValues ?? {}) as Record<string, unknown>;
-            const result = await generateLocalQwenImage({
-              prompt: effectivePrompt,
-              referenceImages: refImages.length > 0 ? refImages : undefined,
-              width: fallback.size?.width,
-              height: fallback.size?.height,
-              params: pv,
+            const modelKey = isKrea2Model ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY;
+            // 本机链路：先用参考图垫底显示，随后被 ComfyUI 推送的采样预览帧替换（首帧不空白）
+            if (isLocalImageModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!, jobDocId);
+            // 作业身份写进节点：刷新后据此续接预览/进度（否则刷新即丢）
+            const persistJob = (job: { jobId: string; clientId: string; base: string }): void => {
+              refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, {
+                localJob: { ...job, kind: 'image', model: modelKey, startedAt: Date.now() },
+              } as Record<string, unknown>));
+            };
+            const callbacks = {
               nodeId,
+              onPreview: (dataUrl: string) => setGeneratingPreview(nodeId, dataUrl, jobDocId),
+              onProgress: (p: { step: number; totalSteps: number }) =>
+                setGeneratingProgress(nodeId, { step: p.step, totalSteps: p.totalSteps }, jobDocId),
+              onJobSubmitted: persistJob,
               signal: ctl.signal,
-            }).catch((err: unknown) => {
+            };
+            const result = await (isKrea2Model
+              ? generateKrea2Image({ prompt: effectivePrompt, aspect: pv.aspect as string | undefined, params: pv, ...callbacks })
+              : generateLocalQwenImage({
+                  prompt: effectivePrompt,
+                  referenceImages: refImages.length > 0 ? refImages : undefined,
+                  width: fallback.size?.width,
+                  height: fallback.size?.height,
+                  params: pv,
+                  ...callbacks,
+                })
+            ).catch((err: unknown) => {
               if (err instanceof Error && err.name === 'AbortError') throw err;
               throw new AiError('NETWORK_ERROR', err instanceof Error ? err.message : String(err));
             });
@@ -356,7 +482,7 @@ export function useAgentBridgeHooks(
               content: url, status: 'success',
               naturalWidth: result.width, naturalHeight: result.height,
               mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
-              errorDetails: undefined, errorType: undefined,
+              errorDetails: undefined, errorType: undefined, localJob: undefined,
             } as any, { width: result.width, height: result.height, fallbackWidth: 340, fallbackHeight: 240 });
             nodeActionBus.emit('canvas:history:created', {
               kind: 'image',
@@ -368,7 +494,7 @@ export function useAgentBridgeHooks(
             void autoLandGenerationOutput({
               nodeId, kind: 'image', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
               content: url, width: result.width, height: result.height, bytes: result.bytes, mimeType: result.mimeType,
-              jobId: result.generationId, model: LOCAL_IMAGE_MODEL_KEY, prompt: effectivePrompt,
+              jobId: result.generationId, model: modelKey, prompt: effectivePrompt,
             }).then((landed) => {
               if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
             }).catch((err) => console.warn('[history] 图片产出落库失败:', err));
@@ -404,7 +530,12 @@ export function useAgentBridgeHooks(
           applyResult({ content: text, status: 'success', errorDetails: undefined, errorType: undefined } as any);
         } else if (mode === 'video') {
           const data = nodeData;
-          const sizeStr = fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined;
+          // 本机 H3 参数面板把比例/系数/尺寸/步数/种子/时长写在 paramValues，
+          // 模板参数只有 1024×1024 兜底 → 不合并会恒生成 1:1 并丢参数。
+          const localVideo = isLocalVideoModel
+            ? resolveLocalVideoRequest(nodeData as Record<string, unknown>, params, fallback.size, fallback.seconds ?? 5)
+            : null;
+          const sizeStr = localVideo?.size ?? (fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined);
           // 本机链路：先用参考图垫底显示，随后被引擎推送的采样帧替换（首帧预览不空白）
           if (isLocalVideoModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!, jobDocId);
           const result = isLocalVideoModel
@@ -412,11 +543,25 @@ export function useAgentBridgeHooks(
                 prompt: effectivePrompt,
                 referenceImages: refImages.length > 0 ? refImages : undefined,
                 size: sizeStr,
-                seconds: fallback.seconds ?? 5,
-                params,
+                seconds: localVideo?.seconds ?? fallback.seconds ?? 5,
+                params: localVideo?.params ?? params,
                 nodeId,
                 onPreview: (frame) => {
                   if (frame.image) setGeneratingPreview(nodeId, frame.image, jobDocId);
+                  if (frame.step != null || frame.totalSteps != null) {
+                    setGeneratingProgress(nodeId, { step: frame.step, totalSteps: frame.totalSteps }, jobDocId);
+                  }
+                },
+                onProgress: (info) => setGeneratingProgress(nodeId, {
+                  phaseLabel: info.phaseLabel,
+                  overallValue: info.overallValue,
+                  overallMax: info.overallMax,
+                }, jobDocId),
+                // 作业身份写进节点：刷新后据此续接预览/进度（否则刷新即丢）
+                onJobSubmitted: (job) => {
+                  refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, {
+                    localJob: { ...job, kind: 'video', model: LOCAL_VIDEO_MODEL_KEY, startedAt: Date.now() },
+                  } as Record<string, unknown>));
                 },
                 signal: ctl.signal,
               }).catch((err: unknown) => {
@@ -431,7 +576,7 @@ export function useAgentBridgeHooks(
           const guideMeta = resultGuide
             ? { id: resultGuide.id, path: resultGuide.path, frames: resultGuide.frames, sha256: resultGuide.sha256 }
             : undefined;
-          applyResult({ content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height, durationMs: result.durationMs, mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId, guide: guideMeta, errorDetails: undefined, errorType: undefined } as any, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
+          applyResult({ content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height, durationMs: result.durationMs, mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId, guide: guideMeta, errorDetails: undefined, errorType: undefined, localJob: undefined } as any, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
           // Plan#69: 产物已由后端自动落 Asset 素材库,事件仅通知抽屉刷新产出历史(不再传 blob URL)
           nodeActionBus.emit('canvas:history:created', {
             kind: 'video',
@@ -485,12 +630,12 @@ export function useAgentBridgeHooks(
         // 文档已切走：不要把「已失败/已取消」写到当前另一份画布的同 id 节点上
         if (getCurrentCanvasDocId() !== jobDocId) return;
         if (ctl.signal.aborted) {
-          refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle', errorDetails: undefined, errorType: undefined } as any));
+          refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle', errorDetails: undefined, errorType: undefined, localJob: undefined } as never));
           return;
         }
         const errorType: AiErrorType = err instanceof AiError ? err.errorType : classifyError(err);
         const msg = err instanceof Error ? err.message : String(err);
-        refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'error', errorDetails: msg, errorType } as any));
+        refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, { status: 'error', errorDetails: msg, errorType, localJob: undefined } as never));
       } finally {
         clearGeneratingPreview(nodeId, jobDocId);
         if (nodeAbortControllersRef.current.get(jobKey) === ctl) nodeAbortControllersRef.current.delete(jobKey);

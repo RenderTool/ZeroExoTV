@@ -123,7 +123,7 @@ describe("批量时长与参数契约", () => {
 });
 
 describe("作业提交与引导优先级（fetch stub）", () => {
-  it("run_generation：派生 86×64 / 107 帧 / steps=3；重跑单段取上一段 media.guide", async () => {
+  it("run_generation：派生 288×160 / 107 帧 / steps=3；重跑单段取上一段 media.guide", async () => {
     const videoPath = path.join(root, "fake.mp4");
     const guidePath = path.join(root, "gd_prev1234.safetensors");
     await fs.writeFile(videoPath, "fake");
@@ -173,8 +173,8 @@ describe("作业提交与引导优先级（fetch stub）", () => {
     const run = await call("run_generation", {
       projectId, episode: "1", confirm: true, selectedIds: [second],
     });
-    expect(run.width).toBe(86);
-    expect(run.height).toBe(64); // 钳到插件 min=64
+    expect(run.width).toBe(288);
+    expect(run.height).toBe(160); // 官方 MP 换算：×0.1 = 0.04MP，仍 32 对齐且 ≥64
     const jobs = run.jobs as Array<{ params: Record<string, unknown>; shotId: string }>;
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.params.frames).toBe(107); // 4s → 17k+5 吸附

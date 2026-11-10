@@ -11,7 +11,7 @@ const STAGES = pipelineStagesText();
 
 const SKILLS_POINTER = `【技能层——工具只回答「能做什么」，技能回答「怎么做」】开工前先读：zeroexo://skills/index（索引）、zeroexo://skills/pipeline（合订本：收料→剧本→主体→分镜提示词→参数→出片）、单技能 zeroexo://skills/<key>（script-import 剧本落地 / subjects 主体库 / shots-prompts 分镜与视频提示词 / params 参数与 H3 延续法）。写提示词、切段、配参数前必须先读对应技能，禁止凭感觉写。
 
-【参数纪律】aspect / scaleFactor / steps / cfg / seed / 引导帧 / 每段时长必须逐项问用户；联调小参数（如 432×240、49 帧、1 步）也要先说清并在用户同意后使用，禁止自行拍板。
+【参数纪律】aspect / scaleFactor / steps / cfg / seed / 引导帧 / 每段时长必须逐项问用户；联调小参数（如 608×352、49 帧、1 步）也要先说清并在用户同意后使用，禁止自行拍板。
 
 【细节规格按需取】资源：zeroexo://guides/index 列全部模块与阶段，zeroexo://guides/<key> 看单模块规格（key：project / episodes / script / subjects / assets / segments / run / export）。prompts：get_started（五阶段冷启动引导）、produce_episode（生产技能合订本）、bootstrap_project（剧本→项目 五阶段分步走查）。`;
 
@@ -20,7 +20,12 @@ export const SERVER_INSTRUCTIONS = `ZeroExoTV：浏览器无限画布式视频�
 【五阶段流水线——每阶段停下等用户确认，未过 gate 不得进下一步】
 ${STAGES}
 
-【最少需要问用户的问题——缺哪个问哪个，禁止模型替用户决定格式、集数、策略】项目名；剧本原文；mode 选择（standard|raw，用户的决定）；主体外观与清单确认；是否拆分镜（用户明确说「可以拆」才拆）；出片参数逐项确认。
+【先认项目，再问参数（2026-11-10 用户拍板）】
+- 用户没点名项目时，**先调 get_current_project**，不要反问「你要操作哪个项目」。拿到 source=open 就直接说「你现在打开的是 <title>（<id>），是操作这个项目吗？」；source=recent 表示只是最近修改过、没有打开记录，更要说清「这是你最近改过的项目」再请用户确认；返回 null 才用 list_projects 让用户挑。
+- 参数一律不猜：画面比例、尺寸、步数、时长、张数、模型，必须用户明确说，或你先给推荐值再请用户确认后才使用。图片（QwenImage2.1）默认 25 步、视频（H3ZeroExo）默认 8 步，都只是推荐值；Qwen 图片尺寸最长边 ≤2048、16 对齐。
+- 用户只说「生成 XXX 图片」时：先确认项目 → 再逐项确认尺寸/比例/步数（或说明将用推荐值）→ 才动数据。
+
+【最少需要问用户的问题——缺哪个问哪个，禁止模型替用户决定格式、集数、策略】项目确认（当前打开的那个是不是要操作的项目）；剧本原文；mode 选择（standard|raw，用户的决定）；主体外观与清单确认；是否拆分镜（用户明确说「可以拆」才拆）；出片参数逐项确认。
 
 【禁止事项】不擅自替用户决定 mode/strategy/presetId 等枚举选项；不覆盖用户数据（写前 dryRun 预览，用户确认才 confirm，overwrite 须用户明示）；不静默默认参数（缺 baseVersion/mode/duration 就报错或就问）；不提交真实 GPU 生成任务；遇 VERSION_CONFLICT 重读再写。
 

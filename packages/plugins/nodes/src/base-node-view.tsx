@@ -14,6 +14,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import type { GeneratingProgress } from './generating-preview-store.js';
 import {
   AlertTriangle,
   Lock,
@@ -245,6 +246,8 @@ export interface AIStateViewProps {
   skeleton?: 'media' | 'text';
   /** 生成中实时预览帧（dataURL；有则铺在骨架上，弱化后作为「带预览的生成中」） */
   previewImage?: string;
+  /** 采样进度（步数 / 阶段），loading 时显示进度条 */
+  progress?: GeneratingProgress;
   /** 骨架阶段文案类型（与生成物一致；禁止用分镜文案渲染图片/视频生成） */
   skeletonKind?: GenLoaderKind;
   /** 成功状态内容(由派生节点提供) */
@@ -392,6 +395,7 @@ export function AIStateView({
   onCancel,
   skeleton,
   previewImage,
+  progress,
   skeletonKind,
   children,
 }: AIStateViewProps): React.ReactElement {
@@ -399,6 +403,13 @@ export function AIStateView({
   // loading: 骨架(spinner) + 半透明遮罩 + 任务信息(媒体生成提交后不可取消,不渲染停止按钮;打断入口在 dock 的 interruptible 分支)
   if (status === 'loading') {
     const spinId = `ze-ai-spin-${accentColor.replace('#', '')}`;
+    const progressPct = progress
+      ? (progress.totalSteps && progress.step
+        ? Math.min(100, Math.round((progress.step / progress.totalSteps) * 100))
+        : (progress.overallMax && progress.overallValue
+          ? Math.min(100, Math.round((progress.overallValue / progress.overallMax) * 100))
+          : 0))
+      : 0;
     return (
       <div style={{ ...aiContainerStyle, background: backgroundColor, gap: 10, position: 'relative' }}>
         {/* 实时预览：把采样中的帧铺满节点，骨架叠在上面（弱化但不遮死） */}
@@ -485,6 +496,27 @@ export function AIStateView({
           >
             {taskLabel}
           </span>
+        ) : null}
+        {progress ? (
+          <div
+            data-generating-progress
+            style={{ position: 'relative', width: '80%', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}
+          >
+            <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
+              <div
+                data-generating-progress-bar
+                style={{ height: '100%', width: `${progressPct}%`, background: accentColor, transition: 'width 0.2s linear' }}
+              />
+            </div>
+            <span
+              data-generating-progress-text
+              style={{ fontSize: 10, color: 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums' }}
+            >
+              {progress.step != null && progress.totalSteps != null
+                ? t('nodes.sampling', { defaultValue: '采样 {{step}} / {{total}}', step: progress.step, total: progress.totalSteps })
+                : (progress.phaseLabel ?? t('nodes.generating'))}
+            </span>
+          </div>
         ) : null}
         {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
         {/* 生成中显式取消：用户可能把提示词 dock 收起了，节点上必须能直接取消 */}

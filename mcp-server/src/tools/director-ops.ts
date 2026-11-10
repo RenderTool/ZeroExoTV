@@ -20,7 +20,8 @@ import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
 const COMFY_BASE = (): string => process.env.ZEROEXO_COMFY_BASE ?? "http://127.0.0.1:8188";
 const GUIDE_ID_RE = /^gd_[A-Za-z0-9_-]{4,64}$/;
 const GUIDE_FRAME_OPTIONS = [5, 22, 39, 56];
-const BASE_PIXELS = 864 * 480;
+const PIXELS_PER_MEGAPIXEL = 1024 * 1024;
+const BASE_MEGAPIXELS = 0.4;
 const ASPECT: Record<string, number> = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1, "4:3": 4 / 3, "3:4": 3 / 4, "21:9": 21 / 9 };
 
 const round32 = (n: number): number => Math.max(32, Math.round(n / 32) * 32);
@@ -28,14 +29,16 @@ const clampScale = (n: unknown): number => {
   const v = Number(n);
   return Number.isFinite(v) ? Math.min(2, Math.max(0.1, v)) : 1;
 };
-/** 与前端 director-params.ts:375-384 同口径 */
+/** 与前端 entities/director-params.ts 同口径：官方 Size Settings Reference（面积 = 0.4MP×系数×1024²，×32 对齐） */
 function resolveVideoSize(aspect: string, scaleFactor: number): { width: number; height: number } {
   const r = ASPECT[aspect] ?? 16 / 9;
   const f = clampScale(scaleFactor);
-  const w0 = Math.sqrt(BASE_PIXELS * r);
-  // 插件 ZeroExoRefVideo 的 width/height 都是 min=64（ref_video.py:88-89），
-  // 低 scaleFactor 派生出的 48 会被 ComfyUI 队列校验拒绝，故钳到插件合法下限。
-  return { width: Math.max(64, Math.round(round32(w0) * f)), height: Math.max(64, Math.round(round32(w0 / r) * f)) };
+  const total = BASE_MEGAPIXELS * f * PIXELS_PER_MEGAPIXEL;
+  // 插件 ZeroExoRefVideo 的 width/height 都是 min=64（ref_video.py:88-89），顺手钳到插件合法下限。
+  return {
+    width: Math.max(64, round32(Math.sqrt(total * r))),
+    height: Math.max(64, round32(Math.sqrt(total / r))),
+  };
 }
 /** 与前端 director-params.ts:285-293 同口径（17k+5 吸附） */
 function durationToFrames(sec: number): number {

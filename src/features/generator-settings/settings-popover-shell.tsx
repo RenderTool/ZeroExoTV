@@ -47,28 +47,34 @@ export function SettingsPopoverShell({
   useEffect(() => {
     if (!open) return;
     const syncPosition = () => setButtonRect(buttonRef.current?.getBoundingClientRect() ?? null);
+    // antd 全局把 Select / Dropdown / Picker 浮层挂到 document.body，与本面板是兄弟 portal；
+    // window 捕获阶段会先收起面板，导致下拉选项点击丢失。嵌套浮层一律视作「面板内部」。
+    const inNestedPopup = (target: Node): boolean =>
+      target instanceof Element && !!target.closest(
+        '.ant-select-dropdown, .ant-dropdown, .ant-picker-dropdown, .ant-cascader-dropdown, .ant-popover, .ant-tooltip',
+      );
     const closeOnOutside = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target) || inNestedPopup(target)) return;
       setOpen(false);
     };
     // 仅当滚动发生在面板/按钮之外时才关闭:
     // 面板内部内容滚动(scroll 事件 target 为面板自身)不得关闭,否则参数面板一滚动就收起
     const closeOnScroll = (event: Event) => {
       const target = event.target as Node;
-      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target) || inNestedPopup(target)) return;
       setOpen(false);
     };
     // 画布为 transform 平移式滚动（不产生原生 scroll 事件）时 scroll 监听失效，
     // 弹层会留在原位 → 补 wheel/touchmove 捕获兜底：外部滚轮/拖拽滚动一律收起
     const closeOnWheel = (event: WheelEvent) => {
       const target = event.target as Node;
-      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target) || inNestedPopup(target)) return;
       setOpen(false);
     };
     const closeOnTouchMove = (event: TouchEvent) => {
       const target = event.target as Node;
-      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target) || inNestedPopup(target)) return;
       setOpen(false);
     };
     syncPosition();

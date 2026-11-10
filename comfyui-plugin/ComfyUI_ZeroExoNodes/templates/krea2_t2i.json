@@ -1,0 +1,87 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "krea2_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "UNet 加载器" }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+      "type": "krea2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "加载 CLIP" }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": { "title": "加载 VAE" }
+  },
+  "4": {
+    "inputs": {
+      "text": "__zx:prompt__",
+      "clip": ["2", 0]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "提示词" }
+  },
+  "5": {
+    "inputs": {
+      "text": "__zx:negative_prompt__",
+      "clip": ["2", 0]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示词" }
+  },
+  "6": {
+    "inputs": {
+      "width": "__zx:width__",
+      "height": "__zx:height__",
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "空 Latent" }
+  },
+  "7": {
+    "inputs": {
+      "eta": "__zx:eta__",
+      "sampler_name": "exponential/ddim",
+      "scheduler": "bong_tangent",
+      "steps": "__zx:steps__",
+      "steps_to_run": -1,
+      "denoise": 1,
+      "cfg": "__zx:cfg__",
+      "seed": "__zx:seed__",
+      "sampler_mode": "standard",
+      "bongmath": true,
+      "model": ["1", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0]
+    },
+    "class_type": "ClownsharKSampler_Beta",
+    "_meta": { "title": "Krea2 采样器" }
+  },
+  "8": {
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["3", 0]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE 解码" }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "zeroexo/__zx:project__/__zx:episode__/krea2",
+      "images": ["8", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "保存图像" }
+  }
+}

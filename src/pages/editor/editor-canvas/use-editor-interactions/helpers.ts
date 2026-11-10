@@ -9,7 +9,8 @@ import type { NodeRecord } from '@zeroexo/core';
 import { resolveNodeSize } from '@zeroexo/core';
 import { resolveContentUrl } from '@zeroexo/plugin-nodes';
 import { getMediaBlob } from '@/platform/media.js';
-import { downloadGuideFile } from '@/shared/utils/guide-file.js';
+import { fetchGuideBlob } from '@/shared/utils/guide-file.js';
+import { downloadFilesAsZip } from '@/features/asset-picker/services/download-asset.js';
 import { serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
 
 // ===== 反推提示词预设 =====
@@ -103,15 +104,18 @@ export async function downloadNodeAsFile(
     if (res?.ok) blob = await res.blob().catch(() => null);
   }
   if (!blob?.size) return { ok: false };
-  triggerAnchorDownload(URL.createObjectURL(blob), filename, true);
-  if (opts?.withGuide) {
-    const guide = data.guide as { id?: string } | undefined;
-    const guideOk = guide?.id
-      ? await downloadGuideFile(guide, `${baseName || '视频'} 引导`)
-      : false;
-    return { ok: true, guideOk };
+  const guide = opts?.withGuide ? (data.guide as { id?: string } | undefined) : undefined;
+  const guideBlob = guide?.id ? await fetchGuideBlob(guide).catch(() => null) : null;
+  if (guideBlob) {
+    const zipBase = (baseName || '视频').replace(/[\\/:*?"<>|]+/g, '_').trim() || '视频';
+    await downloadFilesAsZip(
+      [{ blob, filename }, { blob: guideBlob, filename: `${zipBase} 引导.safetensors` }],
+      zipBase,
+    );
+    return { ok: true, guideOk: true };
   }
-  return { ok: true };
+  triggerAnchorDownload(URL.createObjectURL(blob), filename, true);
+  return { ok: true, guideOk: opts?.withGuide ? false : undefined };
 }
 
 /** 分镜列锚点：取剧本下游已连分镜中最靠下的一个 */

@@ -548,16 +548,25 @@ export function useEditorInteractions({
     const handleNodeDetail = ({ node }: { node: NodeRecord }) => {
       setDetailNode(node);
     };
+    // 胶囊常驻下载（图片/视频/音频）：与右键菜单同一个下载实现（媒体二进制 + 引导打包）
+    const handleNodeDownload = ({ node }: { node: NodeRecord }) => {
+      void import('./use-editor-interactions/helpers.js').then(async (m) => {
+        const res = await m.downloadNodeAsFile(node);
+        if (!res.ok) message.error(t('editor.downloadNodeFailed', '下载失败：文件不存在或已被清理'));
+      });
+    };
     editor.core.eventBus.on('node:rename', handleNodeRename);
     editor.core.eventBus.on('node:delete', handleNodeDelete);
     editor.core.eventBus.on('node:detail', handleNodeDetail);
+    editor.core.eventBus.on('node:download', handleNodeDownload);
 
     return () => {
       editor.core.eventBus.off('node:rename', handleNodeRename);
       editor.core.eventBus.off('node:delete', handleNodeDelete);
       editor.core.eventBus.off('node:detail', handleNodeDetail);
+      editor.core.eventBus.off('node:download', handleNodeDownload);
     };
-  }, [state.editor, state.containerSize, actions, t, addAssetToStore]);
+  }, [state.editor, state.containerSize, actions, t, addAssetToStore, message]);
 
   // 2026-11-05 统一导航入口接收端（navigate-to-view）：「发送到画布」成功后
   // insert-asset-to-canvas 调 navigateToView('canvas', { nodeId }) 切画布页签并送达聚焦目标——

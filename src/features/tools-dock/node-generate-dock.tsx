@@ -41,7 +41,8 @@ import {
 import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
 import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { isLocalComfyuiAddress, useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
@@ -337,6 +338,9 @@ export function NodeGenerateDock({
     return () => { cancelled = true; };
   }, []);
 
+  // 当前 ComfyUI 地址：Krea2 只在线上地址露出（本机没有 krea2 底模 / RES4LYF 采样器）
+  const comfyAddress = useComfyuiEndpointStore((s) => s.address);
+
   const modelOptions = useMemo(() => {
     const encoded = filterChannelModelsByCapability(channels, modeCapability(mode));
     const options = encoded.map((enc) => {
@@ -353,9 +357,13 @@ export function NodeGenerateDock({
     // 本机 Qwen Image 2.1：图像编辑/文生图，作为图片节点常驻选项
     if (mode === 'image') {
       options.push({ value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL, iconKey: 'zeroexo' });
+      // Krea2 只在线上 ComfyUI 有底模 + RES4LYF 采样器：本机模式不露出，避免点了必然失败
+      if (!isLocalComfyuiAddress(comfyAddress)) {
+        options.push({ value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL, iconKey: 'zeroexo' });
+      }
     }
     return options;
-  }, [channels, mode]);
+  }, [channels, mode, comfyAddress]);
 
   // ===== 连入参考素材(复用生成器 deriveIncomingReferences 归一化) =====
   const [graphVersion, setGraphVersion] = useState(0);
@@ -441,6 +449,8 @@ export function NodeGenerateDock({
     if (currentModelValue === LOCAL_VIDEO_MODEL_KEY) return ['text', 'image'];
     // 本机 Qwen Image 2.1：图像编辑（文本 + 参考图）
     if (currentModelValue === LOCAL_IMAGE_MODEL_KEY) return ['text', 'image'];
+    // Krea2 文生图：只有文本输入（模型没有参考图槽）
+    if (currentModelValue === KREA2_MODEL_KEY) return ['text'];
     return getModelInputTypes(channels, currentModelValue);
   }, [channels, currentModelValue]);
 

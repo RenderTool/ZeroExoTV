@@ -130,6 +130,55 @@ export async function linkSubjectStateMedia(params: LinkSubjectStateMediaParams)
 // ===== 引用可见性（双向可见）=====
 
 /**
+ * 永久删除一条历史媒体（2026-11-10 用户要求）
+ *
+ * 与「恢复」不同，这里是真删：从 mediaHistory 移除 + 释放 CAS 引用（refCount--，归零即删文件），
+ * 不是只从数组里抹掉留孤儿文件。删的正好是主体封面时，封面回退到当前槽位的图片，
+ * 再退回历史里第一张可用图片；都没有才置空。
+ */
+export async function deleteSubjectHistoryMedia(params: {
+  trees: SubjectTree[];
+  projectId?: string;
+  rootId: string;
+  stateId: string;
+  /** 要删的那条 mediaHistory 的 storageKey */
+  key: string;
+}): Promise<{ trees: SubjectTree[] }> {
+  const { trees, projectId, rootId, stateId, key } = params;
+  const tree = trees.find((tr) => tr.rootId === rootId);
+  const state = (tree?.states ?? []).find((n) => n.id === stateId);
+  if (!tree || !state || !key) {
+    throw new Error(`[subject-state-media] target state not found: ${rootId}/${stateId}`);
+  }
+  const history = Array.isArray(state.mediaHistory) ? state.mediaHistory : [];
+  const removed = history.find((m) => m.key === key);
+  if (!removed) return { trees }; // 幂等：已经删过
+  const nextHistory = history.filter((m) => m.key !== key);
+  const next = trees.map((tr) => {
+    if (tr.rootId !== rootId) return tr;
+    const states = tr.states.map((n) => (n.id === stateId ? { ...n, mediaHistory: nextHistory } : n));
+    // 封面回退：当前槽位的图片 > 历史里第一张图片 > null
+    const fallback = tr.coverKey === key
+      ? ((state.media ?? []).find((m) => m.type === 'image' && m.key)?.key
+        ?? nextHistory.find((m) => m.type === 'image' && m.key)?.key
+        ?? null)
+      : tr.coverKey;
+    return { ...tr, states, coverKey: fallback };
+  });
+  if (projectId) {
+    const parsed = parseCasStorageKey(key);
+    if (parsed) {
+      try {
+        await releaseCas(parsed.hash, casRef(rootId, stateId, projectId, removed.type));
+      } catch {
+        // 引用本就不在索引里（历史数据）：无事可释放
+      }
+    }
+  }
+  return { trees: next };
+}
+
+/**
  * 删除状态 / 主体树前释放其全部媒体 CAS 引用（refCount--，归零自动删文件）。
  * 场景：主体内手动上传的文件只挂在 subject-state ref 上（不入 asset-store），
  * 若删除时不释放，会留孤儿文件。fire-and-forget，失败不阻塞删除（索引幂等）。
