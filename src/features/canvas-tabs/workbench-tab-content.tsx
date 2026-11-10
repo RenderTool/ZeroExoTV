@@ -142,12 +142,13 @@ export function resolveClipStatus(
   if (status === 'pending') return 'idle';
   if (status === 'done' || status === 'failed') return status;
   if (!run) return 'generating';
+  // 只标记「本次运行实际选中的片段」；其他片段即使上次残留 generating/queued，
+  // 也不能在本轮显示排队/生成中（2026-11-10 用户实测批量只选 2 段，后面全亮生成中）。
+  const idx = run.segmentShotIds.indexOf(shotId);
+  if (idx < 0) return 'idle';
   if (run.phase === 'canceled') return 'cancelled';
   if (run.phase === 'submitting' || run.phase === 'queued') return 'queued';
   if (run.phase === 'running') {
-    const idx = run.segmentShotIds.indexOf(shotId);
-    // 不在本次运行序列（历史残留 generating）→ 保持原态，不误标排队
-    if (idx < 0) return 'generating';
     return run.currentSegment !== null && idx === run.currentSegment - 1 ? 'generating' : 'queued';
   }
   return 'generating';
@@ -776,6 +777,13 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         String(sharedParamsRef.current.params['aspect'] ?? '16:9'),
         Number(sharedParamsRef.current.params['scaleFactor'] ?? 1),
       );
+      // 上一轮残留的「生成中/排队」不属于本次勾选：先归零，避免未选片段亮状态
+      const selected = new Set(selectedIds);
+      for (const s of shotsRef.current) {
+        if (!selected.has(s.id) && s.status === 'generating') {
+          updateShot(s.id, { status: 'pending' });
+        }
+      }
       void comfyRun.startRun({
         selectedIds,
         shots: shotsRef.current.map(toRunShot).map((s) =>

@@ -324,7 +324,7 @@ export async function buildDirectorPack(args: BuildPackArgs): Promise<BuiltDirec
   };
 
   const widgets = {
-    steps: Number(args.shared.params['steps'] ?? DIRECTOR_PRESETS[args.tier].params['steps'] ?? 25),
+    steps: Number(args.shared.params['steps'] ?? DIRECTOR_PRESETS[args.tier].params['steps'] ?? 8),
     sampler: String(args.shared.params['sampler'] ?? 'res_multistep'),
     scheduler: String(args.shared.params['scheduler'] ?? 'simple'),
     cfg: Number(args.shared.params['cfg'] ?? 1),
@@ -363,7 +363,7 @@ export function buildRunOverrides(args: {
   const frameRate = Number(p['frame_rate'] ?? d['frame_rate'] ?? 24) || 24;
   const overrides: BridgeRunOverrides = {
     taskType: preciseTaskType(p['task_type']),
-    steps: Number(p['steps'] ?? d['steps'] ?? 25),
+    steps: Number(p['steps'] ?? d['steps'] ?? 8),
     seed: Number(p['seed'] ?? d['seed'] ?? 0),
     cfg: Number(p['cfg'] ?? d['cfg'] ?? 1),
     width: args.width,

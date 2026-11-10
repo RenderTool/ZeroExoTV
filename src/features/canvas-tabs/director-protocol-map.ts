@@ -249,7 +249,7 @@ export async function buildProtocolVideoRequest(args: BuildProtocolRequestArgs):
     size: `${args.width}x${args.height}`,
     zeroexo_h3: {
       taskType,
-      steps: Number(p['steps'] ?? d['steps'] ?? 25),
+      steps: Number(p['steps'] ?? d['steps'] ?? 8),
       seed: Number(p['seed'] ?? d['seed'] ?? 0),
       cfg: Number(p['cfg'] ?? 1),
       sampler: String(p['sampler'] ?? 'res_multistep'),
@@ -283,7 +283,7 @@ export function buildProtocolImageRequest(args: {
     size: `${args.width}x${args.height}`,
     zeroexo_h3: {
       refs: args.refs ?? [],
-      steps: Number(p['steps'] ?? d?.['steps'] ?? 25),
+      steps: Number(p['steps'] ?? d?.['steps'] ?? 8),
       seed: Number(p['seed'] ?? d?.['seed'] ?? 0),
       cfg: Number(p['cfg'] ?? 1),
       sampler: String(p['sampler'] ?? 'res_multistep'),

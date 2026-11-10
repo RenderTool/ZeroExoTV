@@ -205,7 +205,7 @@ export function ImageEditWorkspace({
         prompt: payload.prompt,
         referenceImages: [dataUrl],
         maskDataUrl: payload.maskDataUrl,
-        params: { steps: 25, cfg: 1, denoise: 1, use_llm_enhance: false, sizeMode: 'source' },
+        params: { steps: 8, cfg: 1, denoise: 1, use_llm_enhance: false, sizeMode: 'source' },
       });
       const ids = await applyMaskEdit({
         node: resolveEditNode(),

@@ -186,7 +186,7 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
       input_image: inputName,
       mask_image: maskName,
       seed,
-      steps: num(params.steps, 25),
+      steps: num(params.steps, 8),
       cfg: num(params.cfg, 1),
       denoise: num(params.denoise, 1),
       edit_mode: !inputName,

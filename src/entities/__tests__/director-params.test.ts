@@ -204,7 +204,7 @@ describe('参数模板（本地预设）', () => {
     const sharedVerified = DIRECTOR_PARAM_SCHEMA.filter((f) => f.scope === 'shared' && f.verified);
     expect(Object.keys(DIRECTOR_PRESETS.h3.params)).toHaveLength(sharedVerified.length);
     expect(DIRECTOR_PRESETS.h3.params['cfg']).toBe(1.0);
-    expect(DIRECTOR_PRESETS.h3.params['steps']).toBe(25);
+    expect(DIRECTOR_PRESETS.h3.params['steps']).toBe(8);
     expect(DIRECTOR_PRESETS.h3.params['width']).toBe(864);
     expect(DIRECTOR_PRESETS.h3.params['continuityEnabled']).toBe(false);
     expect(DIRECTOR_PRESETS.h3.params['continuityOverlapFrames']).toBe(22);

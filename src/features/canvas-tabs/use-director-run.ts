@@ -629,7 +629,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
                 width: runArgs.width,
                 height: runArgs.height,
                 frames: durationToFrames(shot.duration),
-                steps: num('steps', 25),
+                steps: num('steps', 8),
                 cfg: num('cfg', 1),
                 seed: num('seed', 0),
                 frame_rate: 24,

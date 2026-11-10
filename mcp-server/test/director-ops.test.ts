@@ -92,7 +92,7 @@ describe("批量时长与参数契约", () => {
   it("get_param_schema：真名 steps/scaleFactor/refImageSize，禁造键被列出", async () => {
     const s = await call("get_param_schema", {});
     const shared = s.shared as Record<string, { default?: unknown; options?: string[]; min?: number }>;
-    expect(shared.steps?.default).toBe(25);
+    expect(shared.steps?.default).toBe(8);
     expect(shared.scaleFactor?.min).toBe(0.1);
     expect(shared.refImageSize?.options).toContain("match");
     expect(s.forbiddenKeys).toContain("resolution");

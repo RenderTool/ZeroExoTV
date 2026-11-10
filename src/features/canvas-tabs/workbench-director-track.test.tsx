@@ -998,7 +998,7 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
     expect(stage.textContent).not.toContain('甲提示词一');
   });
 
-  it('resolveClipStatus 六态映射：排队（提交/在队/运行中未轮到）、已取消（取消且未完成）、其余透传；不在运行序列不误标', () => {
+  it('resolveClipStatus 六态映射：排队、已取消、未选片段不误亮生成中', () => {
     const run = { phase: 'queued', segmentShotIds: ['a', 'b', 'c'], currentSegment: null };
     expect(resolveClipStatus('pending', run, 'a')).toBe('idle');
     expect(resolveClipStatus('done', run, 'a')).toBe('done');
@@ -1008,9 +1008,10 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
     expect(resolveClipStatus('generating', { ...run, phase: 'submitting' }, 'a')).toBe('queued');
     expect(resolveClipStatus('generating', run, 'b')).toBe('queued');
     expect(resolveClipStatus('generating', { phase: 'running', segmentShotIds: ['a', 'b'], currentSegment: 1 }, 'b')).toBe('queued');
-    // 生成中：运行中轮到本段；不在运行序列（历史残留）保持原态
+    // 生成中：运行中轮到本段
     expect(resolveClipStatus('generating', { phase: 'running', segmentShotIds: ['a', 'b'], currentSegment: 1 }, 'a')).toBe('generating');
-    expect(resolveClipStatus('generating', { phase: 'running', segmentShotIds: ['a'], currentSegment: 1 }, 'c')).toBe('generating');
+    // 不在本次运行序列：即使上次残留 generating，也必须回到 idle
+    expect(resolveClipStatus('generating', { phase: 'running', segmentShotIds: ['a'], currentSegment: 1 }, 'c')).toBe('idle');
     // 已取消：运行取消且本段未完成
     expect(resolveClipStatus('generating', { phase: 'canceled', segmentShotIds: ['a'], currentSegment: null }, 'a')).toBe('cancelled');
   });

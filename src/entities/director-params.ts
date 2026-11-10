@@ -447,7 +447,7 @@ export const DIRECTOR_PARAM_SCHEMA: DirectorParamField[] = [
   { key: 'height', label: '高度', type: 'int', default: 480, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L62', verified: true },
   { key: 'ref_max_size', label: '参考图最大边', type: 'int', default: 864, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L63', verified: true },
   { key: 'total_frames', label: '总帧数', type: 'int', default: 124, min: 5, max: 100000, step: 1, scope: 'shared', source: 'nodes/director_common.py L64-72', verified: true },
-  { key: 'steps', label: '采样步数', type: 'int', default: 25, min: 1, max: 200, step: 1, scope: 'shared', source: 'nodes/director.py L161-172', verified: true },
+  { key: 'steps', label: '采样步数', type: 'int', default: 8, min: 1, max: 200, step: 1, scope: 'shared', source: 'nodes/director.py L161-172', verified: true },
   { key: 'sampler', label: '采样器', type: 'enum', default: 'res_multistep', options: [
     { value: 'res_multistep', label: 'res_multistep' }, { value: 'euler', label: 'euler' },
     { value: 'euler_ancestral', label: 'euler_ancestral' }, { value: 'ddim', label: 'ddim' },

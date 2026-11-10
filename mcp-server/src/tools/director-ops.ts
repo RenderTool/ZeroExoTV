@@ -254,7 +254,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       const p = shared?.params ?? {};
       const aspect = String(p.aspect ?? "16:9");
       const { width, height } = resolveVideoSize(aspect, clampScale(p.scaleFactor ?? 1));
-      const steps = Number(p.steps ?? 25);
+      const steps = Number(p.steps ?? 8);
       const cfg = Number(p.cfg ?? 1);
       const seed = Number(p.seed ?? 0);
       const guideFrames = snapGuide(p.continuityOverlapFrames);
@@ -607,7 +607,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
     schema: {},
     handler: async () => ({
       shared: {
-        steps: { type: "int", default: 25, min: 1, max: 200 },
+        steps: { type: "int", default: 8, min: 1, max: 200 },
         scaleFactor: { type: "float", default: 1, min: 0.1, max: 2, derives: "width/height" },
         refImageSize: { type: "enum", default: "match", options: ["match", "1024", "1280", "1536", "max"] },
         continuityOverlapFrames: { type: "enum", default: 22, options: GUIDE_FRAME_OPTIONS },

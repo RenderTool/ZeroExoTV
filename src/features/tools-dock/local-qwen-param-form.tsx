@@ -62,7 +62,7 @@ export function LocalQwenParamForm({
   const clamped = clampQwenSize(Number(paramValues.width ?? fallback.width), Number(paramValues.height ?? fallback.height));
   const width = clamped.width;
   const height = clamped.height;
-  const steps = Number(paramValues.steps ?? 25);
+  const steps = Number(paramValues.steps ?? 8);
   const cfg = Number(paramValues.cfg ?? 1);
   const denoise = Number(paramValues.denoise ?? 1);
   const seed = Number(paramValues.seed ?? -1);

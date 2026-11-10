@@ -83,7 +83,7 @@ export const DIRECTOR_SHARED_DEFAULTS: Record<string, unknown> = {
   height: 480,
   ref_max_size: 864,
   total_frames: 124,
-  steps: 25,
+  steps: 8,
   sampler: "res_multistep",
   scheduler: "simple",
   shift_video: 12.0,

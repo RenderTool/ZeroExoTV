@@ -176,7 +176,7 @@ const PARAMS = `# 技能：参数与 H3 延续法（params）
 ## 2. 参数必须问用户（硬规则）
 
 - 生产值不许模型自定：\`aspect\`、\`scaleFactor\`、\`steps\`、\`cfg\`、\`seed\`、\`continuityOverlapFrames\`、每段时长，逐项确认后才写。
-- 用户说「按默认」时才用：16:9 / 864×480 / steps 25 / cfg 1.0 / seed 0 / 引导 22 帧。
+- 用户说「按默认」时才用：16:9 / 864×480 / steps 8 / cfg 1.0 / seed 0 / 引导 22 帧。
 
 ## 3. 自检/联调用小参数（用户明确同意后才用）
 

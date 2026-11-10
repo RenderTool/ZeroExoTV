@@ -107,7 +107,7 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
           min={1}
           max={200}
           step={1}
-          value={Number(params['steps'] ?? 25)}
+          value={Number(params['steps'] ?? 8)}
           onChange={(v) => { if (typeof v === 'number' && Number.isFinite(v)) setParam('steps', Math.min(200, Math.max(1, Math.round(v)))); }}
           className="director-input-number"
           style={{ width: 120, height: 25 }}
