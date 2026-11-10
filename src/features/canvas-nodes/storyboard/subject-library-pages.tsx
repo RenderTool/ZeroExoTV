@@ -1372,6 +1372,21 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }
   }, [projectId, commitTrees, antdMessage, t]);
 
+  /** 从状态媒体历史恢复一张旧图（只换引用，不复制文件） */
+  const restoreMedia = useCallback(async (rootId: string, stateId: string, ref: SubjectNodeMediaRef) => {
+    try {
+      const { trees: linked } = await linkSubjectStateMedia({
+        trees: treesRef.current, projectId: projectId ?? undefined,
+        rootId, stateId,
+        asset: { storageKey: ref.key, kind: ref.type, origin: ref.origin },
+      });
+      commitTrees(linked);
+      antdMessage.success(t('subject.mediaRestored', '已恢复历史媒体'));
+    } catch (err) {
+      antdMessage.error(err instanceof Error ? err.message : t('subjectCreate.saveFailed', '保存失败'));
+    }
+  }, [projectId, commitTrees, antdMessage, t]);
+
   // ===== 工具栏片段（整页与抽屉共用同一实现，2026-11-06）=====
   /** 按集筛选：选项来自剧本真实集数；落位由调用处决定（旧版自带 marginLeft:auto，抽屉里被右边缘裁成半截） */
   const episodeFilter = (
@@ -1799,6 +1814,31 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         )}
                       </div>
                     </CardShell>
+                    {(openNode?.mediaHistory?.length ?? 0) > 0 && (
+                      <div data-media-history style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
+                          {t('subject.mediaHistory', '历史图片')}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {(openNode?.mediaHistory ?? []).map((ref, i) => (
+                            <Tooltip key={`${ref.key}-${i}`} title={t('subject.restoreMedia', '恢复这张图')}>
+                              <button
+                                type="button"
+                                data-media-history-item
+                                aria-label={t('subject.restoreMedia', '恢复这张图')}
+                                onClick={() => { void restoreMedia(openTree.rootId, level.stateId, ref); }}
+                                style={{
+                                  width: 54, height: 54, padding: 0, overflow: 'hidden',
+                                  borderRadius: 6, border: '1px solid rgba(128,128,128,0.28)', cursor: 'pointer',
+                                }}
+                              >
+                                <SubjectMediaThumb storageKey={ref.key} kind={slotMediaKind(ref)} dark={isDark} fill />
+                              </button>
+                            </Tooltip>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* 右列：状态名 / 提示词 / 出现集数（基础状态与更多状态同一套表单） */}

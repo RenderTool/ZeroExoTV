@@ -93,12 +93,23 @@ export async function linkSubjectStateMedia(params: LinkSubjectStateMediaParams)
       const nextMedia: SubjectNodeMediaRef[] = asset
         ? [{ key: asset.storageKey, type: asset.kind, origin: asset.origin }, ...media.slice(1)]
         : [];
+      // 被替换/清空的首槽进入历史：文件保留，用户可随时恢复；最多 20 条
+      const history = Array.isArray(n.mediaHistory) ? n.mediaHistory : [];
+      const nextHistory = replaced && replaced.key
+        ? [replaced, ...history.filter((m) => m.key !== replaced.key)].slice(0, 20)
+        : history;
       const node: SubjectTreeNode = asset
-        ? { ...n, type: asset.kind, media: nextMedia }
-        : { ...n, media: [] };
+        ? { ...n, type: asset.kind, media: nextMedia, mediaHistory: nextHistory }
+        : { ...n, media: [], mediaHistory: nextHistory };
       return node;
     });
-    return { ...tr, states };
+    // 当前状态媒体正好是主体封面 → 封面跟随替换/清空，不再停留在旧 key
+    const coverFollows = Boolean(tr.coverKey && oldSlot?.key && tr.coverKey === oldSlot.key);
+    return {
+      ...tr,
+      states,
+      coverKey: coverFollows ? (asset?.storageKey ?? null) : tr.coverKey,
+    };
   });
   // ===== CAS 记账（只在有 projectId 且 key 是 CAS 格式时）=====
   if (projectId) {
@@ -111,13 +122,7 @@ export async function linkSubjectStateMedia(params: LinkSubjectStateMediaParams)
         // 引用条目不存在（资产已被 GC）：仍保留树内引用，主体侧由存活探测显示「引用已失效」
       }
     }
-    if (oldParsed && (!newParsed || newParsed.hash !== oldParsed.hash)) {
-      try {
-        await releaseCas(oldParsed.hash, casRef(rootId, stateId, projectId, oldSlot!.type));
-      } catch {
-        // 旧引用本就不在索引里（历史数据）：无事可释放
-      }
-    }
+    // 旧引用不释放：它已进入 mediaHistory，仍需保活；删除状态时统一释放
   }
   return { trees: next, replaced };
 }
@@ -153,7 +158,8 @@ export async function releaseSubjectStateMediaRefs(params: {
     // 基础状态已在 states[0]，与其余状态同一循环（id 仍是 __base__，CAS 记账不变）
     for (const n of tr.states ?? []) {
       if (stateId && n.id !== stateId) continue;
-      for (const m of n.media ?? []) await releaseOne(tr.rootId, n.id, m);
+      const all = [...(n.media ?? []), ...(n.mediaHistory ?? [])];
+      for (const m of all) await releaseOne(tr.rootId, n.id, m);
     }
   }
 }

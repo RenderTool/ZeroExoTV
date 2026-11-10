@@ -148,6 +148,8 @@ export interface SubjectTreeNode {
   recognitionTerms: string[];
   /** 媒体资源 */
   media: SubjectNodeMediaRef[];
+  /** 被替换过的历史媒体（新→旧，最多保留 20 条；文件由 CAS 引用保活） */
+  mediaHistory?: SubjectNodeMediaRef[];
   /** 文本节点正文 */
   textContent?: string;
   /** 来源标记 */

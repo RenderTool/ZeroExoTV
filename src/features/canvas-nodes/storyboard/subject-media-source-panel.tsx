@@ -16,6 +16,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as AntdApp } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
+import { filterVisibleNodes } from '@zeroexo/core';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { listAssets } from '@/features/asset-picker/asset-store.js';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
@@ -88,7 +89,7 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
           const graph = await loadProjectGraph(projectId);
           if (graph && Array.isArray(graph.nodes) && !cancelled) {
             const seen = new Set<string>();
-            for (const n of graph.nodes) {
+            for (const n of filterVisibleNodes(graph.nodes)) {
               const node = n as { id?: string; title?: string; type?: string; data?: { storageKey?: string } };
               const key = node?.data?.storageKey;
               if (!key || seen.has(key)) continue;

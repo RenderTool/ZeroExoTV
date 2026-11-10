@@ -838,7 +838,11 @@ export function useEditorState(canvasId: string): {
     // 键盘:Space(临时平移)+ V(切换模式),仅非输入框焦点时生效
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) return;
       if (e.code === 'Space') {
         ic.setSpacePressed(true);
         e.preventDefault();

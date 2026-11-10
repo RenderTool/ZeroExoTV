@@ -124,7 +124,7 @@ describe('linkSubjectStateMedia（唯一写入函数语义）', () => {
     expect(registerCalls[0]?.ref).toMatchObject({ kind: 'audio' });
   });
 
-  it('替换：旧引用释放（refCount--）+ 新引用登记，replaced 返回旧值供撤销', async () => {
+  it('替换：旧引用保留进媒体历史 + 新引用登记，replaced 返回旧值供撤销', async () => {
     const tr = makeTree();
     const target = stateOf(tr, 0);
     const once = await linkSubjectStateMedia({
@@ -140,15 +140,30 @@ describe('linkSubjectStateMedia（唯一写入函数语义）', () => {
     const node = firstTree(trees).states.find((n) => n.id === target.id) as SubjectTreeNode;
     expect(node.media).toHaveLength(1);
     expect(node.media[0]?.key).toBe(CAS_B);
-    // 登记新 + 释放旧 各一次
+    expect(node.mediaHistory?.map((m) => m.key)).toEqual([CAS_A]);
+    // 新引用登记；旧引用不释放（历史仍引用）
     expect(registerCalls.map((c) => c.hash)).toEqual([
       'aaaa1111aaaa1111aaaa1111aaaa1111',
       'bbbb2222bbbb2222bbbb2222bbbb2222',
     ]);
-    expect(releaseCalls).toHaveLength(1);
-    expect(releaseCalls[0]?.hash).toBe('aaaa1111aaaa1111aaaa1111aaaa1111');
-    expect(releaseCalls[0]?.ref.assetId).toBe(`subject-state:${tr.rootId}/${target.id}`);
+    expect(releaseCalls).toHaveLength(0);
   });
+
+  it('封面跟随当前媒体替换：旧封面被替换后自动指向新图', async () => {
+    const tr = makeTree();
+    tr.coverKey = CAS_A;
+    const target = stateOf(tr, 0);
+    const once = await linkSubjectStateMedia({
+      trees: [tr], projectId: PROJECT, rootId: tr.rootId, stateId: target.id,
+      asset: { storageKey: CAS_A, kind: 'image' },
+    });
+    const { trees } = await linkSubjectStateMedia({
+      trees: once.trees, projectId: PROJECT, rootId: tr.rootId, stateId: target.id,
+      asset: { storageKey: CAS_B, kind: 'image' },
+    });
+    expect(firstTree(trees).coverKey).toBe(CAS_B);
+  });
+
 
   it('同 key 重挂：不重复记账、replaced=null（无内容被替换）', async () => {
     const tr = makeTree();
@@ -166,7 +181,7 @@ describe('linkSubjectStateMedia（唯一写入函数语义）', () => {
     expect(releaseCalls).toHaveLength(0);  // 不误释放
   });
 
-  it('移除（asset=null）：清空媒体、释放引用、replaced 供撤销恢复', async () => {
+  it('移除（asset=null）：清空媒体、旧图进历史、replaced 供撤销恢复', async () => {
     const tr = makeTree();
     const target = stateOf(tr, 0);
     const linked = await linkSubjectStateMedia({
@@ -180,8 +195,9 @@ describe('linkSubjectStateMedia（唯一写入函数语义）', () => {
     expect(replaced?.key).toBe(CAS_A);
     const node = firstTree(trees).states.find((n) => n.id === target.id) as SubjectTreeNode;
     expect(node.media).toEqual([]);
+    expect(node.mediaHistory?.map((m) => m.key)).toEqual([CAS_A]);
     expect(registerCalls).toHaveLength(1);
-    expect(releaseCalls).toHaveLength(1);
+    expect(releaseCalls).toHaveLength(0);
   });
 
   it('撤销恢复：replaced 可原样回写（视频历史引用也能恢复）', async () => {
