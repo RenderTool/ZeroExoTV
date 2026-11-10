@@ -103,7 +103,10 @@
 - **线上 ComfyUI 尚未部署这份模板**（云端 `/zeroexo/v1/health` 的 templates 里还没有 `krea2_t2i`）：把 `comfyui-plugin/ComfyUI_ZeroExoNodes`
   同步到 `/root/comfyui/ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes` 后重启（`bash /etc/waas-script/restart_comfyui.sh`）。
 - 云端已核对：`krea2_turbo_bf16.safetensors` / `qwen3vl_4b_fp8_scaled.safetensors` / `qwen_image_vae.safetensors` 都在，
-  `ClownsharKSampler_Beta`（RES4LYF）与 `ResolutionSelector` 节点可用，直提 `/prompt` 无 node_errors。
+  `ClownsharKSampler_Beta`（RES4LYF）与 `ResolutionSelector` 节点可用。
+- **云端实测通过（2026-11-10）**：把主链 workflow 直接 POST 到线上 `/prompt`（1024×1024 / 10 步 / seed 4242），
+  `status=success`，产出 `zeroexo/test/krea2_cloudtest2_00001_.png`（1.04MB，1024×1024 写实人像），
+  说明模板里的模型与采样器在线上都能跑；剩余只差把插件目录同步到云端（否则 `kind=krea2_t2i` 找不到模板）。
 
 ### H. 刷新后恢复预览与进度（已完成，见 §3）
 
