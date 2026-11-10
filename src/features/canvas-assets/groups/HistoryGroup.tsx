@@ -147,6 +147,8 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   const [hovered, setHovered] = useState(false);
   // 2026-11-05 用户定稿：历史产出也走统一 MediaLightbox 壳（图片/视频同一 UI）
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const data = asset.data as { kind: string; dataUrl?: string; url?: string; storageKey?: string; width?: number; height?: number; durationMs?: number; guide?: { id?: string } };
   const isVideo = data.kind === 'video';
@@ -270,6 +272,8 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
           )}
           {/* 发送统一收纳：发送到画布 / 导演台（源视频、引导）/ 本项目 / 公共资产 */}
           <Dropdown
+            open={sendMenuOpen}
+            onOpenChange={setSendMenuOpen}
             trigger={['click']}
             menu={{
               items: [
@@ -313,7 +317,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
             <span>
               <ActionButton
                 title={t('assetLibrary.sendTo', { defaultValue: '发送' })}
-                onClick={() => undefined}
+                onClick={() => setSendMenuOpen(true)}
                 theme={theme}
               >
                 <Share2 size={14} />
@@ -322,6 +326,8 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
           </Dropdown>
           {/* 更多最右：下载 / 编辑 / 重命名 / 删除，与资产卡同一套 */}
           <Dropdown
+            open={moreMenuOpen}
+            onOpenChange={setMoreMenuOpen}
             trigger={['click']}
             menu={{
               items: [
@@ -343,7 +349,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
             <span>
               <ActionButton
                 title={t('common.more', { defaultValue: '更多' })}
-                onClick={() => undefined}
+                onClick={() => setMoreMenuOpen(true)}
                 theme={theme}
               >
                 <MoreHorizontal size={14} />
