@@ -10,7 +10,8 @@
  * 符合专业剪辑软件标准 (OpenCut 布局)。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import { ListChecks, Plus, SquareSplitHorizontal, Trash2 } from 'lucide-react';
+import { ChevronDown, ListChecks, Plus, SquareSplitHorizontal, Trash2 } from 'lucide-react';
+import { Dropdown } from 'antd';
 import type { WorkbenchNodeData, WorkbenchTrack } from './workbench-types';
 import { resolveShotsForTrack } from './workbench-sync';
 import { StoryboardTimeline, type StoryboardTimelineProps, type TimelineClipData } from './storyboard-timeline';
@@ -545,10 +546,11 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
   }, [zeroBaseRail, timeline.pixelsPerSecond, timeline.onPixelsPerSecondChange]);
 
   // 全局工具栏回调
+  /** 「添加」主按钮：插到选中片段之后（无选中 = 末尾）；插入位置另有右侧下拉 */
   const handleAddClip = useCallback(() => {
     if (!timeline.onInsertAt) return;
-    timeline.onInsertAt(null);
-  }, [timeline.onInsertAt]);
+    timeline.onInsertAt(timeline.activeShotId ?? null);
+  }, [timeline.onInsertAt, timeline.activeShotId]);
 
   const handleDeleteShot = useCallback(() => {
     if (!timeline.activeShotId || !timeline.onDeleteShot) return;
@@ -802,7 +804,39 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
         {/* 左侧: 编辑工具（2026-11-04 第二条A/B：添加/链接/删除/批量 四键共用 RailIconButton；
             第七条B：图标+文字，容器变窄横向滚动、不换行、不退化纯 icon） */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          <RailIconButton icon={<Plus size={15} />} label={t('workbench.multitrack.add', '添加')} title="在末尾添加新片段" onClick={handleAddClip} disabled={!timeline.onInsertAt} color={C.text} />
+          {/* 2026-11-10 用户要求：插入位置可选（主按钮 = 插到选中片段之后，右侧下拉可选最前/之前/之后/最后） */}
+          <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <RailIconButton icon={<Plus size={15} />} label={t('workbench.multitrack.add', '添加')} title={t('workbench.insert.after', '插入到选中片段之后')} onClick={handleAddClip} disabled={!timeline.onInsertAt} color={C.text} />
+            <Dropdown
+              trigger={['click']}
+              disabled={!timeline.onInsertAt}
+              menu={{
+                style: { minWidth: 170 },
+                items: (() => {
+                  const activeIdx = timeline.activeShotId
+                    ? timeline.shots.findIndex((s) => s.id === timeline.activeShotId)
+                    : -1;
+                  return [
+                    { key: 'first', label: t('workbench.insert.first', '插入到最前'), onClick: () => timeline.onInsertAt?.(null, { index: 0 }) },
+                    { key: 'before', label: t('workbench.insert.before', '插入到选中片段之前'), disabled: activeIdx < 0, onClick: () => timeline.onInsertAt?.(null, { index: activeIdx }) },
+                    { key: 'after', label: t('workbench.insert.after', '插入到选中片段之后'), disabled: activeIdx < 0, onClick: () => timeline.onInsertAt?.(timeline.activeShotId ?? null) },
+                    { key: 'last', label: t('workbench.insert.last', '插入到最后'), onClick: () => timeline.onInsertAt?.(null) },
+                  ];
+                })(),
+              }}
+            >
+              <button
+                type="button"
+                data-insert-menu
+                aria-label={t('workbench.insert.menuTitle', '插入位置')}
+                title={t('workbench.insert.menuTitle', '插入位置')}
+                disabled={!timeline.onInsertAt}
+                style={{ height: 25, width: 18, padding: 0, border: 'none', background: 'transparent', color: C.muted, cursor: timeline.onInsertAt ? 'pointer' : 'default', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <ChevronDown size={12} />
+              </button>
+            </Dropdown>
+          </span>
           {continuityEntry ? (
             /* 分割图标保留原形，名称/功能改为「段间衔接」模式开关 */
             <RailIconButton dataAttr="data-continuity-mode" icon={<SquareSplitHorizontal size={14} />} label={t('workbench.multitrack.link', '链接')} title="段间衔接" onClick={continuityEntry.onToggle} active={continuityEntry.active} color={C.text} />

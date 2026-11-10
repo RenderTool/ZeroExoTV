@@ -22,6 +22,7 @@ import uuid
 from typing import Any
 
 from .lib.guide_options import GUIDE_FRAME_OPTIONS, snap_guide_frames
+from .engine.graph_ops import prune_model_chain
 
 import aiohttp
 import folder_paths
@@ -607,6 +608,10 @@ async def submit_job(request):
     except FileNotFoundError:
         return web.json_response({"ok": False, "error": f"缺少模板 templates/{template_kind}.json"}, status=400)
     template = apply_model_overrides(template, body.get("models"))
+    if kind == "reference_video":
+        # 低显存 / 原模型是 switch 二选一，但两条链都是输出节点的祖先 → 都会执行。
+        # 按本次参数把没选中的一支删掉，避免「选了高性能还在跑低显存链」。
+        template = prune_model_chain(template, _truthy(params.get("use_low_vram")))
 
     job_id = body.get("clientJobId") or f"zx_{uuid.uuid4().hex[:12]}"
     # 前端 /ws clientId 透传：引擎的 minimax_director_preview/progress 按 server.client_id 定向发送

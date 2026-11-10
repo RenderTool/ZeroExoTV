@@ -174,8 +174,7 @@ function readResumableRun(): ResumedRun | null {
 
 // ===== 主线程截帧（串行队列：同一时刻只解码一个视频） =====
 
-const extractQueue: Array<() => Promise<void>> = [];
-let extractBusy = false;
+const extractQueue: Array<() => Promise<void>> = [];let extractBusy = false;
 
 function runQueue(): void {
   if (extractBusy) return;
@@ -246,6 +245,21 @@ export function extractFirstFrame(videoBlob: Blob): Promise<Blob | null> {
 }
 
 // ===== hook =====
+
+/**
+ * 含显式片段引导槽时必须走插件作业通道（2026-11-10 用户实测：桥接模式引导无效）。
+ *
+ * 原因：桥接走官方 MiniMaxH3DirectorZX，timeline_data 的段里没有显式引导字段，
+ * 引导数据会被静默丢掉；只有 /zeroexo/v1/jobs 的 reference_video 模板有 prev_guide_path。
+ */
+export function needsZeroexoForGuides(
+  mode: 'direct' | 'zeroexo' | 'openai',
+  shots: Array<{ id: string; guide?: { id?: string } | null }>,
+  selectedIds: string[],
+): boolean {
+  if (mode !== 'direct') return false;
+  return shots.some((s) => selectedIds.includes(s.id) && Boolean(s.guide?.id));
+}
 
 export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
   startRun: (runArgs: StartRunArgs) => Promise<boolean>;
@@ -519,14 +533,23 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
 
   const startRun = useCallback(
     async (runArgs: StartRunArgs): Promise<boolean> => {
-      const cfg = cfgRef.current();
-      if (!cfg) {
+      const resolved = cfgRef.current();
+      if (!resolved) {
         patch({ phase: 'error', error: '尚未连接 ComfyUI：请点右上角「ComfyUI」填一个地址并测试连接' });
         return false;
       }
+      // 片段引导槽只有插件作业通道（/zeroexo/v1/jobs）会真正送进引擎：
+      // 桥接走官方 director 节点，timeline 里没有显式引导字段，继续用桥接等于把用户的引导数据丢掉。
+      const hasExplicitGuide = needsZeroexoForGuides(resolved.mode, runArgs.shots, runArgs.selectedIds);
+      const cfg = (hasExplicitGuide && resolved.mode === 'direct'
+        ? { mode: 'zeroexo' as const, baseUrl: resolved.baseUrl }
+        : resolved);
       if (!isAuthorized()) {
         patch({ phase: 'error', error: '本地资产库未授权：生成结果需要落盘到项目资产，请先登录' });
         return false;
+      }
+      if (resolved.mode === 'direct' && hasExplicitGuide) {
+        cbRef.current.onNotice('info', '本次运行含片段引导槽：已改走插件作业通道（桥接不支持显式引导）');
       }
       stopPolling();
       stopPreview();

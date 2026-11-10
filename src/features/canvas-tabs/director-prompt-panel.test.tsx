@@ -15,7 +15,7 @@
  * react-i18next 与 asset-picker 全部 mock；antd 真实渲染（Popover portal 到 body）。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { App as AntdApp } from 'antd';
 import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS.js';
@@ -237,6 +237,10 @@ function renderPanel(overrides?: {
   totalShots?: number;
   onPrevShot?: () => void;
   onNextShot?: () => void;
+  /** 2026-11-10：镜头下拉直达 + 片段交换 */
+  onJumpShot?: (index: number) => void;
+  onSwapShot?: (index: number) => void;
+  shotLabels?: string[];
 }) {
   const shared = overrides?.shared ?? makeShared();
   const shot = overrides?.shot ?? makeShot();
@@ -252,6 +256,9 @@ function renderPanel(overrides?: {
         totalShots: overrides?.totalShots ?? 5,
         onPrevShot: overrides?.onPrevShot ?? (() => {}),
         onNextShot: overrides?.onNextShot ?? (() => {}),
+        onJumpShot: overrides?.onJumpShot,
+        onSwapShot: overrides?.onSwapShot,
+        shotLabels: overrides?.shotLabels,
         onShotChange: overrides?.onShotChange ?? (() => {}),
         theme,
         isDark: true,
@@ -284,6 +291,20 @@ describe('面板版式（线上截图为唯一依据）', () => {
       .querySelector('[data-director-shot-prev]') as HTMLButtonElement).disabled).toBe(true);
     expect((renderPanel({ shotIndex: 4, totalShots: 5 }).container
       .querySelector('[data-director-shot-next]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('2026-11-10：镜头号下拉直达任意镜头 + 交换按钮列出其它镜头', async () => {
+    const onJumpShot = vi.fn();
+    const onSwapShot = vi.fn();
+    const { container } = renderPanel({ shotIndex: 1, totalShots: 5, onJumpShot, onSwapShot });
+    // 跳转：点镜头号 → 菜单选「镜头 5」
+    fireEvent.click(container.querySelector('[data-director-shot-jump]') as HTMLButtonElement);
+    fireEvent.click(await screen.findByText('镜头 5'));
+    expect(onJumpShot).toHaveBeenCalledWith(4);
+    // 交换：点交换 → 菜单选「与镜头 3 交换」（0 基 2）
+    fireEvent.click(container.querySelector('[data-director-swap-shot]') as HTMLButtonElement);
+    fireEvent.click(await screen.findByText('与镜头 3 交换'));
+    expect(onSwapShot).toHaveBeenCalledWith(2);
   });
 
   it('第八C+第九条：标题行整行移除（编号胶囊「片段 N / 分镜 N」均无，「分镜」字样 = 0）；v5 抄来元素 = 0；@ 按钮残留 = 0；加号方块 = 1', () => {

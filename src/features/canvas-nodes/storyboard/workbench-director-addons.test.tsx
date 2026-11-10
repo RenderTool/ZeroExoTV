@@ -328,7 +328,7 @@ describe('workbench-multitrack：出片页零变化 + 导演台新 props', () =>
       expect(btn.style.height).toBe('25px');
       expect(btn.style.whiteSpace).toBe('nowrap'); // 不换行、不退化纯 icon
     };
-    expectLabeled('在末尾添加新片段', '添加');
+    expectLabeled('插入到选中片段之后', '添加');
     expectLabeled('段间衔接', '链接');
     expectLabeled('删除选中片段', '删除');
     expectLabeled('批量运行（勾选片段）', '批量');
@@ -341,7 +341,7 @@ describe('workbench-multitrack：出片页零变化 + 导演台新 props', () =>
       continuityEntry: { active: false, onToggle: () => {} },
       batchEntry: { active: false, onToggle: () => {} },
     });
-    expect(container.querySelectorAll('button[title="在末尾添加新片段"]').length).toBe(1);
+    expect(container.querySelectorAll('button[title="插入到选中片段之后"]').length).toBe(1);
     expect(container.querySelectorAll('[data-continuity-mode]').length).toBe(1);
     expect(container.querySelectorAll('button[title="删除选中片段"]').length).toBe(1);
     expect(container.querySelectorAll('[data-batch-mode]').length).toBe(1);
@@ -407,7 +407,7 @@ describe('workbench-multitrack：出片页零变化 + 导演台新 props', () =>
     expect(bar.parentElement).toBe(batchBtn.parentElement);
     expect(bar.querySelector('[data-select-mode-count]')?.textContent).toBe('已选 3 段');
     // 工具行不让位：添加/删除按钮仍渲染（分割入口已于 2026-11-05 调整整项删除）
-    expect(container.querySelector('button[title="在末尾添加新片段"]')).toBeTruthy();
+    expect(container.querySelector('button[title="插入到选中片段之后"]')).toBeTruthy();
     expect(container.querySelector('button[title="删除选中片段"]')).toBeTruthy();
     fireEvent.click(bar.querySelector('[data-select-mode-done]') as Element);
     expect(onDone).toHaveBeenCalledTimes(1);

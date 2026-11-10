@@ -65,6 +65,7 @@ import type { ScriptEpisode } from '@/entities/script-store.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
+import { exportProjects } from '@/pages/home/services/export-projects.js';
 import { ConfirmDialog, NodeCreateMenu, AppearanceDialog, ShortcutsDialog, MobileNavDrawer, MobileNavButton, MobileNavFloatingWrapper, LanguageDialog, AssetDetailViewer, LoadingOverlay } from '@/shared/components/index.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 // Plan#84（征集#184）：副本画布挂载层（与 1 号并排的顶层标签激活时渲染另一块画布）
@@ -665,6 +666,17 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               theme={theme}
               onHome={onBack}
               onNewProject={() => void dialogs.handleNewProject()}
+              onExportProject={() => {
+                void (async () => {
+                  try {
+                    const project = await getProject(canvasId);
+                    await exportProjects([canvasId], project?.title || 'zeroexo-project');
+                    message.success(t('home.exportStarted', '已开始下载项目包'));
+                  } catch {
+                    message.error(t('home.exportFailed'));
+                  }
+                })();
+              }}
               onCopyProject={() => void dialogs.handleCopyProject()}
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
             />

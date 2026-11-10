@@ -554,9 +554,9 @@ export class InteractionController {
   // ===== 滚轮缩放/平移 =====
 
   /**
-   * 滚轮交互（2026-08-25 用户拍板反转：与常规文档滚动直觉一致）:
-   * - 普通滚轮: 上下平移画布（主通道，常驻教育提示）
-   * - Ctrl/Cmd + 滚轮: 以鼠标位置为中心缩放（修饰通道）
+   * 滚轮交互（2026-11-10 用户拍板：滚轮 = 缩放，平移交给拖拽/Shift）:
+   * - 普通滚轮: 以鼠标位置为中心缩放（主通道）
+   * - Ctrl/Cmd + 滚轮: 触控板捏合也走缩放，行为一致
    * - Shift + 滚轮: 水平平移画布
    */
   handleWheel = (event: WheelEvent): void => {
@@ -566,38 +566,8 @@ export class InteractionController {
 
     const viewport = this.store.getViewport();
 
-    // 普通滚轮: 上下平移
-    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
-      const speed = 1.5;
-      this.store.setViewport({
-        ...viewport,
-        y: viewport.y - event.deltaY * speed,
-      });
-      return;
-    }
-
-    // Ctrl/Cmd + 滚轮: 以鼠标位置为中心缩放
-    if (event.ctrlKey || event.metaKey) {
-      const rect = this.getContainerOffset();
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
-      const delta = -event.deltaY;
-      const factor = Math.pow(1.1, delta / 100);
-      const newK = Math.min(Math.max(viewport.k * factor, 0.05), 5);
-
-      const worldX = (mouseX - viewport.x) / viewport.k;
-      const worldY = (mouseY - viewport.y) / viewport.k;
-
-      this.store.setViewport({
-        x: mouseX - worldX * newK,
-        y: mouseY - worldY * newK,
-        k: newK,
-      });
-      return;
-    }
-
-    // Shift + 滚轮: 水平平移
-    if (event.shiftKey) {
+    // Shift + 滚轮: 水平平移（唯一保留的滚轮平移通道）
+    if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
       const speed = 1.5;
       this.store.setViewport({
         ...viewport,
@@ -605,6 +575,25 @@ export class InteractionController {
       });
       return;
     }
+
+    // 普通滚轮 / Ctrl(Cmd) + 滚轮（含触控板捏合）: 以鼠标位置为中心缩放
+    const rect = this.getContainerOffset();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    // 行模式（部分鼠标/触控板返回 deltaMode=1）按 16px/行折算，避免缩放一步到顶
+    const rawDelta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+    const delta = -Math.max(-120, Math.min(120, rawDelta));
+    const factor = Math.pow(1.1, delta / 100);
+    const newK = Math.min(Math.max(viewport.k * factor, 0.05), 5);
+
+    const worldX = (mouseX - viewport.x) / viewport.k;
+    const worldY = (mouseY - viewport.y) / viewport.k;
+
+    this.store.setViewport({
+      x: mouseX - worldX * newK,
+      y: mouseY - worldY * newK,
+      k: newK,
+    });
   };
 
   // ===== 内部方法 =====

@@ -20,10 +20,6 @@ import { generatingPreviewKey, useGeneratingPreviewStore } from '../generating-p
 import { replaceNodeImage } from '../utils/replace-node-image.js';
 import { planOnloadResize } from '../utils/media-fit.js';
 import { IMAGE_DEFAULT_SIZE, IMAGE_LONG_SIDE, MEDIA_MIN_SIZE } from '../utils/node-contracts.js';
-import {
-  cursorOriginPercent,
-  nextContentScale,
-} from '../utils/image-content-zoom.js';
 
 // ===== 引脚定义 =====
 export function getImageNodePins(): Pin[] {
@@ -102,61 +98,9 @@ export function ImageNodeView({
   useEffect(() => { setImgSrc(hydratedContent); }, [hydratedContent]);
 
   // ===== 节点内内容缩放(2026-11-04,不依赖选中态) =====
-  // 滚轮: 悬停图片直接缩放内容,按光标位置锚定(stopPropagation + preventDefault,
-  // 不再冒泡到画布的平移/缩放)。
-  // 双击缩放已移除(2026-11-05 用户拍板:双击不得让节点内图片变大;双击不再改变缩放)。
-  // 只改 img 的 transform scale,节点尺寸不动 → 宽高比恒不变。角柄 resize 保留。
-  // 缩放状态持久化到 data.contentScale/contentOrigin(刷新不丢),换图自动复位。
+  // 2026-11-10 用户拍板：节点内不再滚动缩放图片内容——滚轮属于画布（画布滚轮 = 缩放）。
+  // 图片一律按 contain 铺满节点；节点尺寸由角柄 resize 控制。
   const mediaRef = useRef<HTMLDivElement | null>(null);
-  const savedScaleRaw = (data as Record<string, unknown>).contentScale;
-  const savedScale = typeof savedScaleRaw === 'number' && Number.isFinite(savedScaleRaw) && savedScaleRaw > 0
-    ? savedScaleRaw
-    : 1;
-  const savedOriginRaw = (data as Record<string, unknown>).contentOrigin as { x?: number; y?: number } | undefined;
-  const savedOrigin = savedOriginRaw && Number.isFinite(savedOriginRaw.x) && Number.isFinite(savedOriginRaw.y)
-    ? { x: savedOriginRaw.x as number, y: savedOriginRaw.y as number }
-    : { x: 50, y: 50 };
-  const [contentScale, setContentScale] = useState(savedScale);
-  const [contentOrigin, setContentOrigin] = useState(savedOrigin);
-
-  // 换图后复位内容缩放(并清掉持久化的缩放状态)
-  useEffect(() => {
-    setContentScale(1);
-    setContentOrigin({ x: 50, y: 50 });
-  }, [data.storageKey, data.content]);
-
-  // 缩放状态持久化: 防抖 400ms 写入 data(可撤销),与 data 中已有值相同则不写
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (contentOnly || !commandQueue) return;
-    if (contentScale === savedScale && contentOrigin.x === savedOrigin.x && contentOrigin.y === savedOrigin.y) return;
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = setTimeout(() => {
-      commandQueue.execute(new UpdateNodeDataCommand(node.id, {
-        contentScale,
-        contentOrigin,
-      } as Record<string, unknown>));
-    }, 400);
-    return () => {
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentScale, contentOrigin, contentOnly, commandQueue, node.id]);
-
-  // 原生 wheel 监听:React 合成 wheel 在部分浏览器为 passive,preventDefault 会失效,
-  // 必须以 passive:false 挂原生监听才能阻断画布平移/缩放
-  useEffect(() => {
-    const el = mediaRef.current;
-    if (!el || !hasContent) return;
-    const onWheel = (e: WheelEvent): void => {
-      e.preventDefault();
-      e.stopPropagation();
-      setContentOrigin(cursorOriginPercent(e.clientX, e.clientY, el.getBoundingClientRect()));
-      setContentScale((s) => nextContentScale(s, e.deltaY));
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [hasContent]);
 
   // ===== 图片 onload 纠偏(2026-11-04,修复「比例失真」根因) =====
   // 节点尺寸在创建时用 payload 元数据算定,元数据缺失/错误时永远停在 16:9 fallback。
@@ -293,11 +237,8 @@ export function ImageNodeView({
               onLoad={handleImgLoad}
               onError={handleImgError}
               // contain: 按容器等比 fit —— 不裁切、不变形(节点比例与图片不一致时留白边而非裁切)
-              // transform: 节点内容缩放(滚轮/双击),节点尺寸不变 → 宽高比恒定
               style={{
                 width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', display: 'block',
-                transform: `scale(${contentScale})`,
-                transformOrigin: `${contentOrigin.x}% ${contentOrigin.y}%`,
               }}
             />
           </div>
@@ -362,11 +303,8 @@ export function ImageNodeView({
             draggable={false}
             onError={handleImgError}
             // contain: 按容器等比 fit —— 不裁切、不变形(节点比例与图片不一致时留白边而非裁切)
-            // transform: 节点内容缩放(滚轮/双击),节点尺寸不变 → 宽高比恒定
             style={{
               width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', display: 'block',
-              transform: `scale(${contentScale})`,
-              transformOrigin: `${contentOrigin.x}% ${contentOrigin.y}%`,
             }}
           />
         </div>

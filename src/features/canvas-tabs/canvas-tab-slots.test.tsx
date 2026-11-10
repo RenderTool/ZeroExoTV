@@ -515,7 +515,7 @@ describe('单测 E：导演台片段 1 硬性语义（2026-11-04 约定）', () 
     await waitFor(() => expect(captured.directorPanel?.shot?.imagePrompt).toBe('老人回头，海风很大'));
 
     // 新增片段 2（真实工具栏「+」按钮 → onInsertAt，自动选中）→ 提示词区跟着切换到片段 2
-    const addBtn = container.querySelector('[title="在末尾添加新片段"]');
+    const addBtn = container.querySelector('[title="插入到选中片段之后"]');
     expect(addBtn).toBeTruthy();
     fireEvent.click(addBtn as Element);
     await waitFor(() => {

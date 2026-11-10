@@ -1,9 +1,9 @@
 /** * CanvasPage - 画布项目列表页 * * 从原 HomePage 提取的画布项目列表功能。 * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。 */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Trash2, CheckSquare, Square, Download } from 'lucide-react';
+import { Plus, Trash2, CheckSquare, Square, Download, Upload } from 'lucide-react';
 import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip } from 'antd';
 import { SearchButton } from '@/shared/components/search-button.js';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -13,6 +13,7 @@ import { useCoverUpload } from '@/shared/hooks/use-cover-upload.js';
 import { useProjects } from './use-projects.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
 import { exportProjects } from './services/export-projects.js';
+import { importProjectsFromZip } from './services/import-projects.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { setProjectCover, setCoverView, getCoverView, clearCoverView, deleteCoverImage } from '@/platform/cover.js';
 import type { CoverViewRecord } from '@/shared/utils/cover-viewport.js';
@@ -251,9 +252,41 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
     }
   }, [selectedIds, busy, t, message]);
 
+  // ===== 单项目导出 / 项目导入（2026-11-10 用户要求：任何时候都能备份与恢复） =====
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleExportProject = useCallback(async (id: string) => {
+    if (busy) return;
+    const project = projects.find((p) => p.id === id);
+    setBusy(true);
+    try {
+      await exportProjects([id], project?.title || 'zeroexo-project');
+      message.success(t('home.exportStarted', '已开始下载项目包'));
+    } catch {
+      message.error(t('home.exportFailed'));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, projects, message, t]);
+
+  const handleImportProjects = useCallback(async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file || importing) return;
+    setImporting(true);
+    try {
+      const imported = await importProjectsFromZip(file);
+      message.success(t('home.importDone', '已导入 {{n}} 个项目', { n: imported.length }));
+      await refresh();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : t('home.importFailed', '导入失败：文件不是有效的项目导出包'));
+    } finally {
+      setImporting(false);
+    }
+  }, [importing, message, refresh, t]);
+
   const hasSelection = selectedIds.size > 0;
   const deleteTargetCount = pendingDeleteId ? 1 : selectedIds.size;
-
   if (loading) {
     return (
       <AntdThemeProvider>
@@ -316,6 +349,26 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               <Tooltip title={t('home.newProject')}>
                 <Button type="primary" icon={<Plus size={14} />} size="small" onClick={handleCreate} disabled={busy} />
               </Tooltip>
+
+              {/* 导入项目（zip 包，导出/导入同一格式；任何设备都能备份恢复） */}
+              <Tooltip title={t('home.importProject', '导入项目')}>
+                <Button
+                  icon={<Upload size={14} />}
+                  size="small"
+                  loading={importing}
+                  onClick={() => importInputRef.current?.click()}
+                />
+              </Tooltip>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".zip,application/zip"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  void handleImportProjects(e.target.files);
+                  e.target.value = '';
+                }}
+              />
 
               {/* 数据目录入口已上收到顶栏 */}
 
@@ -408,6 +461,12 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                   {
                     type: 'rename',
                     onClick: () => handleRenameOpen(project.id, project.title),
+                  },
+                  {
+                    type: 'custom',
+                    label: t('home.exportProject', '导出项目'),
+                    icon: <Download size={14} />,
+                    onClick: () => void handleExportProject(project.id),
                   },
                   { type: 'delete', onClick: () => handleDelete(project.id) },
                 ];

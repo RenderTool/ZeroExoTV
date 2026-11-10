@@ -30,7 +30,7 @@
 import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
-import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, Waypoints, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
   CONTINUITY_OVERLAP_OPTIONS,
@@ -162,6 +162,12 @@ export interface DirectorPromptPanelProps {
   /** 跳到上一个 / 下一个镜头：只发信号，组件内不持有序号（受控组件复用铁律） */
   onPrevShot: () => void;
   onNextShot: () => void;
+  /** 下拉快速跳转到指定镜头（0 基）。缺省不渲染下拉 */
+  onJumpShot?: (index: number) => void;
+  /** 与指定镜头交换位置（0 基）。缺省不渲染交换入口 */
+  onSwapShot?: (index: number) => void;
+  /** 镜头标题（下拉菜单展示用），缺省显示「镜头 N」 */
+  shotLabels?: string[];
   onShotChange: (patch: Partial<WorkbenchShot>) => void;
   theme: ThemeConfig;
   isDark: boolean;
@@ -192,6 +198,7 @@ function subjectImageToRef(item: ProductionItem, img: ProductionItemImage): Dire
 
 export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   shared, onSharedChange, shot, shotIndex, totalShots, onPrevShot, onNextShot, onShotChange,
+  onJumpShot, onSwapShot, shotLabels,
   theme, isDark, subjects, subjectTrees, episodeContext,
 }: DirectorPromptPanelProps): ReactElement {
   const { t } = useTranslation();
@@ -930,7 +937,32 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
             <ChevronLeft size={12} />
           </button>
           <span data-director-shot-count style={{ padding: '0 4px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-            {t('director.shotCount', '镜头 {{current}} / {{total}}', { current: shotIndex + 1, total: totalShots })}
+            {onJumpShot ? (
+              /* 2026-11-10 用户要求：镜头号做成下拉，可直接跳到任意片段（36 段时箭头太慢） */
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  style: { maxHeight: 320, overflowY: 'auto', minWidth: 150 },
+                  items: Array.from({ length: totalShots }, (_, i) => ({
+                    key: String(i),
+                    label: `${t('director.shotN', '镜头 {{n}}', { n: i + 1 })}${shotLabels?.[i] ? ` · ${shotLabels[i]}` : ''}`,
+                    onClick: () => onJumpShot(i),
+                  })),
+                }}
+              >
+                <button
+                  type="button"
+                  data-director-shot-jump
+                  title={t('director.jumpShot', '快速跳转镜头')}
+                  style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '0 2px', font: 'inherit', fontVariantNumeric: 'tabular-nums', display: 'inline-flex', alignItems: 'center', gap: 2 }}
+                >
+                  {t('director.shotCount', '镜头 {{current}} / {{total}}', { current: shotIndex + 1, total: totalShots })}
+                  <ChevronDown size={10} />
+                </button>
+              </Dropdown>
+            ) : (
+              t('director.shotCount', '镜头 {{current}} / {{total}}', { current: shotIndex + 1, total: totalShots })
+            )}
           </span>
           <button
             type="button"
@@ -944,6 +976,31 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
             <ChevronRight size={12} />
           </button>
         </span>
+        {/* 2026-11-10：选中片段与其他片段交换位置（两段互换，编号随位置重排） */}
+        {onSwapShot && totalShots > 1 ? (
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              style: { maxHeight: 320, overflowY: 'auto', minWidth: 150 },
+              items: Array.from({ length: totalShots }, (_, i) => ({
+                key: String(i),
+                disabled: i === shotIndex,
+                label: t('director.swapWithShot', '与镜头 {{n}} 交换', { n: i + 1 }),
+                onClick: () => onSwapShot(i),
+              })),
+            }}
+          >
+            <button
+              type="button"
+              data-director-swap-shot
+              aria-label={t('director.swapShot', '交换片段位置')}
+              title={t('director.swapShot', '交换片段位置')}
+              style={{ ...shotNavButtonStyle, padding: '0 6px' }}
+            >
+              <ArrowLeftRight size={12} />
+            </button>
+          </Dropdown>
+        ) : null}
         <span
           data-director-segment-title
           title={segTitle}

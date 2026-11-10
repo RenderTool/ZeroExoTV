@@ -1,4 +1,4 @@
-﻿/**
+/**
  * bugfix-20261104 - 三 BUG 修复的回归断言(2026-11-04)
  *
  * 覆盖:
@@ -65,14 +65,6 @@ import { ReplaceSceneCommand } from '../../../../packages/plugins/group/src/comm
 import { useHierarchyPanelProps } from '../../../../packages/plugins/group/src/hierarchy-panel';
 import { createAssetNode } from '../../../../packages/plugins/nodes/src/asset-node-factory';
 import { computeResizeRect } from '../../../../packages/plugins/interaction/src/resize-geometry';
-import {
-  CONTENT_SCALE_MAX,
-  CONTENT_SCALE_MIN,
-  cursorOriginPercent,
-  nextContentScale,
-  oneToOneScale,
-  toggleContentScale,
-} from '../../../../packages/plugins/nodes/src/utils/image-content-zoom';
 import {
   __configureMediaUrlProviderForTests,
   IMAGE_CONTENT_UPDATED_EVENT,
@@ -239,49 +231,8 @@ describe('Bug3 图片节点导入尺寸(容器等比 fit)', () => {
   });
 });
 
-// ===== Bug 3 补: 节点内内容缩放(滚轮 + 双击,不依赖选中态) =====
-
-describe('Bug3b 图片节点内容缩放(滚轮/双击实际改变缩放值)', () => {
-  it('滚轮向上(deltaY<0)放大、向下(deltaY>0)缩小', () => {
-    const s1 = nextContentScale(1, -100); // 向上滚
-    expect(s1).toBeGreaterThan(1);
-    const s2 = nextContentScale(1, 100); // 向下滚
-    expect(s2).toBeLessThan(1);
-    // 连续滚动单调累积
-    const s3 = nextContentScale(s1, -100);
-    expect(s3).toBeGreaterThan(s1);
-  });
-
-  it('缩放被夹在 [0.1, 10],不会缩没/爆掉', () => {
-    let s = 1;
-    for (let i = 0; i < 100; i++) s = nextContentScale(s, -1000);
-    expect(s).toBe(CONTENT_SCALE_MAX);
-    for (let i = 0; i < 200; i++) s = nextContentScale(s, 1000);
-    expect(s).toBe(CONTENT_SCALE_MIN);
-  });
-
-  it('双击 fit ↔ 目标倍率往返切换', () => {
-    const zoomed = toggleContentScale(1, 2);
-    expect(zoomed).toBe(2);
-    expect(toggleContentScale(zoomed, 2)).toBe(1);
-  });
-
-  it('1:1 倍率按 contain 显示尺寸计算(2000×1000 图 / 620×620 盒 → 2000/620)', () => {
-    const s = oneToOneScale(2000, 1000, 620, 620);
-    expect(s).not.toBeNull();
-    expect(Math.abs(s! - 2000 / 620)).toBeLessThan(0.001);
-    // 入参缺失回退 null(组件回退固定 2×)
-    expect(oneToOneScale(undefined, undefined, 620, 620)).toBeNull();
-  });
-
-  it('滚轮锚点取光标在容器内的百分比位置(光标处即缩放中心)', () => {
-    const rect = { left: 100, top: 50, width: 400, height: 200 };
-    expect(cursorOriginPercent(300, 150, rect)).toEqual({ x: 50, y: 50 });
-    expect(cursorOriginPercent(100, 50, rect)).toEqual({ x: 0, y: 0 });
-    // 越界钳制
-    expect(cursorOriginPercent(9999, -5, rect)).toEqual({ x: 100, y: 0 });
-  });
-});
+// ===== Bug 3 补: 图片节点内容缩放已下线（2026-11-10 用户拍板）=====
+// 滚轮属于画布（画布滚轮 = 缩放），图片在节点内一律 contain 铺满，不再缩放内容。
 
 // ===== Bug2b: 导入图片后层级缩略图不刷新(首次上传路径,2026-11-04 复测) =====
 // 根因: uploadImage 派生图(缩略图/预览图)fire-and-forget 异步生成,完成时不 bump 版本;

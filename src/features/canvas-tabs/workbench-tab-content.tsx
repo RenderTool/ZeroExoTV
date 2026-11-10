@@ -598,6 +598,20 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     [markDirty],
   );
 
+  /** 交换两个片段的位置（2026-11-10）：数组互换 + 重新编号；选中片段不丢 */
+  const swapShots = useCallback((aId: string, bId: string) => {
+    const prev = shotsRef.current;
+    const ia = prev.findIndex((s) => s.id === aId);
+    const ib = prev.findIndex((s) => s.id === bId);
+    if (ia < 0 || ib < 0 || ia === ib) return;
+    const next = [...prev];
+    const a = next[ia]!;
+    next[ia] = next[ib]!;
+    next[ib] = a;
+    setShots(next.map((s, i) => ({ ...s, number: i + 1 })));
+    markDirty();
+  }, [markDirty]);
+
   /* 2026-11-05 导演台：时长不可拖拽（trim handle / ew-resize / onTrim 写回全部移除），
      片段时长只来自参数（参数区/预检）；标签行只读展示 duration。 */
 
@@ -1387,6 +1401,16 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               // 面板内不自建序号状态（受控组件复用铁律）
               onPrevShot={() => setActiveShotId(shots[Math.max(0, selectedShotIndex - 1)]!.id)}
               onNextShot={() => setActiveShotId(shots[Math.min(shots.length - 1, selectedShotIndex + 1)]!.id)}
+              // 2026-11-10：下拉直达任意镜头 + 与其它镜头交换位置（大量片段时不用一路拖）
+              onJumpShot={(i) => {
+                const target = shots[Math.max(0, Math.min(shots.length - 1, i))];
+                if (target) setActiveShotId(target.id);
+              }}
+              onSwapShot={(i) => {
+                const target = shots[i];
+                if (target && target.id !== selectedShot.id) swapShots(selectedShot.id, target.id);
+              }}
+              shotLabels={shots.map((s) => `${s.duration}s`)}
               onShotChange={(patch) => updateShot(selectedShot.id, patch)}
               theme={theme}
               isDark={isDark}
