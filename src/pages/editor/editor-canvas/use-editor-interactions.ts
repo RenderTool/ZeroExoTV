@@ -407,7 +407,7 @@ export function useEditorInteractions({
         // 多选含组时复制整个选区，而不是只复制那张组壳
         {
           id: 'toCanvasCopy',
-          label: t('canvasCopy.create', '另存画布'),
+          label: t('canvasCopy.create', '另存为画布'),
           title: t('canvasCopy.createTitle', '把选中内容另存为画布副本'),
           icon: createElement(EDITOR_ICONS.canvasCopy, { size: 14 }),
           group: '组操作',

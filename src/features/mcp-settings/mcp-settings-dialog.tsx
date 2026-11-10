@@ -26,6 +26,7 @@ import {
   ensureIdeToken,
   loadAudit,
   loadServerInfo,
+  mcpServerMissingTools,
   loadTokens,
   revokeToken,
   runSelfcheck,
@@ -129,6 +130,8 @@ export function McpSettingsDialog({ onClose, embedded = false }: McpSettingsDial
   // MCP 安装包跟静态站一起发布：GitHub Pages 提供 tarball，Agent 自行下载安装
   const mcpPackageUrl = `${appUrl}downloads/zeroexo-mcp-server.tgz`;
   const startCmd = `npx --yes --package=${mcpPackageUrl} -- zeroexo-mcp --http --port 8787`;
+  /** 服务端工具清单缺失 → 说明跑的是旧 dist（网页自动感知更新） */
+  const missingTools = useMemo(() => mcpServerMissingTools(serverInfo), [serverInfo]);
 
   /**
    * 一键复制 bundle：给任意 LLM Agent IDE 的自包含接入包。
@@ -362,6 +365,17 @@ export function McpSettingsDialog({ onClose, embedded = false }: McpSettingsDial
 
   const content = (
     <>
+      {/* 服务端还在跑旧代码 → 网页直接感知并给出重启指引（凭 server-info 的工具清单判断） */}
+      {missingTools.length > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 10 }}
+          data-testid="mcp-stale-warning"
+          title={`MCP 服务是旧版本（缺 ${missingTools.length} 个工具：${missingTools.slice(0, 4).join('、')}${missingTools.length > 4 ? '…' : ''}）`}
+          description="重启 IDE / 后台里的 MCP 服务后，新工具才会生效；重启后重新复制配置即可。"
+        />
+      ) : null}
       {/* ===== 首屏:给 IDE 的配置 + 一键复制 ===== */}
       {mcpConfig && copyBundle ? (
         <>

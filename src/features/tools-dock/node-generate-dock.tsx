@@ -18,7 +18,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Text, Image, Music, Film, Sparkles, ChevronDown, ChevronUp, Layers, FileText, Aperture,
+  Text, Image, Music, Film, Sparkles, ChevronDown, ChevronUp, Layers, FileText, Aperture, ImageOff,
 } from 'lucide-react';
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -453,6 +453,9 @@ export function NodeGenerateDock({
     if (currentModelValue === KREA2_MODEL_KEY) return ['text'];
     return getModelInputTypes(channels, currentModelValue);
   }, [channels, currentModelValue]);
+
+  // 参考素材区是否出现：纯文生图模型（Krea2）只吃文本，不给「上传参考图」的假入口
+  const supportsReferenceInput = supportedInputTypes.some((t) => t !== 'text');
 
   // 每个连入节点与当前模型的兼容性(蓝勾/红叉)
   const nodeCompatibility = useMemo(() => {
@@ -898,21 +901,32 @@ export function NodeGenerateDock({
         <ChevronDown size={13} />
       </button>
 
-      {/* 参考素材区(单色融入;memo 隔离;按 paramValues.mode 智能切换首尾帧/多模态) */}
-      <div style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <DockReferencesSection
-          nodeId={nodeId}
-          incomingNodes={displayIncomingNodes}
-          refUrlMap={displayRefUrlMap}
-          nodeCompatibility={displayNodeCompatibility}
-          onRemoveIncoming={handleRemoveIncoming}
-          mode={currentVideoMode}
-          bounds={refBounds}
-          onUpload={controlledReferences ? handleControlledUpload : undefined}
-          onExtractFrame={onExtractFrame}
-          accept={accept}
-        />
-      </div>
+      {/* 参考素材区(单色融入;memo 隔离;按 paramValues.mode 智能切换首尾帧/多模态)
+          Krea2 等纯文生图模型没有参考图输入：不渲染上传/槽位区，避免误导用户「可以垫图」 */}
+      {supportsReferenceInput ? (
+        <div style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <DockReferencesSection
+            nodeId={nodeId}
+            incomingNodes={displayIncomingNodes}
+            refUrlMap={displayRefUrlMap}
+            nodeCompatibility={displayNodeCompatibility}
+            onRemoveIncoming={handleRemoveIncoming}
+            mode={currentVideoMode}
+            bounds={refBounds}
+            onUpload={controlledReferences ? handleControlledUpload : undefined}
+            onExtractFrame={onExtractFrame}
+            accept={accept}
+          />
+        </div>
+      ) : (
+        <div
+          data-no-reference-input=""
+          style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 6, color: theme.toolbar.textMuted, fontSize: 12 }}
+        >
+          <ImageOff size={14} />
+          {t('nodeDock.textOnlyModel', '该模型只支持文生图，不支持参考图（连入的素材不会作为输入）')}
+        </div>
+      )}
 
       {/* Plan#79 T2：预设标签行（原节点胶囊动作下沉到提示词面板，点击 = 预填提示词）
           形态：输入区上方单行胶囊，可横向换行；非下拉、非模态 */}
@@ -970,7 +984,11 @@ export function NodeGenerateDock({
           isRunning={isRunning}
           hasText={hasText}
           textLength={prompt.length}
-          interruptible={mode === 'text' || model === LOCAL_VIDEO_MODEL_KEY}
+          interruptible={mode === 'text'
+            || (model ?? '').startsWith('zeroexo:')
+            || model === LOCAL_VIDEO_MODEL_KEY
+            || model === LOCAL_IMAGE_MODEL_KEY
+            || model === KREA2_MODEL_KEY}
           onAction={handleAction}
           onConfigChange={onConfigChange}
           onParamValuesChange={handleParamValuesChange}

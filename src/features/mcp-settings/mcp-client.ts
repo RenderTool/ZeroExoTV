@@ -44,6 +44,11 @@ export interface ServerInfo {
   dataRoot: string;
   serverEntry: string;
   tools: number;
+  /** 服务端实际注册的工具名（旧版本没有这个字段） */
+  toolNames?: string[];
+  /** dist/index.js 的编译时间（旧版本没有这个字段） */
+  builtAt?: string | null;
+  pid?: number;
   transports: string[];
   httpPort: number;
   stampedAt: string;
@@ -91,6 +96,7 @@ export interface ToolInfo {
 export const MCP_TOOLS: ToolInfo[] = [
   { name: 'list_projects', access: 'read' },
   { name: 'get_project', access: 'read' },
+  { name: 'get_current_project', access: 'read' },
   { name: 'open_project', access: 'read' },
   { name: 'list_episodes', access: 'read' },
   { name: 'get_script', access: 'read' },
@@ -109,6 +115,7 @@ export const MCP_TOOLS: ToolInfo[] = [
   { name: 'list_jobs', access: 'read' },
   { name: 'verify_output', access: 'read' },
   { name: 'get_param_schema', access: 'read' },
+  { name: 'preflight_import', access: 'read' },
   { name: 'create_project', access: 'write' },
   { name: 'update_project_meta', access: 'write' },
   { name: 'set_script_meta', access: 'write' },
@@ -144,6 +151,18 @@ export const MCP_RESERVED_TOOLS: ToolInfo[] = [
   { name: 'get_asset_binary', access: 'read' },
   { name: 'remove_asset_ref', access: 'write' },
 ];
+
+/**
+ * 网页端「自动感知 MCP 更新」：拿服务端写的 server-info.toolNames 比对前端必需清单。
+ * 返回缺失的工具名；空数组 = 已是最新（或服务还没写 server-info，无法判断）。
+ * 用途：IDE/后台进程还在跑旧 dist 时，网页立刻提示「重启 MCP 服务」，不用用户自己去猜。
+ */
+export function mcpServerMissingTools(info: ServerInfo | null | undefined): string[] {
+  if (!info) return [];
+  if (!Array.isArray(info.toolNames)) return ['(旧版服务，未上报工具清单)'];
+  const names = info.toolNames;
+  return MCP_TOOLS.map((t) => t.name).filter((n) => !names.includes(n));
+}
 
 // ===== token =====
 

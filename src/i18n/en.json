@@ -595,7 +595,34 @@
     "fitScreen": "Fit Screen",
     "scaleTo": "Scale To"
   },
-  "canvasCopy": {
+  "send": {
+    "menu": "Send",
+    "toProjectAssets": "Project assets",
+    "toGlobalAssets": "Global assets",
+    "saveAsAsset": "Save as asset…",
+    "saveAsTitle": "Save as asset",
+    "namePlaceholder": "Asset name",
+    "toSubject": "Send to subject",
+    "saveAsCanvas": "Save as canvas",
+    "doneProject": "Sent to project assets",
+    "doneGlobal": "Sent to global assets",
+    "savedAs": "Saved as asset",
+    "nothing": "Nothing to send",
+    "failed": "Send failed"
+  },
+  "taskQueue": {
+    "title": "Task queue",
+    "pill": "Tasks",
+    "queued": "Queued",
+    "running": "Running",
+    "success": "Done",
+    "error": "Failed",
+    "cancelled": "Cancelled",
+    "clear": "Clear finished",
+    "open": "Expand task queue",
+    "collapse": "Collapse",
+    "untitled": "Untitled task"
+  },  "canvasCopy": {
     "drawerTab": "Canvases",
     "structureTab": "Canvas Structure",
     "subCanvasTab": "Sub-canvas",

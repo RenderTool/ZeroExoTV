@@ -30,7 +30,9 @@
 import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
-import { ChevronDown, ChevronLeft, ChevronRight, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
+import { buildShotAiBrief } from './shot-ai-brief.js';
+import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
   CONTINUITY_OVERLAP_OPTIONS,
@@ -1102,6 +1104,29 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                 <ChevronDown size={8} style={{ opacity: 0.7 }} />
               </button>
             </Popover>
+            {/* 问AI：复制当前镜头信息（项目 + shotId + 提示词 + 参数），粘给任意 Agent 即可定位到这一段 */}
+            <button
+              type="button"
+              data-ask-ai
+              style={{ ...capsuleStyle, gap: 4 }}
+              title={t('director.askAiTitle', '复制当前镜头信息，粘给 AI 后可直接定位到这一段')}
+              aria-label={t('director.askAi', '问AI')}
+              onClick={() => {
+                const brief = buildShotAiBrief({
+                  projectId: getCurrentCanvasId() ?? '',
+                  shot,
+                  shotIndex,
+                  totalShots,
+                  shared,
+                });
+                void navigator.clipboard.writeText(brief)
+                  .then(() => message.success(t('director.askAiCopied', '已复制镜头信息，粘贴给 AI 即可')))
+                  .catch(() => message.error(t('director.askAiFailed', '复制失败，请手动选择复制')));
+              }}
+            >
+              <Copy size={10} />
+              {t('director.askAi', '问AI')}
+            </button>
           </div>
       </div>
 

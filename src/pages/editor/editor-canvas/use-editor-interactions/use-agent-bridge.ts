@@ -17,6 +17,7 @@ import {
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, setGeneratingProgress, clearGeneratingProgress, type ReferenceItem } from '@zeroexo/plugin-nodes';
+import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
@@ -409,6 +410,10 @@ export function useAgentBridgeHooks(
       } as any));
       clearGeneratingPreview(nodeId, jobDocId);
       clearGeneratingProgress(nodeId, jobDocId);
+      // 右下角任务队列（2026-11-10）：画布发起的生成统一登记
+      const taskQueue = useTaskQueueStore.getState();
+      const taskTitle = promptTitleSummary(prompt) || String(nodeData?.title ?? '') || t('taskQueue.untitled', '未命名任务');
+      taskQueue.start({ id: jobKey, kind: mode, title: taskTitle });
 
       try {
         const { refImages, refVideos, refAudios, effectivePrompt } = await collectInputReferences(mentionedRefs, prompt);
@@ -458,8 +463,10 @@ export function useAgentBridgeHooks(
             const callbacks = {
               nodeId,
               onPreview: (dataUrl: string) => setGeneratingPreview(nodeId, dataUrl, jobDocId),
-              onProgress: (p: { step: number; totalSteps: number }) =>
-                setGeneratingProgress(nodeId, { step: p.step, totalSteps: p.totalSteps }, jobDocId),
+              onProgress: (p: { step: number; totalSteps: number }) => {
+                setGeneratingProgress(nodeId, { step: p.step, totalSteps: p.totalSteps }, jobDocId);
+                useTaskQueueStore.getState().update(jobKey, { progress: { step: p.step, totalSteps: p.totalSteps } });
+              },
               onJobSubmitted: persistJob,
               signal: ctl.signal,
             };
@@ -552,11 +559,22 @@ export function useAgentBridgeHooks(
                     setGeneratingProgress(nodeId, { step: frame.step, totalSteps: frame.totalSteps }, jobDocId);
                   }
                 },
-                onProgress: (info) => setGeneratingProgress(nodeId, {
-                  phaseLabel: info.phaseLabel,
-                  overallValue: info.overallValue,
-                  overallMax: info.overallMax,
-                }, jobDocId),
+                onProgress: (info) => {
+                  setGeneratingProgress(nodeId, {
+                    phaseLabel: info.phaseLabel,
+                    overallValue: info.overallValue,
+                    overallMax: info.overallMax,
+                  }, jobDocId);
+                  // 导演台式总进度 → 队列里显示阶段文案
+                  if (info.phaseLabel || info.overallMax) {
+                    useTaskQueueStore.getState().update(jobKey, {
+                      phase: info.phaseLabel,
+                      ...(info.overallMax && info.overallValue !== undefined
+                        ? { progress: { step: info.overallValue, totalSteps: info.overallMax } }
+                        : {}),
+                    });
+                  }
+                },
                 // 作业身份写进节点：刷新后据此续接预览/进度（否则刷新即丢）
                 onJobSubmitted: (job) => {
                   refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, {
@@ -626,15 +644,18 @@ export function useAgentBridgeHooks(
         const titleSummary = promptTitleSummary(prompt);
         if (titleSummary) refs.commandQueue.execute(new UpdateNodeTitleCommand(nodeId, titleSummary));
         nodeFailureCountRef.current.delete(nodeId);
+        useTaskQueueStore.getState().finish(jobKey, 'success');
       } catch (err) {
         // 文档已切走：不要把「已失败/已取消」写到当前另一份画布的同 id 节点上
         if (getCurrentCanvasDocId() !== jobDocId) return;
         if (ctl.signal.aborted) {
+          useTaskQueueStore.getState().finish(jobKey, 'cancelled');
           refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle', errorDetails: undefined, errorType: undefined, localJob: undefined } as never));
           return;
         }
         const errorType: AiErrorType = err instanceof AiError ? err.errorType : classifyError(err);
         const msg = err instanceof Error ? err.message : String(err);
+        useTaskQueueStore.getState().finish(jobKey, 'error', msg);
         refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, { status: 'error', errorDetails: msg, errorType, localJob: undefined } as never));
       } finally {
         clearGeneratingPreview(nodeId, jobDocId);

@@ -6,6 +6,7 @@
  */
 
 import { useCallback, createElement } from 'react';
+import { App, Input } from 'antd';
 import {
   AddNodeCommand,
   RemoveEdgeCommand,
@@ -18,7 +19,8 @@ import {
 import { EDITOR_ICONS } from '../icons.js';
 import { getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 // 本地版（2026-11-02）：无内置 Agent（仅外部 MCP 控制项目）→ 节点菜单不再有「发送到 Agent」入口
-import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
+// 2026-11-10 用户要求：发送统一成「发送」二级菜单（本项目资产 / 全局资产 / 另存为资产 / 发送到主体）
+import { canSendNode, sendNodeToAssets } from '@/features/canvas-assets/node-send.js';
 // 2026-11-06：新建节点的自增标题与默认 data 上提为单一来源（主画布与子画布共用）
 import { buildNewNodeData, newNodeTitle } from '@/features/canvas-nodes/new-node.js';
 // 2026-11-04 资产→主体状态关联：画布右键「发送到主体」弹层（写入统一走 linkSubjectStateMedia）
@@ -42,6 +44,8 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
     onCreateCanvasCopy,
     message,
   } = params;
+  /** 「另存为资产」需要弹命名框（hook 内取一次，不能在 onClick 里调） */
+  const { modal } = App.useApp();
 
   /** 节点创建菜单选择 */
   const handleNodeCreateMenuSelect = useCallback(
@@ -155,48 +159,86 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
             }},
           ];
 
-          // 发送到资产（仅资产节点有内容时显示）
-          if (canSaveAsset && node) {
-            items.push({
-              key: 'saveAsset', label: t('editor.saveToAssets'), icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }), onClick: () => {
-                // npm 异步变体：novel 长文本需先 resolveTextContent 取回正文再生成资产（Plan#74 Phase D）
-                buildNodeAssetInput(node).then((input) => {
-                  if (!input) return;
-                  // 失败只记日志（与 use-agent-bridge 的 handleSaveNodeAsset 同一约定），
-                  // 避免无 catch 的 promise 抛 unhandled rejection
-                  // 列表刷新与滚动定位由 asset-store 内在发出的 assets:created 驱动，此处不手动开会话（Plan#74）
-                  addAssetToStore(input).then(() => {
-                    message.success(t('editor.assetsSaved'));
-                  }).catch((err) => {
-                    console.error('saveAsset failed:', err);
+          // 「发送到…」统一入口（2026-11-10 用户要求）：一个父项 + 二级菜单，目的地细分
+          if (node && canSendNode(node)) {
+            const sendChildren: any[] = [];
+            if (canSaveAsset) {
+              sendChildren.push({
+                key: 'send-to-project',
+                label: t('send.toProjectAssets', '本项目资产'),
+                icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }),
+                onClick: () => {
+                  void sendNodeToAssets(node, 'project')
+                    .then((created) => message.success(created.length > 0
+                      ? t('send.doneProject', '已发送到本项目资产')
+                      : t('send.nothing', '没有可发送的内容')))
+                    .catch((err) => console.error('send-to-project failed:', err));
+                },
+              });
+              sendChildren.push({
+                key: 'send-to-library',
+                label: t('send.toGlobalAssets', '全局资产'),
+                icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }),
+                onClick: () => {
+                  void sendNodeToAssets(node, 'library')
+                    .then((created) => message.success(created.length > 0
+                      ? t('send.doneGlobal', '已发送到全局资产')
+                      : t('send.nothing', '没有可发送的内容')))
+                    .catch((err) => console.error('send-to-library failed:', err));
+                },
+              });
+              sendChildren.push({
+                key: 'send-as-asset',
+                label: t('send.saveAsAsset', '另存为资产…'),
+                icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }),
+                onClick: () => {
+                  let title = String(node.title ?? '');
+                  modal.confirm({
+                    centered: true,
+                    title: t('send.saveAsTitle', '另存为资产'),
+                    content: createElement(Input, {
+                      defaultValue: title,
+                      placeholder: t('send.namePlaceholder', '资产名称'),
+                      onChange: (e: { target: { value: string } }) => { title = e.target.value; },
+                    }),
+                    okText: t('common.confirm', '确定'),
+                    cancelText: t('common.cancel', '取消'),
+                    onOk: async () => {
+                      const created = await sendNodeToAssets(node, 'project', { title });
+                      if (created.length > 0) message.success(t('send.savedAs', '已另存为资产'));
+                    },
                   });
-                });
-              },
-            });
-          }
-
-          // 2026-11-04 资产→主体状态关联（增量新增一项，不动现有菜单结构）：
-          // 图片/音频资产节点 → 「发送到主体」弹层选主体/状态；视频置灰（中性说明视频不支持）
-          if ((nodeType === 'image' || nodeType === 'audio' || nodeType === 'video') && node) {
-            const subjectKind = nodeType === 'image' || nodeType === 'audio' ? nodeType : 'video';
-            items.push({
-              key: 'sendToSubject',
-              label: t('editor.sendToSubject', '发送到主体'),
-              icon: createElement(EDITOR_ICONS.sendToSubject, { size: 14 }),
-              disabled: subjectKind === 'video' || !hasStorageKey,
-              title: subjectKind === 'video'
-                ? t('subject.videoNotSupported', '视频不再支持，请选择图片或语音')
-                : undefined,
-              onClick: () => {
-                if (subjectKind === 'video' || !hasStorageKey) return;
-                openSubjectLinkDialog({
-                  storageKey: (node.data as { storageKey?: string }).storageKey ?? '',
-                  kind: subjectKind,
-                  fromNodeId: nodeId,
-                  sourceLabel: node.title,
-                });
-              },
-            });
+                },
+              });
+            }
+            if ((nodeType === 'image' || nodeType === 'audio' || nodeType === 'video') && hasStorageKey) {
+              const subjectDisabled = nodeType === 'video';
+              sendChildren.push({
+                key: 'send-to-subject',
+                label: t('send.toSubject', '发送到主体'),
+                icon: createElement(EDITOR_ICONS.sendToSubject, { size: 14 }),
+                disabled: subjectDisabled,
+                title: subjectDisabled ? t('subject.videoNotSupported', '视频不再支持，请选择图片或语音') : undefined,
+                onClick: () => {
+                  if (subjectDisabled) return;
+                  openSubjectLinkDialog({
+                    storageKey: (node.data as { storageKey?: string }).storageKey ?? '',
+                    kind: nodeType === 'image' ? 'image' : 'audio',
+                    fromNodeId: nodeId,
+                    sourceLabel: node.title,
+                  });
+                },
+              });
+            }
+            if (sendChildren.length > 0) {
+              items.push({
+                key: 'send',
+                label: t('send.menu', '发送'),
+                icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }),
+                children: sendChildren,
+                onClick: () => {},
+              });
+            }
           }
 
           // 选区 → 右键「保存为画布副本」：与组磁贴 / 多选聚合同一执行器（复制成项目内另一块画布，
@@ -206,7 +248,7 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
             const copyIds = selectionIds.includes(nodeId) ? selectionIds : [nodeId];
             items.push({
               key: 'toCanvasCopy',
-              label: t('canvasCopy.create', '另存画布'),
+              label: t('canvasCopy.create', '另存为画布'),
               title: t('canvasCopy.createTitle', '把选中内容另存为画布副本'),
               icon: createElement(EDITOR_ICONS.canvasCopy, { size: 14 }),
               onClick: () => { onCreateCanvasCopy(copyIds); },

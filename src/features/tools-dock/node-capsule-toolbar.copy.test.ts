@@ -14,7 +14,7 @@ describe('节点胶囊：另存画布入口', () => {
     const block = src.slice(start, end);
     expect(block).toContain('<PictureInPicture2 size={16} />');
     expect(block).not.toContain("<span>{t('canvasCopy.createShort'");
-    expect(block).toContain("title={t('canvasCopy.createShort', '另存画布')}");
+    expect(block).toContain("title={t('canvasCopy.createShort', '另存为画布')}");
   });
 
   it('固定在导航按钮左侧（导航始终最右），不再夹在排列/对齐中间', () => {

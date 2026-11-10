@@ -191,6 +191,8 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
     previewSocket = new ComfyuiPreviewSocket(base, clientId, {
       onPreviewImage: req.onPreview,
       onStep: req.onProgress,
+      // Qwen 缓存节点按 token 块上报 progress（max=4096），折算回请求的采样步数
+      expectedSteps: num(req.params?.['steps'], QWEN_DEFAULT_STEPS),
     });
     previewSocket.connect();
   }

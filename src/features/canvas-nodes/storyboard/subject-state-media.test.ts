@@ -548,7 +548,9 @@ describe('两入口复用唯一写入函数（fs 契约断言）', () => {
     const src = read(
       path.join('../../../pages/editor/editor-canvas/use-editor-interactions/use-node-actions.ts'),
     );
-    expect(src).toContain("key: 'sendToSubject'");
-    expect(src).toMatch(/disabled:\s*subjectKind === 'video'/);
+    // 2026-11-10：发送入口统一成「发送」二级菜单，主体项 key 变为 send-to-subject
+    expect(src).toContain("key: 'send-to-subject'");
+    expect(src).toMatch(/disabled:\s*subjectDisabled/);
+    expect(src).toContain("nodeType === 'video'");
   });
 });

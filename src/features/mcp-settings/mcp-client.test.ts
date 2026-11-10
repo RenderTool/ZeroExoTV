@@ -19,6 +19,7 @@ import {
   ensureIdeToken,
   loadAudit,
   loadTokens,
+  mcpServerMissingTools,
   revokeToken,
   runSelfcheck,
   type FsLike,
@@ -182,8 +183,24 @@ describe('IDE 一键配置 token（ensureIdeToken）', () => {
   });
 });
 
-describe('自检（验收⑤）', () => {
-  it('正常：返回工具数/传输/数据根/审计文件数/token 数', async () => {
+describe('服务端更新感知（mcpServerMissingTools）', () => {
+  it('没有 server-info 或没有工具清单 → 无法判断/按旧版提示', () => {
+    expect(mcpServerMissingTools(null)).toEqual([]);
+    expect(mcpServerMissingTools({ toolNames: undefined } as never)).not.toEqual([]);
+  });
+
+  it('清单齐全 → 不报旧版', () => {
+    const info = { toolNames: MCP_TOOLS.map((t) => t.name) } as never;
+    expect(mcpServerMissingTools(info)).toEqual([]);
+  });
+
+  it('缺 preflight_import → 明确报出缺哪个（只比数量会被增删抵消）', () => {
+    const names = MCP_TOOLS.map((t) => t.name).filter((n) => n !== 'preflight_import');
+    expect(mcpServerMissingTools({ toolNames: names } as never)).toEqual(['preflight_import']);
+  });
+});
+
+describe('自检（验收⑤）', () => {  it('正常：返回工具数/传输/数据根/审计文件数/token 数', async () => {
     const fs = makeFs({
       [MCP_SERVER_INFO_PATH]: JSON.stringify({ dataRoot: 'D:\\Test', serverEntry: 'D:\\x\\dist\\index.js' }),
       [`${MCP_AUDIT_DIR}/mcp-2026-11-04.jsonl`]: '',

@@ -61,6 +61,12 @@ export interface ComfyuiPreviewSocketHandlers {
   onStep?: (progress: ComfyuiStepProgress) => void;
   /** 采样预览（二进制 PREVIEW_IMAGE 帧，dataURL） */
   onPreviewImage?: (dataUrl: string) => void;
+  /**
+   * 本次作业请求的采样步数。ComfyUI 的 progress 事件并不保证 max=步数：
+   * Qwen 的缓存节点按 token 块上报（实测 max=4096），直接显示会变成「45 / 4096 步」。
+   * 给了期望步数且 max 明显偏大时，按比例折算成真实步数。
+   */
+  expectedSteps?: number;
 }
 
 function toWsUrl(baseUrl: string, clientId: string): string {
@@ -257,7 +263,8 @@ export class ComfyuiPreviewSocket extends DirectorPreviewSocket {
     const value = typeof d.value === 'number' ? d.value : null;
     const max = typeof d.max === 'number' ? d.max : null;
     if (value === null || max === null || max <= 0) return;
-    this.previewHandlers.onStep?.({ step: Math.min(value, max), totalSteps: max });
+    const expected = this.previewHandlers.expectedSteps;
+    this.previewHandlers.onStep?.(mapStepProgress(value, max, expected));
   }
 
   protected override onBinary(raw: ArrayBuffer): void {
@@ -270,6 +277,24 @@ export class ComfyuiPreviewSocket extends DirectorPreviewSocket {
     this.lastPreviewAt = now;
     this.previewHandlers.onPreviewImage(dataUrl);
   }
+}
+
+/**
+ * ComfyUI progress 事件 → 展示用步数。
+ * max 明显不是步数时（Qwen 缓存节点按 token 块上报，实测 4096），按完成比例折算到请求步数。
+ */
+export function mapStepProgress(
+  value: number,
+  max: number,
+  expectedSteps?: number,
+): ComfyuiStepProgress {
+  if (expectedSteps && expectedSteps > 0 && max > expectedSteps * 4) {
+    return {
+      step: Math.max(1, Math.min(expectedSteps, Math.round((value / max) * expectedSteps))),
+      totalSteps: expectedSteps,
+    };
+  }
+  return { step: Math.min(value, max), totalSteps: max };
 }
 
 /** ComfyUI BinaryEventTypes：1=PREVIEW_IMAGE；图片格式 1=JPEG 2=PNG */

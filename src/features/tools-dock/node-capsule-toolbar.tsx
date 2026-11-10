@@ -16,9 +16,11 @@
  * 所有可见文本通过 i18n 获取，禁止硬编码。
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
+import { App, Dropdown, Input } from 'antd';
+import type { MenuProps } from 'antd';
 import type { TFunction } from 'i18next';
 import { useGraph, useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -31,11 +33,13 @@ import {
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   Maximize2, Zap,
   Layers, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, Scaling,
-  Compass, PictureInPicture2,
+  Compass, PictureInPicture2, Send, Copy,
   } from 'lucide-react';
 import { DOCK_ICONS } from './icons.js';
 import { NodeJoystickNav } from './node-joystick-nav.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
+import { canSendNode, sendNodeToAssets } from '@/features/canvas-assets/node-send.js';
+import { openSubjectLinkDialog } from '@/features/canvas-nodes/storyboard/subject-link-dialog.js';
 
 export interface NodeCapsuleToolbarProps {
   nodeId: string | null;
@@ -197,6 +201,7 @@ export function NodeCapsuleToolbar({
 }: NodeCapsuleToolbarProps): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
+  const { message, modal } = App.useApp();
   const readOnly = useReadOnly();
   const graph = useGraph(store);
   const viewport = useViewport(store);
@@ -230,6 +235,75 @@ export function NodeCapsuleToolbar({
   const node = nodeProp ?? (nodeId ? graph.nodes.find((n) => n.id === nodeId) : null);
   const hasNodeTools = !!node;
   const isMultiSelect = selectedCount >= 2;
+
+  /** 发送到资产库（本项目 / 全局），与右键菜单同一实现 */
+  const handleSendToAssets = useCallback(async (destination: 'project' | 'library') => {
+    if (!node) return;
+    try {
+      const created = await sendNodeToAssets(node, destination);
+      if (created.length > 0) {
+        message.success(destination === 'project'
+          ? t('send.doneProject', '已发送到本项目资产')
+          : t('send.doneGlobal', '已发送到全局资产'));
+      } else {
+        message.warning(t('send.nothing', '没有可发送的内容'));
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : t('send.failed', '发送失败'));
+    }
+  }, [node, message, t]);
+
+  /** 另存为资产：弹命名框，存到本项目资产 */
+  const handleSaveAsAsset = useCallback(() => {
+    if (!node) return;
+    let title = String(node.title ?? '');
+    modal.confirm({
+      centered: true,
+      title: t('send.saveAsTitle', '另存为资产'),
+      content: (
+        <Input
+          defaultValue={title}
+          placeholder={t('send.namePlaceholder', '资产名称')}
+          onChange={(e) => { title = e.target.value; }}
+        />
+      ),
+      okText: t('common.confirm', '确定'),
+      cancelText: t('common.cancel', '取消'),
+      onOk: async () => {
+        const created = await sendNodeToAssets(node, 'project', { title });
+        if (created.length > 0) message.success(t('send.savedAs', '已另存为资产'));
+      },
+    });
+  }, [node, modal, message, t]);
+
+  /** 发送到主体（视频不支持，中性置灰说明） */
+  const handleSendToSubject = useCallback(() => {
+    if (!node || node.type === 'video') return;
+    const storageKey = (node.data as { storageKey?: string } | undefined)?.storageKey;
+    if (!storageKey) return;
+    openSubjectLinkDialog({
+      storageKey,
+      kind: node.type === 'image' ? 'image' : 'audio',
+      fromNodeId: node.id,
+      sourceLabel: node.title,
+    });
+  }, [node]);
+
+  const sendMenuItems: MenuProps['items'] = node ? [
+    { key: 'send-project', label: t('send.toProjectAssets', '本项目资产'), icon: <Copy size={14} /> },
+    { key: 'send-library', label: t('send.toGlobalAssets', '全局资产'), icon: <Copy size={14} /> },
+    { key: 'send-as', label: t('send.saveAsAsset', '另存为资产…'), icon: <Copy size={14} /> },
+    ...(node.type === 'image' || node.type === 'audio' || node.type === 'video'
+      ? [{
+          key: 'send-subject',
+          label: t('send.toSubject', '发送到主体'),
+          disabled: node.type === 'video' || !(node.data as { storageKey?: string } | undefined)?.storageKey,
+          title: node.type === 'video' ? t('subject.videoNotSupported', '视频不再支持，请选择图片或语音') : undefined,
+        }]
+      : []),
+    { type: 'divider' as const },
+    { key: 'canvas-copy', label: t('canvasCopy.createShort', '另存为画布'), icon: <PictureInPicture2 size={14} /> },
+  ] : [];
   // 批量堆叠可堆叠计数(征集#9 E2):多选且存在可堆叠节点且宿主注入执行逻辑时才有意义
   const stackableCount = useMemo(() => {
     if (!isMultiSelect || !onStackSelected) return 0;
@@ -557,14 +631,45 @@ export function NodeCapsuleToolbar({
       ) : null}
       {isMixedSelection && showArrangeAgg ? null : null}
 
-      {/* 另存画布固定在导航左侧：导航始终最右，避免截帧/导航顺序错位 */}
-      {(showGroupAgg || isPreview || (showNodeTools && !isGroupNode)) && onCreateCanvasCopy ? (
+      {/* 发送（2026-11-10 用户要求统一入口）：本项目资产 / 全局资产 / 另存为资产 / 发送到主体 / 另存为画布 */}
+      {node && canSendNode(node) ? (
+        <div style={{ position: 'relative', marginLeft: 2 }}>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomRight"
+            menu={{
+              items: sendMenuItems,
+              onClick: ({ key }) => {
+                if (key === 'send-project') void handleSendToAssets('project');
+                else if (key === 'send-library') void handleSendToAssets('library');
+                else if (key === 'send-as') handleSaveAsAsset();
+                else if (key === 'send-subject') handleSendToSubject();
+                else if (key === 'canvas-copy') onCreateCanvasCopy?.();
+              },
+            }}
+          >
+            <button
+              type="button"
+              data-capsule-action="send"
+              title={t('send.menu', '发送')}
+              aria-label={t('send.menu', '发送')}
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              style={aggButtonStyle(false, nodeAccent, textColor, hoverBg)}
+              onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <Send size={16} />
+            </button>
+          </Dropdown>
+        </div>
+      ) : (showGroupAgg || isPreview || (showNodeTools && !isGroupNode)) && onCreateCanvasCopy ? (
         <div style={{ position: 'relative', marginLeft: 2 }}>
           <button
             type="button"
             data-capsule-action="canvas-copy"
-            title={t('canvasCopy.createShort', '另存画布')}
-            aria-label={t('canvasCopy.createShort', '另存画布')}
+            title={t('canvasCopy.createShort', '另存为画布')}
+            aria-label={t('canvasCopy.createShort', '另存为画布')}
             onClick={(e) => { e.stopPropagation(); onCreateCanvasCopy(); }}
             onPointerDown={(e) => e.stopPropagation()}
             style={aggButtonStyle(false, nodeAccent, textColor, hoverBg)}

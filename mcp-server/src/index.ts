@@ -84,12 +84,19 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
  */
 async function stampServerInfo(httpPort: number): Promise<void> {
   try {
+    const entry = fileURLToPath(import.meta.url);
+    // dist/index.js 的修改时间 = 这份代码的编译时间：前端拿它判断「服务跑的是不是最新代码」
+    const builtAt = await fs.stat(entry).then((s) => s.mtime.toISOString()).catch(() => null);
     const info = {
       app: "zeroexo-mcp-server",
       version: "0.1.0",
       dataRoot: dataRoot(),
-      serverEntry: fileURLToPath(import.meta.url),
+      serverEntry: entry,
       tools: TOOL_REGISTRY.length,
+      /** 完整工具名：前端比对自己的必需清单，缺哪个就提示重启（光比数量会被新增/删除抵消） */
+      toolNames: TOOL_REGISTRY,
+      builtAt,
+      pid: process.pid,
       transports: ["stdio", "streamable-http"],
       httpPort,
       stampedAt: new Date().toISOString(),

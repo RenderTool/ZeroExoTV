@@ -20,6 +20,7 @@ import {
   buildStdioConfig,
   ensureIdeToken,
   loadServerInfo,
+  mcpServerMissingTools,
   type ServerInfo,
 } from '@/features/mcp-settings/mcp-client.js';
 import {
@@ -95,6 +96,8 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   // 步骤 2：MCP
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [mcpToken, setMcpToken] = useState<string | null>(null);
+  /** 服务端跑的是旧代码时缺的工具（网页自动感知更新） */
+  const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
   // 步骤 3：ComfyUI
   const [address, setAddress] = useState(endpoint.address || DEFAULT_COMFYUI);
   const [testing, setTesting] = useState(false);
@@ -107,6 +110,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
       try {
         const info = await loadServerInfo();
         setServerInfo(info);
+        setMcpStaleTools(mcpServerMissingTools(info));
         if (info) setMcpToken(await ensureIdeToken());
       } catch {
         setServerInfo(null);
@@ -223,6 +227,11 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               {t('onboarding.copyStartCmd', '复制启动命令')}
             </Button>
           </div>
+          {mcpStaleTools.length > 0 ? (
+            <span style={{ fontSize: 12, color: '#d97706' }}>
+              检测到 MCP 服务是旧版本（缺 {mcpStaleTools.length} 个工具，如 {mcpStaleTools[0]}）：重启 IDE 里的 MCP 服务后再生效。
+            </span>
+          ) : null}
         </StepCard>
 
         {/* 3 ComfyUI */}
@@ -251,10 +260,18 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   );
 }
 
-/** 主页底部「使用指引」条（代替原来的政策公告位） */
+/** 主页底部「使用指引」条（代替原来的政策公告位），同时充当「MCP 服务已更新」的自动提示位 */
 export function OnboardingNotice({ onOpen }: { onOpen: () => void }): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
+  const [staleTools, setStaleTools] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void loadServerInfo()
+      .then((info) => { if (alive) setStaleTools(mcpServerMissingTools(info)); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
   return (
     <div
       data-onboarding-notice
@@ -267,11 +284,15 @@ export function OnboardingNotice({ onOpen }: { onOpen: () => void }): React.Reac
         padding: '10px 20px',
         borderTop: `1px solid ${theme.toolbar.border}`,
         fontSize: 12,
-        color: theme.toolbar.textMuted,
+        color: staleTools.length > 0 ? '#d97706' : theme.toolbar.textMuted,
         background: theme.mode === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
       }}
     >
-      <span>{t('onboarding.notice', '第一次使用？先完成 3 项准备：存储路径、MCP 服务、ComfyUI 插件与地址。')}</span>
+      <span>
+        {staleTools.length > 0
+          ? `MCP 服务已更新：重启 IDE 里的 MCP 服务后新工具才生效（当前缺 ${staleTools.length} 个）。`
+          : t('onboarding.notice', '第一次使用？先完成 3 项准备：存储路径、MCP 服务、ComfyUI 插件与地址。')}
+      </span>
       <Button size="small" type="link" onClick={onOpen} style={{ paddingInline: 4 }}>
         {t('onboarding.open', '打开使用指引')}
       </Button>

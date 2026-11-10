@@ -600,7 +600,34 @@
     "fitScreen": "适合屏幕",
     "scaleTo": "缩放至"
   },
-  "canvasCopy": {
+  "send": {
+    "menu": "发送",
+    "toProjectAssets": "本项目资产",
+    "toGlobalAssets": "全局资产",
+    "saveAsAsset": "另存为资产…",
+    "saveAsTitle": "另存为资产",
+    "namePlaceholder": "资产名称",
+    "toSubject": "发送到主体",
+    "saveAsCanvas": "另存为画布",
+    "doneProject": "已发送到本项目资产",
+    "doneGlobal": "已发送到全局资产",
+    "savedAs": "已另存为资产",
+    "nothing": "没有可发送的内容",
+    "failed": "发送失败"
+  },
+  "taskQueue": {
+    "title": "任务队列",
+    "pill": "任务",
+    "queued": "排队中",
+    "running": "生成中",
+    "success": "已完成",
+    "error": "失败",
+    "cancelled": "已取消",
+    "clear": "清空已完成",
+    "open": "展开任务队列",
+    "collapse": "收起",
+    "untitled": "未命名任务"
+  },  "canvasCopy": {
     "drawerTab": "画布",
     "structureTab": "画布结构",
     "subCanvasTab": "子画布",
@@ -625,9 +652,9 @@
     "deleteTitle": "删除这块画布副本？",
     "deleteBody": "「{{name}}」的文件会被删除（{{nodeCount}} 个节点），不可恢复。主画布不受影响。",
     "deleted": "画布副本已删除",
-    "create": "另存画布",
+    "create": "另存为画布",
     "createTitle": "把选中内容另存为画布副本",
-    "createShort": "另存画布",
+    "createShort": "另存为画布",
     "created": "已另存为画布副本「{{title}}」",
     "notReady": "生成子画布失败：画布尚未就绪",
     "noProject": "生成子画布失败：未识别到当前项目",

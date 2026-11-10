@@ -52,6 +52,7 @@ import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-cen
 import { publishCurrentProject } from '@/platform/current-project.js';
 import { cleanupExpiredRecycleItems, sweepOrphansToRecycle } from '@/entities/media-recycle-bin.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
+import { TaskQueueDock } from '@/features/task-center/task-queue-dock.js';
 
 type Route =
   | { name: 'canvas'; canvasId?: string }
@@ -474,6 +475,9 @@ export function App(): React.ReactElement {
             setOnboardingOpen(false);
           }}
         />
+
+        {/* 右下角任务队列（画布 / 导演台 / 图片编辑器共用，可收起） */}
+        <TaskQueueDock />
       </AntdApp>
     </AntdThemeProvider>
   );

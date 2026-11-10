@@ -580,7 +580,34 @@
     "fitScreen": "画面に合わせる",
     "scaleTo": "スケール"
   },
-  "canvasCopy": {
+  "send": {
+    "menu": "送信",
+    "toProjectAssets": "プロジェクトのアセット",
+    "toGlobalAssets": "グローバルアセット",
+    "saveAsAsset": "アセットとして保存…",
+    "saveAsTitle": "アセットとして保存",
+    "namePlaceholder": "アセット名",
+    "toSubject": "主体に送信",
+    "saveAsCanvas": "キャンバスとして別名保存",
+    "doneProject": "プロジェクトのアセットに送信しました",
+    "doneGlobal": "グローバルアセットに送信しました",
+    "savedAs": "アセットとして保存しました",
+    "nothing": "送信できる内容がありません",
+    "failed": "送信に失敗しました"
+  },
+  "taskQueue": {
+    "title": "タスクキュー",
+    "pill": "タスク",
+    "queued": "待機中",
+    "running": "生成中",
+    "success": "完了",
+    "error": "失敗",
+    "cancelled": "キャンセル済み",
+    "clear": "完了をクリア",
+    "open": "タスクキューを開く",
+    "collapse": "折りたたむ",
+    "untitled": "無題のタスク"
+  },  "canvasCopy": {
     "drawerTab": "キャンバス",
     "structureTab": "キャンバス構造",
     "subCanvasTab": "サブキャンバス",

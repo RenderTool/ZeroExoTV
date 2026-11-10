@@ -29,6 +29,8 @@ export interface ContextMenuItem {
   title?: string;
   /** 快捷键提示(右对齐显示,低对比度;非真实绑定,仅展示) */
   shortcut?: string;
+  /** 二级菜单（悬停展开；用于「发送到…」这类有多目的地的主操作） */
+  children?: ContextMenuItem[];
   onClick: () => void;
 }
 
@@ -55,6 +57,28 @@ export function ContextMenu({
   // 动画状态: mounted 控制 DOM 挂载, visible 控制 CSS 动画
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+  /** 二级菜单（悬停父项展开）：fixed 定位在父项右侧，空间不够翻到左侧 */
+  const [subMenu, setSubMenu] = useState<{ key: string; top: number; left: number; items: ContextMenuItem[] } | null>(null);
+  const subCloseTimer = useRef<number | null>(null);
+
+  const cancelSubClose = (): void => {
+    if (subCloseTimer.current !== null) {
+      window.clearTimeout(subCloseTimer.current);
+      subCloseTimer.current = null;
+    }
+  };
+  const openSubMenu = (item: ContextMenuItem, el: HTMLElement): void => {
+    if (!item.children?.length) return;
+    cancelSubClose();
+    const rect = el.getBoundingClientRect();
+    const width = 260;
+    const left = rect.right + width > window.innerWidth - 8 ? Math.max(8, rect.left - width) : rect.right - 4;
+    setSubMenu({ key: item.key, top: rect.top, left, items: item.children });
+  };
+  const scheduleSubClose = (): void => {
+    cancelSubClose();
+    subCloseTimer.current = window.setTimeout(() => setSubMenu(null), 160);
+  };
 
   // 记住最后一次有效位置,供关闭动画期间使用
   if (position) {
@@ -252,10 +276,17 @@ export function ContextMenu({
                 }}
                 role="menuitem"
                 aria-disabled={item.disabled || undefined}
+                aria-haspopup={item.children?.length ? 'menu' : undefined}
                 title={item.title}
-                onClick={() => handleItemClick(item)}
-                onMouseEnter={(e) => handleItemMouseEnter(e, item)}
-                onMouseLeave={handleItemMouseLeave}
+                onClick={() => { if (item.children?.length) return; handleItemClick(item); }}
+                onMouseEnter={(e) => {
+                  handleItemMouseEnter(e, item);
+                  openSubMenu(item, e.currentTarget as HTMLElement);
+                }}
+                onMouseLeave={(e) => {
+                  handleItemMouseLeave(e);
+                  if (item.children?.length) scheduleSubClose();
+                }}
               >
                 {item.icon ? (
                   <span style={{ display: 'inline-flex', width: 14, height: 14, flexShrink: 0 }}>
@@ -263,6 +294,9 @@ export function ContextMenu({
                   </span>
                 ) : null}
                 <span style={{ flex: 1 }}>{item.label}</span>
+                {item.children?.length ? (
+                  <span style={{ marginLeft: 12, flexShrink: 0, opacity: 0.55, fontSize: 14, lineHeight: 1 }}>›</span>
+                ) : null}
                 {item.shortcut && (
                   <span
                     style={{
@@ -276,6 +310,54 @@ export function ContextMenu({
                     {item.shortcut}
                   </span>
                 )}
+              </li>
+            ),
+          )}
+        </ul>
+        ,
+        document.body,
+      ) : null}
+
+      {/* 二级菜单：与主菜单同 portal，悬停父项展开；进子菜单时取消关闭 */}
+      {mounted && subMenu && items.length > 0 ? createPortal(
+        <ul
+          style={{
+            ...menuStyle,
+            left: subMenu.left,
+            top: subMenu.top,
+            minWidth: 240,
+            maxHeight: 'min(60vh, 420px)',
+          }}
+          role="menu"
+          onMouseEnter={cancelSubClose}
+          onMouseLeave={scheduleSubClose}
+        >
+          {subMenu.items.map((item, index) =>
+            item.divider ? (
+              <li key={`sub-divider-${index}`} style={dividerStyle} role="separator" />
+            ) : (
+              <li
+                key={item.key}
+                style={{
+                  ...itemBaseStyle,
+                  color: item.disabled
+                    ? `${theme.toolbar.text}59`
+                    : item.danger
+                      ? theme.toolbar.danger
+                      : theme.toolbar.text,
+                  cursor: item.disabled ? 'default' : 'pointer',
+                }}
+                role="menuitem"
+                aria-disabled={item.disabled || undefined}
+                title={item.title}
+                onClick={() => handleItemClick(item)}
+                onMouseEnter={(e) => handleItemMouseEnter(e, item)}
+                onMouseLeave={handleItemMouseLeave}
+              >
+                {item.icon ? (
+                  <span style={{ display: 'inline-flex', width: 14, height: 14, flexShrink: 0 }}>{item.icon}</span>
+                ) : null}
+                <span style={{ flex: 1 }}>{item.label}</span>
               </li>
             ),
           )}

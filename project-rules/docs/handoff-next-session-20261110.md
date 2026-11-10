@@ -173,6 +173,14 @@
 - 弱模型导入纪律（2026-11-10 事故后加）：MCP 新增只读 `preflight_import`（语言判定/分集标记/主体库与导演台现状 +
   必须逐条问用户的问题）；`import_script`、`split_script_to_shots` 真实写入必须 `userConfirmed:true`，
   英文/外部平台源还要 `sourceFormatConfirmed:true`，缺了直接 `CONFIRM_REQUIRED`
+- 节点「发送」统一入口 + 右下角任务队列（2026-11-10）：胶囊与右键共用一个「发送」二级菜单
+  （本项目资产 / 全局资产 / 另存为资产 / 发送到主体 / 另存为画布）；画布、导演台、图片编辑器任务统一进
+  `task-queue-store`，右下角可收起面板展示排队与步数进度
+- 导演台「问AI」（2026-11-10）：镜头头部复制按钮，复制 projectId + shotId + 段号 + 提示词 + 参考/引导/公共参数 +
+  「我的修改建议」占位，Agent 用 get_current_project + get_workbench 即可定位
+- 进度与复刻修正：Qwen 的 `progress.max=4096` 是 token 数，客户端按请求步数折算；本机 `zeroexo:*` 节点复刻改用节点参数快照
+- MCP 更新感知：`server-info.json` 增加 `toolNames/builtAt/pid`，网页比对必需工具清单并在主页/使用指引/MCP 设置页提示重启
+- Krea2 等纯文生图模型：生成面板不再渲染参考素材上传/槽位区，改为「不支持参考图」说明（`supportsReferenceInput`）
 
 ## 4. 接手检查
 

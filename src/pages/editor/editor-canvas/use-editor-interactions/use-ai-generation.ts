@@ -109,16 +109,20 @@ export async function handleReplayGeneration(
   const srcData = (srcNode?.data ?? {}) as Record<string, any>;
   const generationId = srcData?.generationId as string | undefined;
   const pv = (srcData.paramValues ?? {}) as Record<string, any>;
-  const isLocalVideo = srcNode?.type === 'video' && Object.keys(pv).length > 0;
-  if (!srcNode || (!generationId && !isLocalVideo)) {
+  const modelKey = String(srcData?.model ?? '');
+  // 本机/插件链路（Qwen / Krea2 / H3）没有云端 AiGeneration 记录：generationId 只是 ComfyUI jobId，
+  // 复刻参数就在节点自己的 model + paramValues 里，不能拿去查 /ai/generations。
+  const isLocalNode = Boolean(srcData?.localJob)
+    || modelKey.startsWith('zeroexo:')
+    || (srcNode?.type === 'video' && Object.keys(pv).length > 0);
+  if (!srcNode || (!generationId && !isLocalNode)) {
     message.info(t('editor.replayNoRecord'));
     return;
   }
 
   let record: any;
-  if (isLocalVideo) {
-    // 本机 H3 无云端生成历史（generationId 是 ComfyUI jobId）：参数快照就在节点 paramValues 里
-    record = { prompt: srcData.prompt ?? '', params: { ...pv, _inputs: [] }, model: srcData.model };
+  if (isLocalNode) {
+    record = { prompt: srcData.prompt ?? srcData.generatedPrompt ?? '', params: { ...pv, _inputs: [] }, model: srcData.model };
   } else {
     try {
       record = await apiGet(`/ai/generations/${generationId}`);
@@ -175,7 +179,7 @@ export async function handleReplayGeneration(
         ...(record.negativePrompt ? { negativePrompt: record.negativePrompt } : {}),
         status: 'idle',
         ...(modelValue ? { model: modelValue } : {}),
-        ...(isLocalVideo
+        ...(isLocalNode
           ? { model: srcData.model, paramValues: { ...pv } }
           : cleanParams),
       },

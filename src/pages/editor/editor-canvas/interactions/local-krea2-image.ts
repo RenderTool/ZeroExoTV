@@ -113,6 +113,7 @@ export async function generateKrea2Image(req: LocalKrea2Request): Promise<LocalI
     previewSocket = new ComfyuiPreviewSocket(base, clientId, {
       onPreviewImage: req.onPreview,
       onStep: req.onProgress,
+      expectedSteps: num(req.params?.['steps'], KREA2_DEFAULT_STEPS),
     });
     previewSocket.connect();
   }

@@ -22,6 +22,7 @@ import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 import { applyCrop, applyMaskEdit, applySplit } from './image-edit-actions.js';
 import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
 import { QWEN_DEFAULT_STEPS } from '@/features/canvas-tabs/qwen-limits.js';
+import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 
 export type ImageEditTool = 'crop' | 'split' | 'maskEdit';
 
@@ -200,6 +201,8 @@ export function ImageEditWorkspace({
   // 局部遮罩：本机 Qwen Image 2.1 图像编辑（有遮罩 → 服务端走遮罩模板）
   const handleMaskEdit = async (payload: { prompt: string; maskDataUrl: string }): Promise<void> => {
     if (!dataUrl) return;
+    const taskId = `image-edit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    useTaskQueueStore.getState().start({ id: taskId, kind: 'image', title: '图片编辑 · 局部修改' });
     const hide = message.loading(t('imageEditor.maskGenerating', '局部修改生成中…'), 0);
     try {
       const result = await generateLocalQwenImage({
@@ -207,6 +210,7 @@ export function ImageEditWorkspace({
         referenceImages: [dataUrl],
         maskDataUrl: payload.maskDataUrl,
         params: { steps: QWEN_DEFAULT_STEPS, cfg: 1, denoise: 1, use_llm_enhance: false, sizeMode: 'source' },
+        onProgress: (p) => useTaskQueueStore.getState().update(taskId, { progress: { step: p.step, totalSteps: p.totalSteps } }),
       });
       const ids = await applyMaskEdit({
         node: resolveEditNode(),
@@ -216,8 +220,10 @@ export function ImageEditWorkspace({
         onGetNodeTitle: resultTitle,
       });
       completeEdit(ids);
+      useTaskQueueStore.getState().finish(taskId, 'success');
     } catch (err) {
       console.error('[ImageEditWorkspace] mask edit failed:', err);
+      useTaskQueueStore.getState().finish(taskId, 'error', err instanceof Error ? err.message : String(err));
       message.error(err instanceof Error && err.message ? err.message : t('imageEditor.maskFailed', '局部修改失败，请重试'));
     } finally {
       hide();

@@ -41,6 +41,7 @@ import { durationToFrames } from '@/entities/director-params.js';
 import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
 import { getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
+import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 import {
   cancelZeroexoJob,
   fetchZeroexoJob,
@@ -274,6 +275,8 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
   const doneIndexes = useRef<Set<number>>(new Set());
   const guidanceRequested = useRef<Set<number>>(new Set());
   const canceled = useRef(false);
+  /** 任务队列里的本次运行 id（右下角面板展示用） */
+  const taskIdRef = useRef<string | null>(null);
   const activeJob = useRef<{
     mode: 'openai' | 'direct' | 'zeroexo';
     jobId: string;
@@ -407,6 +410,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     activeJob.current = null;
     zeroexoJobs.current = new Map();
     clearResumableRun();
+    if (taskIdRef.current) useTaskQueueStore.getState().finish(taskIdRef.current, 'error', reason);
     setState((s) => ({ ...s, phase: 'error', error: `任务已中断：${reason}`, preview: null }));
   }, [stopPolling, stopPreview]);
 
@@ -451,11 +455,19 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       }
     }
     patch({ doneCount, currentSegment });
+    if (taskIdRef.current) {
+      useTaskQueueStore.getState().update(taskIdRef.current, {
+        phase: currentSegment ? `第 ${currentSegment} 段` : '执行中',
+        progress: { step: doneCount, totalSteps: entries.length },
+      });
+    }
     statusFailures.current = 0;
     if (failure) {
       patch({ phase: 'error', error: failure });
+      if (taskIdRef.current) useTaskQueueStore.getState().finish(taskIdRef.current, 'error', failure);
     } else if (doneCount >= entries.length && entries.length > 0) {
       patch({ phase: 'success' });
+      if (taskIdRef.current) useTaskQueueStore.getState().finish(taskIdRef.current, 'success');
     } else {
       patch({ phase: 'running' });
     }
@@ -578,6 +590,15 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       statusFailures.current = 0;
       canceled.current = false;
       activeJob.current = null;
+      // 右下角任务队列：导演台出片登记成一条任务，轮询里更新段进度
+      const taskId = `director-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      taskIdRef.current = taskId;
+      useTaskQueueStore.getState().start({
+        id: taskId,
+        kind: 'director',
+        title: `导演台出片 · ${runArgs.selectedIds.length} 段`,
+        phase: '提交中',
+      });
       setState({
         ...INITIAL_STATE,
         phase: 'submitting',
@@ -801,6 +822,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     activeJob.current = null;
     zeroexoJobs.current = new Map();
     clearResumableRun();
+    if (taskIdRef.current) useTaskQueueStore.getState().finish(taskIdRef.current, 'cancelled');
     setState((s) => ({
       ...s,
       phase: 'canceled',

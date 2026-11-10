@@ -78,4 +78,20 @@ describe('ComfyuiPreviewSocket', () => {
     expect(onPreviewImage).not.toHaveBeenCalled();
     socket.close();
   });
+
+  it('max 不是步数（Qwen 缓存节点按 token 报 4096）→ 折算回请求的 25 步', () => {
+    installFakeSocket();
+    const onStep = vi.fn();
+    const socket = new ComfyuiPreviewSocket('http://127.0.0.1:8188', 'cid-1', { onStep, expectedSteps: 25 });
+    socket.connect();
+    const ws = FakeWebSocket.instances[0]!;
+    ws.onmessage?.({ data: JSON.stringify({ type: 'progress', data: { value: 4096, max: 4096 } }) });
+    expect(onStep).toHaveBeenLastCalledWith({ step: 25, totalSteps: 25 });
+    ws.onmessage?.({ data: JSON.stringify({ type: 'progress', data: { value: 2048, max: 4096 } }) });
+    expect(onStep).toHaveBeenLastCalledWith({ step: 13, totalSteps: 25 });
+    // 真·步数事件仍按原值显示（25 步 KSampler 的 progress 不会被折半）
+    ws.onmessage?.({ data: JSON.stringify({ type: 'progress', data: { value: 7, max: 25 } }) });
+    expect(onStep).toHaveBeenLastCalledWith({ step: 7, totalSteps: 25 });
+    socket.close();
+  });
 });
