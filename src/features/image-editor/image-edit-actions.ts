@@ -65,6 +65,16 @@ export async function applyMaskEdit({ node, commandQueue, blob, prompt, onGetNod
   return [childId];
 }
 
+/** 手动涂抹：合成好的 PNG 直接落成结果节点（原节点不动，同样右连一条边） */
+export async function applyPaint({ node, commandQueue, blob, onGetNodeTitle }: {
+  node: NodeRecord;
+  commandQueue: CommandQueue;
+  blob: Blob;
+  onGetNodeTitle?: (type: string, batchIndex?: number, baseCount?: number) => string;
+}): Promise<string[]> {
+  return applyMaskEdit({ node, commandQueue, blob, prompt: nodePrompt(node), onGetNodeTitle });
+}
+
 /** 裁剪：原节点右侧生成一张裁剪结果节点，并连一条 原节点 → 新节点 的边 */
 export async function applyCrop({ node, commandQueue, dataUrl, onGetNodeTitle, rect }: BaseInput & { rect: CropRect }): Promise<string[]> {
   const cropped = await cropDataUrl(dataUrl, rect);

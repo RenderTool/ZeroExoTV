@@ -570,6 +570,8 @@
     "toolCrop": "Crop",
     "toolSplit": "Split",
     "toolMask": "Local",
+    "toolPaint": "Paint",
+    "paintFailed": "Failed to save painting, please retry",
     "backToCanvas": "Back to canvas",
     "tabTitle": "Image edit",
     "tabEditing": "Editing",

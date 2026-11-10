@@ -555,6 +555,8 @@
     "toolCrop": "切り抜き",
     "toolSplit": "分割",
     "toolMask": "部分",
+    "toolPaint": "塗り",
+    "paintFailed": "塗りの保存に失敗しました。再試行してください",
     "backToCanvas": "キャンバスに戻る",
     "tabTitle": "画像編集",
     "tabEditing": "編集中",

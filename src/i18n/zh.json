@@ -575,6 +575,8 @@
     "toolCrop": "裁剪",
     "toolSplit": "分割",
     "toolMask": "局部",
+    "toolPaint": "涂抹",
+    "paintFailed": "涂抹保存失败，请重试",
     "backToCanvas": "返回画布",
     "tabTitle": "图片编辑",
     "tabEditing": "编辑",

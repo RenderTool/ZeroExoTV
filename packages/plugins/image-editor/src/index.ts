@@ -60,6 +60,9 @@ export type { UpscaleDialogProps } from './dialogs/upscale-dialog.js';
 export { MaskEditDialog } from './dialogs/mask-edit-dialog.js';
 export type { MaskEditDialogProps } from './dialogs/mask-edit-dialog.js';
 
+export { PaintDialog } from './dialogs/paint-dialog.js';
+export type { PaintDialogProps, PaintPayload } from './dialogs/paint-dialog.js';
+
 export { AngleDialog } from './dialogs/angle-dialog.js';
 export type { AngleDialogProps } from './dialogs/angle-dialog.js';
 

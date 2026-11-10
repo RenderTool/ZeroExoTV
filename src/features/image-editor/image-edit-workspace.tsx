@@ -13,18 +13,18 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Tooltip } from 'antd';
-import { ArrowLeft, Brush, Grid2x2, Scissors } from 'lucide-react';
+import { ArrowLeft, Brush, Grid2x2, Paintbrush, Scissors } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { CommandQueue, NodeRecord } from '@zeroexo/core';
 import { useHydratedContent } from '@zeroexo/plugin-nodes';
-import { CropDialog, SplitDialog, MaskEditDialog } from '@zeroexo/plugin-image-editor';
+import { CropDialog, SplitDialog, MaskEditDialog, PaintDialog } from '@zeroexo/plugin-image-editor';
 import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
-import { applyCrop, applyMaskEdit, applySplit } from './image-edit-actions.js';
+import { applyCrop, applyMaskEdit, applyPaint, applySplit } from './image-edit-actions.js';
 import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
 import { QWEN_DEFAULT_STEPS } from '@/features/canvas-tabs/qwen-limits.js';
 import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 
-export type ImageEditTool = 'crop' | 'split' | 'maskEdit';
+export type ImageEditTool = 'crop' | 'split' | 'maskEdit' | 'paint';
 
 export interface ImageEditNodeSource {
   kind: 'node';
@@ -61,6 +61,7 @@ const TOOLS: { id: ImageEditTool; labelKey: string; fallback: string; icon: Reac
   { id: 'crop', labelKey: 'imageEditor.toolCrop', fallback: '裁剪', icon: <Scissors size={14} /> },
   { id: 'split', labelKey: 'imageEditor.toolSplit', fallback: '分割', icon: <Grid2x2 size={14} /> },
   { id: 'maskEdit', labelKey: 'imageEditor.toolMask', fallback: '局部', icon: <Brush size={14} /> },
+  { id: 'paint', labelKey: 'imageEditor.toolPaint', fallback: '涂抹', icon: <Paintbrush size={14} /> },
 ];
 
 export function ImageEditWorkspace({
@@ -198,6 +199,18 @@ export function ImageEditWorkspace({
     }
   };
 
+  // 手动涂抹：用户只是想在图上画颜色（补色块/标记），不走 AI，直接合成落成新图片节点
+  const handlePaint = async (payload: { blob: Blob }): Promise<void> => {
+    if (!dataUrl) return;
+    try {
+      const ids = await applyPaint({ node: resolveEditNode(), commandQueue, blob: payload.blob, onGetNodeTitle: resultTitle });
+      completeEdit(ids);
+    } catch (err) {
+      console.error('[ImageEditWorkspace] paint failed:', err);
+      message.error(t('imageEditor.paintFailed', '涂抹保存失败，请重试'));
+    }
+  };
+
   // 局部遮罩：本机 Qwen Image 2.1 图像编辑（有遮罩 → 服务端走遮罩模板）
   const handleMaskEdit = async (payload: { prompt: string; maskDataUrl: string }): Promise<void> => {
     if (!dataUrl) return;
@@ -238,6 +251,15 @@ export function ImageEditWorkspace({
     <CropDialog dataUrl={dataUrl} open inline theme={theme} onClose={abandonEdit} onConfirm={(crop) => void handleCrop(crop)} />
   ) : mode === 'split' ? (
     <SplitDialog dataUrl={dataUrl} open inline theme={theme} onClose={abandonEdit} onConfirm={(params) => void handleSplit(params)} />
+  ) : mode === 'paint' ? (
+    <PaintDialog
+      dataUrl={dataUrl}
+      open
+      inline
+      theme={theme}
+      onClose={abandonEdit}
+      onConfirm={(payload) => { void handlePaint(payload); }}
+    />
   ) : (
     <MaskEditDialog
       dataUrl={dataUrl}
