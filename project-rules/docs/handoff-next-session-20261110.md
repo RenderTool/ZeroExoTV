@@ -107,8 +107,12 @@
 - 参数：比例 + 百万像素（默认 3MP）+ 32 对齐（`resolveKrea2Size`），默认 10 步、cfg 1、eta 0.55；不支持参考图。
 - 插件侧新增 `templates/krea2_t2i.json`（UNET krea2 → CLIP krea2 → VAE qwen_image_vae → ClownsharKSampler_Beta → VAEDecode → SaveImage），
   作业 kind `krea2_t2i`，产物按 image 回传；不接 SeedVR2 / z_image 放大链。
-- **线上 ComfyUI 尚未部署这份模板**（云端 `/zeroexo/v1/health` 的 templates 里还没有 `krea2_t2i`）：把 `comfyui-plugin/ComfyUI_ZeroExoNodes`
+- **云端 ComfyUI 尚未部署这份模板**（云端 `/zeroexo/v1/health` 的 templates 里还没有 `krea2_t2i`）：把 `comfyui-plugin/ComfyUI_ZeroExoNodes`
   同步到 `/root/comfyui/ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes` 后重启（`bash /etc/waas-script/restart_comfyui.sh`）。
+- **本机 ComfyUI 已同步（2026-11-10）**：`D:\ComfyUI\ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI_ZeroExoNodes`
+  已覆盖 `__init__.py`、`engine/graph_ops.py`、`templates/krea2_t2i.json`、`templates/reference_video.json`（旧版还写死
+  `ultra_uncensored_heretic` CLIP，已换成官方 `qwen3vl_32b_minimax_h3_int8_convrot`）。本机没有 krea2 底模，
+  所以 Krea2 仍不会在本机模式的下拉里出现（按设计），模板同步只是保证协议/模板一致。
 - 云端已核对：`krea2_turbo_bf16.safetensors` / `qwen3vl_4b_fp8_scaled.safetensors` / `qwen_image_vae.safetensors` 都在，
   `ClownsharKSampler_Beta`（RES4LYF）与 `ResolutionSelector` 节点可用。
 - **云端实测通过（2026-11-10）**：把主链 workflow 直接 POST 到线上 `/prompt`（1024×1024 / 10 步 / seed 4242），
