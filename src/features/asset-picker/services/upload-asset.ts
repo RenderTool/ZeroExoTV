@@ -47,10 +47,16 @@ const FILE_SIZE_LIMITS: Record<string, number> = {
 const EXTENSION_MIME_MAP: Record<string, string> = {
   'jpg': 'image/jpeg',
   'jpeg': 'image/jpeg',
+  'jfif': 'image/jpeg',
   'png': 'image/png',
   'gif': 'image/gif',
   'webp': 'image/webp',
+  'avif': 'image/avif',
+  'heic': 'image/heic',
+  'heif': 'image/heif',
   'bmp': 'image/bmp',
+  'tif': 'image/tiff',
+  'tiff': 'image/tiff',
   'svg': 'image/svg+xml',
   'mp4': 'video/mp4',
   'webm': 'video/webm',
@@ -77,8 +83,12 @@ function inferMimeType(filename: string): string | null {
 }
 
 const SUPPORTED_MIME_TYPES = {
-  image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml'],
-  video: ['video/mp4', 'video/webm', 'video/ogg', 'video/mkv', 'video/quicktime'],
+  // 2026-11-10 补齐常见图片格式：avif/heic/heif/tiff/jfif 之前会被判「格式不支持」
+  image: [
+    'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/gif', 'image/webp',
+    'image/avif', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff', 'image/svg+xml',
+  ],
+  video: ['video/mp4', 'video/webm', 'video/ogg', 'video/x-matroska', 'video/mkv', 'video/quicktime'],
   audio: ['audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/aac'],
   text: ['text/plain', 'text/markdown', 'text/html', 'application/json'],
 } as const;

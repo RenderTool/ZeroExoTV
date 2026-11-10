@@ -187,6 +187,7 @@ export function useAssetUploadQueue(
       const results: CreateAssetInput[] = [];
       // 收集本批次失败原因:全败时抛出首个错误,避免用户只见笼统的格式提示
       const errors: unknown[] = [];
+      let taskStatuses: string[] = [];
 
       // 2. 使用 UploadQueue 处理并发上传和重试（本地模式不订阅事件，失败原因事后从 task.error 回收）
       const unsub = trackSession
@@ -231,6 +232,7 @@ export function useAssetUploadQueue(
             errors.push(task.error);
           }
         }
+        taskStatuses = taskIds.map((id) => uploadQueue.getTask(id)?.status ?? 'missing');
       } finally {
         unsub();
         uploadQueue.removeTasks(taskIds);
@@ -240,6 +242,13 @@ export function useAssetUploadQueue(
       if (results.length === 0 && errors.length > 0) {
         const first = errors[0];
         throw first instanceof Error ? first : new Error(String(first));
+      }
+      // 没有任何结果、也没有错误（本地模式事件未订阅 / 任务被取消 / 队列实例被复用）：
+      // 不能假装「格式不支持」，必须说清是上传链路没跑起来
+      if (results.length === 0) {
+        throw new Error(
+          `没有文件进入存储（任务状态：${taskStatuses.join(',') || '未开始'}）：请确认数据目录已授权、本地数据服务在线，然后重试`,
+        );
       }
 
       return results;

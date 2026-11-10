@@ -43,7 +43,10 @@ export function PromptLibraryMenu({
         aria-label={t('promptLibrary.title', '提示词')}
         title={t('promptLibrary.title', '提示词')}
         data-testid="prompt-library-menu"
-      />
+      >
+        {/* 2026-11-10 用户要求：按钮必须带「提示词」文本，不能只有一个书本图标 */}
+        {t('promptLibrary.title', '提示词')}
+      </Button>
     </Dropdown>
   );
 }
