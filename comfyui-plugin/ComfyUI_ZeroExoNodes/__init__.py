@@ -148,15 +148,36 @@ def substitute(node: Any, params: dict[str, Any]) -> Any:
     return node
 
 
+def _available_models(folder: str) -> list[str]:
+    try:
+        return list(folder_paths.get_filename_list(folder))
+    except Exception:
+        return []
+
+
+def _pick_model(folder: str, current: str, preferred: tuple[str, ...]) -> str:
+    """模板里的旧模型名可能在某台机器上不存在；按可用清单做确定性回落。"""
+    names = _available_models(folder)
+    if not names:
+        return current
+    if current in names:
+        return current
+    lowered = [(n, n.lower()) for n in names]
+    for kw in preferred:
+        for name, low in lowered:
+            if kw in low:
+                return name
+    return names[0]
+
+
 def apply_model_overrides(template: dict[str, Any], models: Any) -> dict[str, Any]:
     """把前端选择的模型文件名写进模板；加载器节点不变，只换权重文件。"""
-    if not isinstance(models, dict):
-        return template
-    unet = str(models.get("unet") or "").strip()
-    video_vae = str(models.get("videoVae") or "").strip()
-    audio_vae = str(models.get("audioVae") or "").strip()
-    clip = str(models.get("clip") or "").strip()
-    clip_type = str(models.get("clipType") or "").strip()
+    m = models if isinstance(models, dict) else {}
+    unet = str(m.get("unet") or "").strip()
+    video_vae = str(m.get("videoVae") or "").strip()
+    audio_vae = str(m.get("audioVae") or "").strip()
+    clip = str(m.get("clip") or "").strip()
+    clip_type = str(m.get("clipType") or "").strip()
     for node in template.values():
         if not isinstance(node, dict):
             continue
@@ -164,22 +185,43 @@ def apply_model_overrides(template: dict[str, Any], models: Any) -> dict[str, An
         if not isinstance(inputs, dict):
             continue
         cls = node.get("class_type")
-        if cls == "UNETLoader" and unet:
-            inputs["unet_name"] = unet
-        elif cls == "CLIPLoader" and clip:
-            inputs["clip_name"] = clip
+        if cls == "UNETLoader":
+            inputs["unet_name"] = _pick_model(
+                "diffusion_models",
+                unet or str(inputs.get("unet_name") or ""),
+                ("minimax_h3", "h3", "qwen_image", "qwen"),
+            )
+        elif cls == "CLIPLoader":
+            current_clip = str(inputs.get("clip_name") or "")
+            image_clip = ("qwen3.5" in current_clip.lower() or "qwen_image" in current_clip.lower())
+            inputs["clip_name"] = _pick_model(
+                "text_encoders",
+                clip or current_clip,
+                ("qwen3.5", "qwen_image", "qwen3vl_32b") if image_clip else ("minimax_h3", "qwen3vl_32b", "qwen3vl_8b"),
+            )
             if clip_type:
                 inputs["type"] = clip_type
         elif cls == "VAELoader":
             current = str(inputs.get("vae_name") or "").lower()
-            if "audio" in current and audio_vae:
-                inputs["vae_name"] = audio_vae
-            elif "video" in current and video_vae:
-                inputs["vae_name"] = video_vae
+            if "audio" in current:
+                inputs["vae_name"] = _pick_model(
+                    "vae", audio_vae or str(inputs.get("vae_name") or ""), ("audio", "minimax_h3")
+                )
+            else:
+                inputs["vae_name"] = _pick_model(
+                    "vae",
+                    video_vae or str(inputs.get("vae_name") or ""),
+                    ("qwen_image", "qwen") if "qwen" in current else ("video", "minimax_h3"),
+                )
+        elif cls == "CheckpointLoaderSimple":
+            inputs["ckpt_name"] = _pick_model(
+                "checkpoints", str(inputs.get("ckpt_name") or ""), ("qwen", "flux", "sdxl")
+            )
     return template
 
 
 
+def load_template(kind: str) -> dict[str, Any]:
     path = os.path.join(TEMPLATE_DIR, f"{kind}.json")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
