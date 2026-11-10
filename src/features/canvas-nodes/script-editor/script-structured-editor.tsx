@@ -483,7 +483,19 @@ export function ScriptStructuredEditor({
                 onKeyDown={(e) => handleLineKeyDown(e, line)}
                 onPointerDown={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
-                onWheel={(e) => e.stopPropagation()}
+                onWheel={(e) => {
+                  // 2026-11-10 用户反馈「剧本滚轮滚不动」：textarea 是自动高度、自身不会滚，
+                  // 只 stopPropagation 会把滚轮吞掉。这里直接把手势转给剧本滚动容器。
+                  const scroller = e.currentTarget.closest('[data-script-scroll]') as HTMLElement | null;
+                  if (!scroller) return;
+                  e.stopPropagation();
+                  const delta = e.deltaMode === 1
+                    ? e.deltaY * 16
+                    : e.deltaMode === 2
+                      ? e.deltaY * scroller.clientHeight
+                      : e.deltaY;
+                  scroller.scrollTop += delta;
+                }}
                 onPaste={() => history.breakMerge()}
                 onCut={() => history.breakMerge()}
                 onInput={(e) => {

@@ -10,7 +10,7 @@
  * 符合专业剪辑软件标准 (OpenCut 布局)。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import { ChevronDown, ListChecks, Plus, SquareSplitHorizontal, Trash2 } from 'lucide-react';
+import { ChevronDown, Clock, ListChecks, Plus, SquareSplitHorizontal, Trash2 } from 'lucide-react';
 import { Dropdown } from 'antd';
 import type { WorkbenchNodeData, WorkbenchTrack } from './workbench-types';
 import { resolveShotsForTrack } from './workbench-sync';
@@ -479,6 +479,12 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
     return entry?.duration ?? 0;
   }, [focusedTrack, byTrack]);
 
+  /** 全部片段时长合计（导演台右上角统计；用户 2026-11-10 要求） */
+  const totalShotsSeconds = useMemo(
+    () => (timeline.shots ?? []).reduce((sum, s) => sum + (Number(s.duration) || 0), 0),
+    [timeline.shots],
+  );
+
   // 总渲染宽度（2026-11-04 刻度范围修复，症状：时间轴时长只有 3 分钟）：
   // 按内容计算——刻度总长 = 所有片段时长之和 + 尾部余量（与内层时间轴同一规则
   // max(30%, 60s)，能继续往后拖/看）；无硬编码上限，内容超长自动延伸，最后一段
@@ -893,9 +899,23 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
         {/* 2026-11-04 出片页改造：去掉播放按钮与时间码显示（原 Plan#83 B1~B4 中间播放控制 + 「播放选中」按钮下线） */}
         <div style={{ flex: 1 }} />
 
-        {/* 右侧: 缩放控件 (对接 StoryboardTimeline 的缩放，保留 zx-timeline-zoom 白色画风)
-            2026-11-05 固定宽度片段卡片：导演台（zeroBaseRail）卡片不随时长/缩放铺排，缩放控件整组下线 */}
-        {!zeroBaseRail && (
+        {/* 右侧: 导演台 = 全部片段时长统计；出片页 = 缩放控件 (对接 StoryboardTimeline 的缩放，保留 zx-timeline-zoom 白色画风) */}
+        {zeroBaseRail ? (
+          <div
+            data-rail-total-duration
+            title={t('workbench.multitrack.totalDurationTitle', '全部片段时长合计')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+              fontSize: 11, color: C.muted, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            <Clock size={12} />
+            <span data-rail-total-duration-value style={{ fontWeight: 600, color: C.text }}>
+              {t('workbench.multitrack.totalDuration', '总时长 {{time}}', { time: fmtTime(totalShotsSeconds) })}
+            </span>
+            <span style={{ opacity: 0.8 }}>· {timeline.shots.length} 段</span>
+          </div>
+        ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button type="button" onClick={() => timeline.onPixelsPerSecondChange?.(timeline.pixelsPerSecond - 10)} style={{ ...toolBtnStyle, fontSize: 14, padding: '0 6px' }} title="缩小">−</button>
           <input

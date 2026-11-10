@@ -895,6 +895,41 @@ describe('卡片导轨总宽 = 按卡片数计算（卡片间距 + 尾部余量 
     expect(last.style.width).toBe('220px');
     expect(parseFloat(last.style.left) + parseFloat(last.style.width)).toBeLessThanOrEqual(80 * 226 + 200);
   });
+
+  it('顶部工具行右侧显示「全部片段统计时长」（80 段 × 5s = 06:40 · 80 段）', () => {
+    const shots80 = Array.from({ length: 80 }, (_, i) => ({ id: `s${i + 1}`, number: i + 1, duration: 5, status: 'idle' }));
+    const track = {
+      id: 'tr-1', name: '主轨', sourceChain: { origin: 'sb-1' }, status: 'active', order: 0,
+      clips: shots80.map((s) => ({ ref: { sourceShotId: s.id }, instanceData: s, timeline: { durationMs: 5000 } })),
+    } as unknown as WorkbenchTrack;
+    const data = {
+      status: 'ready',
+      shots: shots80.map((s) => ({ ...s, status: 'pending' })),
+      totalDuration: 400,
+      completedCount: 0,
+    } as unknown as WorkbenchNodeData;
+    const timeline = {
+      shots: shots80,
+      activeShotId: null,
+      pixelsPerSecond: 40,
+      onPixelsPerSecondChange: () => {},
+      onSelectShot: () => {},
+      t: tStub as never,
+      theme,
+      isDark: true,
+    } as unknown as StoryboardTimelineProps;
+    const { container } = render(
+      createElement(WorkbenchMultiTrack, {
+        tracks: [track], data, focusedTrackId: track.id, onFocusTrack: () => {}, timeline,
+        zeroBaseRail: true,
+      }),
+    );
+    const el = container.querySelector('[data-rail-total-duration]') as HTMLElement;
+    expect(el).toBeTruthy();
+    const value = el.querySelector('[data-rail-total-duration-value]') as HTMLElement;
+    expect(value.textContent).toContain('06:40'); // 80 × 5s
+    expect(el.textContent).toContain('80 段');
+  });
 });
 
 // ===== 6c. 2026-11-05 220px 固定宽度卡片规格验收（约定修订版）=====

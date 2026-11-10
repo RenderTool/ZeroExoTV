@@ -129,4 +129,25 @@ describe('剧本页滚动条贴边', () => {
     const bottomWrap = paper.lastElementChild as HTMLElement;
     expect(bottomWrap.style.paddingRight).toBe('24px');
   });
+
+  it('光标在文字上滚轮也能滚动剧本页（2026-11-10 用户反馈）', () => {
+    const { baseElement } = renderEditor();
+    const scroll = baseElement.querySelector('[data-script-scroll]') as HTMLElement;
+    expect(scroll).not.toBeNull();
+    const textarea = scroll.querySelector('textarea');
+    expect(textarea).not.toBeNull();
+
+    // jsdom 没有布局：给滚动容器装一个可观测的 scrollTop，断言滚轮被转发成滚动
+    let top = 0;
+    Object.defineProperty(scroll, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => { top = v; },
+    });
+    textarea!.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    expect(top).toBe(120);
+    // 向上滚同理
+    textarea!.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true, cancelable: true }));
+    expect(top).toBe(80);
+  });
 });
