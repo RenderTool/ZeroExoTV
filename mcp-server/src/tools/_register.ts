@@ -76,6 +76,40 @@ export function guardDryRunConfirm(
   }
 }
 
+/**
+ * 用户确认闸门（2026-11-10 弱模型事故后加）：
+ * confirm:true 只代表「Agent 决定落盘」，不代表「用户回答过关键问题」。
+ * 批量导入类写工具额外要求 userConfirmed:true，缺了直接拒绝，并把该问的问题列给 Agent。
+ */
+export function guardUserConfirmed(
+  args: { userConfirmed?: boolean },
+  detail: string,
+): void {
+  if (args.userConfirmed === true) return;
+  throw new McpError(
+    "CONFIRM_REQUIRED",
+    `${detail}：这是批量写操作，必须先调 preflight_import 拿到问题清单，逐条问用户并得到答复后，`
+      + "再带 userConfirmed:true 重试。禁止替用户决定集数、来源格式或主体处理方式。",
+  );
+}
+
+/**
+ * 外部/英文源数据闸门：判定为英文原文时，Agent 还必须显式说明「用户已确认按 ZeroExo 规范重排」。
+ * 只有 userConfirmed 不够——弱模型会拿别人的格式直接覆盖。
+ */
+export function guardForeignSource(
+  analysis: { foreignLikely: boolean; language: string },
+  args: { sourceFormatConfirmed?: boolean },
+): void {
+  if (!analysis.foreignLikely) return;
+  if (args.sourceFormatConfirmed === true) return;
+  throw new McpError(
+    "CONFIRM_REQUIRED",
+    "源文本判定为英文/外部平台格式（中文占比极低）。必须先问用户：按 ZeroExo 的「场次+动作+台词」重排，还是保持原文？"
+      + "用户确认后带 sourceFormatConfirmed:true 重试。",
+  );
+}
+
 /** 简单字段级 diff（before/after 预览用），最多返回 50 条。 */
 export function diffSummary(before: unknown, after: unknown, prefix = "", out: string[] = []): string[] {
   if (out.length >= 50) return out;

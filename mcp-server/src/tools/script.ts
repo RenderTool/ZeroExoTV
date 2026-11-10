@@ -9,7 +9,8 @@ import {
   readScript, setEpisodeMeta, setScriptMeta, updateEpisode, SCRIPT_BLOCK_KINDS,
 } from "../store/script.js";
 import { normalizeScript } from "../lib/script-normalize.js";
-import { defTool, diffSummary, guardDryRunConfirm, type Ctx } from "./_register.js";
+import { analyzeSource } from "../lib/preflight.js";
+import { defTool, diffSummary, guardDryRunConfirm, guardForeignSource, guardUserConfirmed, type Ctx } from "./_register.js";
 
 export function registerScriptTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
@@ -253,9 +254,19 @@ export function registerScriptTools(server: McpServer, ctx: Ctx): void {
       title: z.string().optional(),
       dryRun: z.boolean().optional(),
       confirm: z.boolean().optional(),
+      /** 用户已逐条回答 preflight_import 的问题（集数/来源格式/主体）——真实写入必须 true */
+      userConfirmed: z.boolean().optional()
+        .describe("用户已回答预检问题（集数/来源格式/主体）。真实写入必须 true；dryRun 不需要"),
+      /** 英文/外部平台原文，用户已确认按 ZeroExo 规范重排 */
+      sourceFormatConfirmed: z.boolean().optional()
+        .describe("英文或外部平台原文：用户已确认按 ZeroExo「场次+动作+台词」规范重排"),
     },
     handler: async (args) => {
       guardDryRunConfirm(args, { requireOne: true });
+      if (args.dryRun !== true) {
+        guardUserConfirmed(args, "导入剧本会新建/覆盖剧集");
+        guardForeignSource(analyzeSource(args.content), args);
+      }
       const res = await importScript(dataRoot(), args.projectId, {
         ...args,
         content: args.content,

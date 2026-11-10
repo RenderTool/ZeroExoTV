@@ -86,6 +86,7 @@ describe("剧本工具 mode 语义", () => {
         content: "# 雨夜\n## 第1集：来客",
         strategy: "new_episode",
         confirm: true,
+        userConfirmed: true,
       },
     });
     expect((res as { isError?: boolean }).isError).toBe(true);
@@ -101,6 +102,7 @@ describe("剧本工具 mode 语义", () => {
         mode: "raw",
         strategy: "new_episode",
         confirm: true,
+        userConfirmed: true,
       },
     });
     // 不算失败：不返回 error 语义
@@ -128,6 +130,7 @@ describe("剧本工具 mode 语义", () => {
         mode: "standard",
         strategy: "new_episode",
         confirm: true,
+        userConfirmed: true,
       },
     });
     expect((res as { isError?: boolean }).isError).toBeFalsy();

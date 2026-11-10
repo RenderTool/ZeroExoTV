@@ -6,7 +6,7 @@ import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import { readScript, splitToSegmentDrafts } from "../store/script.js";
 import { addSegments } from "../store/workbench.js";
-import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
+import { defTool, guardDryRunConfirm, guardUserConfirmed, type Ctx } from "./_register.js";
 
 export function registerSplitTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
@@ -20,9 +20,15 @@ export function registerSplitTools(server: McpServer, ctx: Ctx): void {
       baseVersion: z.number().int().min(0).describe("workbench.json 的 version；dryRun 时可为 0"),
       dryRun: z.boolean().optional(),
       confirm: z.boolean().optional(),
+      /** 用户已回答拆段方案（段数/时长/是否重拆）——真实落盘必须 true */
+      userConfirmed: z.boolean().optional()
+        .describe("用户已确认拆段方案（段数/每段时长/对已有片段的处理）。真实落盘必须 true"),
     },
     handler: async (args) => {
       guardDryRunConfirm(args, { requireOne: true });
+      if (args.dryRun !== true) {
+        guardUserConfirmed(args, "拆分镜会改写导演台片段");
+      }
       const script = await readScript(dataRoot(), args.projectId);
       if (!script) throw new McpError("NOT_FOUND", `剧本不存在: ${args.projectId}`);
       const ep = script.episodes.find((e) => e.id === args.episodeId);

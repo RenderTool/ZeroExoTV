@@ -24,6 +24,17 @@ const SCRIPT_IMPORT = `# 技能：剧本落地（script-import）
 
 > 适用：用户给了剧本原文 / 音频转写稿 / 分镜 Markdown，要进「剧本」页签。
 
+## 0. 先预检，再问人（强制，2026-11-10）
+
+调 preflight_import({ projectId, sourceText })（只读），把它返回的 questions 逐条问用户：
+
+- 来源格式：英文/外部平台原文要不要按 ZeroExo 的「场次 + 动作 + 台词」重排？
+- 集数：这次导入成几集（原文检测到哪些分集标记）？
+- 主体资产：要不要先把角色/场景/道具和定妆图导进主体库？
+- 导演台已有片段：保留、追加还是重建？
+
+用户答复后才继续。真实写入 import_script 必须 userConfirmed:true；英文/外部平台源还要 sourceFormatConfirmed:true（缺了会 CONFIRM_REQUIRED）。
+
 ## 1. 先定形态
 
 | 输入 | 处理 |
@@ -274,7 +285,7 @@ export function skillsPipelineText(): string {
 
 ## 1 剧本
 - 读 zeroexo://skills/script-import。
-- \`create_project\` → \`normalize_script\` 或直接整理成标准剧本 → 用户确认 → \`import_script\`。
+- \`create_project\` → \`preflight_import\` → 把问题逐条问用户（集数/来源格式/主体资产/已有片段）→ \`normalize_script\` 或整理成标准剧本 → 用户确认 → \`import_script(userConfirmed:true)\`（英文/外部平台源还要 \`sourceFormatConfirmed:true\`）。
 - ▼ 停：剧本未入库，不得提主体、不得拆分镜。
 
 ## 2 主体

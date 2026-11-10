@@ -170,6 +170,9 @@
 - 首次使用指引（2026-11-10 用户要求）：`features/onboarding/onboarding-guide.tsx`，三项先决条件
   （存储路径 / MCP 一键复制配置 / ComfyUI 插件+地址测试连接）；数据目录就绪后首启自动弹一次
   （`zeroexo:onboarding.seen`），主页底部常驻「使用指引」条（代替政策公告位）可再次打开
+- 弱模型导入纪律（2026-11-10 事故后加）：MCP 新增只读 `preflight_import`（语言判定/分集标记/主体库与导演台现状 +
+  必须逐条问用户的问题）；`import_script`、`split_script_to_shots` 真实写入必须 `userConfirmed:true`，
+  英文/外部平台源还要 `sourceFormatConfirmed:true`，缺了直接 `CONFIRM_REQUIRED`
 
 ## 4. 接手检查
 

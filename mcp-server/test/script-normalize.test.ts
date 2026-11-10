@@ -130,7 +130,7 @@ describe("import_script mode 契约", () => {
   it("standard：落库内容 = 规范化文本（与 normalize_script 同一函数）", async () => {
     const res = await call("import_script", {
       projectId: pid, baseVersion: 0, content: CONTRACT_EXPECTED,
-      mode: "standard", strategy: "new_episode", title: "规范化集", confirm: true,
+      mode: "standard", strategy: "new_episode", title: "规范化集", confirm: true, userConfirmed: true,
     });
     expect(res.isError, `standard 落库失败: ${res.raw}`).toBe(false);
     const script = await readScript(root, pid);
@@ -153,7 +153,7 @@ describe("import_script mode 契约", () => {
     const cur = await readScript(root, pid);
     const res = await call("import_script", {
       projectId: pid, baseVersion: cur!.version, content: CONTRACT_FIXTURE,
-      mode: "raw", strategy: "new_episode", title: "原样集", confirm: true,
+      mode: "raw", strategy: "new_episode", title: "原样集", confirm: true, userConfirmed: true,
     });
     expect(res.isError, `raw 落库失败: ${res.raw}`).toBe(false);
     const script = await readScript(root, pid);

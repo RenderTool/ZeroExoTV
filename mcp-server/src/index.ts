@@ -27,6 +27,7 @@ import { registerSubjectTools } from "./tools/subjects.js";
 import { registerAssetTools } from "./tools/assets.js";
 import { registerWorkbenchTools } from "./tools/workbench.js";
 import { registerStoryboardIngestTools } from "./tools/storyboard-ingest.js";
+import { registerPreflightTools } from "./tools/preflight.js";
 import { registerCanvasTools } from "./tools/canvases.js";
 import { registerPlanTools } from "./tools/plan.js";
 import { registerDirectorOpsTools } from "./tools/director-ops.js";
@@ -69,6 +70,7 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerAssetTools(server, ctx);
   registerWorkbenchTools(server, ctx);
   registerStoryboardIngestTools(server, ctx);
+  registerPreflightTools(server, ctx);
   registerCanvasTools(server, ctx);
   registerPlanTools(server, ctx);
   registerDirectorOpsTools(server, ctx);
