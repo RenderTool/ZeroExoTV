@@ -74,31 +74,15 @@
 用户已自行解决，不要重复改算法。  
 保留现有尺寸参数逻辑，避免覆盖用户改动。
 
-### E. 主体发送到画布（复用堆叠框架，但类型必须是主体节点）
+### E. 主体发送到画布（已完成，见 §3）
 
-要求：
-- 主体可发送到画布
-- 一个主体 = N 个资产（图片/视频/音频都支持）
-- 复用之前隐藏的堆叠节点框架，但节点类型/语义是「主体节点」，不是堆叠节点
-- 点击节点里的某个资产，定位回抽屉中对应主体/状态的具体资产
-- 需要扩展堆叠框架支持音频
-- 不要重新造一套预览/切换/保存框架
-
-相关代码：
-- `packages/plugins/nodes/src/nodes/stacked-media-presentation.tsx`（卡片缩略图：**audio 目前落到通用文本图标，需补音频预览**）
-- `packages/plugins/nodes/src/nodes/stacked-media-types.ts`（`StackMediaType` 已含 `audio`）
-- `packages/plugins/nodes/src/node-tools.tsx:createStackNode`（空堆叠节点创建样板）
-- `packages/plugins/nodes/src/index.tsx:createStackedMediaExtension`（getTools 已按卡片类型注入源工具）
-- 主体：`src/features/canvas-nodes/storyboard/StoryboardSubjectTree.tsx`、`subject-library-pages.tsx`
-
-实现口径（下一轮直接照做）：
-1. 主体卡片/详情加「发送到画布」：把该主体所有状态的媒体（image/video/audio）映射成 `StackCard`（`sourceType` 用资产 kind），
-   `AddNodeCommand` 建 `stacked-media` 节点，`data` 里加 `subject = { rootId, name }` 作为语义标记，标题用主体名。
-2. 节点视图：`data.subject` 存在时按「主体」渲染（标题/角标），其余交互继续走堆叠框架，不新建第二套。
-3. 卡片点击：`nodeActionBus.emit('canvas:subject:open', { rootId, stateId, storageKey })`，
-   由 editor-page 监听后 `navigateToView('subject', { rootId, stateId })` 并聚焦到该资产（主体库已有聚焦事件通道）。
-4. 音频：`stacked-media-presentation.tsx` 的小卡片与主视图补 `<audio controls>`（缩略图用 Music 图标），
-   卡片操作菜单里的「源工具」已按 `sourceType='audio'` 注入 `getAudioTools`，无需另写。
+- 主体详情页头「发送到画布」→ `buildSubjectStackNodeData` 把该主体**各状态当前媒体**（图片/视频/音频）映射成堆叠卡片，
+  在视口中心建 `stacked-media` 节点，`data.subject = { rootId, name }` 标记语义（标题 = 主体名）。
+  预览/切换/保存全部复用堆叠框架，没有第二套实现。
+- 点节点里的卡片（底部缩略导航）→ `canvas:subject:open` → 切回主体库并定位到该主体/状态（走既有
+  `NAVIGATE_FOCUS_SUBJECT_EVENT` 通道）。
+- 音频已补：小卡片用音符图标，主视图给原生 `<audio controls>`（`StackAudioContent`，按 storageKey 解析）。
+- 历史图（`mediaHistory`）不参与发送，只发当前槽位资产。
 
 ### F. Krea2 文生图（已完成，见 §3；线上插件需重新部署）
 
@@ -174,6 +158,10 @@
   （2026-11-10 云端探测：`use_low_vram=false` 时 last-prompt 里仍有 45:58–45:61 低显存链 → 两条链都执行）
 - 孤立媒体回收站：`media-recycle-bin.ts`（0 引用条目 + 索引外残留 → `media/recycle/`，保留 30 天），
   LOGO 菜单入口 + 每日一次定时搬运/过期清理；扫描阶段绝不硬删
+- 主体发送到画布：`subject-stack-cards.ts` 映射主体各状态媒体 → 堆叠节点（`data.subject` 语义标记），
+  卡片点击回跳主体库对应状态；堆叠框架补音频（音符缩略图 + `<audio controls>`）
+- 云端插件已更新（2026-11-10，SSH）：`krea2_t2i` 上线并通过 `/zeroexo/v1/jobs` 跑通（1024² 出图），
+  last-prompt 复核低显存链已被剪掉（`45:66` 与 45:58–45:61 不再出现在高显存作业里）
 
 ## 4. 接手检查
 

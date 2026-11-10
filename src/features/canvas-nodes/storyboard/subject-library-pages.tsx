@@ -23,7 +23,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Tooltip } from 'antd';
 import {
   ArrowLeft,
-  Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
+  Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, Layers, MapPin, Package, Pencil, Plus, Search,
   Shapes, Square, Star, Trash2, UserRound,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -54,6 +54,8 @@ import {
 } from '@/shared/components/masonry-grid.js';
 import { stableColumnCount } from '@/shared/utils/stable-columns.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import { nodeActionBus } from '@zeroexo/plugin-nodes';
+import { buildSubjectStackNodeData } from './subject-stack-cards.js';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
 import { readScript, watchScript, displayEpisodeTitle } from '@/entities/script-store.js';
 import {
@@ -1411,6 +1413,22 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     });
   }, [antdModal, projectId, commitTrees, antdMessage, t]);
 
+  /** 2026-11-10 用户要求：主体发送到画布——复用堆叠节点框架，节点语义是「主体」 */
+  const sendSubjectToCanvas = useCallback((tree: SubjectTree) => {
+    const data = buildSubjectStackNodeData(tree);
+    if (!data) {
+      antdMessage.warning(t('subject.sendToCanvasEmpty', '该主体还没有图片/视频/音频，先挂一张再发送'));
+      return;
+    }
+    nodeActionBus.emit('subject:sendToCanvas', {
+      nodeId: '',
+      rootId: tree.rootId,
+      name: tree.name,
+      data,
+    });
+    antdMessage.success(t('subject.sendToCanvasDone', '已发送到画布（主体节点）'));
+  }, [antdMessage, t]);
+
   // ===== 工具栏片段（整页与抽屉共用同一实现，2026-11-06）=====
   /** 按集筛选：选项来自剧本真实集数；落位由调用处决定（旧版自带 marginLeft:auto，抽屉里被右边缘裁成半截） */
   const episodeFilter = (
@@ -1711,6 +1729,15 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           <span data-state-count={stateCount} style={{ fontSize: 12, color: theme.toolbar.textMuted, flexShrink: 0 }}>
             {stateCountText}
           </span>
+          <Button
+            size="small"
+            data-send-subject-canvas=""
+            icon={<Layers size={13} />}
+            onClick={() => sendSubjectToCanvas(openTree)}
+            style={{ flexShrink: 0 }}
+          >
+            {t('subject.sendToCanvas', '发送到画布')}
+          </Button>
         </SubjectPageHeader>
         {/* 主操作统一放顶部（2026-11-06 用户指令）：添加状态在页头下方，不再埋到列表底端 */}
         <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>

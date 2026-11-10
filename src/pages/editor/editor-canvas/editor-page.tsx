@@ -34,7 +34,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { fullSync, onProjectDeleted } from '@/services/sync/sync-service.js';
 import { useSyncStatus, CLOUD_ENABLED } from '@/services/sync/sync-store.js';
 import type { NodeRecord } from '@zeroexo/core';
-import { filterVisibleNodes } from '@zeroexo/core';
+import { AddNodeCommand, filterVisibleNodes } from '@zeroexo/core';
 import { TopBar, ConfigDialog } from '@/features/top-bar/index.js';
 import { CanvasMenu } from '@/features/top-bar/components/canvas-menu.js';
 import { CanvasOverlays } from '@/features/canvas-interaction/canvas-overlays.js';
@@ -62,7 +62,8 @@ import { buildDefaultEpisodes } from '@/services/canvas-script.js';
 import { ensureScript } from '@/entities/script-store.js';
 import { ensureProjectMounts } from '@/entities/slot-containers.js';
 import type { ScriptEpisode } from '@/entities/script-store.js';
-import { nodeActionBus } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, STACKED_MEDIA_DEFAULT_SIZE } from '@zeroexo/plugin-nodes';
+import { navigateToView } from '@/features/canvas-tabs/navigate-to-view.js';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
 import { exportProjects } from '@/pages/home/services/export-projects.js';
@@ -637,6 +638,57 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
   // 堆叠收纳/合并提示 — 已提取到 useStackToast
   useStackToast(t, message);
+
+  /**
+   * 主体 ↔ 画布（2026-11-10）：
+   * - subject:sendToCanvas：主体除「发送到画布」→ 在视口中心建一个「主体节点」。
+   *   复用 stacked-media 框架（预览/切换/保存都不另写），只加 data.subject 语义标记；
+   * - canvas:subject:open：点主体节点里的某张资产 → 切回主体库并定位到该主体/状态。
+   */
+  useEffect(() => {
+    const unsubSend = nodeActionBus.on('subject:sendToCanvas', (event) => {
+      const store = refs.store;
+      const cq = refs.commandQueue;
+      if (!store || !cq) return;
+      const detail = event as {
+        rootId?: string;
+        name?: string;
+        data?: { cards?: unknown[]; activeIndex?: number };
+      };
+      const cards = detail.data?.cards;
+      if (!detail.rootId || !Array.isArray(cards) || cards.length === 0) return;
+      const vp = store.getViewport();
+      const el = containerRef.current;
+      const viewW = el?.clientWidth ?? 800;
+      const viewH = el?.clientHeight ?? 600;
+      const k = vp.k > 0 ? vp.k : 1;
+      const size = STACKED_MEDIA_DEFAULT_SIZE;
+      const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      cq.execute(new AddNodeCommand({
+        id: nodeId,
+        type: 'stacked-media',
+        position: {
+          x: (viewW / 2 - vp.x) / k - size.width / 2,
+          y: (viewH / 2 - vp.y) / k - size.height / 2,
+        },
+        size: { ...size },
+        title: detail.name || '主体',
+        data: {
+          cards,
+          activeIndex: detail.data?.activeIndex ?? 0,
+          subject: { rootId: detail.rootId, name: detail.name ?? '' },
+        },
+      } as NodeRecord));
+      store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
+      store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
+    });
+    const unsubOpen = nodeActionBus.on('canvas:subject:open', (event) => {
+      const detail = event as { rootId?: string; stateId?: string };
+      if (!detail.rootId) return;
+      navigateToView('subject', { rootId: detail.rootId, stateId: detail.stateId });
+    });
+    return () => { unsubSend(); unsubOpen(); };
+  }, [refs.store, refs.commandQueue]);
 
   return (
     <ReadOnlyProvider value={isReadOnlyViewer}>

@@ -1,7 +1,7 @@
 /** StackNode 的纯呈现组件：媒体预览、替换按钮和导航，不持有图事务状态。 */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, Image as ImageIcon, Upload, Video } from 'lucide-react';
+import { FileText, Image as ImageIcon, Music, Upload, Video } from 'lucide-react';
 import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { VideoNodeView } from './video-node-view.js';
@@ -52,6 +52,10 @@ function VideoCardThumb({ storageKey, content, dark }: { storageKey?: string; co
 }
 
 function Thumbnail({ card, dark, quality = 'sm' }: { card: StackCard; dark: boolean; quality?: 'sm' | 'preview' }): React.ReactElement {
+  // 2026-11-10：音频卡片用音符图标（之前和文本一样落到通用文件图标，认不出是音频）
+  if (card.sourceType === 'audio') {
+    return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.45)' }}><Music size={15} /></div>;
+  }
   if (card.sourceType !== 'image' && card.sourceType !== 'video') return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.45)' }}><FileText size={15} /></div>;
   if (card.sourceType === 'video') {
     return <VideoCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} dark={dark} />;
@@ -181,12 +185,38 @@ export function StackMediaContent({ card, width, height, isDark = false, onTextC
     const html = (card.data.content as string | undefined) ?? '';
     return <StackTextEditor html={html} isDark={isDark} onCommit={(next) => onTextCommit?.(card.id, next)} />;
   }
+  if (card.sourceType === 'audio') {
+    return (
+      <StackAudioContent
+        storageKey={card.data.storageKey as string | undefined}
+        content={(card.data.content as string | undefined) ?? ''}
+        title={card.title ?? '音频'}
+        isDark={isDark}
+      />
+    );
+  }
   if (card.sourceType !== 'video') {
     // 空态/未知类型占位底色统一为 contentSurface(与空文本卡一致,消除三类空卡色差)
     return <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', alignContent: 'center', gap: 10, color: isDark ? 'rgba(255,255,255,0.6)' : 'var(--color-text-secondary, #78716c)', background: isDark ? '#161616' : '#ffffff' }}><FileText size={28} strokeWidth={1.6} /><span style={{ maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{card.title || card.sourceType}</span></div>;
   }
   const node = { id: card.id, type: card.sourceType, title: card.title ?? '', data: card.data, size: { width, height }, position: { x: 0, y: 0 } } as NodeRendererProps['node'];
   return <VideoNodeView node={node} pins={[]} isSelected={isSelected} isHovered={isHovered} forceShowPins={false} updateNode={() => {}} invK={invK} connectionController={null} contentOnly forcePlayback={isSelected && isHovered} emptyBackground={isDark ? '#161616' : '#ffffff'} />;
+}
+
+/** 音频卡片主视图：storageKey 解析出可播地址后给原生播放器（不预加载整段） */
+function StackAudioContent({ storageKey, content, title, isDark = false }: { storageKey?: string; content: string; title: string; isDark?: boolean }): React.ReactElement {
+  const src = useHydratedContent(storageKey, content);
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, boxSizing: 'border-box', background: isDark ? '#161616' : '#ffffff', color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(15,23,42,0.75)' }}>
+      <Music size={34} strokeWidth={1.6} />
+      <span style={{ maxWidth: '85%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 500 }} title={title}>{title}</span>
+      {src ? (
+        <audio src={src} controls preload="metadata" style={{ width: '100%', maxWidth: 420 }} onClick={(e) => e.stopPropagation()} />
+      ) : (
+        <span style={{ fontSize: 12, opacity: 0.65 }}>音频加载中…</span>
+      )}
+    </div>
+  );
 }
 
 function StackImageContent({ src, storageKey, isDark = false }: { src: string; storageKey?: string; isDark?: boolean }): React.ReactElement {

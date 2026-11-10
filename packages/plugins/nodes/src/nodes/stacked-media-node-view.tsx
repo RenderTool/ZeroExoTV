@@ -204,6 +204,18 @@ export function StackedMediaNodeView({
   }, [activeIndex, beginSwitchAnimation, commandQueue, data, node, updateNode]);
 
   const handleJump = useCallback((index: number) => {
+    // 2026-11-10 主体节点：点卡片 = 定位回主体库里对应主体/状态的那张资产
+    const card = data.cards[index];
+    const subject = (node.data as Record<string, unknown> | undefined)?.subject as { rootId?: string } | undefined;
+    const stateId = card?.data?.subjectStateId as string | undefined;
+    if (subject?.rootId && stateId) {
+      nodeActionBus.emit('canvas:subject:open', {
+        nodeId: node.id,
+        rootId: subject.rootId,
+        stateId,
+        storageKey: card?.data?.storageKey,
+      });
+    }
     if (index === activeIndex) return;
     beginSwitchAnimation(index > activeIndex ? 1 : -1);
     if (commandQueue) {
