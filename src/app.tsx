@@ -50,6 +50,7 @@ import {
 import { ServiceCenterDialog } from '@/features/service-center/service-center-dialog.js';
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
+import { cleanupExpiredRecycleItems, sweepOrphansToRecycle } from '@/entities/media-recycle-bin.js';
 
 type Route =
   | { name: 'canvas'; canvasId?: string }
@@ -146,6 +147,27 @@ export function App(): React.ReactElement {
       .then((name) => setRootReady(!!name))
       .catch(() => setRootReady(false));
   }, []);
+
+  // 媒体回收站定时任务（2026-11-10）：每天最多跑一次——先把没人引用的孤立媒体移入回收站，
+  // 再清掉保留期（30 天）已过的条目。移入是可恢复的，绝不在扫描阶段硬删。
+  useEffect(() => {
+    if (!rootReady) return;
+    const KEY = 'zeroexo:recycle:lastRun';
+    const DAY = 24 * 60 * 60 * 1000;
+    const last = Number(window.localStorage.getItem(KEY) ?? 0);
+    if (Number.isFinite(last) && Date.now() - last < DAY) return;
+    void (async () => {
+      try {
+        const purged = await cleanupExpiredRecycleItems();
+        const swept = await sweepOrphansToRecycle();
+        window.localStorage.setItem(KEY, String(Date.now()));
+        if (purged > 0) console.info(`[recycle] 过期清理 ${purged} 个文件`);
+        if (swept.moved > 0) console.info(`[recycle] 移入回收站 ${swept.moved} 个未引用文件（保留 30 天）`);
+      } catch {
+        // 目录未授权 / 离线：下次再试，不影响主界面
+      }
+    })();
+  }, [rootReady]);
 
   // 数据目录授权可能在会话中失效（权限被撤销 / 句柄丢失）——
   // 定期 + 窗口聚焦时复查：失效就重新弹首启门（否则本地存储全部报

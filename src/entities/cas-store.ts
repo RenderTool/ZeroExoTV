@@ -420,3 +420,27 @@ export async function releaseCas(hash: string, ref: { assetId: string; projectId
 export async function readCasIndex(): Promise<CasIndex> {
   return readIndex();
 }
+
+/**
+ * 回收站专用（2026-11-10）：摘掉 refCount 已为 0 的索引条目，返回条目元数据。
+ * 物理文件由调用方先移入回收站再调用（本函数只动索引，不删文件）。
+ * 有任何存活引用 → 返回 null，调用方不得动它。
+ */
+export async function detachEmptyCasEntry(hash: string): Promise<CasEntry | null> {
+  return withCasLock(async () => {
+    for (let attempt = 0; attempt < CONFLICT_RETRY; attempt++) {
+      const index = await readIndex();
+      const entry = index.entries[hash];
+      if (!entry || entry.refs.length > 0 || entry.refCount > 0) return null;
+      const st = await stat(casIndexPath());
+      delete index.entries[hash];
+      try {
+        await writeJsonIfUnchanged(casIndexPath(), index, st);
+      } catch {
+        continue; // 外部并发改索引 → 重读重试
+      }
+      return entry;
+    }
+    return null;
+  });
+}

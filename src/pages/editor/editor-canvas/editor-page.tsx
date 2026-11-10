@@ -72,6 +72,7 @@ import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 import { CanvasDocumentTabs } from '@/features/canvas-tabs/canvas-document-tabs.js';
 import { isImageTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { ImageEditWorkspace } from '@/features/image-editor/image-edit-workspace.js';
+import { MediaRecycleBinDialog } from '@/features/storage/media-recycle-bin-dialog.js';
 import { useCanvasDocumentSwitch, useRestoreCanvasTabs } from '@/features/canvas-tabs/use-canvas-document-switch.js';
 import { isOpenCanvasTabKey } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
@@ -118,6 +119,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const canvasEmpty = useIsCanvasEmpty(state.editor?.store ?? null);
   // 移动端语言弹窗(由 MobileNavDrawer 触发)
   const [mobileLanguageOpen, setMobileLanguageOpen] = useState(false);
+  /** 媒体回收站（孤立媒体先移入、保留 30 天；入口在左上角 LOGO 菜单） */
+  const [recycleBinOpen, setRecycleBinOpen] = useState(false);
   // AI 渠道配置(用于生成中按钮展示"模型(渠道)"任务信息)
   const aiConfig = useAiConfigStore((state) => state.config);
 
@@ -679,6 +682,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               }}
               onCopyProject={() => void dialogs.handleCopyProject()}
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
+              onOpenRecycleBin={() => setRecycleBinOpen(true)}
             />
           }
           syncBadge={!state.loading && CLOUD_ENABLED ? (
@@ -1243,6 +1247,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       {/* 画布资产 → 主体状态关联弹层(2026-11-04 主体库改造):
           挂在应用树内以获得 antd App 上下文(message 3 秒可撤销轻提示)与主题 */}
       <SubjectLinkDialogHost />
+
+      {/* 媒体回收站：扫描到没人引用的媒体先移进来，保留 30 天，可查看来源/大小/时间后恢复或彻底删除 */}
+      <MediaRecycleBinDialog open={recycleBinOpen} onClose={() => setRecycleBinOpen(false)} theme={theme} />
 
 
 
