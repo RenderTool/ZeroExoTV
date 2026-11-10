@@ -85,11 +85,20 @@
 - 不要重新造一套预览/切换/保存框架
 
 相关代码：
-- `packages/plugins/nodes/src/nodes/stacked-media-presentation.tsx`
-- `packages/plugins/nodes/src/nodes/stacked-media.ts`（若存在）
-- `packages/plugins/nodes/src/index.tsx`
-- 主体：`src/features/canvas-nodes/storyboard/StoryboardSubjectTree.tsx`
-- 主体页面：`subject-library-pages.tsx`
+- `packages/plugins/nodes/src/nodes/stacked-media-presentation.tsx`（卡片缩略图：**audio 目前落到通用文本图标，需补音频预览**）
+- `packages/plugins/nodes/src/nodes/stacked-media-types.ts`（`StackMediaType` 已含 `audio`）
+- `packages/plugins/nodes/src/node-tools.tsx:createStackNode`（空堆叠节点创建样板）
+- `packages/plugins/nodes/src/index.tsx:createStackedMediaExtension`（getTools 已按卡片类型注入源工具）
+- 主体：`src/features/canvas-nodes/storyboard/StoryboardSubjectTree.tsx`、`subject-library-pages.tsx`
+
+实现口径（下一轮直接照做）：
+1. 主体卡片/详情加「发送到画布」：把该主体所有状态的媒体（image/video/audio）映射成 `StackCard`（`sourceType` 用资产 kind），
+   `AddNodeCommand` 建 `stacked-media` 节点，`data` 里加 `subject = { rootId, name }` 作为语义标记，标题用主体名。
+2. 节点视图：`data.subject` 存在时按「主体」渲染（标题/角标），其余交互继续走堆叠框架，不新建第二套。
+3. 卡片点击：`nodeActionBus.emit('canvas:subject:open', { rootId, stateId, storageKey })`，
+   由 editor-page 监听后 `navigateToView('subject', { rootId, stateId })` 并聚焦到该资产（主体库已有聚焦事件通道）。
+4. 音频：`stacked-media-presentation.tsx` 的小卡片与主视图补 `<audio controls>`（缩略图用 Music 图标），
+   卡片操作菜单里的「源工具」已按 `sourceType='audio'` 注入 `getAudioTools`，无需另写。
 
 ### F. Krea2 文生图（已完成，见 §3；线上插件需重新部署）
 
