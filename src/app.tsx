@@ -51,6 +51,7 @@ import { ServiceCenterDialog } from '@/features/service-center/service-center-di
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
 import { cleanupExpiredRecycleItems, sweepOrphansToRecycle } from '@/entities/media-recycle-bin.js';
+import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
 
 type Route =
   | { name: 'canvas'; canvasId?: string }
@@ -136,6 +137,8 @@ export function App(): React.ReactElement {
   // 语言设置弹窗(移动端抽屉触发)
   const [languageOpen, setLanguageOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
+  /** 首次使用指引（2026-11-10）：数据目录就绪后自动弹一次；主页底部可再次打开 */
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   const { theme } = useTheme();
   const { t, i18n } = useTranslation();
@@ -147,6 +150,11 @@ export function App(): React.ReactElement {
       .then((name) => setRootReady(!!name))
       .catch(() => setRootReady(false));
   }, []);
+
+  // 首次使用指引：只在数据目录就绪且没看过时弹一次（看过标记写 localStorage）
+  useEffect(() => {
+    if (rootReady && !isOnboardingDone()) setOnboardingOpen(true);
+  }, [rootReady]);
 
   // 媒体回收站定时任务（2026-11-10）：每天最多跑一次——先把没人引用的孤立媒体移入回收站，
   // 再清掉保留期（30 天）已过的条目。移入是可恢复的，绝不在扫描阶段硬删。
@@ -456,6 +464,15 @@ export function App(): React.ReactElement {
         <ServiceCenterDialog
           open={servicesOpen}
           onClose={() => setServicesOpen(false)}
+        />
+
+        {/* 首次使用指引 */}
+        <OnboardingGuide
+          open={onboardingOpen}
+          onClose={() => {
+            markOnboardingDone();
+            setOnboardingOpen(false);
+          }}
         />
       </AntdApp>
     </AntdThemeProvider>

@@ -48,7 +48,7 @@
 - MCP：`http://127.0.0.1:8787/mcp`
 - 文件服务：`http://127.0.0.1:8790`
 
-## 2. 待做需求（下一会话）
+## 2. A–G 需求（全部完成，2026-11-10；实现要点见下与 §3）
 
 ### A. 孤立资源 → 回收站 + 定时清理（已完成，见 §3）
 
@@ -84,15 +84,20 @@
 - 音频已补：小卡片用音符图标，主视图给原生 `<audio controls>`（`StackAudioContent`，按 storageKey 解析）。
 - 历史图（`mediaHistory`）不参与发送，只发当前槽位资产。
 
-### F. Krea2 文生图（已完成，见 §3；线上插件需重新部署）
+### F. Krea2 文生图（已完成，见 §3；云端与本机插件均已部署）
 
 - 实现口径：不新造节点类型，按项目既有「本机/线上伪模型」惯例做成图片节点的模型选项 `Krea2`（`zeroexo:krea2`），
   只在**非本机地址**（`isLocalComfyuiAddress` 为 false）时出现在模型下拉里；本机模式完全不可见。
 - 参数：比例 + 百万像素（默认 3MP）+ 32 对齐（`resolveKrea2Size`），默认 10 步、cfg 1、eta 0.55；不支持参考图。
 - 插件侧新增 `templates/krea2_t2i.json`（UNET krea2 → CLIP krea2 → VAE qwen_image_vae → ClownsharKSampler_Beta → VAEDecode → SaveImage），
   作业 kind `krea2_t2i`，产物按 image 回传；不接 SeedVR2 / z_image 放大链。
-- **云端 ComfyUI 尚未部署这份模板**（云端 `/zeroexo/v1/health` 的 templates 里还没有 `krea2_t2i`）：把 `comfyui-plugin/ComfyUI_ZeroExoNodes`
-  同步到 `/root/comfyui/ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes` 后重启（`bash /etc/waas-script/restart_comfyui.sh`）。
+- **云端已部署（2026-11-10）**：插件整目录同步到 `/root/comfyui/ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes` 并重启；
+  `/zeroexo/v1/health` 的 templates 已包含 `krea2_t2i`。⚠️ 备份目录**不能留在 `custom_nodes/` 里**（ComfyUI 会把
+  `ComfyUI_ZeroExoNodes.bak-*` 也当插件加载，旧路由抢先注册，表现为「文件换了但 health 还是旧模板」）——备份放
+  `/root/comfyui/plugin-backups/`。
+- **云端实测通过（2026-11-10）**：`/zeroexo/v1/jobs`（kind=krea2_t2i，1024² / 10 步）→ `state=success`，
+  产物 `zeroexo/e2e/krea2/krea2_00001_.png`（日光灯塔写实图）；last-prompt 复核 `use_low_vram=false` 时
+  只有高显存链（`45:66` 开关与 45:58–45:61 已被剪掉，LoRA 直连 `45:1`）。
 - **本机 ComfyUI 已同步（2026-11-10）**：`D:\ComfyUI\ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI_ZeroExoNodes`
   已覆盖 `__init__.py`、`engine/graph_ops.py`、`templates/krea2_t2i.json`、`templates/reference_video.json`（旧版还写死
   `ultra_uncensored_heretic` CLIP，已换成官方 `qwen3vl_32b_minimax_h3_int8_convrot`）。本机没有 krea2 底模，
@@ -162,6 +167,9 @@
   卡片点击回跳主体库对应状态；堆叠框架补音频（音符缩略图 + `<audio controls>`）
 - 云端插件已更新（2026-11-10，SSH）：`krea2_t2i` 上线并通过 `/zeroexo/v1/jobs` 跑通（1024² 出图），
   last-prompt 复核低显存链已被剪掉（`45:66` 与 45:58–45:61 不再出现在高显存作业里）
+- 首次使用指引（2026-11-10 用户要求）：`features/onboarding/onboarding-guide.tsx`，三项先决条件
+  （存储路径 / MCP 一键复制配置 / ComfyUI 插件+地址测试连接）；数据目录就绪后首启自动弹一次
+  （`zeroexo:onboarding.seen`），主页底部常驻「使用指引」条（代替政策公告位）可再次打开
 
 ## 4. 接手检查
 

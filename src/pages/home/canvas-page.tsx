@@ -14,6 +14,7 @@ import { useProjects } from './use-projects.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
 import { exportProjects } from './services/export-projects.js';
 import { importProjectsFromZip } from './services/import-projects.js';
+import { OnboardingGuide, OnboardingNotice } from '@/features/onboarding/onboarding-guide.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { setProjectCover, setCoverView, getCoverView, clearCoverView, deleteCoverImage } from '@/platform/cover.js';
 import type { CoverViewRecord } from '@/shared/utils/cover-viewport.js';
@@ -255,6 +256,8 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   // ===== 单项目导出 / 项目导入（2026-11-10 用户要求：任何时候都能备份与恢复） =====
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
+  /** 使用指引（首次启动自动弹，之后从这里再次打开；代替原来的政策公告位） */
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const handleExportProject = useCallback(async (id: string) => {
     if (busy) return;
@@ -533,6 +536,9 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
           />
         </Modal>
 
+        {/* 使用指引条（代替原来的政策公告位） */}
+        <OnboardingNotice onOpen={() => setGuideOpen(true)} />
+
         <Modal
           title={t('home.createCanvas')}
           open={createModalOpen}
@@ -568,6 +574,9 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             initialCover={coverState.target.thumbnailUrl ?? undefined}
           />
         )}
+
+        {/* 使用指引（首次启动由 app 自动弹，这里是主页再次打开的入口） */}
+        <OnboardingGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       </div>
     </AntdThemeProvider>

@@ -341,6 +341,11 @@ page container (height: 100%, flex column, overflow: hidden)
   不允许只在画布上翻页。
 - 堆叠框架必须支持音频卡片：缩略图用音符图标，主视图给原生 `<audio controls>`（按 storageKey 解析，不预加载全量）。
 
+### 首次使用指引（2026-11-10 用户拍板）
+- 首次启动（数据目录就绪后）自动弹出一次，列出三项先决条件：① 存储路径指定；② MCP 服务「一键复制配置」去 Agent IDE 粘贴；③ ComfyUI 插件安装说明 + 地址输入与「测试连接」。
+- 关掉后写 `zeroexo:onboarding.seen`，不再自动弹；主页底部常驻一条「使用指引」入口（放在原政策公告的位置，本项目没有政策公告）可随时重新打开。
+- 指引只做入口与状态展示：存储走浏览器目录授权，MCP 配置复用设置页的 `buildStdioConfig`/`ensureIdeToken`，ComfyUI 连接复用 `testEndpointConnection` + 同一个 endpoint store，禁止另起一套配置。
+
 ### 画布视图操作（2026-11-10 用户拍板）
 - **滚轮 = 以光标为中心缩放画布**；Shift + 滚轮 = 水平平移；平移主力是空白处拖拽。
   禁止再让滚轮默认上下平移画布。
