@@ -35,6 +35,7 @@ import { fullSync, onProjectDeleted } from '@/services/sync/sync-service.js';
 import { useSyncStatus, CLOUD_ENABLED } from '@/services/sync/sync-store.js';
 import type { NodeRecord } from '@zeroexo/core';
 import { AddNodeCommand, filterVisibleNodes } from '@zeroexo/core';
+import { VersionBadge } from '@/features/top-bar/components/version-badge.js';
 import { TopBar, ConfigDialog } from '@/features/top-bar/index.js';
 import { CanvasMenu } from '@/features/top-bar/components/canvas-menu.js';
 import { CanvasOverlays } from '@/features/canvas-interaction/canvas-overlays.js';
@@ -693,6 +694,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   return (
     <ReadOnlyProvider value={isReadOnlyViewer}>
     <Layout style={layoutStyle(theme)}>
+      {/* 版本号：统一放画布左下角（2026-11-12 用户要求） */}
+      <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 20 }}>
+        <VersionBadge theme={theme} />
+      </div>
       <div style={mainRowStyle}>
       <div style={mainColStyle}>
       <div style={headerStyle}>

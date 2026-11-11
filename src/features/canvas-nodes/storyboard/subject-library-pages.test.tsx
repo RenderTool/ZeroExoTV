@@ -462,7 +462,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy();
   });
 
-  it('状态卡：封面 16:9 / 最小宽 260 / 信息在封面下 / 无右侧箭头', async () => {
+  it('状态卡：瀑布流真实比例 / 最小宽 260 / 信息在封面下 / 无右侧箭头', async () => {
     renderPages(makeTree());
     await openSubjectPage();
 
@@ -470,7 +470,9 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(card.style.minWidth).toBe(`${SUBJECT_STATE_CARD_MIN_WIDTH}px`);
     expect(card.style.flexDirection).toBe('column');
     const cover = card.querySelector('[data-state-cover]') as HTMLElement;
-    expect(cover.style.aspectRatio.replace(/\s/g, '')).toBe('16/9');
+    // 2026-11-12：状态卡不再固定 16:9，改由瀑布流按真实宽高比给高度
+    expect(cover.hasAttribute('data-card-cover-fit')).toBe(false);
+    expect(cover.style.aspectRatio).toBe('');
     expect(cover.style.borderRadius).toBe('12px');
 
     // 信息区是最后一个直接子节点（右侧箭头已删除）
@@ -480,7 +482,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     const name = card.querySelector('[data-state-name]') as HTMLElement;
     expect(name.textContent).toContain('东海龙王 · 状态2');
     expect(name.style.fontSize).toBe('12px');
-    expect(card.querySelector('[data-state-episodes]')).toBeTruthy();
+    expect(card.querySelector('[data-state-episodes]')).toBeNull();
     expect(card.querySelector('[data-state-ready]')).toBeTruthy();
   });
 
@@ -873,11 +875,17 @@ describe('抽屉工具栏与素材同源 + 批量编辑', () => {
 });
 
 describe('基础状态 = 独立状态（2026-11-08）', () => {
-  it('状态卡各显示自己的出现集数；基础状态未标注显示「全部」', async () => {
+  it('状态卡不再显示集数；集数信息只在状态详情页编辑', async () => {
     renderPages(makeTree());
     await openSubjectPage();
-    expect(document.querySelector('[data-state-card="__base__"]')?.textContent).toContain('全部');
-    expect(document.querySelector('[data-state-card="state-1"]')?.textContent).toContain('第 1 集');
+    // 2026-11-12 用户要求：集数不在卡片上铺开，避免 100 集时卡片变长文
+    expect(document.querySelector('[data-state-card="__base__"]')?.textContent).not.toContain('全部');
+    expect(document.querySelector('[data-state-card="state-1"]')?.textContent).not.toContain('第 1 集');
+
+    // 详情页仍有「出现集数」入口
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+    expect(screen.getByText('出现集数')).toBeTruthy();
   });
 
   it('基础状态编辑页与更多状态同一套表单：提示词 + 出现集数，勾选写回 baseState', async () => {

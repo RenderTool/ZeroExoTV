@@ -37,6 +37,8 @@ export interface SubjectMediaThumbProps {
   size?: number;
   /** 铺满父容器（16:9 封面用；不外露圆角，由父级裁切） */
   fill?: boolean;
+  /** 图片适配：contain=显示完整图（主体/状态卡），cover=裁切铺满 */
+  fit?: 'cover' | 'contain';
   /** 音频/无图占位文案（如「待补媒体」） */
   emptyLabel?: string;
   /**
@@ -47,7 +49,7 @@ export interface SubjectMediaThumbProps {
 }
 
 export function SubjectMediaThumb({
-  storageKey, kind = 'image', dark, size = 84, fill = false, emptyLabel = '待补媒体', onLoaded,
+  storageKey, kind = 'image', dark, size = 84, fill = false, fit = 'cover', emptyLabel = '待补媒体', onLoaded,
 }: SubjectMediaThumbProps): React.ReactElement {
   const alive = useSubjectMediaAlive(storageKey ?? undefined);
   const fallback = storageKey ? (getResourceUrl(storageKey, 'preview') ?? '') : '';
@@ -76,7 +78,7 @@ export function SubjectMediaThumb({
           width: fill ? '100%' : size,
           height: fill ? '100%' : size,
           borderRadius: fill ? 0 : 8,
-          objectFit: 'cover',
+          objectFit: fit,
           display: 'block',
           flexShrink: 0,
         }}

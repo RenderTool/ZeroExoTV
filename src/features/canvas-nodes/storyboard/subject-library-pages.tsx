@@ -18,7 +18,7 @@
  * - 编辑即写回（onChangeTree），返回/刷新不丢草稿；
  * - 层级按项目记忆（view-prefs.subjectPages），popstate 还原层级。
  */
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
 import {
@@ -52,7 +52,6 @@ import {
   cardCoverMetrics,
   useMasonryColumnWidth,
 } from '@/shared/components/masonry-grid.js';
-import { stableColumnCount } from '@/shared/utils/stable-columns.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { buildSubjectStackNodeData } from './subject-stack-cards.js';
@@ -92,8 +91,6 @@ import { SubjectMediaThumb, useSubjectMediaAlive } from './subject-media-preview
 import {
   SUBJECT_STATE_CARD_GAP,
   SUBJECT_STATE_CARD_MIN_WIDTH,
-  SUBJECT_STATE_COVER_ASPECT,
-  subjectStateGridMetricsForWidth,
 } from './subject-card-metrics';
 import {
   SUBJECT_BASE_STATE_ID,
@@ -230,26 +227,6 @@ function EpisodePickerContent({
       </div>
     </div>
   );
-}
-
-function episodesSummary(node: { appearEpisodes?: number[] }, episodes: Array<{ number: number }>, t: ReturnType<typeof useTranslation>['t']): string {
-  const valid = new Set(episodes.map((e) => e.number));
-  const picked = Array.from(new Set((node.appearEpisodes ?? []).filter((n) => valid.has(n)))).sort((a, b) => a - b);
-  if (picked.length === 0) return t('subject.appearEpisodesAll', '全部');
-  if (picked.length === episodes.length) return t('subject.appearEpisodesAllCount', { n: picked.length, defaultValue: `全部（${picked.length} 集）` });
-
-  // 连续集压成区间，避免 100 集时卡片里铺一整段「第 1 集、第 2 集…」
-  const ranges: string[] = [];
-  let start = picked[0]!;
-  let prev = start;
-  for (let i = 1; i <= picked.length; i += 1) {
-    const cur = picked[i];
-    if (cur !== undefined && cur === prev + 1) { prev = cur; continue; }
-    ranges.push(start === prev ? `${start}` : `${start}–${prev}`);
-    if (cur !== undefined) { start = cur; prev = cur; }
-  }
-  const shown = ranges.length > 4 ? `${ranges.slice(0, 3).join('、')}…` : ranges.join('、');
-  return t('subject.appearEpisodesRange', { ranges: shown, n: picked.length, defaultValue: `第 ${shown} 集（共 ${picked.length} 集）` });
 }
 
 /**
@@ -710,14 +687,13 @@ function SubjectGridCard({
  * 封面卡额外留一枚常驻「封面」徽标（不靠 hover 才能看出来哪个状态被选了）。
  */
 function StateGridCard({
-  stateId, title, thumbKey, thumbKind, emptyLabel, episodesText, deadText, theme, isCover, onClick, onToggleCover, onDelete,
+  stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, onClick, onToggleCover, onDelete,
 }: {
   stateId: string;
   title: string;
   thumbKey?: string | null;
   thumbKind?: 'image' | 'audio' | 'video';
   emptyLabel: string;
-  episodesText: string;
   deadText: string;
   theme: ThemeConfig;
   /** 当前作为主体封面的状态（常驻徽标 + 星标高亮） */
@@ -731,6 +707,10 @@ function StateGridCard({
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
+  const columnWidth = useMasonryColumnWidth();
+  const [aspect, setAspect] = useState<number | null>(null);
+  useEffect(() => { setAspect(null); }, [thumbKey]);
+  const coverMetrics = cardCoverMetrics(columnWidth, aspect);
   const alive = useSubjectMediaAlive(thumbKey ?? undefined);
   const dead = thumbKey ? !alive : false;
   const active = hover || focus;
@@ -759,14 +739,16 @@ function StateGridCard({
         theme={theme}
         data-state-cover
         hovered={active}
-        style={{ width: '100%', aspectRatio: SUBJECT_STATE_COVER_ASPECT }}
+        style={{ width: '100%', height: coverMetrics.height, transition: CARD_COVER_TRANSITION }}
       >
         <SubjectMediaThumb
           storageKey={thumbKey}
           kind={thumbKind}
           dark={theme.mode === 'dark'}
           fill
+          fit={coverMetrics.fit}
           emptyLabel={emptyLabel}
+          onLoaded={(w, h) => { if (w > 0 && h > 0) setAspect((prev) => prev ?? w / h); }}
         />
         {isCover && (
           <ThumbBadge data-state-cover-badge style={{ position: 'absolute', top: 6, left: 6, zIndex: 3 }}>
@@ -790,7 +772,6 @@ function StateGridCard({
             display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6,
             ...uiCardMetaStyle(theme),
           }}>
-            <span data-state-episodes>{episodesText}</span>
             {dead && <span aria-hidden style={{ opacity: 0.45 }}>·</span>}
             <span data-state-ready style={dead ? { color: theme.toolbar.danger } : undefined}>
               {dead ? deadText : ''}
@@ -855,51 +836,12 @@ function StateGridCard({
  * 共享 AddTile（与资产「上传素材」同款同形、中性色，hover 不亮强调色边框；2026-11-06 起统一放顶部）。
  */
 function SubjectStateGrid({ children }: { children: ReactNode }): React.ReactElement {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  const columnsRef = useRef(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const read = () => {
-      const el2 = ref.current;
-      if (!el2) return;
-      const w = el2.getBoundingClientRect().width || el2.clientWidth || 0;
-      setWidth((prev) => (Math.abs(prev - w) < 2 ? prev : w));
-    };
-    read();
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', read);
-      return () => window.removeEventListener('resize', read);
-    }
-    const ro = new ResizeObserver(read);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  // 测量盒本身已在页边距内，额外 paddingX 传 0 → 单卡在大屏可到 300+
-  // 列数走滞回：单卡高度由列宽算出，列宽由宽度算出，宽度又受竖向滚动条出现/消失影响，
-  // 无滞回时抽屉拖到某个尺寸会“宽度↔列数↔高度”互相推拟（征集 #182）
-  const metrics = useMemo(() => {
-    const columns = stableColumnCount(width, columnsRef.current, (w) => subjectStateGridMetricsForWidth(w, { paddingX: 0 }).columns);
-    columnsRef.current = columns;
-    return subjectStateGridMetricsForWidth(width, { paddingX: 0, columns: columns > 0 ? columns : undefined });
-  }, [width]);
-  const columns = metrics.columns;
+  // 2026-11-12 用户要求：主体/状态/素材统一走同一套瀑布流；状态卡也按真实宽高比显示完整图，
+  // 不再固定 16:9 裁切。
   return (
-    <div
-      ref={ref}
-      data-subject-state-grid
-      data-columns={columns}
-      data-card-width={Math.round(metrics.cardWidth)}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-        gap: SUBJECT_STATE_CARD_GAP,
-        alignContent: 'start',
-      }}
-    >
+    <MasonryGrid gap={SUBJECT_STATE_CARD_GAP} paddingX={0}>
       {children}
-    </div>
+    </MasonryGrid>
   );
 }
 
@@ -1852,7 +1794,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     thumbKey={first?.key}
                     thumbKind={slotMediaKind(first ?? null)}
                     emptyLabel={t('subject.noCover', '暂无封面')}
-                    episodesText={episodesSummary(node, episodes, t)}
                     deadText={t('subject.mediaDead', '引用已失效')}
                     theme={theme}
                     isCover={isCoverState(node.id)}
@@ -1911,12 +1852,13 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                 <div style={editColumnsStyle}>
                   {/* 媒体卡：动作不再排在图片下方成一条，改到封面右上角（与状态卡 / 主体卡同一落位、同一 overlay 按钮） */}
                   <div data-form-section="media" data-media-slot style={{ ...editPaneStyle, maxWidth: 380 }}>
-                    <CardShell theme={theme} style={{ width: '100%', aspectRatio: SUBJECT_STATE_COVER_ASPECT }}>
+                    <CardShell theme={theme} style={{ width: '100%', height: 'min(60vh, 560px)' }}>
                       <SubjectMediaThumb
                         storageKey={slotMedia?.key}
                         kind={slotKind}
                         dark={isDark}
                         fill
+                        fit="contain"
                         emptyLabel={t('subject.mediaPending', '待补媒体')}
                       />
                       <div

@@ -14,6 +14,7 @@ import { useProjects } from './use-projects.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
 import { exportProjects } from './services/export-projects.js';
 import { importProjectsFromZip } from './services/import-projects.js';
+import { VersionBadge } from '@/features/top-bar/components/version-badge.js';
 import { OnboardingGuide, OnboardingNotice } from '@/features/onboarding/onboarding-guide.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { setProjectCover, setCoverView, getCoverView, clearCoverView, deleteCoverImage } from '@/platform/cover.js';
@@ -535,6 +536,11 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             autoFocus
           />
         </Modal>
+
+        {/* 版本号：统一放在画布左下角（2026-11-12 用户要求） */}
+        <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 20 }}>
+          <VersionBadge theme={theme} />
+        </div>
 
         {/* 使用指引条（代替原来的政策公告位） */}
         <OnboardingNotice onOpen={() => setGuideOpen(true)} />

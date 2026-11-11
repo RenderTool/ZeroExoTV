@@ -27,7 +27,6 @@ import { LanguageSwitcher } from '@/shared/components/language-switcher.js';
 import { TopBarIconButton, TOPBAR_ICON_GAP } from '@/shared/components/topbar-icon-button.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { openServiceCenter } from '@/features/service-center/service-center-events.js';
-import { VersionBadge } from '@/features/top-bar/components/version-badge.js';
 
 export interface AppTopBarProps {
   onNavigate: (route: 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies' | { name: 'auth'; mode: 'login' }) => void;
@@ -84,9 +83,6 @@ export function AppTopBar({
             className="zeroexo-icon-btn"
             color={textColor}
           />
-
-          {/* 版本号固定最右（2026-11-12：主页顶栏，避免与悬浮图标重叠） */}
-          <VersionBadge theme={theme} />
         </div>
       </div>
     </header>
