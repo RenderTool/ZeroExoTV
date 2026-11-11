@@ -66,6 +66,17 @@ export interface AssetLibraryToolbarProps {
   } | null;
   /** 层级节点总数（征集 #96：统计徽标并入筛选行右侧） */
   hierarchyNodeCount?: number;
+  /**
+   * 主页选择模式：与项目页同款「页头同一排」批量按钮（S-22）。
+   * 传 null = 非选择态或抽屉模式，标题行保持原样。
+   */
+  batch?: {
+    selectedCount: number;
+    totalCount: number;
+    onToggleSelectAll: () => void;
+    onBatchDownload: () => void;
+    onBatchDelete: () => void;
+  } | null;
 }
 
 // ===== 抽屉模式：模型渠道同款下拉（征集 #94） =====
@@ -273,6 +284,7 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
   embeddedInCanvas = false,
   hierarchyFilter = null,
   hierarchyNodeCount = 0,
+  batch = null,
 }: AssetLibraryToolbarProps): React.ReactElement {
   const { t } = useTranslation();
 
@@ -494,28 +506,40 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
           placeholder={t('assetLibrary.searchPlaceholder')}
           theme={theme}
         />
-        {/* 征集 #87 验收轮十三:上传/新建提示词/新建剧本在层级分组隐藏(层级面板不需要) */}
-        {activeGroup !== 'hierarchy' && (
+        {/* 选择态：与项目页同款「页头同一排」批量按钮（S-22），不再放内容区右下角 */}
+        {batch ? (
           <>
-            {/* 资产项目化：tooltip 明示上传归属（跟随胶囊段） */}
+            {/* 与项目页一致：选择态仍保留上传入口 */}
             <Tooltip title={uploadTargetLabel}>
-              <Button
-                size="small"
-                icon={<Upload size={14} />}
-                onClick={() => materialFileInputRef.current?.click()}
-              />
+              <Button size="small" icon={<Upload size={14} />} onClick={() => materialFileInputRef.current?.click()} />
             </Tooltip>
-            {/* 资产项目化：公共库只收四类素材，公共库视图不给新建剧本入口 */}
-            {allowNewScript && (
-              <Tooltip title="新建剧本">
-                <Button
-                  size="small"
-                  icon={<BookOpen size={14} />}
-                  onClick={onNewScript}
-                />
-              </Tooltip>
-            )}
+            <span data-asset-batch-bar style={{ fontSize: 12, color: theme.toolbar.textMuted, whiteSpace: 'nowrap' }}>
+              {t('common.batchSelected', { n: batch.selectedCount, defaultValue: `已选 ${batch.selectedCount} 项` })}
+            </span>
+            <Button size="small" data-asset-batch-select-all onClick={batch.onToggleSelectAll}>
+              {batch.selectedCount === batch.totalCount ? t('common.batchSelectNone', '取消全选') : t('common.batchSelectAll', '全选')}
+            </Button>
+            <Button size="small" danger type="primary" disabled={batch.selectedCount === 0} data-asset-batch-delete onClick={batch.onBatchDelete}>
+              {t('common.batchDeleteSelected', '删除选中')}
+            </Button>
+            <Button size="small" data-asset-batch-download disabled={batch.selectedCount === 0} onClick={batch.onBatchDownload}>
+              {t('assetLibrary.batchDownload', '打包下载')}
+            </Button>
           </>
+        ) : (
+          /* 征集 #87 验收轮十三:上传/新建提示词/新建剧本在层级分组隐藏(层级面板不需要) */
+          activeGroup !== 'hierarchy' && (
+            <>
+              <Tooltip title={uploadTargetLabel}>
+                <Button size="small" icon={<Upload size={14} />} onClick={() => materialFileInputRef.current?.click()} />
+              </Tooltip>
+              {allowNewScript && (
+                <Tooltip title="新建剧本">
+                  <Button size="small" icon={<BookOpen size={14} />} onClick={onNewScript} />
+                </Tooltip>
+              )}
+            </>
+          )
         )}
         <Tooltip title={multiSelectEnabled ? t('common.multiSelectExit', '退出多选') : t('common.multiSelect', '多选')}>
           <Button

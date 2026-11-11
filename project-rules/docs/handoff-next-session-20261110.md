@@ -190,6 +190,8 @@
   `run_generation` 串行准入（`CONTINUITY_NOT_PLANNED` / `CONTINUITY_ORDER`）；说明与技能写明「照搬原稿段长/跳段/只做一半 = 不合格」
 - MCP 自我更新感知（2026-11-11）：网页写 `.lf/zeroexo/app_meta/mcp-required.json`；旧版 MCP 工具返回自动带 `_mcpOutdated`；
   Agent 用 `mcp_update_status` 体检、`update_mcp_server`（需用户确认）git 快进 + 重编译，重启 MCP 后生效
+- 下载/发送修正（2026-11-11）：胶囊下载对带引导的视频自动打 zip（取不到引导才退回单文件并提示）；
+  引导地址回退链为「当前地址 → guide.baseUrl → localJob.base」；历史卡「发送到导演台」对图片/音频/视频全开放
 
 ## 4. 接手检查
 

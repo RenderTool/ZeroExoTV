@@ -162,7 +162,8 @@ export function MediaRecycleBinDialog({
       centered
       width={680}
       title={t('recycle.title', '媒体回收站')}
-      styles={{ body: { paddingTop: 8 } }}
+      // 数据多时弹窗不能超过视口：固定正文高度上限 + 内置滚动，footer 常驻可见
+      styles={{ body: { paddingTop: 8, maxHeight: 'min(60vh, 520px)', overflowY: 'auto' } }}
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
@@ -185,7 +186,7 @@ export function MediaRecycleBinDialog({
         rowKey="id"
         dataSource={items}
         columns={columns}
-        pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false}
+        pagination={items.length > 10 ? { pageSize: 10, size: 'small' } : false}
         locale={{ emptyText: t('recycle.empty', '回收站是空的（只收录已确认没人引用的媒体）') }}
       />
     </Modal>

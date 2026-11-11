@@ -470,6 +470,13 @@ describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', 
     expect(src).toContain("historySource === 'canvas' ? () => handleLocate(asset) : undefined");
   });
 
+  it('画布生成的图片/音频也能发到导演台（2026-11-11 反馈：之前图片菜单项是灰的）', () => {
+    const src = readSrc('src/features/canvas-assets/groups/HistoryGroup.tsx');
+    // 发送到导演台按 image/video/audio 放开，引导仍只给 video
+    expect(src).toMatch(/kind === 'image' \|\| kind === 'video' \|\| kind === 'audio'/);
+    expect(src).toContain('sendable ? () => sendAssetToWorkbench(asset, antdMessage, t) : undefined');
+  });
+
   it('图片分类即使带 generation 元数据也不套用视频引导角标/下载菜单', () => {
     const img = mkAsset({ id: 'img-like-guide' });
     const { container } = render(<HistoryGroup store={mkStore([img])} theme={theme} />);

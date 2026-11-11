@@ -28,4 +28,6 @@
 | S-20 | 2026-11-10 | 历史分组类型标签改简约名词（图片 / 视频） | 独立热修 | 🟢 merged | [2026-11-10-comfyui-history-kind-labels.md](2026-11-10-comfyui-history-kind-labels.md) |
 | S-21 | 2026-11-11 | 项目 ZIP 导出范围补全：剧本转 MD、主体格式化、无缝迁移 | C-05 | 🟢 merged | [2026-11-11-project-zip-full-migration.md](2026-11-11-project-zip-full-migration.md) |
 
-状态：open 0 / merged 21。
+| S-22 | 2026-11-11 | 首页三项：回收站弹窗尺寸 / 复制项目 / 资产选择模式对齐 | 独立热修 | 🟢 merged | [2026-11-11-homepage-three-fixes.md](2026-11-11-homepage-three-fixes.md) |
+
+状态：open 0 / merged 22。

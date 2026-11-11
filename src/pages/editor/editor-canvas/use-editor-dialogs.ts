@@ -9,7 +9,8 @@ import type { NodeRecord } from '@zeroexo/core';
 import { getProject, loadProjectGraph, saveProjectGraph, createProject, updateProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
 import { loadCanvasConfig, saveCanvasConfig } from '@/features/top-bar/index.js';
 import { pushProjectMeta } from '@/services/sync/sync-service.js';
-import { copyCanvasScript, createCanvasScript, bindCanvasScript } from '@/services/canvas-script.js';
+import { createCanvasScript, bindCanvasScript } from '@/services/canvas-script.js';
+import { cloneProjectData } from '@/pages/home/services/clone-project-data.js';
 import { openCanvasTab } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import { toInsertPayload } from '@/features/asset-picker/components/picker-card.js';
@@ -363,10 +364,8 @@ export function useEditorDialogs({
         await updateProject(project.id, { nodeCount: 0 });
       }
       // 拷贝项目:云端记录由首次编辑触发 Yjs upsert 自动创建(Phase3)
-      // 本地版（2026-11-02）：复制画布时同步复制其剧本（绑定改到新画布）
-      void copyCanvasScript(canvasId, project.id, `${copyTitle} 剧本`).catch((err) => {
-        console.warn('[editorDialogs] copy canvas script failed:', err);
-      });
+      // S-22：实体三件套 / 副本画布 / 剧本资产 / 本项目资产记录一并复制，与首页同一份实现
+      await cloneProjectData(canvasId, project.id, copyTitle);
       onOpenProject(project.id);
     }
   }, [canvasId, t, onOpenProject, refs.store]);

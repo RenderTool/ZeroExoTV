@@ -74,7 +74,7 @@ export interface LocalVideoResult {
   /** 外部渠道产物才有云端资产 id；本机为 undefined */
   assetId?: string;
   /** 本机 H3 同步产出的引导数据（safetensors，供导出/发送导演台） */
-  guide?: { id: string; path?: string; frames?: number; sha256?: string };
+  guide?: { id: string; path?: string; frames?: number; sha256?: string; baseUrl?: string };
 }
 
 const POLL_MS = 2000;
@@ -221,6 +221,8 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
             path: status.guide.path,
             frames: status.guide.frames,
             sha256: status.guide.sha256,
+            // 记录产出地址：之后下载「视频+引导」优先用这个地址取 .safetensors
+            baseUrl: base,
           };
         }
         if (state === 'error') throw new Error(status.error || '本机执行失败（详见 ComfyUI 日志）');

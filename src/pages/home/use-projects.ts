@@ -15,6 +15,7 @@ import {
   cleanupProjectResourcesBatch,
 } from '@zeroexo/plugin-persistence';
 import type { CanvasProjectMeta } from '@zeroexo/plugin-persistence';
+import { cloneProjectData } from './services/clone-project-data.js';
 import {
   pushProjectMeta,
   onProjectDeleted,
@@ -117,6 +118,8 @@ export function useProjects(): UseProjectsResult {
       try {
         const project = await storeCopy(sourceId);
         if (project) {
+          // meta + 主 graph 之外的数据按 projectId 隔离，必须一并克隆才是真副本
+          await cloneProjectData(sourceId, project.id, project.title);
           setProjects((prev) => {
             const next = [...prev, project];
             next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

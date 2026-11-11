@@ -19,26 +19,36 @@ export function isGuideId(id: string | undefined): id is string {
   return !!id && GUIDE_ID_PATTERN.test(id);
 }
 
-/** 引导文件的 /view URL（无地址/非法 id 返回 null） */
-export function guideViewUrl(guide: GuideMeta | { id?: string } | null | undefined): string | null {
-  const base = useComfyuiEndpointStore.getState().address?.replace(/\/+$/, '');
-  if (!base || !isGuideId(guide?.id)) return null;
+/** 引导文件的 /view URL 候选：当前连接地址优先，其次产出该引导时的地址（换地址/重启后仍可下载） */
+export function guideViewUrls(guide: GuideMeta | { id?: string; baseUrl?: string } | null | undefined): string[] {
+  if (!isGuideId(guide?.id)) return [];
   const qs = new URLSearchParams({
     filename: `${guide.id}.safetensors`,
     subfolder: GUIDE_SUBFOLDER,
     type: 'output',
   }).toString();
-  return `${base}/view?${qs}`;
+  const bases: string[] = [];
+  const current = useComfyuiEndpointStore.getState().address?.replace(/\/+$/, '');
+  const origin = (guide as { baseUrl?: string }).baseUrl?.replace(/\/+$/, '');
+  if (current) bases.push(current);
+  if (origin && !bases.includes(origin)) bases.push(origin);
+  return bases.map((base) => `${base}/view?${qs}`);
 }
 
-/** 取回引导文件字节（失败返回 null，调用方提示） */
-export async function fetchGuideBlob(guide: GuideMeta | { id?: string } | null | undefined): Promise<Blob | null> {
-  const url = guideViewUrl(guide);
-  if (!url) return null;
-  const res = await fetch(url).catch(() => null);
-  if (!res?.ok) return null;
-  const blob = await res.blob().catch(() => null);
-  return blob?.size ? blob : null;
+/** 引导文件的 /view URL（无地址/非法 id 返回 null） */
+export function guideViewUrl(guide: GuideMeta | { id?: string; baseUrl?: string } | null | undefined): string | null {
+  return guideViewUrls(guide)[0] ?? null;
+}
+
+/** 取回引导文件字节（按候选地址逐个试；失败返回 null，调用方提示） */
+export async function fetchGuideBlob(guide: GuideMeta | { id?: string; baseUrl?: string } | null | undefined): Promise<Blob | null> {
+  for (const url of guideViewUrls(guide)) {
+    const res = await fetch(url).catch(() => null);
+    if (!res?.ok) continue;
+    const blob = await res.blob().catch(() => null);
+    if (blob?.size) return blob;
+  }
+  return null;
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
@@ -57,7 +67,7 @@ function triggerDownload(blob: Blob, filename: string): void {
  * @returns true = 已触发下载；false = 文件不可取（调用方提示）
  */
 export async function downloadGuideFile(
-  guide: GuideMeta | { id?: string } | null | undefined,
+  guide: GuideMeta | { id?: string; baseUrl?: string } | null | undefined,
   baseName: string,
 ): Promise<boolean> {
   const blob = await fetchGuideBlob(guide);

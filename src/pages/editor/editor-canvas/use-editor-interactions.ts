@@ -549,10 +549,18 @@ export function useEditorInteractions({
       setDetailNode(node);
     };
     // 胶囊常驻下载（图片/视频/音频）：与右键菜单同一个下载实现（媒体二进制 + 引导打包）
+    // 2026-11-11 用户反馈：视频有引导时，点下载应该自动打成一个 zip，而不是只给 mp4
     const handleNodeDownload = ({ node }: { node: NodeRecord }) => {
       void import('./use-editor-interactions/helpers.js').then(async (m) => {
-        const res = await m.downloadNodeAsFile(node);
-        if (!res.ok) message.error(t('editor.downloadNodeFailed', '下载失败：文件不存在或已被清理'));
+        const hasGuide = Boolean((node.data as { guide?: { id?: string } } | null)?.guide?.id);
+        const res = await m.downloadNodeAsFile(node, { withGuide: hasGuide });
+        if (!res.ok) {
+          message.error(t('editor.downloadNodeFailed', '下载失败：文件不存在或已被清理'));
+        } else if (hasGuide && res.guideOk) {
+          message.success(t('editor.downloadNodeWithGuideDone', '已打包下载：视频 + 引导'));
+        } else if (hasGuide) {
+          message.warning(t('assetLibrary.guideDownloadFailed', '引导数据下载失败：文件不存在或 ComfyUI 未连接（已单独下载视频）'));
+        }
       });
     };
     editor.core.eventBus.on('node:rename', handleNodeRename);

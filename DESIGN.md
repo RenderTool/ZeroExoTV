@@ -341,6 +341,11 @@ page container (height: 100%, flex column, overflow: hidden)
 - Agent 先用 `mcp_update_status` 说明情况；用户同意后 `update_mcp_server`（`userConfirmed:true`）自动 git 快进 + 重新编译，
   最后必须提示「重启 MCP 服务」（stdio 进程无法热替换已加载代码）；仓库有未提交改动时拒绝自动更新，绝不覆盖用户修改。
 
+### 下载与发送（2026-11-11 修正）
+- 节点胶囊下载：视频节点若带引导数据，**自动打包成 zip**（视频 + `引导.safetensors`），不再只给 mp4；取不到引导时退回单文件下载并提示原因。
+- 引导取回地址按「当前连接地址 → 产出该引导时的地址（`guide.baseUrl`）→ 节点 `localJob.base`」逐个尝试，换地址/重启后仍能打包。
+- 历史/素材卡「发送到导演台」对 **图片 / 音频 / 视频** 都开放（各自进对应槽位），只有纯文本不支持；引导发送仍只对视频开放。
+
 ### 导演台延续法（2026-11-11 用户事故后定为硬性）
 - 段长：可见帧必须吸附 **17k+5**（fps 24，向上吸附）；每段可见帧 + **22 帧引导** ≤ **736**；第 2 段起必须吃上一段尾帧。
 - 必须走 `plan_continuity_edit`（MCP，dryRun 出「段/帧/秒/是否吃上一段」表 → 用户确认 → confirm+userConfirmed）再生成；

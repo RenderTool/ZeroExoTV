@@ -520,6 +520,24 @@ export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
   return created;
 }
 
+/**
+ * 复制项目：把源项目的资产/产出记录复制一份并绑定到新项目（S-22）。
+ * 必须绕开 addAssets —— 它按 storageKey 去重，同源 CAS 记录会被全部跳过，副本就丢了产出。
+ * CAS 文件按内容寻址共享，只复制元数据记录。
+ */
+export async function duplicateProjectAssets(sourceProjectId: string, targetProjectId: string): Promise<number> {
+  const list = await readAll();
+  const copies: Asset[] = list
+    .filter((a) => a.projectId === sourceProjectId)
+    .map((a) => ({ ...a, id: nanoid(), projectId: targetProjectId, createdAt: now() }));
+  if (copies.length === 0) return 0;
+  await writeAll([...list, ...copies]);
+  for (const a of copies) {
+    nodeActionBus.emit('assets:created', { nodeId: '', assetId: a.id, kind: a.kind });
+  }
+  return copies.length;
+}
+
 /** 提取素材记录/输入的后端 storageKey(文本等纯元数据资产无存储文件,返回 undefined) */
 export function getStorageKeyOfAsset(a: Pick<Asset, 'data'> | CreateAssetInput): string | undefined {
   const d = a.data;

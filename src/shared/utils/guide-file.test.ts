@@ -11,7 +11,7 @@ vi.mock('@/features/canvas-tabs/comfyui-endpoint.js', () => ({
   useComfyuiEndpointStore: { getState: () => ({ address: endpointMock.address }) },
 }));
 
-import { fetchGuideBlob, guideViewUrl, isGuideId } from './guide-file.js';
+import { fetchGuideBlob, guideViewUrl, guideViewUrls, isGuideId } from './guide-file.js';
 
 beforeEach(() => {
   endpointMock.address = 'http://127.0.0.1:8188';
@@ -51,5 +51,28 @@ describe('fetchGuideBlob', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, blob: async () => null })));
     await expect(fetchGuideBlob({ id: 'gd_abc12345' })).resolves.toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it('当前地址取不到时回退到「产出该引导时的地址」（2026-11-11 下载没打包的修复）', async () => {
+    endpointMock.address = 'http://127.0.0.1:8188';
+    const calls: string[] = [];
+    const blob = new Blob(['guide-bytes'], { type: 'application/octet-stream' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(String(url));
+      // 本地地址没有这个引导，云端地址才有
+      if (String(url).startsWith('http://127.0.0.1:8188')) return { ok: false, blob: async () => null };
+      return { ok: true, blob: async () => blob };
+    }));
+    await expect(fetchGuideBlob({ id: 'gd_cloud12345', baseUrl: 'https://cloud.example.com/' })).resolves.toBe(blob);
+    expect(calls[0]).toContain('127.0.0.1:8188');
+    expect(calls[1]).toContain('cloud.example.com/view');
+    vi.unstubAllGlobals();
+  });
+
+  it('guideViewUrls：没有当前地址时仍能用产出地址', () => {
+    endpointMock.address = '';
+    const urls = guideViewUrls({ id: 'gd_abc12345', baseUrl: 'https://cloud.example.com' });
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain('cloud.example.com/view');
   });
 });

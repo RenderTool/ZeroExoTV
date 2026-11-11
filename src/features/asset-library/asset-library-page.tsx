@@ -324,6 +324,17 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ]);
   }, [setCtxMenuPosition, setCtxMenuItems, ctx.handleNewScript]);
 
+  // 主页选择态与抽屉批量条共用的打包下载（S-22：主页入口移到页头工具栏）
+  const handleBatchDownload = useCallback(() => {
+    const assets = ctx.allItems
+      .filter((item) => ctx.selectedIds.has(item.data.id))
+      .map((item) => item.data as import('@/features/asset-picker/index.js').Asset);
+    void downloadAssetsAsZip(assets, `assets-${Date.now()}`).then((n) => {
+      if (n > 0) antdMessage.success(t('assetLibrary.batchDownloaded', { n, defaultValue: `已打包下载 ${n} 项` }));
+      else antdMessage.warning(t('assetLibrary.batchDownloadEmpty', '没有可下载的文件'));
+    });
+  }, [ctx.allItems, ctx.selectedIds, antdMessage, t]);
+
   // 使用 useMemo 完全隔离 Toolbar 的 JSX 创建，避免父组件重渲染时重建
   const toolbar = useMemo(() => (
     <AssetLibraryToolbar
@@ -351,6 +362,13 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       materialFileInputRef={materialFileInputRef}
       onNewScript={ctx.handleNewScript}
       allowNewScript={ctx.scopeTab === 'project'}
+      batch={!props.embeddedInCanvas && ctx.multiSelectEnabled && ctx.activeGroup !== 'hierarchy' ? {
+        selectedCount: ctx.selectedIds.size,
+        totalCount: ctx.allItems.length,
+        onToggleSelectAll: ctx.handleToggleSelectAll,
+        onBatchDownload: handleBatchDownload,
+        onBatchDelete: ctx.handleBatchDelete,
+      } : null}
     />
   ), [
     ctx.categories, ctx.activeGroup, ctx.activeChild,
@@ -362,6 +380,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ctx.setSearch,
     handleMultiSelectToggle, handleUploadMaterial,
     ctx.handleNewScript, ctx.scopeTab,
+    handleBatchDownload, ctx.allItems, ctx.selectedIds,
+    ctx.handleToggleSelectAll, ctx.handleBatchDelete,
   ]);
 
   // 使用 useMemo 完全隔离主内容区（工具栏 + 网格视图 + 多选栏 + 分页器），
@@ -429,8 +449,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
           />
         )}
 
-        {/* 多选操作栏(层级分组除外:树形列表自带批量选择) */}
-        {ctx.multiSelectEnabled && ctx.activeGroup !== 'hierarchy' && (
+        {/* 主页选择态已移到页头工具栏（S-22）；抽屉内嵌模式保留原内容区操作栏 */}
+        {props.embeddedInCanvas && ctx.multiSelectEnabled && ctx.activeGroup !== 'hierarchy' && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -450,15 +470,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
                 size="small"
                 data-asset-batch-download
                 disabled={ctx.selectedIds.size === 0}
-                onClick={() => {
-                  const assets = ctx.allItems
-                    .filter((item) => ctx.selectedIds.has(item.data.id))
-                    .map((item) => item.data as import('@/features/asset-picker/index.js').Asset);
-                  void downloadAssetsAsZip(assets, `assets-${Date.now()}`).then((n) => {
-                    if (n > 0) antdMessage.success(t('assetLibrary.batchDownloaded', { n, defaultValue: `已打包下载 ${n} 项` }));
-                    else antdMessage.warning(t('assetLibrary.batchDownloadEmpty', '没有可下载的文件'));
-                  });
-                }}
+                onClick={handleBatchDownload}
               >
                 {t('assetLibrary.batchDownload', '打包下载')}
               </Button>
@@ -502,7 +514,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ctx.handleDragOver, ctx.handleDrop, handleGridCtxMenu,
     ctx.allItems, ctx.PAGE_SIZE, ctx.page, ctx.setPage,
     ctx.handleToggleSelectAll, ctx.handleBatchDelete, ctx.setMultiSelectEnabled,
-    ctx.search,
+    ctx.search, handleBatchDownload,
   ]);
 
   return (

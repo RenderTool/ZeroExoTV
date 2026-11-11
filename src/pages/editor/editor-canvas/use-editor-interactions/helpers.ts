@@ -104,8 +104,15 @@ export async function downloadNodeAsFile(
     if (res?.ok) blob = await res.blob().catch(() => null);
   }
   if (!blob?.size) return { ok: false };
-  const guide = opts?.withGuide ? (data.guide as { id?: string } | undefined) : undefined;
-  const guideBlob = guide?.id ? await fetchGuideBlob(guide).catch(() => null) : null;
+  const guide = opts?.withGuide ? (data.guide as { id?: string; baseUrl?: string } | undefined) : undefined;
+  // 引导按「当前连接地址 → 产出时的地址 → 节点 localJob.base」逐个试，换地址/重启后仍能打包
+  const guideRef = guide?.id
+    ? {
+        ...guide,
+        baseUrl: guide.baseUrl ?? (data.localJob as { base?: string } | undefined)?.base,
+      }
+    : undefined;
+  const guideBlob = guideRef ? await fetchGuideBlob(guideRef).catch(() => null) : null;
   if (guideBlob) {
     const zipBase = (baseName || '视频').replace(/[\\/:*?"<>|]+/g, '_').trim() || '视频';
     await downloadFilesAsZip(

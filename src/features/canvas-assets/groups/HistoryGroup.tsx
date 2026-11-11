@@ -612,9 +612,13 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
                     onLocate={historySource === 'canvas' ? () => handleLocate(asset) : undefined}
                     onPromote={(target) => handlePromote(asset, target)}
                     onDownload={(opts) => void store.handleDownloadItem({ type: 'asset', data: asset }, opts)}
-                    onSendVideo={(asset.data as { kind?: string }).kind === 'video'
-                      ? () => sendAssetToWorkbench(asset, antdMessage, t)
-                      : undefined}
+                    onSendVideo={(() => {
+                      // 2026-11-11 用户反馈：画布生成的图片也应该能发到导演台（图片槽），
+                      // 之前只给 video 开放，菜单项对图片是灰的。图片/音频/视频都走同一执行器。
+                      const kind = (asset.data as { kind?: string }).kind;
+                      const sendable = kind === 'image' || kind === 'video' || kind === 'audio';
+                      return sendable ? () => sendAssetToWorkbench(asset, antdMessage, t) : undefined;
+                    })()}
                     onSendGuide={(asset.data as { kind?: string }).kind === 'video'
                       ? () => { void sendGuideToWorkbench(asset, antdMessage, t); }
                       : undefined}
