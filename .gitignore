@@ -53,3 +53,5 @@ dist-broken-*/
 # Python（ComfyUI 插件本地跑过就会生成）
 __pycache__/
 *.pyc
+
+tools/*.png

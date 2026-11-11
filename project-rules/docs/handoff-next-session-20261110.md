@@ -199,6 +199,12 @@
 - 图片结果节点比例（2026-11-11）：生成完成用 `fitImageNodeSize` 同时重算宽高（长边 ≤320），
   修复 Krea2/Qwen 返回后节点停在旧比例、图片 contain 出黑边
 - 图片尺寸口径（2026-11-11）：Krea2 的 1MP = 1024×1024（1024²，不是 1e6）；1MP 1:1 → 1024×1024
+- 新增 Moss Image 文生图（2026-11-11）：`zeroexo:moss`，模板 `moss_image_t2i.json`（moss_image_sft_int8 + qwen3.5_9b
+  text encoder type=moss_image + flux2 VAE，er_sde/simple，25 步/cfg 2.5），16 对齐，默认 1MP=1024²
+- MCP 画布图片作业桥（2026-11-11）：`generate_canvas_images` 写 `.lf/zeroexo/app_meta/image-jobs/*.json`，
+  网页 `useMcpImageJobs` 轮询建节点→生成→落历史→写 `.status.json`；`get_canvas_image_job` 查询；
+  MCP 无法直接写主画布（浏览器持有），只能走这条桥
+- MCP 技能新增 `image-prompts`（Moss/Krea2/Qwen 三模型提示词写法与参数口径）
 - @ 提及弹层：portal 到 body + fixed + z-index 4000，避免被 dock/节点盖住；参考槽缩略图补内联内容回退
 - 历史卡片：MasonryGrid 瀑布流 + 真实宽高比 + `object-fit: contain`，不再固定 16:9 裁图
 - 提交作业：网络层 Failed to fetch 自动重试 2 次（同一 clientJobId），首点不再必失败
