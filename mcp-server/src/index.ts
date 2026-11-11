@@ -61,7 +61,7 @@ async function withOverview(): Promise<string> {
 async function buildServer(ctx: Ctx): Promise<McpServer> {
   // instructions 内置整套操作规则（零安装路径），细节规格经 guides 资源/prompts 按需取
   const server = new McpServer(
-    { name: "zeroexo-mcp-server", version: "0.0.1" },
+    { name: "zeroexo-mcp-server", version: "0.2.0" },
     { instructions: await withOverview() },
   );
   registerGuideResources(server);
@@ -95,7 +95,7 @@ async function stampServerInfo(httpPort: number): Promise<void> {
     const builtAt = await fs.stat(entry).then((s) => s.mtime.toISOString()).catch(() => null);
     const info = {
       app: "zeroexo-mcp-server",
-      version: "0.0.1",
+      version: "0.2.0",
       dataRoot: dataRoot(),
       serverEntry: entry,
       tools: TOOL_REGISTRY.length,
