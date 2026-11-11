@@ -334,6 +334,13 @@ page container (height: 100%, flex column, overflow: hidden)
   「该模型只支持文生图，不支持参考图（连入的素材不会作为输入）」，禁止让用户以为可以垫图。
 - 有参考图能力的模型（Qwen Image 2.1 / H3ZeroExo）保持现有参考区与兼容性红叉提示。
 
+### 导演台延续法（2026-11-11 用户事故后定为硬性）
+- 段长：可见帧必须吸附 **17k+5**（fps 24，向上吸附）；每段可见帧 + **22 帧引导** ≤ **736**；第 2 段起必须吃上一段尾帧。
+- 必须走 `plan_continuity_edit`（MCP，dryRun 出「段/帧/秒/是否吃上一段」表 → 用户确认 → confirm+userConfirmed）再生成；
+  计划会写入 `shot.paramValues.continuityPlan` 并打开 `sharedParams.continuityEnabled`。
+- `run_generation` 在延续法开启时：没有计划 → `CONTINUITY_NOT_PLANNED`；跳段/从中间开始 → `CONTINUITY_ORDER`；
+  必须严格串行（上一段 success 拿到 guide 才提交下一段）。禁止照搬原稿段长、只写「承上」字样冒充延续法。
+
 ### 导演台工具行（2026-11-10 用户要求）
 - 工具行最右侧固定显示「全部片段统计时长」：`总时长 mm:ss · N 段`（按时长四舍五入到秒；空项目显示 `00:00 · 0 段`），
   使用等宽数字，不允许被中部弹性空隙挤掉或换行。

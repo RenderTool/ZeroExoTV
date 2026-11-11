@@ -295,6 +295,10 @@ export function skillsPipelineText(): string {
 
 ## 3 分镜与提示词
 - 读 zeroexo://skills/shots-prompts。
+- **延续法（硬性）**：段长必须吸附 17k+5 帧、每段可见帧 + 22 引导帧 ≤ 736；第 2 段起吃上一段尾帧。
+  先 plan_continuity_edit 出整张「段/帧/秒/是否接上一段」表给用户确认（confirm:true + userConfirmed:true），
+  再逐段串行 run_generation（从第 1 段开始，禁止跳段/并行），每段成功立刻 sync_job_results。
+  照搬原稿段长、跳段、或只写「承上/接上一段」字样都算没做延续法，run_generation 会直接拒绝。
 - 没有现成提示词时：\`scaffold_episode({ style, durationSec, sharedParams })\` 直接从剧本产出占位主体 + 占位片段 + 提示词，并返回 missingAssets；**不要自己手写提示词，也不要抄别的项目**。
 - 有素材后：\`apply_shot_prompts({ style })\` 按 references 真实槽位把 <Subject N> 重写成 @PictureN。
 - 质量门 <7 分重写，不许交付。

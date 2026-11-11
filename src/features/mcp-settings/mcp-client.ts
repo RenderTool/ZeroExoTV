@@ -126,6 +126,7 @@ export const MCP_TOOLS: ToolInfo[] = [
   { name: 'set_episode_meta', access: 'write' },
   { name: 'import_script', access: 'write' },
   { name: 'split_script_to_shots', access: 'write' },
+  { name: 'plan_continuity_edit', access: 'write' },
   { name: 'upsert_subject', access: 'write' },
   { name: 'set_subject_image', access: 'write' },
   { name: 'link_subject_to_shot', access: 'write' },

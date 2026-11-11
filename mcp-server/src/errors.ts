@@ -10,7 +10,11 @@ export type McpErrorCode =
   | "CONFIRM_REQUIRED"
   | "SLOT_OVERFLOW"
   | "IO_ERROR"
-  | "NOT_IMPLEMENTED";
+  | "NOT_IMPLEMENTED"
+  /** 延续法：片段没有 plan_continuity_edit 计划就生成（2026-11-11） */
+  | "CONTINUITY_NOT_PLANNED"
+  /** 延续法：跳段 / 从中间开始，接不上上一段尾帧 */
+  | "CONTINUITY_ORDER";
 
 export class McpError extends Error {
   constructor(

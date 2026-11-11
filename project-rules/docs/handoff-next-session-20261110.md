@@ -186,6 +186,8 @@
 - 剧本页滚轮修复（2026-11-10）：行 textarea 的 `onWheel` 不再只 stopPropagation，改为把 deltaY 转给
   `[data-script-scroll]`（光标停在文字上也能滚动页面）
 - 导演台工具行右侧显示「总时长 mm:ss · N 段」（2026-11-10），数据 = 全部片段 duration 之和
+- 延续法硬闸门（2026-11-11 事故后加）：`plan_continuity_edit` 计划（17k+5 段长 / 22 帧尾帧 / ≤736 帧）+
+  `run_generation` 串行准入（`CONTINUITY_NOT_PLANNED` / `CONTINUITY_ORDER`）；说明与技能写明「照搬原稿段长/跳段/只做一半 = 不合格」
 
 ## 4. 接手检查
 

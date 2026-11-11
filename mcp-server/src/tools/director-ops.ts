@@ -16,6 +16,7 @@ import { uploadToCas } from "../store/cas.js";
 import { appendAssetRecord, assetsLibraryFile, type LibraryAsset } from "../store/asset-library.js";
 import { mutateWorkbench, readWorkbench } from "../store/workbench.js";
 import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
+import { hasContinuityPlan } from "../lib/continuity.js";
 
 const COMFY_BASE = (): string => process.env.ZEROEXO_COMFY_BASE ?? "http://127.0.0.1:8188";
 const GUIDE_ID_RE = /^gd_[A-Za-z0-9_-]{4,64}$/;
@@ -104,6 +105,32 @@ async function fetchJob(jobId: string, base = COMFY_BASE()): Promise<JobStatus> 
   const res = await fetch(`${base}/zeroexo/v1/jobs/${encodeURIComponent(jobId)}`);
   if (!res.ok) throw new McpError("IO_ERROR", `作业查询失败 HTTP ${res.status}: ${jobId}`);
   return (await res.json()) as JobStatus;
+}
+
+/**
+ * 延续法串行生成：等上一段真正成功拿到 guide 再提交下一段（每段吃上一段尾帧）。
+ * 超时/失败都返回终态，由调用方决定是否继续——绝不并行提交。
+ */
+async function waitForJobTerminal(
+  jobId: string,
+  base: string,
+  timeoutMs = 20 * 60 * 1000,
+  intervalMs = 3000,
+): Promise<JobStatus> {
+  const started = Date.now();
+  for (;;) {
+    let job: JobStatus;
+    try {
+      job = await fetchJob(jobId, base);
+    } catch (err) {
+      job = { state: "error", error: err instanceof Error ? err.message : String(err), jobId };
+    }
+    if (job.state && ["success", "error", "cancelled"].includes(job.state)) return job;
+    if (Date.now() - started > timeoutMs) {
+      return { ...job, state: "error", error: `等待作业超时（${Math.round(timeoutMs / 60000)} 分钟）: ${jobId}` };
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 async function exists(p: string | undefined): Promise<boolean> {
@@ -232,7 +259,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
   // ===== T3：触发生成（核心） =====
   defTool(server, ctx, {
     name: "run_generation",
-    description: "经 MCP 直接向 ComfyUI 插件提交导演台生成作业。selectedIds 省略=全部片段；按时间线解析引导（显式槽 > 前一段 media.guide > use_prev_guide）。低资源测试用 steps/scaleFactor 调小。",
+    description: "经 MCP 直接向 ComfyUI 插件提交导演台生成作业。selectedIds 省略=全部片段；按时间线解析引导（显式槽 > 前一段 media.guide > use_prev_guide）。开启延续法时：必须有 plan_continuity_edit 计划、按时间线连续选段、严格串行（上一段 success 拿到 guide 才提交下一段），否则直接拒绝。低资源测试用 steps/scaleFactor 调小。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -247,7 +274,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       const root = dataRoot();
       const wb = await readWorkbench(root, args.projectId);
       if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
-      const allShots = wb.shots as unknown as Array<{ id: string; duration: number; imagePrompt?: string; videoPrompt?: string; negativePrompt?: string; guide?: { id?: string }; media?: { guide?: { id?: string } }; continuation?: { enabled: boolean }; references?: Array<{ kind?: string; storageKey?: string }> }>;
+      const allShots = wb.shots as unknown as Array<{ id: string; duration: number; imagePrompt?: string; videoPrompt?: string; negativePrompt?: string; guide?: { id?: string }; media?: { guide?: { id?: string } }; continuation?: { enabled: boolean }; references?: Array<{ kind?: string; storageKey?: string }>; paramValues?: Record<string, unknown> | null }>;
       const selected = args.selectedIds?.length
         ? allShots.filter((s) => args.selectedIds!.includes(s.id))
         : allShots;
@@ -278,9 +305,9 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         }
       })();
 
-      const submissions = selected.map((shot) => {
+      const buildSubmission = (shot: typeof selected[number], overrideGuideId?: string) => {
         const allIdx = allShots.findIndex((s) => s.id === shot.id);
-        const explicit = shot.guide?.id;
+        const explicit = overrideGuideId ?? shot.guide?.id;
         const segEnabled = shot.continuation ? shot.continuation.enabled === true : continuityOn;
         let guideId: string | undefined = explicit;
         let usePrev = false;
@@ -302,21 +329,94 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           reference_image: "",
         };
         return { shotId: shot.id, clientJobId: `mcp_${args.projectId}_${shot.id}_${Date.now()}`, params };
-      });
+      };
 
-      if (args.dryRun) return { written: false, dryRun: true, submissions };
+      // 延续法准入（2026-11-11 用户事故）：没做延续法计划的片段、跳段、从中间开始 —— 一律拒绝，
+      // 不允许 Agent「不知道为什么要这么做」就把原稿段长直接搬进去跑。
+      if (continuityOn) {
+        const unplanned = selected.filter((s) => !hasContinuityPlan(s));
+        if (unplanned.length > 0) {
+          throw new McpError(
+            "CONTINUITY_NOT_PLANNED",
+            `延续法已开启，但 ${unplanned.length} 个片段没有延续法计划（段长没按 17k+5 重排、没有接缝标记）。`
+            + "先调 plan_continuity_edit：dryRun 出「段/帧/秒/是否吃上一段尾帧」表 → 用户确认 → confirm:true + userConfirmed:true，"
+            + "再回来生成。禁止照搬原稿段长直接跑。",
+          );
+        }
+        const idxs = selected
+          .map((s) => allShots.findIndex((x) => x.id === s.id))
+          .sort((a, b) => a - b);
+        if (idxs.some((v, i) => i > 0 && v !== idxs[i - 1]! + 1)) {
+          throw new McpError(
+            "CONTINUITY_ORDER",
+            "开启延续法时必须按时间线连续选段：跳段会让被跳过的片段吃不到上一段尾帧，接缝就断了。",
+          );
+        }
+        const firstIdx = idxs[0] ?? 0;
+        if (firstIdx > 0 && !allShots[firstIdx - 1]?.media?.guide?.id) {
+          throw new McpError(
+            "CONTINUITY_ORDER",
+            `第 ${firstIdx + 1} 段之前还没有已生成的引导数据：延续法必须从第 1 段开始按顺序跑，`
+            + "不能从中间挑着生成（挑着跑等于放弃衔接）。",
+          );
+        }
+      }
 
-      const jobs: Array<{ jobId: string; shotId: string; params: Record<string, unknown> }> = [];
-      for (const sub of submissions) {
-        const body = { kind: "reference_video", clientJobId: sub.clientJobId, project: args.projectId, episode, params: sub.params };
+      const submissions = selected.map((shot) => buildSubmission(shot));
+
+      const submit = async (params: Record<string, unknown>, clientJobId: string): Promise<string> => {
+        const body = { kind: "reference_video", clientJobId, project: args.projectId, episode, params };
         const res = await fetch(`${base}/zeroexo/v1/jobs`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
         });
         const text = await res.text();
         if (!res.ok) throw new McpError("IO_ERROR", `提交作业失败 HTTP ${res.status}: ${text.slice(0, 300)}`);
-        const out = JSON.parse(text) as { jobId?: string; state?: string };
+        const out = JSON.parse(text) as { jobId?: string };
         if (!out.jobId) throw new McpError("IO_ERROR", `插件未返回 jobId: ${text.slice(0, 200)}`);
-        jobs.push({ jobId: out.jobId, shotId: sub.shotId, params: sub.params });
+        return out.jobId;
+      };
+
+      if (args.dryRun) {
+        return { written: false, dryRun: true, continuity: continuityOn, serial: continuityOn, submissions };
+      }
+
+      // 延续法：严格串行，上一段 success 且拿到 guide 才提交下一段
+      if (continuityOn) {
+        const ordered = [...selected].sort(
+          (a, b) => allShots.findIndex((x) => x.id === a.id) - allShots.findIndex((x) => x.id === b.id),
+        );
+        const jobs: Array<Record<string, unknown>> = [];
+        let lastGuideId: string | undefined;
+        for (const shot of ordered) {
+          const sub = buildSubmission(shot, lastGuideId);
+          const jobId = await submit(sub.params, sub.clientJobId);
+          const terminal = await waitForJobTerminal(jobId, base);
+          jobs.push({
+            jobId, shotId: shot.id, state: terminal.state,
+            guideId: terminal.guide?.id ?? null, error: terminal.error ?? null,
+            params: sub.params,
+          });
+          if (terminal.state !== "success") {
+            return {
+              written: true, continuity: true, serial: true,
+              failedShotId: shot.id, jobs,
+              error: terminal.error ?? `第 ${jobs.length} 段生成失败（${terminal.state}）`,
+              next: "修好这一段后从这一段继续；禁止跳到后面的段",
+            };
+          }
+          lastGuideId = terminal.guide?.id ?? lastGuideId;
+        }
+        return {
+          written: true, continuity: true, serial: true,
+          projectId: args.projectId, episode, baseUrl: base, width, height, steps, guideFrames, jobs,
+          next: "用 sync_job_results 按同样顺序回写视频与引导（每段的 guide 会自动成为下一段的输入）",
+        };
+      }
+
+      const jobs: Array<{ jobId: string; shotId: string; params: Record<string, unknown> }> = [];
+      for (const sub of submissions) {
+        const jobId = await submit(sub.params, sub.clientJobId);
+        jobs.push({ jobId, shotId: sub.shotId, params: sub.params });
       }
       return { written: true, projectId: args.projectId, episode, baseUrl: base, width, height, steps, guideFrames, jobs };
     },

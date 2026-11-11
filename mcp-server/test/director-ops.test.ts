@@ -20,6 +20,7 @@ import { createProject } from "../src/store/projects.js";
 import { handleFsRequest } from "../src/file-server.js";
 import { registerWorkbenchTools } from "../src/tools/workbench.js";
 import { registerDirectorOpsTools } from "../src/tools/director-ops.js";
+import { registerContinuityTools } from "../src/tools/continuity.js";
 
 let root: string;
 let projectId: string;
@@ -51,6 +52,7 @@ beforeAll(async () => {
   const ctx = { getToken: () => token };
   registerWorkbenchTools(server, ctx as never);
   registerDirectorOpsTools(server, ctx as never);
+  registerContinuityTools(server, ctx as never);
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await server.connect(st);
   client = new Client({ name: "test-client", version: "0.0.1" });
@@ -153,6 +155,13 @@ describe("作业提交与引导优先级（fetch stub）", () => {
       params: { steps: 3, scaleFactor: 0.1, refImageSize: "match", continuityOverlapFrames: 22, continuityEnabled: true },
     });
     v = sp.version as number;
+
+    // 延续法（2026-11-11）：开 continuityEnabled 后必须先做计划，run_generation 只认带计划的片段
+    const plan = await call("plan_continuity_edit", {
+      projectId, baseVersion: v, confirm: true, userConfirmed: true,
+    });
+    expect(plan.written).toBe(true);
+    v = plan.version as number;
 
     const wb0 = await call("get_workbench", { projectId });
     const shots = wb0.shots as Array<{ id: string }>;
