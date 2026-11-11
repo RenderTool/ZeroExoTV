@@ -1,13 +1,14 @@
 /**
- * ZIP 导出
+ * ZIP 导出（v2：画布 + 剧本 + 主体 + 导演台 + 资产/产出 + 阅读用 MD）
  *
  * 流程:
- * 1. 遍历选中项目,加载 graph + 收集 storageKey
- * 2. 从 image_files / media_files 桶获取 blob
- * 3. 构造 projects.json + files/ 目录
+ * 1. 遍历选中项目，加载 graph + 实体三件套 + 本项目资产记录
+ * 2. 生成阅读用 Markdown 与无损 JSON，写进 ZIP；收集所有 storageKey 的二进制
+ * 3. 构造 projects.json（含文档路径索引）+ files/ 目录
  * 4. fflate.zipSync 打包 → 浏览器下载
+ *
+ * v2 之前只导 graph 与它引用的素材，剧本/主体/导演台/产出记录全丢，无法迁移。
  */
-
 import type { GraphModel } from '@zeroexo/core';
 import {
   getImageBlob,
@@ -22,9 +23,16 @@ import { createZip } from './zip.js';
 import { getMediaBlob as getDiskBlob } from '@/platform/media.js';
 import { verifySnapshotForExport } from '@/entities/snapshot-store.js';
 import { readStoryboardContainer, readWorkbenchContainer } from '@/entities/slot-containers.js';
-// Spec（征集#184）：副本画布必须随项目导出（否则 zip 恢复后标签指向不存在的画布）
+import type { StoryboardContainer } from '@/entities/slot-containers.js';
+import { readScript } from '@/entities/script-store.js';
+import type { ScriptEntity } from '@/entities/script-store.js';
+import { listAssets } from '@/features/asset-picker/asset-store.js';
+import type { Asset } from '@/features/asset-picker/index.js';
 import { getCanvas, listCanvases, MAIN_CANVAS_ID, type CanvasDocument } from '@/entities/canvas-store.js';
-import type { CanvasExportAsset, CanvasExportFile, CanvasProjectExportItem } from './export-types.js';
+import { collectStorageKeys, scriptEntityToMarkdown, storyboardToSubjectMarkdown } from './project-documents.js';
+import type {
+  CanvasExportAsset, CanvasExportFile, CanvasProjectDocuments, CanvasProjectExportItem,
+} from './export-types.js';
 
 /** 导出前快照只读校验（storyboard/workbench）：最近一份快照存在且 hash 可比对（只 log） */
 async function verifyContainersSnapshotsForExport(projectId: string): Promise<void> {
@@ -36,6 +44,62 @@ async function verifyContainersSnapshotsForExport(projectId: string): Promise<vo
   } catch (err) {
     console.error('[export-projects] snapshot export check failed (continue export):', err);
   }
+}
+
+interface ProjectEntities {
+  script: ScriptEntity | null;
+  storyboard: StoryboardContainer | null;
+  workbench: unknown;
+  assets: Asset[];
+}
+
+type ZipFiles = { name: string; data: BlobPart }[];
+
+function pushJson(zipFiles: ZipFiles, path: string, value: unknown): void {
+  zipFiles.push({ name: path, data: JSON.stringify(value, null, 2) });
+}
+
+/**
+ * v2 项目文档：阅读用 MD + 无损 JSON。
+ * MD 供人阅读/比对，导入一律读 JSON；两者按项目 id 分目录，避免多项目同名覆盖。
+ */
+function collectProjectDocuments(
+  projectId: string,
+  entities: ProjectEntities,
+  zipFiles: ZipFiles,
+): CanvasProjectDocuments {
+  const docs: CanvasProjectDocuments = { scriptMarkdown: [], subjectsMarkdown: [] };
+  if (entities.script) {
+    const jsonPath = `script/${projectId}/script.json`;
+    pushJson(zipFiles, jsonPath, entities.script);
+    docs.scriptJson = jsonPath;
+    for (const doc of scriptEntityToMarkdown(entities.script)) {
+      const path = `script/${projectId}/${doc.path}`;
+      zipFiles.push({ name: path, data: doc.content });
+      docs.scriptMarkdown.push(path);
+    }
+  }
+  if (entities.storyboard) {
+    const jsonPath = `subjects/${projectId}/subjects.json`;
+    pushJson(zipFiles, jsonPath, entities.storyboard);
+    docs.subjectsJson = jsonPath;
+    for (const doc of storyboardToSubjectMarkdown(entities.storyboard)) {
+      const path = `subjects/${projectId}/${doc.path}`;
+      zipFiles.push({ name: path, data: doc.content });
+      docs.subjectsMarkdown.push(path);
+    }
+  }
+  if (entities.workbench) {
+    const path = `entities/${projectId}/workbench.json`;
+    pushJson(zipFiles, path, entities.workbench);
+    docs.workbenchJson = path;
+  }
+  if (entities.assets.length > 0) {
+    const path = `assets/${projectId}/assets.json`;
+    pushJson(zipFiles, path, entities.assets);
+    docs.assetsJson = path;
+  }
+  return docs;
 }
 
 /**
@@ -58,24 +122,38 @@ export async function exportProjects(
 
   if (projects.length === 0) return;
 
-  // 导出前只读校验（2026-11-04 快照库）：导演台实体（storyboard/workbench）最近一份快照
-  // 存在且 hash 可比对——只打 log 不阻断导出（本轮无 UI 恢复入口，防误触）。
   for (const project of projects) {
     void verifyContainersSnapshotsForExport(project.id);
   }
 
-  const zipFiles: { name: string; data: BlobPart }[] = [];
+  const zipFiles: ZipFiles = [];
   const exportItems = await Promise.all(
     projects.map(async (project) => {
       const graph = await loadProjectGraph(project.id);
-      const files = await collectProjectFiles(project.id, graph, zipFiles, project.thumbnailUrl);
-      // Spec：副本画布 + 其内部素材一并收集（1 号已是上面的 graph，不重复）
+      // 单个实体读失败不阻断整个导出（目录未授权/文件缺失时仍导出画布）
+      const [script, storyboard, workbench, allAssets] = await Promise.all([
+        readScript(project.id).catch(() => null),
+        readStoryboardContainer(project.id).catch(() => null),
+        readWorkbenchContainer(project.id).catch(() => null),
+        listAssets().catch((): Asset[] => []),
+      ]);
+      const entities: ProjectEntities = {
+        script,
+        storyboard,
+        workbench,
+        assets: allAssets.filter((a) => a.projectId === project.id),
+      };
+      const documents = collectProjectDocuments(project.id, entities, zipFiles);
+      // 主体图 / 产出 CAS 不在 graph 里，必须单独并入二进制清单
+      const extraKeys = collectStorageKeys([storyboard, workbench, entities.assets]);
+      const files = await collectProjectFiles(project.id, graph, zipFiles, project.thumbnailUrl, extraKeys);
       const sub = await collectCanvasCopies(project.id, zipFiles);
       const item: CanvasProjectExportItem = {
         meta: project,
         graph,
         files: [...files, ...sub.assets],
         ...(sub.docs.length > 0 ? { canvases: sub.docs } : {}),
+        documents,
       };
       return item;
     }),
@@ -83,7 +161,7 @@ export async function exportProjects(
 
   const data: CanvasExportFile = {
     app: 'zeroexo-canvas',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     projects: exportItems,
   };
@@ -102,17 +180,16 @@ export async function exportProjects(
  * @param projectId 项目 id(用于 ZIP 内路径隔离)
  * @param graph 图数据(从中提取 storageKey)
  * @param zipFiles 累积写入的 ZIP 文件列表
- * @returns 素材文件清单
+ * @param extraKeys v2：实体（主体树/导演台/资产记录）里引用的 storageKey
  */
 async function collectProjectFiles(
   projectId: string,
   graph: GraphModel | null,
-  zipFiles: { name: string; data: BlobPart }[],
+  zipFiles: ZipFiles,
   coverKey?: string | null,
+  extraKeys: Set<string> = new Set(),
 ): Promise<CanvasExportAsset[]> {
-  // 本地版（Plan#83）：封面存在 graph.metadata.coverUrl 与 meta.thumbnailUrl，
-  // 键名不是 storageKey、递归扫描抓不到 → 显式并入，保证 zip 里封面跟随项目
-  const keys = new Set<string>();
+  const keys = new Set<string>(extraKeys);
   const metaCover = (graph?.metadata as { coverUrl?: string } | undefined)?.coverUrl;
   if (metaCover && metaCover.startsWith('image:')) keys.add(metaCover);
   if (coverKey && coverKey.startsWith('image:')) keys.add(coverKey);
@@ -142,8 +219,7 @@ async function collectProjectFiles(
 }
 
 /**
- * 素材取用链（单一入口）：图片桶 → 媒体桶 → 磁盘 blob 兜底。
- * collectProjectFiles 与 collectSubCanvasAssets 共用，避免主/子两套取用逻辑分叉。
+ * 素材取用链（单一入口）：图片桶 → 媒体桶 → 磁盘 blob 兜底（cas: 走这里读 media/cas/）。
  */
 async function blobForStorageKey(storageKey: string): Promise<Blob | null> {
   return (storageKey.startsWith('image:')
@@ -157,14 +233,13 @@ async function blobForStorageKey(storageKey: string): Promise<Blob | null> {
  */
 async function collectCanvasCopies(
   projectId: string,
-  zipFiles: { name: string; data: BlobPart }[],
+  zipFiles: ZipFiles,
 ): Promise<{ docs: CanvasDocument[]; assets: CanvasExportAsset[] }> {
   const docs: CanvasDocument[] = [];
   const assets: CanvasExportAsset[] = [];
   try {
     const metas = await listCanvases(projectId);
     for (const meta of metas) {
-      // 1 号不内嵌：它的图就是项目 graph（内嵌会造成两份图存同一项目）
       if (meta.id === MAIN_CANVAS_ID) continue;
       const got = await getCanvas(projectId, meta.id);
       if (!got || got.doc.graphRef !== 'inline' || !got.doc.graph) continue;
@@ -176,7 +251,6 @@ async function collectCanvasCopies(
         const blob = await blobForStorageKey(storageKey);
         if (!blob) continue;
         const path = `files/${projectId}/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
-        // 同一素材可能同时被 1 号与副本引用：路径相同 → 不重复写入 zip
         if (!zipFiles.some((f) => f.name === path)) {
           zipFiles.push({ name: path, data: blob });
           assets.push({ storageKey, path, mimeType: blob.type || 'application/octet-stream', bytes: blob.size });
@@ -198,7 +272,6 @@ function triggerDownload(blob: Blob, fileName: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // 延迟 revoke,确保下载已启动
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -207,7 +280,7 @@ function safeFileName(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '_');
 }
 
-/** 根据 mimeType 推断文件扩展名 */
+/** 根据 mimeType 推断文件扩展名；cas: 键自带扩展名时优先用它 */
 function fileExtension(mimeType: string, storageKey: string): string {
   if (mimeType.includes('png')) return 'png';
   if (mimeType.includes('jpeg')) return 'jpg';
@@ -216,5 +289,6 @@ function fileExtension(mimeType: string, storageKey: string): string {
   if (mimeType.includes('mp4')) return 'mp4';
   if (mimeType.includes('webm')) return 'webm';
   if (mimeType.includes('audio')) return 'm4a';
-  return storageKey.startsWith('image:') ? 'png' : 'bin';
+  const fromKey = /\.([a-z0-9]+)$/i.exec(storageKey)?.[1];
+  return fromKey ?? (storageKey.startsWith('image:') ? 'png' : 'bin');
 }

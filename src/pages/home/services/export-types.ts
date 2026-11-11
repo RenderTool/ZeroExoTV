@@ -15,9 +15,23 @@ import type { CanvasDocument } from '@/entities/canvas-store.js';
 /** 导出文件根结构 */
 export interface CanvasExportFile {
   app: 'zeroexo-canvas';
-  version: 1;
+  /** v1 = 画布 + 素材；v2 = 追加剧本 / 主体 / 导演台 / 资产记录与阅读用 MD */
+  version: 1 | 2;
   exportedAt: string;
   projects: CanvasProjectExportItem[];
+}
+
+/**
+ * v2 项目文档清单（ZIP 内路径）。
+ * MD 是阅读视图，导入一律以同名无损 JSON 为准；全部可选以兼容 v1 旧包。
+ */
+export interface CanvasProjectDocuments {
+  scriptJson?: string;
+  scriptMarkdown: string[];
+  subjectsJson?: string;
+  subjectsMarkdown: string[];
+  workbenchJson?: string;
+  assetsJson?: string;
 }
 
 /** 单个项目的导出项 */
@@ -25,6 +39,8 @@ export interface CanvasProjectExportItem {
   meta: CanvasProjectMeta;
   graph: GraphModel | null;
   files: CanvasExportAsset[];
+  /** v2：剧本 / 主体 / 导演台 / 资产的文档路径索引 */
+  documents?: CanvasProjectDocuments;
   /**
    * Spec（征集#184）：项目内的**副本画布**文档（权威数据 = projects/<pid>/canvases/*.json）。
    * 1 号主画布不在此列——它就是上面的 `graph`。旧文件无此字段 = 无副本。

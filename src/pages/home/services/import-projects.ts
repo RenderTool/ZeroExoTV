@@ -1,15 +1,12 @@
 /**
- * ZIP 导入
+ * ZIP 导入（v2：还原画布 + 剧本 + 主体 + 导演台 + 资产/产出）
  *
  * 流程:
- * 1. 读取 ZIP → 解析 projects.json
- * 2. 为每个项目生成新 ID,为每个素材生成新 storageKey
- * 3. 写入素材到 image_files / media_files 桶
- * 4. 重映射 graph 中的 storageKey
- * 5. 写入 graph 到 canvas 桶
- * 6. 写入项目元数据到 app_state 桶
+ * 1. 读取 ZIP → 解析 projects.json → 版本校验/迁移（v1 旧包仍可导入）
+ * 2. 逐项目生成新 ID、重映射 storageKey；cas: 按内容 hash 原样写回，不用 nanoid
+ * 3. 还原 graph / 副本画布 / 实体三件套 / 本项目资产记录
+ * 4. 项目仍是「新建 + 追加」，不覆盖用户既有数据
  */
-
 import { nanoid } from 'nanoid';
 import type { GraphModel } from '@zeroexo/core';
 import {
@@ -24,8 +21,41 @@ import type { CanvasProjectMeta } from '@zeroexo/plugin-persistence';
 import { readZip } from './zip.js';
 import type { CanvasExportFile } from './export-types.js';
 import { CURRENT_ZIP_VERSION, migrateExportFile } from './version-migration.js';
-// Spec（征集#184）：导入时还原副本画布（写到新项目 id 下，内部 storageKey 同主 graph 一起重映射）
 import { createCanvas, type CanvasDocument } from '@/entities/canvas-store.js';
+import { writeJson } from '@/platform/fs.js';
+import { putCas, parseCasStorageKey } from '@/entities/cas-store.js';
+import { addAssets } from '@/features/asset-picker/asset-store.js';
+import { ensureProjectMounts } from '@/entities/slot-containers.js';
+
+interface RestoredEntities {
+  /** 导出时的旧项目 id */
+  oldId: string;
+  keyMap: Map<string, string>;
+  script: unknown;
+  storyboard: unknown;
+  workbench: unknown;
+  assets: Array<Record<string, unknown>>;
+}
+
+interface CasToWrite {
+  oldProjectId: string;
+  blob: Blob;
+  ext?: string;
+  mime?: string;
+}
+
+/** 从 ZIP 里按路径读一份无损 JSON；缺失/损坏返回 null，不阻断导入 */
+async function readDocument(zip: Map<string, Blob>, path?: string): Promise<unknown> {
+  if (!path) return null;
+  const file = zip.get(path);
+  if (!file) return null;
+  try {
+    return JSON.parse(await file.text());
+  } catch {
+    console.warn(`[import-projects] 文档 ${path} 解析失败（跳过）`);
+    return null;
+  }
+}
 
 /**
  * 从 ZIP 文件导入项目
@@ -34,13 +64,11 @@ import { createCanvas, type CanvasDocument } from '@/entities/canvas-store.js';
  * @throws Error ZIP 格式版本不兼容时抛错
  */
 export async function importProjectsFromZip(file: Blob): Promise<CanvasProjectMeta[]> {
-  // 1. 解压 ZIP
   const zip = await readZip(file);
   const projectFile = zip.get('projects.json');
   if (!projectFile) throw new Error('ZIP 文件中缺少 projects.json');
   const raw = JSON.parse(await projectFile.text()) as CanvasExportFile;
 
-  // 2. 版本校验与自动迁移
   if (raw.version > CURRENT_ZIP_VERSION) {
     throw new Error(
       `ZIP 文件版本(v${raw.version})高于当前支持的最高版本(v${CURRENT_ZIP_VERSION})。` +
@@ -49,30 +77,35 @@ export async function importProjectsFromZip(file: Blob): Promise<CanvasProjectMe
   }
   const data = migrateExportFile(raw);
   if (data.version !== CURRENT_ZIP_VERSION) {
-    throw new Error(
-      `ZIP 文件版本迁移失败: 期望 v${CURRENT_ZIP_VERSION}，得到 v${data.version}`,
-    );
+    throw new Error(`ZIP 文件版本迁移失败: 期望 v${CURRENT_ZIP_VERSION}，得到 v${data.version}`);
   }
-
   if (!data.projects || data.projects.length === 0) return [];
 
-  // 3. 逐项目处理:重写素材 + 重映射 storageKey + 写 graph
   const metasToImport: CanvasProjectMeta[] = [];
   const graphDataToSave: { projectId: string; graph: GraphModel }[] = [];
-  /** 旧项目 id → 该项目的副本画布文档（已重映射内部 storageKey） */
   const canvasesToSave: { projectId: string; docs: CanvasDocument[] }[] = [];
+  const entitiesToRestore: RestoredEntities[] = [];
+  const casToWrite: CasToWrite[] = [];
 
   for (const item of data.projects) {
-    // 构建旧 storageKey → 新 storageKey 映射
     const keyMap = new Map<string, string>();
-    for (const asset of item.files) {
-      const newKey = remapStorageKey(asset.storageKey);
-      keyMap.set(asset.storageKey, newKey);
-
-      // 从 ZIP 读取 blob,用新 storageKey 写入对应桶
+    for (const asset of item.files ?? []) {
       const blob = zip.get(asset.path);
       if (!blob) continue;
       const typedBlob = blob.type ? blob : blob.slice(0, blob.size, asset.mimeType);
+      if (asset.storageKey.startsWith('cas:')) {
+        // CAS 是内容寻址：文件名就是 sha256，换成 nanoid 会让主体图/产出全变死链
+        keyMap.set(asset.storageKey, asset.storageKey);
+        casToWrite.push({
+          oldProjectId: item.meta.id,
+          blob: typedBlob,
+          ext: parseCasStorageKey(asset.storageKey)?.ext,
+          mime: asset.mimeType,
+        });
+        continue;
+      }
+      const newKey = remapStorageKey(asset.storageKey);
+      keyMap.set(asset.storageKey, newKey);
       if (newKey.startsWith('image:')) {
         await setImageBlob(newKey, typedBlob);
       } else {
@@ -80,13 +113,7 @@ export async function importProjectsFromZip(file: Blob): Promise<CanvasProjectMe
       }
     }
 
-    // 重映射 graph 中的 storageKey 并刷新 content 字段
-    const remappedGraph = item.graph
-      ? await remapGraphStorageKeys(item.graph, keyMap)
-      : null;
-
-    // 暂存元数据和 graph(等会统一写入)
-    // 清除 cloudId 和 version,确保导入后作为新项目处理,能正常云同步
+    const remappedGraph = item.graph ? await remapGraphStorageKeys(item.graph, keyMap) : null;
     const cleanMeta: CanvasProjectMeta = {
       ...item.meta,
       cloudId: null,
@@ -94,19 +121,12 @@ export async function importProjectsFromZip(file: Blob): Promise<CanvasProjectMe
       lastSyncedAt: null,
     };
     metasToImport.push(cleanMeta);
-    if (remappedGraph) {
-      // 用临时 ID 占位,后面 importProjects 返回新 ID 后再写入 graph
-      graphDataToSave.push({ projectId: cleanMeta.id, graph: remappedGraph });
-    }
+    if (remappedGraph) graphDataToSave.push({ projectId: cleanMeta.id, graph: remappedGraph });
 
-    // Spec：副本画布也要重映射内部 storageKey，否则标签指向的画布里全是死 key
-    // （字段旧名 `subCanvases` 一并接受：旧格式导出的 zip 仍可导入）
-    const legacy = item as { canvases?: CanvasDocument[]; subCanvases?: CanvasDocument[] };
-    const zipCanvases = legacy.canvases ?? legacy.subCanvases;
+    const zipCanvases = item.canvases ?? (item as { subCanvases?: CanvasDocument[] }).subCanvases;
     if (zipCanvases && zipCanvases.length > 0) {
       const docs: CanvasDocument[] = [];
       for (const doc of zipCanvases) {
-        // 无 graph 的文档不合法：跳过而不是建一份空画布冒充用户的副本
         if (!doc.graph) {
           console.warn(`[import-projects] 副本画布 ${doc.id} 缺 graph（跳过）`);
           continue;
@@ -114,38 +134,49 @@ export async function importProjectsFromZip(file: Blob): Promise<CanvasProjectMe
         try {
           docs.push({ ...doc, graph: await remapGraphStorageKeys(doc.graph, keyMap) });
         } catch (err) {
-          // 单个文档重映射失败 → 跳过该副本（不阻断整个导入），但必须留痕
           console.error(`[import-projects] 副本画布 ${doc.id} 重映射失败（跳过）:`, err);
         }
       }
       if (docs.length > 0) canvasesToSave.push({ projectId: cleanMeta.id, docs });
     }
+
+    // v2：无损 JSON 是导入唯一依据，阅读用 MD 不参与还原
+    if (item.documents) {
+      const docs = item.documents;
+      const [script, storyboard, workbench, assets] = await Promise.all([
+        readDocument(zip, docs.scriptJson),
+        readDocument(zip, docs.subjectsJson),
+        readDocument(zip, docs.workbenchJson),
+        readDocument(zip, docs.assetsJson),
+      ]);
+      entitiesToRestore.push({
+        oldId: cleanMeta.id,
+        keyMap,
+        script,
+        storyboard,
+        workbench,
+        assets: Array.isArray(assets) ? assets as Array<Record<string, unknown>> : [],
+      });
+    }
   }
 
-  // 4. 写入项目元数据(importProjects 会重新生成 ID + 加后缀)
   const importedProjects = await importProjects(metasToImport);
+  const idMap = new Map(metasToImport.map((old, i) => [old.id, importedProjects[i]?.id]));
 
-  // 5. 按 旧ID → 新ID 映射,写入 graph 数据
-  const idMap = new Map(
-    metasToImport.map((old, i) => [old.id, importedProjects[i]?.id]),
-  );
   for (const { projectId: oldId, graph } of graphDataToSave) {
     const newId = idMap.get(oldId);
     if (!newId) continue;
     await saveProjectGraph(newId, graph);
   }
 
-  // 6. 写入副本画布（挂到新项目 id 的 canvases/ 下；节点 id 随 graph 原样保留）
   for (const { projectId: oldId, docs } of canvasesToSave) {
     const newId = idMap.get(oldId);
     if (!newId) continue;
     for (const doc of docs) {
       try {
-        // 重名/已存在会抛错（createCanvas 走“不存在才写”）→ 跳过而不是覆盖用户数据
         await createCanvas(newId, {
           id: doc.id,
           title: doc.title,
-          // 上面收集阶段已过滤掉无 graph 的文档，这里不会为 undefined
           graph: doc.graph as GraphModel,
           coverKey: doc.coverKey ?? null,
           order: doc.order,
@@ -156,27 +187,48 @@ export async function importProjectsFromZip(file: Blob): Promise<CanvasProjectMe
     }
   }
 
+  // CAS 物理文件与索引：按内容 hash 写回（同 hash 即同内容，重复导入自动去重）
+  for (const entry of casToWrite) {
+    const newId = idMap.get(entry.oldProjectId) ?? entry.oldProjectId;
+    await putCas({
+      data: entry.blob,
+      ext: entry.ext,
+      mime: entry.mime,
+      ref: { assetId: `import-${nanoid()}`, projectId: newId, kind: 'project-import' },
+    }).catch((err) => console.warn('[import-projects] CAS 写回失败:', err));
+  }
+
+  // 剧本 / 主体库 / 导演台 / 资产记录：挂到新项目 id 下
+  for (const entity of entitiesToRestore) {
+    const newId = idMap.get(entity.oldId);
+    if (!newId) continue;
+    const remap = <T,>(value: T): T => remapObject(value, entity.keyMap);
+    try {
+      if (entity.script) await writeJson(`projects/${newId}/entities/script.json`, entity.script);
+      if (entity.storyboard) await writeJson(`projects/${newId}/entities/storyboard.json`, remap(entity.storyboard));
+      if (entity.workbench) await writeJson(`projects/${newId}/entities/workbench.json`, remap(entity.workbench));
+      if (entity.assets.length > 0) {
+        const mapped = entity.assets.map((asset) => ({ ...remap(asset), projectId: newId }));
+        await addAssets(mapped as unknown as Parameters<typeof addAssets>[0]);
+      }
+      // 缺省实体兜底：ensure 只在文件不存在时创建，不会覆盖上面刚写入的数据
+      await ensureProjectMounts(newId);
+    } catch (err) {
+      console.error(`[import-projects] 项目 ${newId} 实体还原失败:`, err);
+    }
+  }
+
   return importedProjects;
 }
 
-/**
- * 重映射 storageKey(保留前缀,生成新 ID 部分)
- * image:abc123 → image:<newNanoid>
- * video:xyz789 → video:<newNanoid>
- */
+/** 重映射 storageKey（保留前缀，生成新 ID 部分；cas: 不走这里） */
 function remapStorageKey(oldKey: string): string {
   const prefix = oldKey.split(':')[0];
   return `${prefix}:${nanoid()}`;
 }
 
-/**
- * 递归替换 graph 中所有 storageKey 值并刷新 content 字段
- * 遍历 nodes/edges/metadata 及其嵌套对象
- */
 async function remapGraphStorageKeys(graph: GraphModel, keyMap: Map<string, string>): Promise<GraphModel> {
-  const remappedNodes = await Promise.all(
-    graph.nodes.map(async (node) => remapNode(node, keyMap)),
-  );
+  const remappedNodes = await Promise.all(graph.nodes.map((node) => remapNode(node, keyMap)));
   return {
     nodes: remappedNodes,
     edges: graph.edges.map((edge) => remapObject(edge, keyMap) as typeof edge),
@@ -185,43 +237,34 @@ async function remapGraphStorageKeys(graph: GraphModel, keyMap: Map<string, stri
   };
 }
 
-/**
- * 重映射单个节点的 storageKey 并刷新 content 字段
- */
 async function remapNode(node: GraphModel['nodes'][number], keyMap: Map<string, string>): Promise<GraphModel['nodes'][number]> {
   const remapped = remapObject(node, keyMap) as GraphModel['nodes'][number];
   const data = remapped.data as Record<string, unknown> | undefined;
   if (data?.storageKey && typeof data.storageKey === 'string') {
     const newStorageKey = data.storageKey;
     let content: string | undefined;
-    if (newStorageKey.startsWith('image:')) {
-      content = await resolveImageUrl(newStorageKey);
-    } else if (newStorageKey.startsWith('video:') || newStorageKey.startsWith('audio:')) {
-      content = await resolveMediaUrl(newStorageKey);
-    }
-    if (content) {
-      data.content = content;
-    }
+    if (newStorageKey.startsWith('image:')) content = await resolveImageUrl(newStorageKey);
+    else if (newStorageKey.startsWith('video:') || newStorageKey.startsWith('audio:')) content = await resolveMediaUrl(newStorageKey);
+    if (content) data.content = content;
   }
   return remapped;
 }
 
 /**
- * 深度遍历对象,替换所有 storageKey 字段值
- * 仅替换字符串类型且在 keyMap 中的 storageKey
+ * 深度遍历替换 storage key。
+ * 主体树的 media[].key / coverKey / deriveFrom.mediaKey 与资产记录的字段名各不相同，
+ * 按字段名集合 + 值必须在 keyMap 中双重判定，避免误伤普通 key 字段。
  */
+const REMAPPED_FIELDS = new Set([
+  'storageKey', 'key', 'coverKey', 'mediaKey', 'assetStorageKey', 'coverStorageKey',
+]);
+
 function remapObject<T>(obj: T, keyMap: Map<string, string>): T {
   if (!obj || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => remapObject(item, keyMap)) as T;
-  }
+  if (Array.isArray(obj)) return obj.map((item) => remapObject(item, keyMap)) as T;
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-    if (
-      key === 'storageKey' &&
-      typeof value === 'string' &&
-      keyMap.has(value)
-    ) {
+    if (REMAPPED_FIELDS.has(key) && typeof value === 'string' && keyMap.has(value)) {
       result[key] = keyMap.get(value);
     } else if (value && typeof value === 'object') {
       result[key] = remapObject(value, keyMap);

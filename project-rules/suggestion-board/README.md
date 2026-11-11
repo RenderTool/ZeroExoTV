@@ -26,5 +26,6 @@
 | S-18 | 2026-11-10 | 画布视频生成验收反馈 5 项：采样进度 / 打包下载 / 一键同款 / 参数浮层下拉 / 输出比例恒 1:1 | 独立热修 | 🟢 merged | [2026-11-10-comfyui-canvas-video-generation-five-feedbacks.md](2026-11-10-comfyui-canvas-video-generation-five-feedbacks.md) |
 | S-19 | 2026-11-10 | 素材导入失败：目录授权与 MCP 服务无关，失败被空态吞掉 | 独立热修 | 🟢 merged | [2026-11-10-comfyui-directory-auth-not-mcp.md](2026-11-10-comfyui-directory-auth-not-mcp.md) |
 | S-20 | 2026-11-10 | 历史分组类型标签改简约名词（图片 / 视频） | 独立热修 | 🟢 merged | [2026-11-10-comfyui-history-kind-labels.md](2026-11-10-comfyui-history-kind-labels.md) |
+| S-21 | 2026-11-11 | 项目 ZIP 导出范围补全：剧本转 MD、主体格式化、无缝迁移 | C-05 | 🟢 merged | [2026-11-11-project-zip-full-migration.md](2026-11-11-project-zip-full-migration.md) |
 
-状态：open 0 / merged 20。
+状态：open 0 / merged 21。

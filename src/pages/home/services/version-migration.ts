@@ -26,7 +26,7 @@
 import type { CanvasExportFile } from './export-types.js';
 
 /** 当前 ZIP 导出格式版本（随格式升级递增） */
-export const CURRENT_ZIP_VERSION = 1;
+export const CURRENT_ZIP_VERSION = 2;
 
 /** 迁移函数：从某个版本升级到下一版本 */
 export type ZipMigrationFn = (data: CanvasExportFile) => CanvasExportFile;
@@ -60,12 +60,13 @@ export function getSupportedVersions(): number[] {
  * @throws Error 如果缺少中间版本的迁移函数
  */
 export function migrateExportFile(data: CanvasExportFile): CanvasExportFile {
-  let current = { ...data };
+  let current: CanvasExportFile = { ...data };
 
-  // 无 version 字段视为 v1
-  const rawVersion = (data as { version?: number }).version ?? 1;
-  if (rawVersion < 1) {
-    console.warn(`[version-migration] unknown version ${rawVersion}, treating as v1`);
+  // 无 version 字段视为 v1；必须写回 current，否则 while 判 undefined 会直接跳过迁移
+  const rawVersion = (data as { version?: number }).version;
+  if (rawVersion === undefined || rawVersion < 1) {
+    if (rawVersion !== undefined) console.warn(`[version-migration] unknown version ${rawVersion}, treating as v1`);
+    current = { ...current, version: 1 };
   }
 
   while (current.version < CURRENT_ZIP_VERSION) {
@@ -97,3 +98,17 @@ export function migrateExportFile(data: CanvasExportFile): CanvasExportFile {
 
   return current;
 }
+
+/**
+ * v1 → v2：旧包只有 meta/graph/files/canvases，新实体字段全部可选。
+ * 这里只补空文档清单与 files 兜底，旧包内容一字不改，保证历史 ZIP 仍能导入。
+ */
+registerZipMigration(1, (data) => ({
+  ...data,
+  version: 2 as const,
+  projects: (Array.isArray(data.projects) ? data.projects : []).map((item) => ({
+    ...item,
+    files: Array.isArray(item.files) ? item.files : [],
+    documents: item.documents ?? { scriptMarkdown: [], subjectsMarkdown: [] },
+  })),
+}));
