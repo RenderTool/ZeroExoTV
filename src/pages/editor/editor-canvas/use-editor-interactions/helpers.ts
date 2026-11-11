@@ -113,6 +113,10 @@ export async function downloadNodeAsFile(
       }
     : undefined;
   const guideBlob = guideRef ? await fetchGuideBlob(guideRef).catch(() => null) : null;
+  // 下载即回填本地缓存：老产物（生成时还没做自动缓存）也能在云端清盘前落到 media/guides
+  if (guideBlob && guideRef?.id) {
+    void import('@/entities/guide-store.js').then((m) => m.writeGuideBlob(guideRef.id!, guideBlob)).catch(() => undefined);
+  }
   if (guideBlob) {
     const zipBase = (baseName || '视频').replace(/[\\/:*?"<>|]+/g, '_').trim() || '视频';
     await downloadFilesAsZip(
