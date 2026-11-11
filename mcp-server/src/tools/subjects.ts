@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
-import { matchSubjectCandidates, deleteSubject, deleteSubjectImage, mergeSubjects, readStoryboard, setSubjectImage, upsertSubject } from "../store/storyboard.js";
+import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -58,7 +58,66 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       const sb = await readStoryboard(dataRoot(), args.projectId);
       if (!sb) return { version: 0, subjects: [] };
       const list = args.kind ? sb.entities.filter((e) => e.kind === args.kind) : sb.entities;
-      return { version: sb.version, subjects: list };
+      const trees = (Array.isArray(sb.subjectTree) ? sb.subjectTree : []) as Array<{
+        itemId?: string | null;
+        states?: Array<{ media?: Array<{ key: string }> }>;
+      }>;
+      const byTree = new Map(trees.map((t) => [t.itemId, t]));
+      return {
+        version: sb.version,
+        subjects: list.map((e) => {
+          const tree = byTree.get(e.id);
+          const keys = new Set((tree?.states ?? []).flatMap((st) => (st.media ?? []).map((m) => m.key)));
+          return {
+            ...e,
+            stateCount: tree?.states?.length ?? 0,
+            imagesMapped: e.images.filter((i) => keys.has(i.storageKey)).length,
+          };
+        }),
+      };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "audit_subjects",
+    description:
+      "只读自检主体库：主体是否缺树、图是否没映射进状态（页面不显示）、基础状态是否没图、空主体、同名重复。" +
+      "写主体后建议先跑它；有 images_not_in_tree / missing_tree 就调用 repair_subject_trees。",
+    bits: ["subject.read"],
+    schema: { projectId: z.string() },
+    handler: async (args) => {
+      const audit = await auditSubjects(dataRoot(), args.projectId);
+      return audit;
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "repair_subject_trees",
+    description:
+      "修复主体树：补齐缺失的树、把 entity.images 按 stateTag 映射进基础状态/对应状态（幂等，不删数据、不动已有提示词）。" +
+      "写类：先 dryRun 看 mediaFixed/statesCreated，再 userConfirmed:true 落盘。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      userConfirmed: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "修复主体树必须 userConfirmed:true（先 dryRun 看会补多少）");
+      }
+      const res = await repairSubjectTrees(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        dryRun: args.dryRun,
+      });
+      return {
+        written: res.written,
+        version: res.after.version,
+        mediaFixed: res.mediaFixed,
+        statesCreated: res.statesCreated,
+        treesCreated: res.treesCreated,
+      };
     },
   });
 

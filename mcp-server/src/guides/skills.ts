@@ -128,6 +128,14 @@ const SUBJECTS = `# 技能：主体库（subjects）
 - 这三个都是破坏性写，必须 **先 dryRun 给用户确认清单，再 userConfirmed:true**；禁止说「MCP 没有删主体/删图的工具，请你去前端删」。
 - 合并前必须确认 source/target 是同一演员；不同演员不能合并（服务端只允许同 kind，但同名不同人仍需人工判断）。
 
+### 3.8 主体写完必须自检（2026-11-12 事故后加，硬性）
+
+- 任何 \`upsert_subject\` / \`set_subject_image\` / \`merge_subjects\` 之后，必须调用 \`audit_subjects({ projectId })\`。
+- \`images_not_in_tree > 0\` 或 \`missing_tree > 0\`：说明页面会出现「有图但基础状态没图」，
+  用 \`repair_subject_trees({ baseVersion, dryRun:true })\` 看数量，再 \`userConfirmed:true\` 修复。
+- \`audit_subjects\` 返回的 \`no_image\` 是**没出图的配角/场景**，不是数据损坏；不要为了清零去删有剧情的角色。
+- 禁止把「页面没图」解释成浏览器缓存或让用户重新导入；先跑 audit 拿证据。
+
 ## 4. 落地步骤
 
 1. \`upsert_subject({ name, kind, aliases, note:身份锚点句 })\` —— 先 dryRun，清单给用户确认后才写。

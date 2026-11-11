@@ -20,7 +20,7 @@ export interface ProductionItem {
   consistency?: string;
   note?: string;
   episodeIds: string[];
-  images: { storageKey: string; label?: string }[];
+  images: { storageKey: string; stateTag?: string; prompt?: string; note?: string; tags?: string[]; label?: string }[];
   coverKey?: string | null;
 }
 
@@ -86,6 +86,8 @@ export async function upsertSubject(
         };
         s.entities.push(subject);
       }
+      // 主体与主体树必须成对存在：MCP 新建/更新后立刻补树，避免前端打开是空状态
+      ensureTree(s, subject);
     },
   });
   return { ...res, subject, created };
@@ -387,4 +389,163 @@ export async function mergeSubjects(
     },
   });
   return { ...res, merged: res.written !== false, movedImages, movedStates };
+}
+
+// ===== 主体库自检与修复（2026-11-12：MCP 写入只改实体不建树导致「有图但页面没图」） =====
+
+const BASE_STATE_TAGS = new Set(["", "定妆", "基础状态", "基础形态", "基础", "定妆照"]);
+
+function normalizeStateTag(tag: unknown): string {
+  return String(tag ?? "").trim();
+}
+
+/** 把 entity.images 按 stateTag 映射进树：基础图 → states[0]；其它 tag → 对应状态（不存在则建） */
+function assignImagesToTree(
+  tree: TreeLike,
+  images: ProductionItem["images"],
+  coverKey?: string | null,
+): { mediaFixed: number; statesCreated: number; baseFilled: boolean } {
+  let mediaFixed = 0;
+  let statesCreated = 0;
+  const base = tree.states[0];
+  const groups = new Map<string, ProductionItem["images"]>();
+  for (const img of images) {
+    const tag = normalizeStateTag(img.stateTag);
+    const key = BASE_STATE_TAGS.has(tag) || (coverKey && img.storageKey === coverKey) ? "__base__" : tag || "__base__";
+    const list = groups.get(key) ?? [];
+    list.push(img);
+    groups.set(key, list);
+  }
+  const baseImgs = groups.get("__base__") ?? [];
+  if (baseImgs.length > 0) {
+    const next = baseImgs.map((i) => ({ key: i.storageKey, type: "image", prompt: i.prompt }));
+    if (JSON.stringify(base.media ?? []) !== JSON.stringify(next)) mediaFixed += 1;
+    base.media = next;
+  }
+  for (const [tag, imgs] of groups) {
+    if (tag === "__base__") continue;
+    let state = tree.states.find((x) => normalizeStateTag(x.state) === tag);
+    if (!state) {
+      state = {
+        id: `snode-${tree.rootId}-${tree.states.length}`,
+        state: tag,
+        type: "image",
+        step: 1,
+        deriveFrom: null,
+        deltaPrompt: "",
+        fullPrompt: "",
+        recognitionTerms: [],
+        media: [],
+        source: "user",
+        baseRef: tree.rootId,
+        appearEpisodes: [],
+      };
+      tree.states.push(state);
+      statesCreated += 1;
+    }
+    const next = imgs.map((i) => ({ key: i.storageKey, type: "image", prompt: i.prompt }));
+    if (JSON.stringify(state.media ?? []) !== JSON.stringify(next)) mediaFixed += 1;
+    state.media = next;
+  }
+  return { mediaFixed, statesCreated, baseFilled: base.media.length > 0 };
+}
+
+export interface SubjectAuditIssue {
+  subjectId: string;
+  name: string;
+  kind: SubjectKind;
+  issue: "missing_tree" | "images_not_in_tree" | "base_state_empty" | "no_image" | "duplicate_name";
+  detail: string;
+}
+
+export interface SubjectAudit {
+  version: number;
+  entities: number;
+  trees: number;
+  counts: { missingTree: number; imagesNotInTree: number; baseStateEmpty: number; noImage: number; duplicateName: number };
+  issues: SubjectAuditIssue[];
+}
+
+/** 只读自检：主体 ↔ 树 ↔ 图片是否一一对应（写主体后建议先跑它） */
+export async function auditSubjects(root: string, projectId: string): Promise<SubjectAudit> {
+  const s = await readStoryboard(root, projectId);
+  const empty: SubjectAudit = {
+    version: 0,
+    entities: 0,
+    trees: 0,
+    counts: { missingTree: 0, imagesNotInTree: 0, baseStateEmpty: 0, noImage: 0, duplicateName: 0 },
+    issues: [],
+  };
+  if (!s) return empty;
+  const trees = (Array.isArray(s.subjectTree) ? s.subjectTree : []) as TreeLike[];
+  const byTree = new Map(trees.map((t) => [t.itemId, t]));
+  const issues: SubjectAuditIssue[] = [];
+  const seen = new Map<string, string>();
+  for (const e of s.entities) {
+    const tree = byTree.get(e.id);
+    if (!tree) {
+      issues.push({ subjectId: e.id, name: e.name, kind: e.kind, issue: "missing_tree", detail: "没有主体树" });
+      empty.counts.missingTree += 1;
+    } else {
+      const keys = new Set(tree.states.flatMap((st) => (st.media ?? []).map((m) => m.key)));
+      const missing = e.images.filter((i) => !keys.has(i.storageKey));
+      if (missing.length > 0) {
+        issues.push({
+          subjectId: e.id, name: e.name, kind: e.kind, issue: "images_not_in_tree",
+          detail: `${missing.length} 张图不在任何状态里（页面不显示）`,
+        });
+        empty.counts.imagesNotInTree += 1;
+      }
+      if (e.images.length > 0 && (tree.states[0]?.media ?? []).length === 0) {
+        issues.push({ subjectId: e.id, name: e.name, kind: e.kind, issue: "base_state_empty", detail: "基础状态没有图" });
+        empty.counts.baseStateEmpty += 1;
+      }
+    }
+    if (e.images.length === 0) {
+      issues.push({ subjectId: e.id, name: e.name, kind: e.kind, issue: "no_image", detail: "主体没有任何图" });
+      empty.counts.noImage += 1;
+    }
+    const norm = e.name.replace(/[（(][^）)]*[）)]/g, "").replace(/\s+/g, "").toLowerCase();
+    const prev = seen.get(`${norm}|${e.kind}`);
+    if (prev) {
+      issues.push({ subjectId: e.id, name: e.name, kind: e.kind, issue: "duplicate_name", detail: `与 ${prev} 同名` });
+      empty.counts.duplicateName += 1;
+    } else {
+      seen.set(`${norm}|${e.kind}`, e.name);
+    }
+  }
+  return { version: s.version, entities: s.entities.length, trees: trees.length, counts: empty.counts, issues };
+}
+
+/** 修复：补齐缺失的树、把图片映射进状态（幂等）。不删数据，不动已有提示词。 */
+export async function repairSubjectTrees(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; dryRun?: boolean },
+): Promise<UpdateResult<StoryboardContainer> & { mediaFixed: number; statesCreated: number; treesCreated: number }> {
+  let mediaFixed = 0;
+  let statesCreated = 0;
+  let treesCreated = 0;
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
+    baseVersion: opts.baseVersion,
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      const before = (Array.isArray(s.subjectTree) ? s.subjectTree : []).length as number;
+      for (const e of s.entities) {
+        const existed = ((Array.isArray(s.subjectTree) ? s.subjectTree : []) as TreeLike[]).some((t) => t.itemId === e.id);
+        const tree = ensureTree(s, e);
+        if (!existed) treesCreated += 1;
+        const r = assignImagesToTree(tree, e.images ?? [], e.coverKey);
+        mediaFixed += r.mediaFixed;
+        statesCreated += r.statesCreated;
+        if (!e.coverKey && e.images?.[0]) e.coverKey = e.images[0].storageKey;
+        tree.coverKey = e.coverKey ?? tree.states[0]?.media?.[0]?.key ?? null;
+      }
+      if (before === 0) {
+        // 保证 subjectTree 落到容器里（ensureTree 已写，但空数组情况再兜底）
+        s.subjectTree = s.subjectTree ?? [];
+      }
+    },
+  });
+  return { ...res, mediaFixed, statesCreated, treesCreated };
 }
