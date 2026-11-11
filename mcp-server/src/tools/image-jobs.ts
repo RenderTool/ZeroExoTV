@@ -42,40 +42,79 @@ function statusPath(root: string, jobId: string): string {
 }
 
 export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
+  const queueJob = async (projectId: string, requests: unknown[], jobIdArg?: string) => {
+    const root = dataRoot();
+    const projectDir = path.join(root, "projects", projectId);
+    const exists = await fs.stat(projectDir).then(() => true).catch(() => false);
+    if (!exists) throw new McpError("NOT_FOUND", `项目不存在: ${projectId}`);
+    const jobId = jobIdArg?.trim() || `zxjob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const payload = {
+      schemaVersion: 1,
+      jobId,
+      projectId,
+      createdAt: new Date().toISOString(),
+      requests: requests.map((r, i) => ({ ...(r as object), index: i })),
+    };
+    await fs.mkdir(path.join(root, JOBS_DIR), { recursive: true });
+    await fs.writeFile(jobPath(root, jobId), JSON.stringify(payload, null, 2), "utf8");
+    return {
+      jobId,
+      queued: payload.requests.length,
+      jobFile: path.join(JOBS_DIR, `${jobId}.json`),
+      hint: "网页画布需打开同一项目且在线；每 2 秒轮询一次，用 get_canvas_image_job({ projectId, jobId }) 看进度",
+    };
+  };
+
   defTool(server, ctx, {
     name: "generate_canvas_images",
     description:
-      "在**当前打开的画布**上批量生成或改图：写一份作业到共享目录，网页画布在线时自动创建**下游新节点**、调用 ComfyUI 生成并把结果写进实时画布与历史。" +
-      "纯文生图 model=moss/krea2/qwen；**改图（图生图）传 sourceStorageKey 或 sourceNodeId**（走 Qwen 图片编辑，必须描述「只改什么、其余保持不变」）。" +
-      "绝不覆盖原图/原节点。每张图可独立指定 prompt、比例、百万像素、步数、种子。" +
-      "投递后用 get_canvas_image_job 轮询进度。",
+      "在**当前打开的画布**上批量生成/改图：写作业到共享目录，网页画布在线时自动在画布上**新建下游节点**、调用 ComfyUI 生成并把结果写进实时画布与历史（不是只进资产库）。" +
+      "纯文生图 model=moss/krea2/qwen；**改图传 sourceStorageKey 或 sourceNodeId**（走 Qwen 图片编辑）。绝不覆盖原图/原节点。" +
+      "每张图可独立指定 prompt、比例、百万像素、步数、种子。投递后用 get_canvas_image_job 轮询。",
     bits: ["project.write"],
     schema: {
       projectId: z.string(),
       requests: z.array(requestSchema).min(1).max(24),
       jobId: z.string().optional(),
     },
+    handler: async (args) => queueJob(args.projectId, args.requests, args.jobId),
+  });
+
+  defTool(server, ctx, {
+    name: "edit_canvas_image",
+    description:
+      "修改画布上已有的一张图（图生图）：传 sourceNodeId（画布节点 id）或 sourceStorageKey（cas:/image: 键）+ 编辑指令，" +
+      "网页会把原图作为输入交给 Qwen 图片编辑，**在画布上新建「MCP 改图」节点**，原图不动。" +
+      "编辑指令必须写成「只改什么 + 其余保持不变 + 原图关键元素复述」，不要重新描述整张新图。",
+    bits: ["project.write"],
+    schema: {
+      projectId: z.string(),
+      sourceNodeId: z.string().optional(),
+      sourceStorageKey: z.string().optional(),
+      prompt: z.string().min(1).describe("只描述要改的部分与必须保持的内容"),
+      title: z.string().optional(),
+      maskStorageKey: z.string().optional(),
+      steps: z.number().int().min(1).max(100).optional(),
+      seed: z.number().int().optional(),
+      width: z.number().int().optional(),
+      height: z.number().int().optional(),
+    },
     handler: async (args) => {
-      const root = dataRoot();
-      const projectDir = path.join(root, "projects", args.projectId);
-      const exists = await fs.stat(projectDir).then(() => true).catch(() => false);
-      if (!exists) throw new McpError("NOT_FOUND", `项目不存在: ${args.projectId}`);
-      const jobId = args.jobId?.trim() || `zxjob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      const payload = {
-        schemaVersion: 1,
-        jobId,
-        projectId: args.projectId,
-        createdAt: new Date().toISOString(),
-        requests: args.requests.map((r, i) => ({ ...r, index: i })),
-      };
-      await fs.mkdir(path.join(root, JOBS_DIR), { recursive: true });
-      await fs.writeFile(jobPath(root, jobId), JSON.stringify(payload, null, 2), "utf8");
-      return {
-        jobId,
-        queued: payload.requests.length,
-        jobFile: path.join(JOBS_DIR, `${jobId}.json`),
-        hint: "网页画布需打开同一项目且在线；每 2 秒轮询一次，用 get_canvas_image_job({ projectId, jobId }) 看进度",
-      };
+      if (!args.sourceNodeId && !args.sourceStorageKey) {
+        throw new McpError("VALIDATION", "改图必须给 sourceNodeId 或 sourceStorageKey（先 get_canvas/list_assets 取原图）");
+      }
+      return queueJob(args.projectId, [{
+        model: "qwen",
+        prompt: args.prompt,
+        title: args.title,
+        sourceNodeId: args.sourceNodeId,
+        sourceStorageKey: args.sourceStorageKey,
+        maskStorageKey: args.maskStorageKey,
+        steps: args.steps,
+        seed: args.seed,
+        width: args.width,
+        height: args.height,
+      }]);
     },
   });
 

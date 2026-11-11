@@ -12,7 +12,7 @@ import { fitImageNodeSize } from '@/pages/editor/editor-canvas/use-editor-intera
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { listDir, readJson, writeJson, removeFile } from '@/platform/fs.js';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
+import { resolveMediaBlob } from '@/shared/media/resolve-media-blob.js';
 import { contentToDataUrl } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
 import { generateMossImage } from '@/pages/editor/editor-canvas/interactions/local-moss-image.js';
 import { generateKrea2Image } from '@/pages/editor/editor-canvas/interactions/local-krea2-image.js';
@@ -179,17 +179,26 @@ export function useMcpImageJobs(opts: {
         if (item.state === 'done') continue;
         const nodeId = item.nodeId;
         // 改图：解析原图（sourceNodeId 从画布节点读，sourceStorageKey 直接给键），转 dataURL 交给 Qwen 编辑
-        let sourceKey = req.sourceStorageKey ?? '';
-        if (!sourceKey && req.sourceNodeId && store) {
-          const srcNode = store.getGraph().nodes.find((n) => n.id === req.sourceNodeId);
-          const d = (srcNode?.data ?? {}) as Record<string, unknown>;
-          sourceKey = String(d.storageKey ?? d.content ?? '');
-        }
-        const sourceDataUrl = sourceKey
-          ? await contentToDataUrl(getResourceUrl(sourceKey, 'full') ?? sourceKey).catch(() => undefined)
+        const srcNode = req.sourceNodeId && store
+          ? store.getGraph().nodes.find((n) => n.id === req.sourceNodeId)
           : undefined;
+        const srcData = (srcNode?.data ?? {}) as Record<string, unknown>;
+        let sourceKey = req.sourceStorageKey ?? String(srcData.storageKey ?? '');
+        const inlineSource = typeof srcData.content === 'string' ? srcData.content : '';
+        const blobToDataUrl = async (blob: Blob | null): Promise<string | undefined> => {
+          if (!blob) return undefined;
+          const url = URL.createObjectURL(blob);
+          try { return await contentToDataUrl(url); } finally { URL.revokeObjectURL(url); }
+        };
+        // 优先用节点内联内容（data:/blob:/http），其次按 storageKey 从本地媒体存储读原始字节
+        let sourceDataUrl = inlineSource && /^(data:|blob:|https?:)/.test(inlineSource)
+          ? await contentToDataUrl(inlineSource).catch(() => undefined)
+          : undefined;
+        if (!sourceDataUrl && sourceKey) {
+          sourceDataUrl = await blobToDataUrl(await resolveMediaBlob(sourceKey, 'image', 'orig').catch(() => null));
+        }
         const maskDataUrl = req.maskStorageKey
-          ? await contentToDataUrl(getResourceUrl(req.maskStorageKey, 'full') ?? req.maskStorageKey).catch(() => undefined)
+          ? await blobToDataUrl(await resolveMediaBlob(req.maskStorageKey, 'image', 'orig').catch(() => null))
           : undefined;
         const isEdit = Boolean(sourceDataUrl);
         const modelKey = isEdit ? LOCAL_IMAGE_MODEL_KEY : MODEL_KEYS[req.model ?? 'moss'];

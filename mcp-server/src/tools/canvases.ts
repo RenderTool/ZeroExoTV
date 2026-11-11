@@ -61,7 +61,7 @@ export function registerCanvasTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "patch_canvas_nodes",
     description:
-      "给**副本画布**的既有节点打补丁（data 浅合并 / title 覆盖 / position 覆盖）。写纪律：size+mtime 双因子乐观锁 + version+1，与前端并发时后写者拿 VERSION_CONFLICT。任一 nodeId 不存在则整体不写并回 missingNodeIds。dryRun:true 只返回字段级 diff。**1 号主画布只读**（前端防抖自动保存，外部写会互相覆盖）；**不做结构性增删节点或连线**。",
+      "给**副本画布**的既有节点打补丁（data 浅合并 / title 覆盖 / position 覆盖）。写纪律：size+mtime 双因子乐观锁 + version+1，与前端并发时后写者拿 VERSION_CONFLICT。任一 nodeId 不存在则整体不写并回 missingNodeIds。dryRun:true 只返回字段级 diff。**1 号主画布只读**（前端防抖自动保存，外部写会互相覆盖）；**不做结构性增删节点或连线**。要在画布上新增图/改图，用 generate_canvas_images / edit_canvas_image（网页在线时由网页在实时画布建下游节点），不要试图用本工具造节点。",
     bits: ["project.write"],
     schema: {
       projectId: z.string(),
