@@ -7,7 +7,8 @@
  * 这样 MCP 触发的图会出现在**用户正在看的实时画布**上（主画布由浏览器持有，外部不直接写 JSON）。
  */
 import { useEffect, useRef } from 'react';
-import { AddNodeCommand, UpdateNodeDataCommand, type CommandQueue } from '@zeroexo/core';
+import { AddNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand, type CommandQueue } from '@zeroexo/core';
+import { fitImageNodeSize } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { listDir, readJson, writeJson, removeFile } from '@/platform/fs.js';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
@@ -148,10 +149,11 @@ export function useMcpImageJobs(opts: {
         const modelKey = MODEL_KEYS[req.model ?? 'moss'];
         const col = i % 5;
         const row = Math.floor(i / 5);
+        const position = { x: 120 + col * 300, y: 120 + row * 320 };
         cq.execute(new AddNodeCommand({
           id: nodeId,
           type: 'image',
-          position: { x: 120 + col * 300, y: 120 + row * 320 },
+          position,
           size: { width: 300, height: 300 },
           title: req.title || `MCP 图片 ${i + 1}`,
           data: {
@@ -199,6 +201,8 @@ export function useMcpImageJobs(opts: {
             prompt: req.prompt,
             ...(landed?.storageKey ? { storageKey: landed.storageKey } : {}),
           } as Record<string, unknown>));
+          const fitted = fitImageNodeSize(300, result.width, result.height);
+          cq.execute(new ResizeNodeCommand(nodeId, { ...position, width: 300, height: 300 }, { ...position, width: fitted.width, height: fitted.height }));
           item.state = 'done';
           item.storageKey = landed?.storageKey;
           item.width = result.width;

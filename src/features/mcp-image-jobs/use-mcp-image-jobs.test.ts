@@ -27,5 +27,8 @@ describe('useMcpImageJobs 结构契约', () => {
     expect(src).toContain('autoLandGenerationBlob');
     expect(src).toContain('.status.json');
     expect(src).toContain('state: \'running\'');
+    // 节点必须按原图比例重算（MCP 建节点用 300×300 占位）
+    expect(src).toContain('ResizeNodeCommand');
+    expect(src).toContain('fitImageNodeSize(300');
   });
 });

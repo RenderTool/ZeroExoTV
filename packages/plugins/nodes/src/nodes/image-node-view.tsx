@@ -155,6 +155,29 @@ export function ImageNodeView({
     }
   };
 
+  /**
+   * 2026-11-11：生成结果（含 MCP 投递的图）写回节点后，节点尺寸必须回到原图比例。
+   * 只靠 onLoad 会漏：节点可能在图片加载完成之后才被外部更新数据，或 MCP 新建节点用固定 300×300。
+   * 这里以 naturalWidth/Height 为准兜底纠正一次（长边 ≤320、短边 ≥120）。
+   */
+  useEffect(() => {
+    if (contentOnly || !commandQueue) return;
+    if (data.status !== 'success') return;
+    const nw = data.naturalWidth;
+    const nh = data.naturalHeight;
+    if (!nw || !nh) return;
+    const curW = node.size?.width ?? IMAGE_DEFAULT_SIZE.width;
+    const curH = node.size?.height ?? IMAGE_DEFAULT_SIZE.height;
+    const ratio = nh / nw;
+    let width = Math.min(IMAGE_LONG_SIDE, Math.max(MEDIA_MIN_SIZE.height, Math.round(curW)));
+    let height = Math.round(width * ratio);
+    if (height > IMAGE_LONG_SIDE) { height = IMAGE_LONG_SIDE; width = Math.round(height / ratio); }
+    if (height < MEDIA_MIN_SIZE.height) { height = MEDIA_MIN_SIZE.height; width = Math.round(height / ratio); }
+    if (Math.abs(width - curW) <= 2 && Math.abs(height - curH) <= 2) return;
+    const rect = { x: node.position.x, y: node.position.y, width: curW, height: curH };
+    commandQueue.execute(new ResizeNodeCommand(node.id, rect, { ...rect, width, height }));
+  }, [contentOnly, commandQueue, data.status, data.naturalWidth, data.naturalHeight, node.id, node.position.x, node.position.y, node.size?.width, node.size?.height]);
+
   // 节点颜色使用 theme.node.fill(所有类型共用)
   const nodeColor = theme.node.fill;
 
