@@ -5,7 +5,6 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, CheckSquare, Square, Download, Upload } from 'lucide-react';
 import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip } from 'antd';
-import { VersionBadge } from '@/features/top-bar/components/version-badge.js';
 import { SearchButton } from '@/shared/components/search-button.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AntdThemeProvider, ProjectCard, CoverUploadModal } from '@/shared/components/index.js';
@@ -424,10 +423,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                 </Tooltip>
               )}
             </div>
-          </div>
-          {/* 版本号固定放主页右上角（2026-11-12 用户要求） */}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-            <VersionBadge theme={theme} />
           </div>
         </div>
 
