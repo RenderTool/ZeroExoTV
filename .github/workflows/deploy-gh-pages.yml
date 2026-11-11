@@ -36,10 +36,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build static site (project path)
+      - name: Build static site (custom domain root)
         env:
-          VITE_BASE_PATH: /ZeroExoTV/
+          # renderdoc.space 的 gh-pages 站点挂在域名根（/），必须用 / 作为 base；
+          # 若用 /ZeroExoTV/，根页会去请求 /ZeroExoTV/assets/* 导致 404。
+          VITE_BASE_PATH: /
         run: pnpm build
+
+      - name: Add /ZeroExoTV redirect
+        run: |
+          mkdir -p dist/ZeroExoTV
+          cat > dist/ZeroExoTV/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><title>ZeroExoTV</title><script>location.replace('/'+location.hash)</script><meta http-equiv="refresh" content="0;url=/">
+          EOF
 
       - name: Package MCP
         run: |
