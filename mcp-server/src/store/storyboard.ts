@@ -347,7 +347,9 @@ export async function mergeSubjects(
           movedImages += 1;
         }
       }
-      target.aliases = Array.from(new Set([...(target.aliases ?? []), source.name, ...(source.aliases ?? [])])).filter((a) => a !== target.name);
+      target.aliases = Array.from(new Set([...(target.aliases ?? []), source.name, ...(source.aliases ?? [])])).filter(
+        (a) => a !== target.name && !a.includes('⚠️') && !a.includes('可前端删'),
+      );
       target.episodeIds = Array.from(new Set([...(target.episodeIds ?? []), ...(source.episodeIds ?? [])]));
       if (!target.coverKey) target.coverKey = source.coverKey ?? target.images[0]?.storageKey ?? null;
 
