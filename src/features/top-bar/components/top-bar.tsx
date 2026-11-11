@@ -239,8 +239,6 @@ export function TopBar({
                 transition: 'max-width 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s',
               }}
             >
-              {/* 版本号 + 本地/官方对照（2026-11-11 用户要求） */}
-              <VersionBadge theme={theme} />
               {/* 外观(主题切换,2026-08-29 移回顶栏;与主页顶栏共用同一图标) */}
               <TopBarIconButton
                 action="appearance"
@@ -289,6 +287,8 @@ export function TopBar({
                 />
               </Badge>
             </Tooltip>
+            {/* 版本号常驻最右侧（2026-11-12 用户要求；不随设置组收起） */}
+            <VersionBadge theme={theme} />
             {/* 本地版（Plan#83）：Agent 面板开关随 canvas-agent 链路移除 */}
           </>
         )}

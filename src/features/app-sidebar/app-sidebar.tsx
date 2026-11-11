@@ -146,37 +146,6 @@ export function AppSidebar({ activeRoute, onNavigate }: AppSidebarProps): React.
             );
           })}
         </div>
-
-        {/* ===== 底部政策公告按钮 ===== */}
-        <div style={{
-          padding: '10px',
-          display: 'flex',
-          justifyContent: 'center',
-        }}>
-          <Tooltip title="政策公告" placement="right">
-            <button
-              type="button"
-              className="zeroexo-sidebar-btn"
-              onClick={() => handleNavigate('policies')}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 36, height: 36, borderRadius: '50%',
-                border: 'none', background: 'transparent',
-                color: textColor,
-                cursor: 'pointer', fontFamily: 'inherit',
-                transition: 'all .15s',
-              }}
-            >
-              <SidebarAnimatedIcon
-                type="help"
-                size={20}
-                active={false}
-                color={textColor}
-                strokeWidth={1.5}
-              />
-            </button>
-          </Tooltip>
-        </div>
       </div>
     </>
   );
