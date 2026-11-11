@@ -38,7 +38,7 @@ jobs:
       - name: Build static site
         env:
           # 仓库名 ZeroExoTV；自定义域名时改成 /
-          VITE_BASE_PATH: /ZeroExoTV/
+          VITE_BASE_PATH: ./
         run: pnpm build
 
       - name: Package MCP
