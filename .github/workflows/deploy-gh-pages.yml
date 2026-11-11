@@ -1,0 +1,71 @@
+name: Deploy gh-pages (custom domain renderdoc.space)
+
+# 2026-11-11：自定义域名 renderdoc.space 的站点由 gh-pages 分支提供（CNAME），
+# Actions 的 Pages artifact 部署不会更新它，导致自定义域名一直引用旧 hash 资源 404。
+# 这里在每次 main 推送后把同一份构建同步到 gh-pages，保证两条域名一致。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.0 --activate
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static site (project path)
+        env:
+          VITE_BASE_PATH: /ZeroExoTV/
+        run: pnpm build
+
+      - name: Package MCP
+        run: |
+          cd mcp-server
+          npm install --no-audit --no-fund
+          npm run build
+          npm pack --pack-destination ../dist/downloads
+          cd ..
+          MCP_VERSION=$(node -p "require('./mcp-server/package.json').version")
+          cp "dist/downloads/zeroexo-mcp-server-${MCP_VERSION}.tgz" dist/downloads/zeroexo-mcp-server.tgz
+
+      - name: Package ComfyUI plugin
+        run: |
+          cd comfyui-plugin
+          zip -r ../dist/downloads/ComfyUI_ZeroExoNodes.zip ComfyUI_ZeroExoNodes \
+            -x '*/__pycache__/*' '*.pyc'
+          cp ../dist/downloads/ComfyUI_ZeroExoNodes.zip \
+            "../dist/downloads/ComfyUI_ZeroExoNodes-${GITHUB_SHA::7}.zip"
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          cname: renderdoc.space
+          enable_jekyll: false
+          force_orphan: false
+          commit_message: 'Deploy ${{ github.sha }} to gh-pages'
