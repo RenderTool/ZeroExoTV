@@ -355,7 +355,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               </Tooltip>
 
               {/* 导入项目（zip 包，导出/导入同一格式；任何设备都能备份恢复） */}
-              <VersionBadge theme={theme} />
               <Tooltip title={t('home.importProject', '导入项目')}>
                 <Button
                   icon={<Upload size={14} />}
@@ -425,6 +424,10 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                 </Tooltip>
               )}
             </div>
+          </div>
+          {/* 版本号固定放主页右上角（2026-11-12 用户要求） */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+            <VersionBadge theme={theme} />
           </div>
         </div>
 
