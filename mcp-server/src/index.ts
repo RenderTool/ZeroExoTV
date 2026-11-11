@@ -181,6 +181,8 @@ async function main(): Promise<void> {
   if (argv.includes("--http")) {
     const portIdx = argv.indexOf("--port");
     const port = portIdx >= 0 ? Number(argv[portIdx + 1]) : 8787;
+    // 先注册工具再盖印章：否则 server-info 会写 tools:0/toolNames:[]，网页误报「缺 52 个工具」
+    await buildServer({ getToken: () => process.env.ZEROEXO_MCP_TOKEN });
     await stampServerInfo(port);
     // 有会话态：initialize 建立 session，后续请求按 mcp-session-id 复用同一 server。
     const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();

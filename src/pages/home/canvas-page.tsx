@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, CheckSquare, Square, Download, Upload } from 'lucide-react';
 import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip } from 'antd';
+import { VersionBadge } from '@/features/top-bar/components/version-badge.js';
 import { SearchButton } from '@/shared/components/search-button.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AntdThemeProvider, ProjectCard, CoverUploadModal } from '@/shared/components/index.js';
@@ -354,6 +355,7 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               </Tooltip>
 
               {/* 导入项目（zip 包，导出/导入同一格式；任何设备都能备份恢复） */}
+              <VersionBadge theme={theme} />
               <Tooltip title={t('home.importProject', '导入项目')}>
                 <Button
                   icon={<Upload size={14} />}

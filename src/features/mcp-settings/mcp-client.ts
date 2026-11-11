@@ -162,7 +162,8 @@ export const MCP_RESERVED_TOOLS: ToolInfo[] = [
  */
 export function mcpServerMissingTools(info: ServerInfo | null | undefined): string[] {
   if (!info) return [];
-  if (!Array.isArray(info.toolNames)) return ['(旧版服务，未上报工具清单)'];
+  // 2026-11-11：服务端可能在注册工具前盖章（tools:0），空清单视为「无法判断」，不要误报缺全部工具。
+  if (!Array.isArray(info.toolNames) || info.toolNames.length === 0) return [];
   const names = info.toolNames;
   return MCP_TOOLS.map((t) => t.name).filter((n) => !names.includes(n));
 }
