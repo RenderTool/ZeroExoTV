@@ -549,3 +549,73 @@ export async function repairSubjectTrees(
   });
   return { ...res, mediaFixed, statesCreated, treesCreated };
 }
+
+// ===== 集数同步（2026-11-12：episodeIds 只写实体，树里的 appearEpisodes 一直是空 → 页面全显示「全部」） =====
+
+function stripHtmlText(html: string): string {
+  return String(html ?? "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, "");
+}
+
+/**
+ * 把主体的集数关联同步到树：entity.episodeIds ↔ states[0].appearEpisodes（编号）。
+ * entity 为空时按名字/别名在剧本里重新匹配（只补空，不覆盖已有绑定）。
+ */
+export async function syncSubjectEpisodes(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; subjectId?: string; dryRun?: boolean },
+): Promise<UpdateResult<StoryboardContainer> & { synced: number; appeared: number }> {
+  const script = await readScriptSafe(root, projectId);
+  const episodes = script?.episodes ?? [];
+  const byId = new Map(episodes.map((e) => [e.id, e.number]));
+  const byNumber = new Map(episodes.map((e) => [e.number, e.id]));
+  let synced = 0;
+  let appeared = 0;
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
+    baseVersion: opts.baseVersion,
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      for (const e of s.entities) {
+        if (opts.subjectId && e.id !== opts.subjectId) continue;
+        let numbers = e.episodeIds.map((id) => byId.get(id)).filter((n): n is number => typeof n === "number");
+        if (episodes.length > 0) {
+          const needles = [e.name, ...(e.aliases ?? [])]
+            .map((n) => stripHtmlText(n))
+            .filter((n) => n.length >= 2 && !n.includes("⚠️"));
+          const mentioned = episodes
+            .filter((ep) => {
+              const text = stripHtmlText(ep.content ?? "");
+              return needles.some((n) => text.includes(n));
+            })
+            .map((ep) => ep.number);
+          // 2026-11-12：以剧本实际出现为准重算（旧绑定是半套自动生成的，会漏集）
+          if (mentioned.length > 0) numbers = mentioned;
+          if (numbers.length > 0) {
+            e.episodeIds = numbers.map((n) => byNumber.get(n)).filter((id): id is string => Boolean(id));
+          }
+        }
+        const tree = ensureTree(s, e);
+        const before = JSON.stringify(tree.states[0]?.appearEpisodes ?? []);
+        tree.states[0].appearEpisodes = [...numbers].sort((a, b) => a - b);
+        if (before !== JSON.stringify(tree.states[0].appearEpisodes)) synced += 1;
+        if (numbers.length > 0) appeared += 1;
+      }
+    },
+  });
+  return { ...res, synced, appeared };
+}
+
+async function readScriptSafe(root: string, projectId: string): Promise<{ episodes: Array<{ id: string; number: number; content?: string }> } | null> {
+  try {
+    const mod = await import("./script.js");
+    return (await mod.readScript(root, projectId)) as { episodes: Array<{ id: string; number: number; content?: string }> } | null;
+  } catch {
+    return null;
+  }
+}

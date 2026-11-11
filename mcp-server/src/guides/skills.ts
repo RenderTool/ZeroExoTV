@@ -134,6 +134,9 @@ const SUBJECTS = `# 技能：主体库（subjects）
 - \`images_not_in_tree > 0\` 或 \`missing_tree > 0\`：说明页面会出现「有图但基础状态没图」，
   用 \`repair_subject_trees({ baseVersion, dryRun:true })\` 看数量，再 \`userConfirmed:true\` 修复。
 - \`audit_subjects\` 返回的 \`no_image\` 是**没出图的配角/场景**，不是数据损坏；不要为了清零去删有剧情的角色。
+- 集数关联：页面「出现集数」读的是主体树 \`states[0].appearEpisodes\`，不是 \`entity.episodeIds\`。
+  写完集数后必须 \`sync_subject_episodes({ baseVersion, dryRun:true })\` → \`userConfirmed:true\`，
+  以剧本实际出现重算；否则页面会全部显示「全部」。
 - 禁止把「页面没图」解释成浏览器缓存或让用户重新导入；先跑 audit 拿证据。
 
 ## 4. 落地步骤

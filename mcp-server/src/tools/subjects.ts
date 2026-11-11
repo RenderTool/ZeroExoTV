@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
-import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, upsertSubject } from "../store/storyboard.js";
+import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, syncSubjectEpisodes, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -118,6 +118,32 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         statesCreated: res.statesCreated,
         treesCreated: res.treesCreated,
       };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "sync_subject_episodes",
+    description:
+      "把主体的集数关联同步到主体树：entity.episodeIds ↔ 基础状态 appearEpisodes（页面「出现集数」读的就是它）。" +
+      "空关联会按名字/别名在剧本里重新匹配。写类：先 dryRun 看 synced/appeared，再 userConfirmed:true。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      subjectId: z.string().optional(),
+      userConfirmed: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "同步集数必须 userConfirmed:true（先 dryRun 看影响范围）");
+      }
+      const res = await syncSubjectEpisodes(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        subjectId: args.subjectId,
+        dryRun: args.dryRun,
+      });
+      return { written: res.written, version: res.after.version, synced: res.synced, appeared: res.appeared };
     },
   });
 
