@@ -367,9 +367,13 @@ page container (height: 100%, flex column, overflow: hidden)
 - 与图片节点 onload 校正同一规则；用户手动 resize 后仍保留（onload 只纠正比例失配且每图源只纠一次）。
 
 ### MCP 图片作业桥（2026-11-11）
-- MCP 不能直接写 1 号主画布（浏览器防抖自动保存会覆盖），所以图片生成走共享作业目录：
-  `generate_canvas_images` 写 `.lf/zeroexo/app_meta/image-jobs/<jobId>.json`，网页端 `useMcpImageJobs` 每 2 秒轮询，
+- MCP 不能直接写 1 号主画布（浏览器防抖自动保存会覆盖），所以图片生成/改图走共享作业目录：
+  `generate_canvas_images`（文生图 / 带 source 的图生图）与 `edit_canvas_image`（改图专用）写
+  `.lf/zeroexo/app_meta/image-jobs/<jobId>.json`，网页端 `useMcpImageJobs` 每 2 秒轮询，
   建图片节点 → 调 Moss/Krea2/Qwen 生成 → 写回节点与历史 → 写 `<jobId>.status.json` 供 `get_canvas_image_job` 轮询。
+- **改图必须带原图**：`sourceNodeId`（画布节点）或 `sourceStorageKey`（`cas:` / `image:`）；网页用
+  `resolveMediaBlob(storageKey,'image','orig')` 读原始字节，走 Qwen 图生图，**新建「MCP 改图」节点，原图不动**。
+- 提示词写「只改什么 + 其余保持不变」；禁止 Agent 用自身内置生图能力改图，也禁止不传原图直接重生成（会变成另一张图）。
 - 只有网页打开同一项目时作业才会被消费；pending 超过 30 秒先检查网页项目。
 
 ### 图片尺寸（Krea2，2026-11-11 用户纠正）
