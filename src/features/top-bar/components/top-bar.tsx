@@ -23,7 +23,6 @@ import {
   LanguageSwitcher,
 } from '@/shared/components/index.js';
 import { TopBarIconButton, TOPBAR_ICON_GAP } from '@/shared/components/topbar-icon-button.js';
-import { VersionBadge } from './version-badge.js';
 import type { ShortcutEntry } from '@zeroexo/plugin-keyboard';
 
 import { TitleEditor } from './title-editor.js';
@@ -287,8 +286,6 @@ export function TopBar({
                 />
               </Badge>
             </Tooltip>
-            {/* 版本号常驻最右侧（2026-11-12 用户要求；不随设置组收起） */}
-            <VersionBadge theme={theme} />
             {/* 本地版（Plan#83）：Agent 面板开关随 canvas-agent 链路移除 */}
           </>
         )}

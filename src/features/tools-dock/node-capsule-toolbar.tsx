@@ -637,6 +637,26 @@ export function NodeCapsuleToolbar({
           <Dropdown
             trigger={['click']}
             placement="bottomRight"
+            styles={{
+              // 与全局菜单统一：深色卡片、10 圆角、32 高条目（2026-11-12 用户反馈）
+              root: {
+                background: theme.mode === 'dark' ? '#1f1f1f' : '#ffffff',
+                borderRadius: 10,
+                padding: 6,
+                border: `1px solid ${borderColor}`,
+                boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+              },
+              item: {
+                height: 32,
+                lineHeight: '32px',
+                borderRadius: 8,
+                margin: '2px 0',
+                paddingInline: 10,
+                fontSize: 13,
+                color: textColor,
+              },
+              itemIcon: { minWidth: 18, color: textColor },
+            }}
             menu={{
               items: sendMenuItems,
               onClick: ({ key }) => {

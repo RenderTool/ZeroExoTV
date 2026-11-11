@@ -55,6 +55,8 @@ export function PaintDialog({
   const [saving, setSaving] = useState(false);
   const [hasPaint, setHasPaint] = useState(false);
   const [undoCount, setUndoCount] = useState(0);
+  /** 画布缩放（2026-11-12 用户要求：涂抹支持缩放，便于精细涂抹） */
+  const [zoom, setZoom] = useState(1);
   const [cursor, setCursor] = useState<{ x: number; y: number; scale: number } | null>(null);
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export function PaintDialog({
     setBrushSize(DEFAULT_BRUSH_SIZE);
     setHasPaint(false);
     setCursor(null);
+    setZoom(1);
     undoRef.current = [];
     let cancelled = false;
     readImageMeta(dataUrl)
@@ -78,6 +81,19 @@ export function PaintDialog({
     const ctx = canvas.getContext('2d');
     ctx?.clearRect(0, 0, canvas.width, canvas.height);
   }, [image]);
+
+  // Ctrl/⌘ + 滚轮缩放画布（2026-11-12 用户要求）；普通滚轮保持滚动
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || !open) return;
+    const onWheel = (event: WheelEvent): void => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      setZoom((z) => Math.min(4, Math.max(1, Math.round((z + (event.deltaY < 0 ? 0.25 : -0.25)) * 100) / 100)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [open]);
 
   const pointOf = (canvas: HTMLCanvasElement, clientX: number, clientY: number): { x: number; y: number } => {
     const rect = canvas.getBoundingClientRect();
@@ -232,9 +248,9 @@ export function PaintDialog({
     <div
       ref={stageRef}
       data-paint-stage
-      style={{ position: 'relative', width: inline ? '100%' : undefined, height: inline ? '100%' : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', touchAction: 'none', overflow: 'hidden' }}
+      style={{ position: 'relative', width: inline ? '100%' : undefined, height: inline ? '100%' : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', touchAction: 'none', overflow: 'auto' }}
     >
-      <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
+      <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', zoom }}>
         <img src={dataUrl} alt="" draggable={false} style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : '68vh', maxWidth: '100%' }} />
         {image ? (
           <canvas
@@ -327,6 +343,20 @@ export function PaintDialog({
           <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
         </div>
         <Slider min={2} max={160} step={1} value={brushSize} onChange={(v) => setBrushSize(v)} />
+      </div>
+
+      {/* 画布缩放（Ctrl/⌘ + 滚轮，或按钮） */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 4 }}>
+          <span>画布缩放</span>
+          <span data-paint-zoom-value style={{ fontWeight: 600, color: theme.toolbar.text }}>{Math.round(zoom * 100)}%</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Button size="small" data-paint-zoom-out onClick={() => setZoom((z) => Math.max(1, Math.round((z - 0.25) * 100) / 100))} disabled={zoom <= 1}>缩小</Button>
+          <Button size="small" data-paint-zoom-reset onClick={() => setZoom(1)}>100%</Button>
+          <Button size="small" data-paint-zoom-in onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.25) * 100) / 100))} disabled={zoom >= 4}>放大</Button>
+        </div>
+        <div style={{ marginTop: 4, fontSize: 11, color: theme.toolbar.textMuted }}>Ctrl / ⌘ + 滚轮也可缩放</div>
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>

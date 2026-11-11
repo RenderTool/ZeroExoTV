@@ -1,6 +1,6 @@
 /**
- * 手动局部涂抹（2026-11-10 用户要求）：
- * 局部编辑器要有「画笔 + 颜色（取色器/吸色）+ 保存到画布」，不是只有 AI 蒙版。
+ * 手动局部涂抹（2026-11-10 / 2026-11-12 用户要求）：
+ * 局部编辑器要有「画笔 + 颜色（取色器/吸色）+ 缩放 + 保存到画布」，不是只有 AI 蒙版。
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -18,6 +18,13 @@ describe('手动涂抹编辑器', () => {
     expect(dialog).toContain('type="color"');
     expect(dialog).toContain('data-paint-tool="picker"');
     expect(dialog).toContain('Pipette');
+  });
+
+  it('涂抹支持缩放（Ctrl/⌘+滚轮与按钮），便于精细涂抹', () => {
+    expect(dialog).toContain('data-paint-zoom-in');
+    expect(dialog).toContain('data-paint-zoom-reset');
+    expect(dialog).toContain('Ctrl / ⌘ + 滚轮也可缩放');
+    expect(dialog).toContain('zoom');
   });
 
   it('有笔刷大小、撤销、清空与保存到画布', () => {
