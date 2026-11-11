@@ -405,6 +405,16 @@ page container (height: 100%, flex column, overflow: hidden)
 - MCP 本地版本读数据根 `.mcp/server-info.json`（version/tools/builtAt）；MCP 服务自身在
   `mcp_update_status` 里也返回 `localVersion / requiredVersion / versionOutdated`，便于 Agent 主动提示更新。
 
+### 自定义域名 / 子路径部署（2026-11-11 用户 404 反馈）
+- 所有 HTML 里的静态资源引用必须走 `%BASE_URL%`（runtime-config、favicon），禁止写域名根绝对路径；
+  `public/runtime-config.js` 必须有默认文件（`window.env = window.env || {}`），避免可选配置 404。
+- `index.html` 内置自愈脚本：`/assets/` 下脚本/样式 404 时带 `_r=<时间戳>` 重载一次（10 秒限频），
+  用于「CDN/镜像的 index.html 还是旧版」时自动拿到新 index；若镜像本身没同步资源，仍需重新发布完整 dist。
+- 自定义域名部署必须**整包同步** `dist/`（index.html + assets/ + runtime-config.js + version.json + downloads/ + openlib/），
+  不能只覆盖 index.html 或只覆盖 assets；服务器缓存规则：`index.html` 用 `no-cache`，`/assets/*` 用长缓存（文件名带 hash）。
+- 判断是否「只同步了一半」：`/version.json` 的 commit 与 `index.html` 引用的 assets hash 必须来自同一次构建；
+  若 index 引用的 hash 在 `assets/` 里不存在，就是镜像没同步完整。
+
 ### 首次启动与「一键安装 MCP」（2026-11-11 用户要求）
 - 全新机器没有 `.mcp/server-info.json` 是**正常状态**，不是「服务信息生成失败」：onboarding 步骤 2 显示中性的首次使用指引，
   不显示「旧版本/缺 N 个工具/环境不行」这类告警。

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ZeroExoTV</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/x-icon" href="%BASE_URL%favicon.ico" />
     <!-- Google Fonts CDN 备选（项目资源优先，CDN 作为回退） -->
     <!-- display=optional：字体未在极短窗口内就绪则直接用系统回退且永不换入，
          杜绝 font swap 引发的文本重排/布局位移（CLS）；代价是慢网下本次访问无品牌字体 -->
@@ -29,7 +29,26 @@
   </head>
   <body>
     <div id="root"></div>
-    <script src="/runtime-config.js"></script>
+    <script>
+      // 静态资源 404 自愈：自定义域名/CDN 上 index.html 未及时更新时会引用旧 hash 资源，
+      // 这里检测 /assets/ 资源加载失败后带 cache-bust 重载一次（10 秒内只重试一次，避免死循环）。
+      (function () {
+        var KEY = 'zx_asset_reload_at';
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          if (!t || (t.tagName !== 'SCRIPT' && t.tagName !== 'LINK')) return;
+          var url = t.src || t.href || '';
+          if (url.indexOf('/assets/') < 0) return;
+          var last = Number(sessionStorage.getItem(KEY) || 0);
+          if (Date.now() - last < 10000) return;
+          sessionStorage.setItem(KEY, String(Date.now()));
+          var u = new URL(location.href);
+          u.searchParams.set('_r', String(Date.now()));
+          location.replace(u.toString());
+        }, true);
+      })();
+    </script>
+    <script src="%BASE_URL%runtime-config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
