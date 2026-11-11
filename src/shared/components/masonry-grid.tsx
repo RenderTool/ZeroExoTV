@@ -200,7 +200,14 @@ export function MasonryGrid({
       <div
         key={(child as { key?: string | null } | null)?.key ?? index}
         data-masonry-cell
-        style={{ breakInside: 'avoid', marginBottom: gap, minWidth: 0 }}
+        style={{
+          breakInside: 'avoid',
+          marginBottom: gap,
+          minWidth: 0,
+          // 大量图片时抽屉拖拽/滚动卡顿：让 Chromium 跳过视口外的卡片渲染（2026-11-12 用户反馈）
+          contentVisibility: 'auto',
+          containIntrinsicSize: '220px 300px',
+        }}
       >
         {child}
       </div>

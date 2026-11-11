@@ -35,6 +35,16 @@ async function episodesAppearingIn(root: string, projectId: string, names: strin
 }
 
 
+function normalizeSubjectName(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/(状态|形态|时期)$/i, "")
+    .toLowerCase();
+}
+
+
 export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "list_subjects",
@@ -56,7 +66,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     name: "upsert_subject",
     description:
       "新建或更新主体（有 id 更新、无 id 新建 item-…）。写类：baseVersion 必填，0=主体库不存在时创建。" +
-      "新建时若未给 episodeIds，会**按名字/别名在剧本里自动关联出现过的集**（避免所有主演默认挂全部集）。",
+      "新建时若未给 episodeIds，会**按名字/别名在剧本里自动关联出现过的集**（避免所有主演默认挂全部集）。" +
+      "**同一演员的不同状态/形态禁止新建主体**：同名/同别名会报 SUBJECT_EXISTS，请用 set_subject_image(stateTag=…) 挂到现有主体。",
     bits: ["subject.write"],
     schema: {
       projectId: z.string(),
@@ -73,6 +84,23 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       const { projectId, baseVersion, dryRun, ...subject } = args;
       let autoEpisodes: Array<{ id: string; number: number; title: string }> | null = null;
       const isCreate = !args.id;
+      if (isCreate) {
+        // 同一演员不同形态被弱模型新建成第二个主体：同名/同别名直接拒绝，要求挂状态
+        const sb = await readStoryboard(dataRoot(), projectId);
+        const target = normalizeSubjectName(args.name);
+        const dup = sb?.entities.find((e) => {
+          if (e.kind !== args.kind) return false;
+          return [e.name, ...(e.aliases ?? [])].some((n) => normalizeSubjectName(n) === target);
+        });
+        if (dup) {
+          throw new McpError(
+            "VALIDATION",
+            `主体「${dup.name}」已存在（id=${dup.id}）。同一演员的不同状态/形态不要新建主体：` +
+              `请用 set_subject_image({ subjectId: "${dup.id}", storageKey, stateTag: "美艳态" }) 挂到该主体；` +
+              "新建主体只用于不同角色/场景/道具。",
+          );
+        }
+      }
       if (isCreate && args.episodeIds === undefined) {
         autoEpisodes = await episodesAppearingIn(dataRoot(), projectId, [args.name, ...(args.aliases ?? [])]);
         if (autoEpisodes.length > 0) {

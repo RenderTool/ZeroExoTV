@@ -110,10 +110,114 @@ export interface SubjectImageInput {
   cover?: boolean;
 }
 
+/** 主体树里的状态节点（MCP 只写必要字段，其余交给前端迁移/补全） */
+interface TreeStateLike {
+  id: string;
+  state: string;
+  type: string;
+  step?: number;
+  deriveFrom?: unknown;
+  deltaPrompt?: string;
+  fullPrompt?: string;
+  recognitionTerms?: string[];
+  media: Array<{ key: string; type: string; prompt?: string }>;
+  source?: string;
+  baseRef?: string;
+  appearEpisodes?: number[];
+}
+
+interface TreeLike {
+  rootId: string;
+  itemId?: string | null;
+  name: string;
+  kind: SubjectKind;
+  aliases: string[];
+  states: TreeStateLike[];
+  coverKey?: string | null;
+}
+
+function ensureTree(s: StoryboardContainer, item: ProductionItem): TreeLike {
+  const trees = (Array.isArray(s.subjectTree) ? s.subjectTree : []) as TreeLike[];
+  let tree = trees.find((t) => t.itemId === item.id);
+  if (!tree) {
+    // 兼容按名字绑定的老树（无 itemId）：不抢改，仅当名字唯一命中时接管
+    const byName = trees.filter((t) => !t.itemId && t.name === item.name);
+    if (byName.length === 1) {
+      tree = byName[0];
+      tree.itemId = item.id;
+    }
+  }
+  if (!tree) {
+    tree = {
+      rootId: `subj-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
+      itemId: item.id,
+      name: item.name,
+      kind: item.kind,
+      aliases: item.aliases ?? [],
+      states: [],
+      coverKey: null,
+    };
+    trees.push(tree);
+  }
+  if (!Array.isArray(tree.states)) tree.states = [];
+  if (tree.states.length === 0) {
+    tree.states.push({
+      id: "__base__",
+      state: "",
+      type: "image",
+      step: 1,
+      deriveFrom: null,
+      deltaPrompt: "",
+      fullPrompt: "",
+      recognitionTerms: [],
+      media: [],
+      source: "user",
+      baseRef: tree.rootId,
+      appearEpisodes: [],
+    });
+  }
+  s.subjectTree = trees;
+  return tree;
+}
+
+/** 状态图落到主体树：base/定妆 → states[0]；其它 stateTag → 对应状态（不存在则新建） */
+function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
+  const base = tree.states[0];
+  const tag = (input.stateTag ?? "").trim();
+  if (!tag || tag === "定妆" || tag === "基础状态" || tag === "基础形态") {
+    base.media = [{ key: input.storageKey, type: "image", prompt: input.prompt }];
+    if (input.prompt) base.fullPrompt = input.prompt;
+    if (!base.state) base.state = tag === "定妆" ? "" : base.state;
+    return;
+  }
+  let state = tree.states.find((x) => x.state === tag);
+  if (!state) {
+    state = {
+      id: `snode-${tree.rootId}-${tree.states.length}`,
+      state: tag,
+      type: "image",
+      step: 1,
+      deriveFrom: null,
+      deltaPrompt: base.fullPrompt ? "" : "",
+      fullPrompt: input.prompt ?? "",
+      recognitionTerms: [],
+      media: [],
+      source: "user",
+      baseRef: tree.rootId,
+      appearEpisodes: [],
+    };
+    tree.states.push(state);
+  }
+  state.media = [{ key: input.storageKey, type: "image", prompt: input.prompt }];
+  if (input.prompt) state.fullPrompt = input.prompt;
+}
+
 /**
  * 挂主体状态图：同 storageKey 已存在则原地更新（幂等），否则追加到 images[]。
  * cover=true 或主体此前无任何图 → coverKey = 该 storageKey。
- * 对齐前端 ProductionItem.images 元素（production-manager-types.ts L19-29：stateTag=状态名）。
+ * 同时写 subjectTree（2026-11-12 修复：只挂封面时基础状态仍显示「暂无封面」）：
+ * - 定妆/无 stateTag → 基础状态 states[0] 的 media；
+ * - 其它 stateTag → 对应状态节点（不存在则创建），前端主体页按状态展示。
  */
 export async function setSubjectImage(
   root: string,
@@ -144,6 +248,9 @@ export async function setSubjectImage(
         subject.images.push(entry);
       }
       if (input.cover || !subject.coverKey) subject.coverKey = input.storageKey;
+      const tree = ensureTree(s, subject);
+      applyImageToTree(tree, input);
+      if (input.cover || !tree.coverKey) tree.coverKey = input.storageKey;
     },
   });
   return { ...res, subject };
