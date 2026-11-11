@@ -241,20 +241,16 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
           {isVideo ? t('assetLibrary.filterVideo', { defaultValue: '视频' }) : t('assetLibrary.filterImage', { defaultValue: '图片' })}
         </ThumbBadge>
         {hasGuide && (
-          <button
-            type="button"
-            data-guide-download={asset.id}
-            title={t('assetLibrary.downloadVideoWithGuide', { defaultValue: '下载视频+引导' })}
-            aria-label={t('assetLibrary.downloadVideoWithGuide', { defaultValue: '下载视频+引导' })}
-            onClick={(e) => { e.stopPropagation(); onDownload({ withGuide: true }); }}
-            style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}
+          /* 2026-11-11 用户要求：这里只是「含引导」标签，不要做成下载入口（下载在 hover 菜单里） */
+          <span
+            data-guide-badge={asset.id}
+            style={{ position: 'absolute', top: 6, right: 6, zIndex: 3 }}
           >
             <ThumbBadge>
               <Waypoints size={10} />
               {t('assetLibrary.hasGuide', { defaultValue: '含引导' })}
-              <Download size={10} />
             </ThumbBadge>
-          </button>
+          </span>
         )}
         {/* hover 操作（右下角）：定位 / 加入资产库 / 下载。
             2026-11-10：整条操作区吞掉 click —— 否则点空白处会冒泡到封面「打开大图」，

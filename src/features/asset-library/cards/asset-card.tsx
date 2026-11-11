@@ -225,20 +225,16 @@ function AssetCardGrid({
           style={{ position: 'absolute', top: 6, left: multiSelectEnabled ? 34 : 6, zIndex: 4 }}
         />
         {hasGuide && (
-          <button
-            type="button"
-            data-guide-download={asset.id}
-            title={t('assetLibrary.downloadVideoWithGuide', '下载视频+引导')}
-            aria-label={t('assetLibrary.downloadVideoWithGuide', '下载视频+引导')}
-            onClick={(e) => { e.stopPropagation(); onDownload?.({ withGuide: true }); }}
-            style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 4, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}
+          /* 2026-11-11 用户要求：「含引导」只是标签，不在这里做下载（下载在右键/更多菜单） */
+          <span
+            data-guide-badge={asset.id}
+            style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 4 }}
           >
             <ThumbBadge>
               <Waypoints size={10} />
               {t('assetLibrary.hasGuide', '含引导')}
-              <Download size={10} />
             </ThumbBadge>
-          </button>
+          </span>
         )}
         {isVideo && videoCreated ? (
           <video
