@@ -25,6 +25,12 @@ const requestSchema = z.object({
   width: z.number().int().optional(),
   height: z.number().int().optional(),
   negative_prompt: z.string().optional(),
+  /** 改图：原图 storageKey（cas: 或 image:）。给了就走向图生图（Qwen 编辑），新建下游节点，不覆盖原图 */
+  sourceStorageKey: z.string().optional(),
+  /** 改图：也可以直接给画布节点 id，由网页读取该节点的 storageKey/content */
+  sourceNodeId: z.string().optional(),
+  /** 可选遮罩 storageKey（白=重绘区） */
+  maskStorageKey: z.string().optional(),
 });
 
 function jobPath(root: string, jobId: string): string {
@@ -39,9 +45,10 @@ export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "generate_canvas_images",
     description:
-      "在**当前打开的画布**上批量生成图片：写一份生图作业到共享目录，网页画布在线时自动创建图片节点、调用本机/云端 ComfyUI 生成并把结果写进实时画布与历史。" +
-      "支持 model=moss（Moss Image 文生图）/ krea2 / qwen。每张图可独立指定 prompt、比例、百万像素、步数、种子。" +
-      "投递后用 get_canvas_image_job 轮询进度；不要在网页未打开该项目时投递（会一直 pending）。",
+      "在**当前打开的画布**上批量生成或改图：写一份作业到共享目录，网页画布在线时自动创建**下游新节点**、调用 ComfyUI 生成并把结果写进实时画布与历史。" +
+      "纯文生图 model=moss/krea2/qwen；**改图（图生图）传 sourceStorageKey 或 sourceNodeId**（走 Qwen 图片编辑，必须描述「只改什么、其余保持不变」）。" +
+      "绝不覆盖原图/原节点。每张图可独立指定 prompt、比例、百万像素、步数、种子。" +
+      "投递后用 get_canvas_image_job 轮询进度。",
     bits: ["project.write"],
     schema: {
       projectId: z.string(),

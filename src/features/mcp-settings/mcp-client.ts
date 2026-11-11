@@ -144,6 +144,8 @@ export const MCP_TOOLS: ToolInfo[] = [
   { name: 'set_segment_duration', access: 'write' },
   { name: 'set_shot_guide', access: 'write' },
   { name: 'run_generation', access: 'write' },
+  { name: 'generate_canvas_images', access: 'write' },
+  { name: 'get_canvas_image_job', access: 'read' },
   { name: 'sync_job_results', access: 'write' },
   { name: 'repair_asset_storage_keys', access: 'write' },
 ];

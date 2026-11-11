@@ -523,7 +523,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   }
   const commandQueue = refs.commandQueue;
   // MCP 图片作业：网页在线时消费 .lf/.../image-jobs，把 MCP 生成的图落到当前实时画布
-  useMcpImageJobs({ projectId: canvasId, commandQueue });
+  useMcpImageJobs({ projectId: canvasId, commandQueue, store: refs.store });
   const { processFiles } = useUploadQueue(commandQueue, uploadQueueRef.current);
   // 组件卸载时重置队列
   useEffect(() => {

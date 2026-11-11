@@ -289,7 +289,22 @@ Krea 2 吃**自然语言 + 明确视觉选择**，越像给摄影师/美术指�
 2. \`generate_canvas_images({ projectId, requests:[{model, prompt, aspect, megapixels, steps, seed, title}] })\`。
 3. \`get_canvas_image_job({ projectId, jobId })\` 轮询；state=done 后把 nodeId/storageKey 报给用户，让他在画布上核对。
 4. pending 超过 30 秒：先确认网页是否打开同一项目（作业只在当前项目被消费）。
-5. 失败项看 items[].error；不要静默重试，把原因报给用户。`;
+5. 失败项看 items[].error；不要静默重试，把原因报给用户。
+
+## 6. 改图 / 图生图（用户说「把这张图的 X 改掉」时）
+
+**必须走 generate_canvas_images 并带上原图**，禁止不传原图直接重生成（那是另一张图），也禁止用 Agent 自己的内置生图能力改图。
+
+1. 先确定原图：
+   - 画布节点：\`get_canvas\` 找到该节点的 \`storageKey\`，用 \`sourceNodeId\` 传节点 id；
+   - 资产/历史：\`list_assets\` 或 \`list_history\` 拿 \`storageKey\`（\`cas:<hash>.<ext>\` / \`image:<id>\`），用 \`sourceStorageKey\`。
+2. 提示词写法：**「只改什么 + 其余保持不变 + 原图关键元素复述」**，例如：
+   \`只把画面中的玻璃罩煤油灯换成明代陶/铜油灯（矮身、无玻璃罩、暖色油焰），其余保持不变：人物姿势、服装、构图、光线、背景街道与雨夜氛围都保持原样。\`
+   不要写「重新生成一张…」；不要把整张图重新描述成新构图。
+3. 调用：\`generate_canvas_images({ projectId, requests:[{ model:'qwen', prompt:'…只改…其余保持不变…', sourceNodeId 或 sourceStorageKey }] })\`。
+   需要局部重绘时再给 \`maskStorageKey\`（白=可改区）。
+4. 结果落在**新节点**（标题「MCP 改图」），原节点原图不动；告诉用户新节点位置。
+5. 改完必须让用户看结果再决定是否继续；不要把「改图」做成覆盖式重生成。`;
 
 export const PRODUCTION_SKILLS: ProductionSkill[] = [
   {

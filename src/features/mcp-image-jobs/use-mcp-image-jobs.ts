@@ -12,6 +12,8 @@ import { fitImageNodeSize } from '@/pages/editor/editor-canvas/use-editor-intera
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { listDir, readJson, writeJson, removeFile } from '@/platform/fs.js';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
+import { getResourceUrl } from '@/shared/utils/resource-url.js';
+import { contentToDataUrl } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
 import { generateMossImage } from '@/pages/editor/editor-canvas/interactions/local-moss-image.js';
 import { generateKrea2Image } from '@/pages/editor/editor-canvas/interactions/local-krea2-image.js';
 import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
@@ -31,6 +33,10 @@ interface McpImageRequest {
   width?: number;
   height?: number;
   negative_prompt?: string;
+  /** 改图：原图 storageKey / 节点 id / 遮罩（给了就走 Qwen 图生图，仍新建下游节点） */
+  sourceStorageKey?: string;
+  sourceNodeId?: string;
+  maskStorageKey?: string;
 }
 
 interface McpImageJob {
@@ -64,7 +70,11 @@ interface JobStatus {
 
 const MODEL_KEYS = { moss: MOSS_MODEL_KEY, krea2: KREA2_MODEL_KEY, qwen: LOCAL_IMAGE_MODEL_KEY } as const;
 
-async function generateOne(req: McpImageRequest, nodeId: string): Promise<{
+async function generateOne(
+  req: McpImageRequest,
+  nodeId: string,
+  edit?: { sourceDataUrl?: string; maskDataUrl?: string },
+): Promise<{
   blob: Blob; width: number; height: number; mimeType: string; bytes: number; generationId: string;
 }> {
   const model = req.model ?? 'moss';
@@ -77,6 +87,18 @@ async function generateOne(req: McpImageRequest, nodeId: string): Promise<{
     width: req.width,
     height: req.height,
   };
+  // 改图（图生图）：只有 Qwen 支持 image 输入；原图 + 可选遮罩，输出到新节点，不动原图
+  if (edit?.sourceDataUrl) {
+    return generateLocalQwenImage({
+      prompt: req.prompt,
+      width: req.width,
+      height: req.height,
+      referenceImages: [edit.sourceDataUrl],
+      maskDataUrl: edit.maskDataUrl,
+      params: { ...params, edit_mode: false },
+      nodeId,
+    });
+  }
   if (model === 'moss') {
     return generateMossImage({ prompt: req.prompt, aspect: req.aspect, params, nodeId });
   }
@@ -95,9 +117,11 @@ async function generateOne(req: McpImageRequest, nodeId: string): Promise<{
 export function useMcpImageJobs(opts: {
   projectId: string | null | undefined;
   commandQueue: CommandQueue | null | undefined;
+  /** 画布 store：改图请求给 sourceNodeId 时用它解析节点 storageKey/content */
+  store?: { getGraph(): { nodes: Array<{ id: string; data?: unknown }> } } | null;
   enabled?: boolean;
 }): void {
-  const { projectId, commandQueue, enabled = true } = opts;
+  const { projectId, commandQueue, store, enabled = true } = opts;
   const busyRef = useRef(false);
 
   useEffect(() => {
@@ -154,7 +178,22 @@ export function useMcpImageJobs(opts: {
         const item = status.items[i]!;
         if (item.state === 'done') continue;
         const nodeId = item.nodeId;
-        const modelKey = MODEL_KEYS[req.model ?? 'moss'];
+        // 改图：解析原图（sourceNodeId 从画布节点读，sourceStorageKey 直接给键），转 dataURL 交给 Qwen 编辑
+        let sourceKey = req.sourceStorageKey ?? '';
+        if (!sourceKey && req.sourceNodeId && store) {
+          const srcNode = store.getGraph().nodes.find((n) => n.id === req.sourceNodeId);
+          const d = (srcNode?.data ?? {}) as Record<string, unknown>;
+          sourceKey = String(d.storageKey ?? d.content ?? '');
+        }
+        const sourceDataUrl = sourceKey
+          ? await contentToDataUrl(getResourceUrl(sourceKey, 'full') ?? sourceKey).catch(() => undefined)
+          : undefined;
+        const maskDataUrl = req.maskStorageKey
+          ? await contentToDataUrl(getResourceUrl(req.maskStorageKey, 'full') ?? req.maskStorageKey).catch(() => undefined)
+          : undefined;
+        const isEdit = Boolean(sourceDataUrl);
+        const modelKey = isEdit ? LOCAL_IMAGE_MODEL_KEY : MODEL_KEYS[req.model ?? 'moss'];
+        const displayTitle = req.title || (isEdit ? `MCP 改图 ${i + 1}` : `MCP 图片 ${i + 1}`);
         const col = i % 5;
         const row = Math.floor(i / 5);
         const position = { x: 120 + col * 300, y: 120 + row * 320 };
@@ -163,7 +202,7 @@ export function useMcpImageJobs(opts: {
           type: 'image',
           position,
           size: { width: 300, height: 300 },
-          title: req.title || `MCP 图片 ${i + 1}`,
+          title: displayTitle,
           data: {
             content: '',
             status: 'loading',
@@ -182,12 +221,12 @@ export function useMcpImageJobs(opts: {
         item.state = 'running';
         await writeJson(statusRel, { ...status, updatedAt: new Date().toISOString() }).catch(() => undefined);
         try {
-          const result = await generateOne(req, nodeId);
+          const result = await generateOne(req, nodeId, isEdit ? { sourceDataUrl, maskDataUrl } : undefined);
           const url = URL.createObjectURL(result.blob);
           const landed = await autoLandGenerationBlob({
             nodeId,
             kind: 'image',
-            title: req.title || `MCP 图片 ${i + 1}`,
+            title: displayTitle,
             blob: result.blob,
             width: result.width,
             height: result.height,
@@ -218,7 +257,7 @@ export function useMcpImageJobs(opts: {
           status.completed += 1;
           nodeActionBus.emit('canvas:history:created', {
             kind: 'image',
-            title: req.title || `MCP 图片 ${i + 1}`,
+            title: displayTitle,
             generationId: result.generationId,
             prompt: req.prompt,
             nodeId,
