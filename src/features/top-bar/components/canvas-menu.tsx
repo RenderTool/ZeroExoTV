@@ -13,7 +13,8 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Home, Plus, Copy, Trash2, Download, ArchiveRestore } from 'lucide-react';import { useTranslation } from 'react-i18next';
+import { Home, Plus, Copy, Trash2, Download } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -26,8 +27,6 @@ export interface CanvasMenuProps {
   onNewProject: () => void;
   /** 打包导出本项目（zip：画布 + 素材 + 副本画布），只读也不拦 */
   onExportProject: () => void;
-  /** 打开媒体回收站（孤立媒体先移入、保留 30 天） */
-  onOpenRecycleBin: () => void;
   onCopyProject: () => void;
   onDeleteProject: () => void;
 }
@@ -37,7 +36,6 @@ export function CanvasMenu({
   onHome,
   onNewProject,
   onExportProject,
-  onOpenRecycleBin,
   onCopyProject,
   onDeleteProject,
 }: CanvasMenuProps): React.ReactElement {
@@ -48,7 +46,6 @@ export function CanvasMenu({
   const handleHome = useCallback(() => { setOpen(false); onHome(); }, [onHome]);
   const handleNew = useCallback(() => { setOpen(false); onNewProject(); }, [onNewProject]);
   const handleExport = useCallback(() => { setOpen(false); onExportProject(); }, [onExportProject]);
-  const handleRecycle = useCallback(() => { setOpen(false); onOpenRecycleBin(); }, [onOpenRecycleBin]);
   const handleCopy = useCallback(() => { setOpen(false); onCopyProject(); }, [onCopyProject]);
   const handleDelete = useCallback(() => { setOpen(false); onDeleteProject(); }, [onDeleteProject]);
 
@@ -58,7 +55,6 @@ export function CanvasMenu({
     { key: 'new', label: t('menu.newProject'), icon: <Plus size={14} />, onClick: handleNew },
     // 导出是只读操作：只读模式下照常提供（用户要随时备份）
     { key: 'export', label: t('menu.exportProject', '导出项目'), icon: <Download size={14} />, onClick: handleExport },
-    { key: 'recycle', label: t('menu.recycleBin', '媒体回收站'), icon: <ArchiveRestore size={14} />, onClick: handleRecycle },
     // 只读隐藏拷贝/删除（2026-08-25 系统性只读防护）：拷贝项目=创建副本、删除=销毁画布，均属项目级写操作
     ...(!readOnly
       ? [

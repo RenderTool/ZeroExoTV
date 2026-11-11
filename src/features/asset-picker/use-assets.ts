@@ -14,6 +14,7 @@ import {
   removeAssets as storeRemove,
   updateAsset as storeUpdate,
 } from './asset-store.js';
+import { filterLiveAssets } from './asset-liveness.js';
 import type { CreateAssetInput, UpdateAssetInput } from './asset-store.js';
 import type { Asset } from './index.js';
 import {
@@ -43,7 +44,8 @@ export function useAssets(): UseAssetsResult {
     try {
       setError(null);
       const list = await listAssets();
-      setAssets(list);
+      // 2026-11-11：引用已失效的资产（文件被清理/删除）不再出现在列表里
+      setAssets(await filterLiveAssets(list));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load assets');
     } finally {

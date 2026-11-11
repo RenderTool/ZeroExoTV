@@ -1,16 +1,17 @@
-/** S-22 结构回归：回收站尺寸、资产选择态按钮位置、双复制路径收敛 */
+/** S-22 结构回归：资产选择态按钮位置、双复制路径收敛 */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const read = (relative: string): string => readFileSync(resolve(process.cwd(), relative), 'utf8');
 
-describe('回收站弹窗固定尺寸', () => {
-  it('正文有高度上限与内置滚动，分页单页行数收敛', () => {
-    const source = read('src/features/storage/media-recycle-bin-dialog.tsx');
-    expect(source).toMatch(/maxHeight:\s*'min\(60vh, 520px\)'/);
-    expect(source).toContain("overflowY: 'auto'");
-    expect(source).toContain('pageSize: 10');
+describe('孤立媒体即时清理（2026-11-11：回收站下线）', () => {
+  it('app 启动每日清理，不存在回收站弹窗/入口', () => {
+    const app = read('src/app.tsx');
+    expect(app).toContain('purgeOrphanMedia');
+    expect(app).not.toContain('media-recycle-bin');
+    const menu = read('src/features/top-bar/components/canvas-menu.tsx');
+    expect(menu).not.toContain('recycleBin');
   });
 });
 

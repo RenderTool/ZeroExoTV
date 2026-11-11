@@ -50,14 +50,13 @@
 
 ## 2. A–G 需求（全部完成，2026-11-10；实现要点见下与 §3）
 
-### A. 孤立资源 → 回收站 + 定时清理（已完成，见 §3）
+### A. 孤立资源即时清理（已完成；2026-11-11 改口径：回收站下线）
 
-- 数据层 `src/entities/media-recycle-bin.ts`：扫描只认 CAS 索引——`refs` 为空的条目 + 索引里没有的
-  `media/cas/*` 残留文件；有存活引用的一律不动。
-- 移入 = 搬到 `media/recycle/` 并记账（`entities/media_recycle_bin.json`：来源/大小/移入时间/到期时间），
-  **不硬删**；保留 30 天，`cleanupExpiredRecycleItems` 才真删（`sweepOrphansToRecycle` 只搬不删）。
-- 入口：画布左上角 LOGO 菜单「媒体回收站」；弹层里可扫描、逐条恢复 / 彻底删除、清空（二次确认）。
-- 定时：`app.tsx` 每天最多跑一次「先清理过期、再把新孤立媒体移入回收站」，失败静默（未授权/离线下次再试）。
+- 用户明确删除 = 立即删（`releaseCas` 引用到 0 就删文件），不再缓存。
+- 数据层 `src/entities/orphan-media.ts`：`purgeOrphanMedia()` 直接删「0 引用 CAS 条目 + `media/cas` 索引外文件 +
+  旧 `media/recycle` 目录」，有引用的一律不动；删除失败时不摘索引，避免断链。
+- 定时：`app.tsx` 每天最多跑一次（`zeroexo:orphan-media:lastRun`），失败静默（未授权/离线下次再试）。
+- 列表过滤：`filterLiveAssets()` 隐藏文件已失效的资产，死记录不再出现在「资产 → 项目/全局」。
 
 ### B. 画布节点胶囊常驻下载（已完成，见 §3）
 
@@ -161,8 +160,8 @@
 - 引导数据生效：含片段引导槽的运行强制走 `/zeroexo/v1/jobs`（桥接 timeline 无引导字段，会静默丢弃）
 - 低显存链：插件提交前 `prune_model_chain` 删掉未选中的模型链；**线上仍待重新部署**
   （2026-11-10 云端探测：`use_low_vram=false` 时 last-prompt 里仍有 45:58–45:61 低显存链 → 两条链都执行）
-- 孤立媒体回收站：`media-recycle-bin.ts`（0 引用条目 + 索引外残留 → `media/recycle/`，保留 30 天），
-  LOGO 菜单入口 + 每日一次定时搬运/过期清理；扫描阶段绝不硬删
+- 孤立媒体即时清理（2026-11-11 改口径）：回收站整体下线；`purgeOrphanMedia()` 每日直接删除无引用文件，
+  `filterLiveAssets()` 让失效资产不再出现在资产列表
 - 主体发送到画布：`subject-stack-cards.ts` 映射主体各状态媒体 → 堆叠节点（`data.subject` 语义标记），
   卡片点击回跳主体库对应状态；堆叠框架补音频（音符缩略图 + `<audio controls>`）
 - 云端插件已更新（2026-11-10，SSH）：`krea2_t2i` 上线并通过 `/zeroexo/v1/jobs` 跑通（1024² 出图），
