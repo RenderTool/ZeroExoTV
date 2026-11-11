@@ -609,7 +609,8 @@
     "open": "タスクキューを開く",
     "collapse": "折りたたむ",
     "untitled": "無題のタスク"
-  },  "canvasCopy": {
+  },
+  "canvasCopy": {
     "drawerTab": "キャンバス",
     "structureTab": "キャンバス構造",
     "subCanvasTab": "サブキャンバス",
@@ -3094,5 +3095,13 @@
     "specExample": "例",
     "specCopy": "コピー",
     "specCopied": "コピー済み"
+  },
+  "onboarding": {
+    "mcpFirstRun": "MCP サービスがまだ見つかりません。初回はダウンロードして一度起動してください。起動後に token 付き設定が自動で表示されます。",
+    "stepMcpFirstRun": "MCP サービスがまだ見つかりません。初回は「インストールコマンドをコピー」をターミナルに貼って一度実行してください（Node 18+ 必須）。公式パッケージを取得し、現在のデータルートと token で起動します。その後ここで更新し、標準 MCP 設定をコピーできます。",
+    "downloadMcp": "MCP パッケージをダウンロード",
+    "refreshMcp": "起動済み、状態を更新",
+    "copyBootstrap": "インストールコマンドをコピー",
+    "bootstrapPending": "インストールコマンドを生成中（先に保存先を承認してください）…"
   }
 }

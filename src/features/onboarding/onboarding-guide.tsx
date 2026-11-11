@@ -8,6 +8,8 @@
  *
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开（代替已经不存在的政策公告位）。
  */
+import { getRootPathHint } from '@/platform/fs.js';
+import { buildBootstrapCommand, detectBootstrapPlatform } from '@/features/mcp-settings/mcp-bootstrap.js';
 import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Input, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -98,6 +100,8 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [mcpToken, setMcpToken] = useState<string | null>(null);
   /** 服务端跑的是旧代码时缺的工具（网页自动感知更新） */
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
+  /** 全新机器：一键安装并启动 MCP 的命令（下载官方包 + 当前数据根/token） */
+  const [bootstrapCommand, setBootstrapCommand] = useState('');
   // 步骤 3：ComfyUI
   const [address, setAddress] = useState(endpoint.address || DEFAULT_COMFYUI);
   const [testing, setTesting] = useState(false);
@@ -112,6 +116,19 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         setServerInfo(info);
         setMcpStaleTools(mcpServerMissingTools(info));
         if (info) setMcpToken(await ensureIdeToken());
+        else {
+          // 全新机器还没有服务：生成一条可复制的「安装并启动」命令（不显示告警）
+          const [token, dataRoot] = await Promise.all([ensureIdeToken(), getRootPathHint()]);
+          if (token && dataRoot) {
+            const base = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
+            setBootstrapCommand(buildBootstrapCommand({
+              platform: detectBootstrapPlatform(),
+              downloadUrl: `${window.location.origin}${base}downloads/zeroexo-mcp-server.tgz`,
+              dataRoot,
+              token,
+            }));
+          }
+        }
       } catch {
         setServerInfo(null);
       }
@@ -136,7 +153,8 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
 
   const copy = useCallback(async (text: string, label: string) => {
     if (!text) {
-      message.warning(t('onboarding.mcpNotReady', 'MCP 服务信息还没有生成：先在设置里启动一次 MCP 服务'));
+      // 全新机器本来就没有 MCP 服务：这不是错误，给「首次使用」指引而不是告警
+      message.info(t('onboarding.mcpFirstRun', '还没有检测到 MCP 服务：首次使用请先下载并启动一次，启动后这里会自动生成带 token 的配置'));
       return;
     }
     try {
@@ -208,16 +226,55 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         </StepCard>
 
         {/* 2 MCP */}
-        <StepCard index={2} title={t('onboarding.stepMcp', '启动 MCP 服务（给 Agent IDE）')} done={false} theme={theme}>
-          <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
-            {t('onboarding.stepMcpHint', '复制下面的配置，粘到 Agent IDE（如 Cursor / Claude Code）的 MCP 设置里；配置里已带 token。')}
-          </span>
+        <StepCard index={2} title={t('onboarding.stepMcp', '启动 MCP 服务（给 Agent IDE）')} done={Boolean(serverInfo)} theme={theme}>
+          {serverInfo ? (
+            <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
+              {t('onboarding.stepMcpHint', '复制下面的配置，粘到 Agent IDE（如 Cursor / Claude Code）的 MCP 设置里；配置里已带 token。')}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: theme.toolbar.textMuted, lineHeight: 1.7 }}>
+              {t('onboarding.stepMcpFirstRun', '还没有检测到 MCP 服务。首次使用先下载安装包并启动一次；启动后这里会自动出现带 token 的配置，不用重启网页。')}
+            </span>
+          )}
+          {!serverInfo ? (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button
+                size="small"
+                type="primary"
+                icon={<Copy size={13} />}
+                disabled={!bootstrapCommand}
+                onClick={() => void copy(bootstrapCommand, '安装命令')}
+              >
+                {t('onboarding.copyBootstrap', '一键复制安装命令')}
+              </Button>
+              <Button
+                size="small"
+                href={`${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}downloads/zeroexo-mcp-server.tgz`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t('onboarding.downloadMcp', '下载 MCP 安装包')}
+              </Button>
+              <Button
+                size="small"
+                onClick={() => void loadServerInfo().then((info) => {
+                  setServerInfo(info);
+                  setMcpStaleTools(mcpServerMissingTools(info));
+                  if (info) void ensureIdeToken().then(setMcpToken).catch(() => undefined);
+                }).catch(() => undefined)}
+              >
+                {t('onboarding.refreshMcp', '我已启动，刷新状态')}
+              </Button>
+            </div>
+          ) : null}
           <pre style={{
             margin: 0, padding: 10, borderRadius: 8, maxHeight: 150, overflow: 'auto', fontSize: 11, lineHeight: 1.5,
             background: theme.mode === 'dark' ? 'rgba(0,0,0,0.35)' : 'rgba(15,23,42,0.05)',
             border: `1px solid ${theme.toolbar.border}`, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
           }}>
-{startCommand || t('onboarding.startCmdPlaceholder', '（先启动一次 MCP 服务后这里会给出命令）')}
+{serverInfo
+  ? (startCommand || t('onboarding.startCmdPlaceholder', '启动一次 MCP 服务后这里会给出命令'))
+  : (bootstrapCommand || t('onboarding.bootstrapPending', '正在生成安装命令（需要先授权存储目录）…'))}
           </pre>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button size="small" type="primary" icon={<Copy size={13} />} onClick={() => void copy(mcpConfig, 'MCP 配置')}>

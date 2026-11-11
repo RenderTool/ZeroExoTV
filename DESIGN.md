@@ -405,6 +405,17 @@ page container (height: 100%, flex column, overflow: hidden)
 - MCP 本地版本读数据根 `.mcp/server-info.json`（version/tools/builtAt）；MCP 服务自身在
   `mcp_update_status` 里也返回 `localVersion / requiredVersion / versionOutdated`，便于 Agent 主动提示更新。
 
+### 首次启动与「一键安装 MCP」（2026-11-11 用户要求）
+- 全新机器没有 `.mcp/server-info.json` 是**正常状态**，不是「服务信息生成失败」：onboarding 步骤 2 显示中性的首次使用指引，
+  不显示「旧版本/缺 N 个工具/环境不行」这类告警。
+- 首次使用给一条可复制的**安装并启动命令**（`buildBootstrapCommand`）：
+  - Windows：`powershell … Invoke-WebRequest <official tgz> → tar -xzf → node dist/index.js --http --port 8787`；
+  - macOS/Linux：`curl -fsSL <official tgz> | tar → ZEROEXO_DATA_ROOT=… ZEROEXO_MCP_TOKEN=… node …`；
+  - 命令自带当前数据根与网页生成的 token（需要 Node 18+），跑一次后回到页面点「我已启动，刷新状态」，
+    自动出现标准 MCP 配置（可复制给任意 Agent IDE）。
+- 官方安装包地址 = `https://<pages>/downloads/zeroexo-mcp-server.tgz`（CI 每次构建重新打包，与 `mcp-server/package.json` 版本一致）。
+- 没有 server-info 时 version badge 显示「未检测到（首次使用请先配置）」，不标成需要更新。
+
 ### 导演台延续法（2026-11-11 用户事故后定为硬性）
 - 段长：可见帧必须吸附 **17k+5**（fps 24，向上吸附）；每段可见帧 + **22 帧引导** ≤ **736**；第 2 段起必须吃上一段尾帧。
 - 必须走 `plan_continuity_edit`（MCP，dryRun 出「段/帧/秒/是否吃上一段」表 → 用户确认 → confirm+userConfirmed）再生成；

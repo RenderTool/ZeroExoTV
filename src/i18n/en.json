@@ -624,7 +624,8 @@
     "open": "Expand task queue",
     "collapse": "Collapse",
     "untitled": "Untitled task"
-  },  "canvasCopy": {
+  },
+  "canvasCopy": {
     "drawerTab": "Canvases",
     "structureTab": "Canvas Structure",
     "subCanvasTab": "Sub-canvas",
@@ -3116,5 +3117,13 @@
     "specExample": "Example",
     "specCopy": "Copy",
     "specCopied": "Copied"
+  },
+  "onboarding": {
+    "mcpFirstRun": "No MCP service detected yet. Download and start it once; the token config will appear here automatically.",
+    "stepMcpFirstRun": "No MCP service detected. First run: click Copy install command, paste it into any terminal (Node 18+ required); it downloads the official package and starts it with your data root + token. Then refresh here and copy the standard MCP config.",
+    "downloadMcp": "Download MCP package",
+    "refreshMcp": "I started it, refresh",
+    "copyBootstrap": "Copy install command",
+    "bootstrapPending": "Generating install command (authorize the data folder first)…"
   }
 }

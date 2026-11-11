@@ -629,7 +629,8 @@
     "open": "展开任务队列",
     "collapse": "收起",
     "untitled": "未命名任务"
-  },  "canvasCopy": {
+  },
+  "canvasCopy": {
     "drawerTab": "画布",
     "structureTab": "画布结构",
     "subCanvasTab": "子画布",
@@ -3127,5 +3128,13 @@
     "specExample": "示例",
     "specCopy": "复制",
     "specCopied": "已复制"
+  },
+  "onboarding": {
+    "mcpFirstRun": "还没有检测到 MCP 服务：首次使用请先下载并启动一次，启动后这里会自动生成带 token 的配置",
+    "stepMcpFirstRun": "还没有检测到 MCP 服务。首次使用：点「一键复制安装命令」，粘到任意终端跑一次（需要 Node 18+），它会下载官方包并用当前数据根+token 启动；之后回来点刷新即可复制标准 MCP 配置。",
+    "downloadMcp": "下载 MCP 安装包",
+    "refreshMcp": "我已启动，刷新状态",
+    "copyBootstrap": "一键复制安装命令",
+    "bootstrapPending": "正在生成安装命令（需要先授权存储目录）…"
   }
 }

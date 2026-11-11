@@ -184,9 +184,10 @@ describe('IDE 一键配置 token（ensureIdeToken）', () => {
 });
 
 describe('服务端更新感知（mcpServerMissingTools）', () => {
-  it('没有 server-info 或没有工具清单 → 无法判断/按旧版提示', () => {
+  it('没有 server-info 或没有工具清单 → 视为无法判断，不误报缺全部工具', () => {
     expect(mcpServerMissingTools(null)).toEqual([]);
-    expect(mcpServerMissingTools({ toolNames: undefined } as never)).not.toEqual([]);
+    expect(mcpServerMissingTools({ toolNames: undefined } as never)).toEqual([]);
+    expect(mcpServerMissingTools({ toolNames: [] } as never)).toEqual([]);
   });
 
   it('清单齐全 → 不报旧版', () => {

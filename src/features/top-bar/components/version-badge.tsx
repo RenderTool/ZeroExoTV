@@ -48,7 +48,9 @@ export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElem
   const appOutdated = isNewerVersion(APP_VERSION, latestApp);
   const latestMcp = manifest?.mcpVersion ?? EXPECTED_MCP_VERSION;
   const mcpLocal = mcp?.version ?? '';
-  const mcpOutdated = !mcpLocal || isNewerVersion(mcpLocal, latestMcp);
+  const mcpDetected = Boolean(mcpLocal);
+  // 全新机器/未配置 MCP：不算「过时」，只提示首次配置
+  const mcpOutdated = mcpDetected && isNewerVersion(mcpLocal, latestMcp);
 
   const muted = theme.toolbar.textMuted ?? '';
   const text = theme.toolbar.text ?? '';
@@ -91,8 +93,8 @@ export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElem
       </div>
       <div style={{ ...rowStyle, paddingTop: 0 }}>
         <span style={labelStyle}>MCP 状态</span>
-        <span style={{ fontSize: 11, color: mcpOutdated ? STATUS_WARN : STATUS_OK }}>
-          {mcpOutdated ? '需要更新 MCP 并重启' : '已是最新'}
+        <span style={{ fontSize: 11, color: mcpOutdated ? STATUS_WARN : mcpDetected ? STATUS_OK : muted }}>
+          {!mcpDetected ? '未检测到（首次使用请先配置）' : mcpOutdated ? '需要更新 MCP 并重启' : '已是最新'}
         </span>
       </div>
 

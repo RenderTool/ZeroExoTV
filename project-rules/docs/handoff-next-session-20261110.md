@@ -205,6 +205,8 @@
   网页 `useMcpImageJobs` 轮询建节点→生成→落历史→写 `.status.json`；`get_canvas_image_job` 查询；
   MCP 无法直接写主画布（浏览器持有），只能走这条桥
 - MCP 技能新增 `image-prompts`（Moss/Krea2/Qwen 三模型提示词写法与参数口径）
+- 首次启动（2026-11-11）：无 server-info 属正常，onboarding 给「一键复制安装命令」（下载官方 tgz + 当前数据根/token 启动，
+  Node 18+），刷新后出现标准 MCP 配置；版本徽标显示「未检测到（首次使用请先配置）」而不是需要更新
 - @ 提及弹层：portal 到 body + fixed + z-index 4000，避免被 dock/节点盖住；参考槽缩略图补内联内容回退
 - 历史卡片：MasonryGrid 瀑布流 + 真实宽高比 + `object-fit: contain`，不再固定 16:9 裁图
 - 提交作业：网络层 Failed to fetch 自动重试 2 次（同一 clientJobId），首点不再必失败
