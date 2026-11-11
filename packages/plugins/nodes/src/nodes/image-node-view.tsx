@@ -109,7 +109,7 @@ export function ImageNodeView({
   // 每个图源只纠一次(ref 守卫);用户拖角 resize 锁比例,纠正后比例恒匹配,不会被回打。
   const correctedForRef = useRef<string | null>(null);
   const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>): void => {
-    if (contentOnly || !commandQueue) return;
+    if (contentOnly) return;
     const img = e.currentTarget;
     const nw = img.naturalWidth;
     const nh = img.naturalHeight;
@@ -119,10 +119,14 @@ export function ImageNodeView({
     correctedForRef.current = srcKey;
 
     if (data.naturalWidth !== nw || data.naturalHeight !== nh) {
-      commandQueue.execute(new UpdateNodeDataCommand(node.id, {
-        naturalWidth: nw,
-        naturalHeight: nh,
-      } as Record<string, unknown>));
+      if (commandQueue) {
+        commandQueue.execute(new UpdateNodeDataCommand(node.id, {
+          naturalWidth: nw,
+          naturalHeight: nh,
+        } as Record<string, unknown>));
+      } else {
+        updateNode({ data: { ...(node.data ?? {}), naturalWidth: nw, naturalHeight: nh } });
+      }
     }
 
     const newSize = planOnloadResize(node.size ?? IMAGE_DEFAULT_SIZE, nw, nh, {
@@ -137,7 +141,8 @@ export function ImageNodeView({
         width: node.size?.width ?? IMAGE_DEFAULT_SIZE.width,
         height: node.size?.height ?? IMAGE_DEFAULT_SIZE.height,
       };
-      commandQueue.execute(new ResizeNodeCommand(node.id, oldRect, { ...oldRect, ...newSize }));
+      if (commandQueue) commandQueue.execute(new ResizeNodeCommand(node.id, oldRect, { ...oldRect, ...newSize }));
+      else updateNode({ size: newSize });
     }
   };
 
@@ -174,8 +179,8 @@ export function ImageNodeView({
     if (height > IMAGE_LONG_SIDE) { height = IMAGE_LONG_SIDE; width = Math.round(height / ratio); }
     if (height < MEDIA_MIN_SIZE.height) { height = MEDIA_MIN_SIZE.height; width = Math.round(height / ratio); }
     if (Math.abs(width - curW) <= 2 && Math.abs(height - curH) <= 2) return;
-    const rect = { x: node.position.x, y: node.position.y, width: curW, height: curH };
-    commandQueue.execute(new ResizeNodeCommand(node.id, rect, { ...rect, width, height }));
+    // 自动布局不走命令队列（避免队列缺失/校验拒绝导致尺寸纠正失效）；用户手动拖角仍走 ResizeNodeCommand
+    updateNode({ size: { width, height } });
   }, [contentOnly, commandQueue, data.status, data.naturalWidth, data.naturalHeight, node.id, node.position.x, node.position.y, node.size?.width, node.size?.height]);
 
   // 节点颜色使用 theme.node.fill(所有类型共用)
