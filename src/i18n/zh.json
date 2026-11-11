@@ -2697,7 +2697,9 @@
     "episodeSearchPlaceholder": "搜索集数 / 标题",
     "episodeSearchEmpty": "没有匹配的集",
     "selectAllEpisodes": "全选",
-    "clearEpisodes": "清空"
+    "clearEpisodes": "清空",
+    "appearEpisodesAllCount": "全部（{{n}} 集）",
+    "appearEpisodesRange": "第 {{ranges}} 集（共 {{n}} 集）"
   },
   "episode": {
     "pending": "等待中",

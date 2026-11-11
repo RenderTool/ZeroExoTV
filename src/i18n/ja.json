@@ -2664,7 +2664,9 @@
     "episodeSearchPlaceholder": "話数 / タイトルを検索",
     "episodeSearchEmpty": "一致する話がありません",
     "selectAllEpisodes": "全選択",
-    "clearEpisodes": "クリア"
+    "clearEpisodes": "クリア",
+    "appearEpisodesAllCount": "全話（{{n}} 話）",
+    "appearEpisodesRange": "第 {{ranges}} 話（計 {{n}} 話）"
   },
   "episode": {
     "pending": "待機中",

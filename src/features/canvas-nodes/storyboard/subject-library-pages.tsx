@@ -234,8 +234,22 @@ function EpisodePickerContent({
 
 function episodesSummary(node: { appearEpisodes?: number[] }, episodes: Array<{ number: number }>, t: ReturnType<typeof useTranslation>['t']): string {
   const valid = new Set(episodes.map((e) => e.number));
-  const picked = (node.appearEpisodes ?? []).filter((n) => valid.has(n)).sort((a, b) => a - b);
-  return picked.length > 0 ? picked.map((n) => `第 ${n} 集`).join('、') : t('subject.appearEpisodesAll', '全部');
+  const picked = Array.from(new Set((node.appearEpisodes ?? []).filter((n) => valid.has(n)))).sort((a, b) => a - b);
+  if (picked.length === 0) return t('subject.appearEpisodesAll', '全部');
+  if (picked.length === episodes.length) return t('subject.appearEpisodesAllCount', '全部（{{n}} 集）', { n: picked.length });
+
+  // 连续集压成区间，避免 100 集时卡片里铺一整段「第 1 集、第 2 集…」
+  const ranges: string[] = [];
+  let start = picked[0]!;
+  let prev = start;
+  for (let i = 1; i <= picked.length; i += 1) {
+    const cur = picked[i];
+    if (cur !== undefined && cur === prev + 1) { prev = cur; continue; }
+    ranges.push(start === prev ? `${start}` : `${start}–${prev}`);
+    if (cur !== undefined) { start = cur; prev = cur; }
+  }
+  const shown = ranges.length > 4 ? `${ranges.slice(0, 3).join('、')}…` : ranges.join('、');
+  return t('subject.appearEpisodesRange', '第 {{ranges}} 集（共 {{n}} 集）', { ranges: shown, n: picked.length });
 }
 
 /**

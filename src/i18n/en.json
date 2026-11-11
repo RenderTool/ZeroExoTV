@@ -2686,7 +2686,9 @@
     "episodeSearchPlaceholder": "Search episode / title",
     "episodeSearchEmpty": "No matching episodes",
     "selectAllEpisodes": "Select all",
-    "clearEpisodes": "Clear"
+    "clearEpisodes": "Clear",
+    "appearEpisodesAllCount": "All ({{n}} episodes)",
+    "appearEpisodesRange": "Episodes {{ranges}} ({{n}} total)"
   },
   "episode": {
     "pending": "Pending",
