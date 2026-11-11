@@ -101,10 +101,10 @@ export async function handleReplayGeneration(
     warning: (msg: string) => void;
     success: (msg: string) => void;
   },
-): Promise<void> {
+): Promise<{ nodeId: string; mode: string; prompt: string } | null> {
   const store = refs.store;
   const cq = refs.commandQueue;
-  if (!store || !cq) return;
+  if (!store || !cq) return null;
   const srcNode = store.getGraph().nodes.find((n: any) => n.id === nodeId) as NodeRecord | undefined;
   const srcData = (srcNode?.data ?? {}) as Record<string, any>;
   const generationId = srcData?.generationId as string | undefined;
@@ -117,7 +117,7 @@ export async function handleReplayGeneration(
     || (srcNode?.type === 'video' && Object.keys(pv).length > 0);
   if (!srcNode || (!generationId && !isLocalNode)) {
     message.info(t('editor.replayNoRecord'));
-    return;
+    return null;
   }
 
   let record: any;
@@ -128,11 +128,11 @@ export async function handleReplayGeneration(
       record = await apiGet(`/ai/generations/${generationId}`);
     } catch {
       message.warning(t('editor.replayNoRecord'));
-      return;
+      return null;
     }
     if (!record) {
       message.warning(t('editor.replayNoRecord'));
-      return;
+      return null;
     }
   }
 
@@ -247,6 +247,11 @@ export async function handleReplayGeneration(
   else message.success(t('editor.replayDone', { n: copiedCount }));
 
   store.focusOnNode(newId, state.containerSize, w, h, 400, 51);
+  // 2026-11-11 用户要求：一键同款 = 直接在下游新节点上开始生成（绝不覆盖原节点）
+  const prompt = String(record.prompt ?? srcData.prompt ?? '');
+  if (!prompt.trim()) return null;
+  const mode = (srcNode.type === 'video' || srcNode.type === 'audio' || srcNode.type === 'text' ? srcNode.type : 'image') as string;
+  return { nodeId: newId, mode, prompt };
 }
 
 /** 处理输入参考的收集，转换为 data URL 供 AI 接口使用 */

@@ -8,12 +8,15 @@
 import { isAuthorized, writeJson } from '@/platform/fs.js';
 import { MCP_TOOLS } from '@/features/mcp-settings/mcp-client.js';
 import { MCP_REQUIRED_MANIFEST } from '@/shared/constants/mcp-manifest.js';
+import { APP_VERSION, EXPECTED_MCP_VERSION } from '@/shared/constants/version.js';
 
 export async function publishMcpRequiredManifest(): Promise<void> {
   try {
     if (!(await isAuthorized())) return;
     await writeJson(MCP_REQUIRED_MANIFEST, {
       schemaVersion: 1,
+      appVersion: APP_VERSION,
+      mcpVersion: EXPECTED_MCP_VERSION,
       requiredTools: MCP_TOOLS.map((t) => t.name),
       writtenAt: new Date().toISOString(),
     });

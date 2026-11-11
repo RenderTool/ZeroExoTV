@@ -2,11 +2,50 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
-import { readdirSync, rmSync, existsSync } from 'fs';
+import { readdirSync, rmSync, existsSync, readFileSync } from 'fs';
+import { execSync } from 'node:child_process';
 import { spawn } from 'node:child_process';
 
-// ===== 开发阶段不注入版本号 / 构建时间 =====
-// 产品不显示版本号与版本迭代记录（版本徽标、更新日志、画布菜单版本行均已下线）。
+// ===== 版本清单（2026-11-11 用户要求）=====
+// 网页与 MCP 都显示版本号，并提供「官方最新版 vs 本地版本」对照：
+// - 构建时把 version.json 写进 dist（GitHub Pages 部署后即官方最新版清单）；
+// - 页面内用 __APP_VERSION__ 显示本地版本，fetch version.json 比对官方最新版。
+const APP_PKG = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')) as { version: string };
+const MCP_PKG = JSON.parse(readFileSync(path.resolve(__dirname, 'mcp-server/package.json'), 'utf8')) as { version: string };
+function versionManifest(): Plugin {
+  const payload = (): string => JSON.stringify({
+    appVersion: APP_PKG.version,
+    mcpVersion: MCP_PKG.version,
+    commit: (() => { try { return execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch { return ''; } })(),
+    builtAt: new Date().toISOString(),
+  });
+  return {
+    name: 'zeroexo-version-manifest',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url && req.url.split('?')[0]!.endsWith('/version.json')) {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(payload());
+          return;
+        }
+        next();
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url && req.url.split('?')[0]!.endsWith('/version.json')) {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(payload());
+          return;
+        }
+        next();
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: payload() });
+    },
+  };
+}
 
 // ===== 本地数据服务随应用自动拉起（2026-11-05 数据同源）=====
 // 用户打开页面时 fs-server（默认 8790）必须永远在线，否则前端退到临时存储。
@@ -85,7 +124,11 @@ function cleanStaleBuildAssets(): Plugin {
 export default defineConfig({
   // GitHub Pages 项目站点：部署时设置 VITE_BASE_PATH=/<repo>/；自定义域名/根站点保持 /
   base: process.env.VITE_BASE_PATH || '/',
-  plugins: [tailwindcss(), react(), zeroexoFsServer(), cleanStaleBuildAssets()],
+  plugins: [tailwindcss(), react(), zeroexoFsServer(), cleanStaleBuildAssets(), versionManifest()],
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_PKG.version),
+    __MCP_VERSION__: JSON.stringify(MCP_PKG.version),
+  },
   build: {
     // 静态资源目录（public/openlib 7268 张）原样保留；旧 hashed chunk 由
     // cleanStaleBuildAssets 在构建前清理。不要改回空目录全删：会触发批量删除保护。

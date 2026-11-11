@@ -23,6 +23,7 @@ import {
   LanguageSwitcher,
 } from '@/shared/components/index.js';
 import { TopBarIconButton, TOPBAR_ICON_GAP } from '@/shared/components/topbar-icon-button.js';
+import { VersionBadge } from './version-badge.js';
 import type { ShortcutEntry } from '@zeroexo/plugin-keyboard';
 
 import { TitleEditor } from './title-editor.js';
@@ -238,6 +239,8 @@ export function TopBar({
                 transition: 'max-width 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s',
               }}
             >
+              {/* 版本号 + 本地/官方对照（2026-11-11 用户要求） */}
+              <VersionBadge theme={theme} />
               {/* 外观(主题切换,2026-08-29 移回顶栏;与主页顶栏共用同一图标) */}
               <TopBarIconButton
                 action="appearance"

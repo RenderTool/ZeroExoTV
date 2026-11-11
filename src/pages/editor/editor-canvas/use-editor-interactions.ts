@@ -678,7 +678,11 @@ export function useEditorInteractions({
     });
     // 一键同款(征集#43):胶囊工具栏/右键菜单 emit → 复原完整生成链路
     const unsubReplay = nodeActionBus.on('replayGeneration', (event: { nodeId: string }) => {
-      void handleReplayGeneration(event.nodeId, refs, state, t, message);
+      void (async () => {
+        const target = await handleReplayGeneration(event.nodeId, refs, state, t, message);
+        // 2026-11-11 用户要求：一键同款 = 建下游新节点并直接生成，不改动原节点
+        if (target) void handlePromptGenerate(target.nodeId, target.mode as GenerationMode, target.prompt);
+      })();
     });
     const unsubCancel = nodeActionBus.on('cancel', (event: { nodeId: string }) => {
       // 分镜节点: 嵌套 Map(epKey → { taskId }), 断开 SSE + 取消后端任务

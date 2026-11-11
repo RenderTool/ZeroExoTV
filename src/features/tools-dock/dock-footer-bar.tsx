@@ -84,7 +84,19 @@ export const DockFooterBar = memo(function DockFooterBar({
         <StyledSelect
           value={model}
           options={modelOptions}
-          onChange={(m) => onConfigChange?.(nodeId, { model: m })}
+          onChange={(m) => {
+            onConfigChange?.(nodeId, { model: m });
+            // 2026-11-11：Krea2(10步/3MP) ↔ Moss(25步/1MP) ↔ Qwen(25步/1MP) 参数不通用，
+            // 切换模型必须重置为新模型默认值，否则会拿上一个模型的 10 步去跑 Moss。
+            if (mode === 'image' && m !== model && (m.startsWith('zeroexo:') || model.startsWith('zeroexo:'))) {
+              const defaults = m === MOSS_MODEL_KEY
+                ? { steps: 25, cfg: 2.5, megapixels: 1 }
+                : m === KREA2_MODEL_KEY
+                  ? { steps: 10, cfg: 1, megapixels: 3, eta: 0.55 }
+                  : { steps: 25, cfg: 1 };
+              onParamValuesChange(defaults);
+            }
+          }}
           minWidth={120}
           maxWidth={180}
           height={26}

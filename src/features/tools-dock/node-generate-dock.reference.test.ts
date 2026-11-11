@@ -17,8 +17,7 @@ describe('Krea2 / Moss = 纯文生图，不给参考图假入口', () => {
 
   it('参考素材区按 supportsReferenceInput 条件渲染，否则显示「不支持参考图」说明', () => {
     expect(src).toContain('const supportsReferenceInput = supportedInputTypes.some((t) => t !== \'text\');');
-    expect(src).toContain('{supportsReferenceInput ? (');
-    expect(src).toContain('data-no-reference-input');
+    expect(src).toContain('{supportsReferenceInput ? (');    expect(src).toContain('data-no-reference-input');
     expect(src).toContain('textOnlyModel');
   });
 });

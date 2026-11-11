@@ -1129,6 +1129,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             model={(selectedNodeData?.model as string) ?? ''}
             onConfigChange={interactions.handleNodeConfigChange}
             paramValues={(selectedNodeData?.paramValues as Record<string, any>) ?? {}}
+            // 2026-11-11 用户要求：生成过的节点不再默认收起提示词面板——选中即可看到生成信息，
+            // 不需要先点「一键同款」才能看（一键同款保留，改为直接下游生成）。
+            defaultCollapsed={!((selectedNodeData as Record<string, unknown> | null | undefined)?.generationId
+              && (selectedNodeData as Record<string, unknown> | null | undefined)?.prompt)}
           />
         ) : null}
 

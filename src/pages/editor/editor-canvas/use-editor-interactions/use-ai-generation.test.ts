@@ -59,10 +59,12 @@ describe('handleReplayGeneration（本机视频一键同款）', () => {
       getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
     };
     const msg = { info: vi.fn(), warning: vi.fn(), success: vi.fn() };
-    await handleReplayGeneration(
+    const target = await handleReplayGeneration(
       'n1', { store, commandQueue: cq }, { containerSize: { width: 1000, height: 800 } },
       (k: string) => k, msg,
     );
+    // 返回下游节点信息：调用方据此直接触发同款生成（不覆盖原节点）
+    expect(target).toEqual({ nodeId: expect.any(String), mode: 'video', prompt: '一只狗' });
     expect(apiMock.apiGet).not.toHaveBeenCalled();
     expect(cq.execute).toHaveBeenCalledTimes(1);
     const batch = cq.execute.mock.calls[0]![0] as { commands: Array<{ node?: { data: Record<string, unknown> } }> };

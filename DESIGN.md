@@ -392,6 +392,15 @@ page container (height: 100%, flex column, overflow: hidden)
 - 云端网关冷启动 / 旧 keep-alive 被关时，浏览器对 POST 不会自动重试，表现为「第一次点生成必 Failed to fetch」。
 - `submitJob` 对网络层失败自动重试 2 次（800ms、2000ms，同一 clientJobId）；HTTP 4xx/5xx 与业务拒绝不重试。
 
+### 版本号与更新对照（2026-11-11 用户要求）
+- 顶栏显示版本徽标 `v0.0.1`（`VersionBadge`），点开显示四行：网页本地 / 网页官方最新 / MCP 本地 / MCP 官方最新，
+  以及各自状态（已是最新 / 有新版本请刷新 / 需要更新 MCP 并重启）。
+- 版本来源唯一：根 `package.json`（网页）与 `mcp-server/package.json`（MCP）；构建时由 `vite.config.ts` 的
+  `versionManifest` 插件生成同源 `version.json`（appVersion / mcpVersion / commit / builtAt），页面用
+  `fetch('version.json', no-store)` 取「官方最新版」。
+- MCP 本地版本读数据根 `.mcp/server-info.json`（version/tools/builtAt）；MCP 服务自身在
+  `mcp_update_status` 里也返回 `localVersion / requiredVersion / versionOutdated`，便于 Agent 主动提示更新。
+
 ### 导演台延续法（2026-11-11 用户事故后定为硬性）
 - 段长：可见帧必须吸附 **17k+5**（fps 24，向上吸附）；每段可见帧 + **22 帧引导** ≤ **736**；第 2 段起必须吃上一段尾帧。
 - 必须走 `plan_continuity_edit`（MCP，dryRun 出「段/帧/秒/是否吃上一段」表 → 用户确认 → confirm+userConfirmed）再生成；

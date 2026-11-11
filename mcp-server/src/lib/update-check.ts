@@ -20,6 +20,8 @@ export const MCP_REQUIRED_MANIFEST = ".lf/zeroexo/app_meta/mcp-required.json";
 
 export interface RequiredManifest {
   schemaVersion?: number;
+  appVersion?: string;
+  mcpVersion?: string;
   requiredTools?: string[];
   writtenAt?: string;
 }
@@ -31,6 +33,12 @@ export interface UpdateStatus {
   required: string[] | null;
   /** 前端要求但本进程没有的工具（旧版的核心信号） */
   missing: string[];
+  /** 本机运行的 MCP 版本（dist 同目录 package.json） */
+  localVersion: string | null;
+  /** 网页要求的 MCP 版本（manifest / version.json） */
+  requiredVersion: string | null;
+  /** 版本不一致 = 该更新 MCP */
+  versionOutdated: boolean;
   /** 运行中的 dist 比磁盘源码旧？ */
   distOutdated: boolean;
   /** 仓库落后上游的提交数（读不到 git 时为 null） */
@@ -113,11 +121,20 @@ export async function buildUpdateStatus(input: {
     statMs(input.serverEntry),
   ]);
   const builtAt = entryMtime !== null ? new Date(entryMtime).toISOString() : null;
+  // 版本对照（2026-11-11）：本机 dist 同目录 package.json vs 网页 manifest 要求版本
+  const localVersion = await fs
+    .readFile(path.join(path.dirname(input.serverEntry), "..", "package.json"), "utf8")
+    .then((raw) => (JSON.parse(raw) as { version?: string }).version ?? null)
+    .catch(() => null);
+  const requiredVersion = manifest?.mcpVersion ?? null;
+  const versionOutdated = Boolean(requiredVersion && localVersion && requiredVersion !== localVersion);
 
   let hint: string | null = null;
   if (missing.length > 0) {
     hint = `MCP 服务是旧版：缺少前端要求的 ${missing.length} 个工具（${missing.slice(0, 5).join("、")}）。`
       + "先调 mcp_update_status 说明情况，征得用户同意后调 update_mcp_server（userConfirmed:true），再重启 MCP 服务。";
+  } else if (versionOutdated) {
+    hint = `MCP 版本落后：本机 v${localVersion}，网页要求 v${requiredVersion}。请更新 MCP 安装包并重启服务。`;
   } else if (distOutdated) {
     hint = "磁盘上的 MCP 代码已经重新编译，但当前进程还是旧的：重启 MCP 服务即可生效。";
   } else if ((gitBehind ?? 0) > 0) {
@@ -127,6 +144,9 @@ export async function buildUpdateStatus(input: {
     tools: input.tools,
     required,
     missing,
+    localVersion,
+    requiredVersion,
+    versionOutdated,
     distOutdated,
     gitBehind,
     repoRoot,
