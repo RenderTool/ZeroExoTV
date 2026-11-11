@@ -223,7 +223,7 @@ def apply_model_overrides(template: dict[str, Any], models: Any) -> dict[str, An
             inputs["clip_name"] = _pick_model(
                 "text_encoders",
                 clip or current_clip,
-                ("qwen3.5", "qwen_image", "qwen3vl_32b") if image_clip else ("minimax_h3", "qwen3vl_32b", "qwen3vl_8b"),
+                ("qwen3.5", "qwen_image", "qwen3vl_32b") if image_clip else ("minimax_h3", "qwen3vl_32b"),  # H3 必须 32b（hidden 5120）；8b/4b 会 matmul 形状不匹配，禁止回落
             )
             if clip_type:
                 inputs["type"] = clip_type
@@ -645,6 +645,22 @@ async def submit_job(request):
         return web.json_response({"ok": False, "error": f"缺少模板 templates/{template_kind}.json"}, status=400)
     template = apply_model_overrides(template, body.get("models"))
     if kind == "reference_video":
+        # H3 必须用 32b 文本编码器（hidden 5120）；若机器上只有 8b/4b（4096），
+        # 继续跑会在 matmul 报 "shapes cannot be multiplied (10x4096 and 5120x5376)"，
+        # 这里提前给出可操作的错误，而不是让用户看到 PyTorch 形状错误。
+        available_text_encoders = _available_models("text_encoders")
+        for node in template.values():
+            if not isinstance(node, dict) or node.get("class_type") != "CLIPLoader":
+                continue
+            clip_name = str((node.get("inputs") or {}).get("clip_name") or "")
+            if clip_name and available_text_encoders and clip_name not in available_text_encoders:
+                return web.json_response({
+                    "ok": False,
+                    "error": (
+                        f"缺少 H3 文本编码器 {clip_name}：请把 qwen3vl_32b_minimax_h3_* 放进 models/text_encoders。"
+                        " 8b/4b 的 hidden 是 4096，H3 需要 5120，强行跑会报 matmul 形状不匹配。"
+                    ),
+                }, status=400)
         # 低显存 / 原模型是 switch 二选一，但两条链都是输出节点的祖先 → 都会执行。
         # 按本次参数把没选中的一支删掉，避免「选了高性能还在跑低显存链」。
         template = prune_model_chain(template, _truthy(params.get("use_low_vram")))
