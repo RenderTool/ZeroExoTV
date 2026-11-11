@@ -2657,7 +2657,14 @@
     "undo": "元に戻す",
     "undoDone": "元に戻しました。元の内容を復元",
     "promptCopied": "プロンプトをコピーしました",
-    "copyFailed": "コピーに失敗しました。手動で選択してコピーしてください"
+    "copyFailed": "コピーに失敗しました。手動で選択してコピーしてください",
+    "appearEpisodesSelected": "{{n}} 話を選択",
+    "appearEpisodesAllShort": "全話（未選択）",
+    "chooseEpisodes": "話を選択",
+    "episodeSearchPlaceholder": "話数 / タイトルを検索",
+    "episodeSearchEmpty": "一致する話がありません",
+    "selectAllEpisodes": "全選択",
+    "clearEpisodes": "クリア"
   },
   "episode": {
     "pending": "待機中",

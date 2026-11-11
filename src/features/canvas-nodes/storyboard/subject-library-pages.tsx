@@ -20,7 +20,7 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { App as AntdApp, Button, Checkbox, Dropdown, Input, Tooltip } from 'antd';
+import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, Layers, MapPin, Package, Pencil, Plus, Search,
@@ -160,6 +160,78 @@ const KIND_FILTERS: Array<{ key: 'all' | ProductionItemKind; labelKey: string }>
 ];
 
 /** 剧集摘要（空 = 全部；悬空编号只过滤显示，不清数据） */
+/**
+ * 出现集数选择器（2026-11-12 简化）：
+ * 80+ 集时不再把每个集铺成一行 chip；默认只显示「已选 N 集」，点开后在弹层里搜索/勾选。
+ */
+function EpisodePickerContent({
+  episodes,
+  selected,
+  onToggle,
+  theme,
+  t,
+}: {
+  episodes: Array<{ number: number; title?: string }>;
+  selected: number[];
+  onToggle: (n: number) => void;
+  theme: ThemeConfig;
+  t: ReturnType<typeof useTranslation>['t'];
+}): React.ReactElement {
+  const [query, setQuery] = useState('');
+  const q = query.trim();
+  const list = q
+    ? episodes.filter((ep) => String(ep.number).includes(q) || (ep.title ?? '').includes(q))
+    : episodes;
+  const allSelected = episodes.every((ep) => selected.includes(ep.number));
+  return (
+    <div style={{ width: 300 }}>
+      <Input
+        size="small"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t('subject.episodeSearchPlaceholder', '搜索集数 / 标题')}
+        allowClear
+      />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '8px 0' }}>
+        <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
+          {selected.length > 0
+            ? t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selected.length })
+            : t('subject.appearEpisodesAllShort', '未选（全部剧集）')}
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Button
+            size="small"
+            type="link"
+            onClick={() => {
+              if (allSelected) episodes.forEach((ep) => { if (selected.includes(ep.number)) onToggle(ep.number); });
+              else episodes.forEach((ep) => { if (!selected.includes(ep.number)) onToggle(ep.number); });
+            }}
+          >
+            {allSelected ? t('subject.clearEpisodes', '清空') : t('subject.selectAllEpisodes', '全选')}
+          </Button>
+        </div>
+      </div>
+      <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {list.map((ep) => (
+          <label
+            key={ep.number}
+            data-episode-option={ep.number}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 6px', borderRadius: 6, cursor: 'pointer' }}
+          >
+            <Checkbox checked={selected.includes(ep.number)} onChange={() => onToggle(ep.number)} />
+            <span style={{ fontSize: 12 }}>{displayEpisodeTitle(ep.title, ep.number)}</span>
+          </label>
+        ))}
+        {list.length === 0 ? (
+          <div style={{ fontSize: 12, color: theme.toolbar.textMuted, padding: 8 }}>
+            {t('subject.episodeSearchEmpty', '没有匹配的集')}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function episodesSummary(node: { appearEpisodes?: number[] }, episodes: Array<{ number: number }>, t: ReturnType<typeof useTranslation>['t']): string {
   const valid = new Set(episodes.map((e) => e.number));
   const picked = (node.appearEpisodes ?? []).filter((n) => valid.has(n)).sort((a, b) => a - b);
@@ -1966,43 +2038,33 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                       </div>
                     </div>
 
-                    {/* 出现集数：每个状态（含基础状态）独立，控件同一套 */}
+                    {/* 出现集数：每个状态（含基础状态）独立；默认只显示摘要，点「选择集数」再开搜索列表（2026-11-12 简化） */}
                     <div data-episodes-field>
                       <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
                       {validEpisodes.length === 0 ? (
                         <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
                       ) : (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                          {validEpisodes.map((ep) => {
-                            const checked = selectedEpisodes.includes(ep.number);
-                            return (
-                              <div
-                                key={ep.number}
-                                data-episode-option={ep.number}
-                                role="checkbox"
-                                aria-checked={checked}
-                                tabIndex={0}
-                                onClick={() => toggleEpisode(ep.number)}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEpisode(ep.number); } }}
-                                style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: 8, height: 32, fontSize: 12,
-                                  padding: '0 12px', borderRadius: 6, cursor: 'pointer', boxSizing: 'border-box',
-                                  border: `1px solid ${checked ? theme.toolbar.accent : theme.toolbar.border}`,
-                                  background: 'transparent',
-                                  color: checked ? theme.toolbar.accent : theme.toolbar.text,
-                                  transition: 'border-color .15s ease, color .15s ease',
-                                }}
-                                onMouseEnter={(e) => { if (!checked) e.currentTarget.style.borderColor = theme.toolbar.accent; }}
-                                onMouseLeave={(e) => { if (!checked) e.currentTarget.style.borderColor = theme.toolbar.border; }}
-                              >
-                                {/* 勾选框自身吞掉点击：切换只由外层 chip 或 checkbox 触发一次 */}
-                                <span data-episode-checkbox style={{ display: 'inline-flex' }} onClick={(e) => e.stopPropagation()}>
-                                  <Checkbox checked={checked} onChange={() => toggleEpisode(ep.number)} tabIndex={-1} />
-                                </span>
-                                {displayEpisodeTitle(ep.title, ep.number)}
-                              </div>
-                            );
-                          })}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <span data-episodes-summary style={{ fontSize: 12, color: theme.toolbar.text }}>
+                            {selectedEpisodes.length > 0
+                              ? t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selectedEpisodes.length })
+                              : t('subject.appearEpisodesAllShort', '未选（全部剧集）')}
+                          </span>
+                          <Popover
+                            trigger="click"
+                            placement="bottomLeft"
+                            content={(
+                              <EpisodePickerContent
+                                episodes={validEpisodes}
+                                selected={selectedEpisodes}
+                                onToggle={toggleEpisode}
+                                theme={theme}
+                                t={t}
+                              />
+                            )}
+                          >
+                            <Button size="small" data-episodes-picker>{t('subject.chooseEpisodes', '选择集数')}</Button>
+                          </Popover>
                         </div>
                       )}
                       <div style={{ ...hintStyle, marginTop: 8 }}>

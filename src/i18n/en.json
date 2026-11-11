@@ -2679,7 +2679,14 @@
     "undo": "Undo",
     "undoDone": "Undone, original content restored",
     "promptCopied": "Prompt copied",
-    "copyFailed": "Copy failed, please select and copy manually"
+    "copyFailed": "Copy failed, please select and copy manually",
+    "appearEpisodesSelected": "{{n}} episode(s) selected",
+    "appearEpisodesAllShort": "All episodes (none selected)",
+    "chooseEpisodes": "Choose episodes",
+    "episodeSearchPlaceholder": "Search episode / title",
+    "episodeSearchEmpty": "No matching episodes",
+    "selectAllEpisodes": "Select all",
+    "clearEpisodes": "Clear"
   },
   "episode": {
     "pending": "Pending",

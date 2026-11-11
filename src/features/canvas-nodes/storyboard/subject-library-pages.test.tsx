@@ -890,7 +890,9 @@ describe('基础状态 = 独立状态（2026-11-08）', () => {
     // label 统一为「提示词」（不再是「完整提示词 / 备注」二选一）
     expect(document.querySelector('[data-field="prompt"]')?.getAttribute('aria-label')).toBe('提示词');
     expect(screen.getByText('出现集数')).toBeTruthy();
-    expect(document.querySelectorAll('[data-episode-option]').length).toBe(2);
+    // 2026-11-12：集数选择收进弹层（80+ 集不再平铺），先打开「选择集数」
+    fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
+    await waitFor(() => expect(document.querySelectorAll('[data-episode-option]').length).toBe(2));
 
     fireEvent.click(document.querySelector('[data-episode-option="2"]') as Element);
     await waitFor(() => {

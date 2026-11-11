@@ -166,8 +166,10 @@ export function MasonryGrid({
       const el2 = ref.current;
       if (!el2) return;
       const w = el2.getBoundingClientRect().width || el2.clientWidth || 0;
-      // 死区 2px（原 0.5）：抽屉展开动画逐帧变宽时不必每帧重算卡片高度
-      setWidth((prev) => (Math.abs(prev - w) < 2 ? prev : w));
+      // 2026-11-12 抽屉拖拽卡顿：宽度量化到 8px 桶 + 死区 8px，
+      // 拖拽时不再逐像素重算所有卡片封面高度/图片加载档位。
+      const quantized = Math.round(w / 8) * 8;
+      setWidth((prev) => (Math.abs(prev - quantized) < 8 ? prev : quantized));
     };
     read();
     if (typeof ResizeObserver === 'undefined') {

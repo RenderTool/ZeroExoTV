@@ -6,7 +6,34 @@ import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import { matchSubjectCandidates, readStoryboard, setSubjectImage, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
+import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ");
+}
+
+/** 主体在剧本里出现过的集（按名字/别名匹配；空数组 = 剧本里没出现） */
+async function episodesAppearingIn(root: string, projectId: string, names: string[]): Promise<Array<{ id: string; number: number; title: string }>> {
+  const script = await readScript(root, projectId).catch(() => null);
+  if (!script) return [];
+  const needles = names.map((n) => n.trim()).filter((n) => n.length >= 1);
+  if (needles.length === 0) return [];
+  return script.episodes
+    .map((ep) => {
+      const text = stripHtml(ep.content ?? "");
+      const hit = needles.some((n) => text.includes(n));
+      return hit ? { id: ep.id, number: ep.number, title: ep.title } : null;
+    })
+    .filter((v): v is { id: string; number: number; title: string } => v !== null);
+}
+
 
 export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
@@ -27,7 +54,9 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
 
   defTool(server, ctx, {
     name: "upsert_subject",
-    description: "新建或更新主体（有 id 更新、无 id 新建 item-…）。写类：baseVersion 必填，0=主体库不存在时创建。",
+    description:
+      "新建或更新主体（有 id 更新、无 id 新建 item-…）。写类：baseVersion 必填，0=主体库不存在时创建。" +
+      "新建时若未给 episodeIds，会**按名字/别名在剧本里自动关联出现过的集**（避免所有主演默认挂全部集）。",
     bits: ["subject.write"],
     schema: {
       projectId: z.string(),
@@ -42,8 +71,29 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     },
     handler: async (args) => {
       const { projectId, baseVersion, dryRun, ...subject } = args;
+      let autoEpisodes: Array<{ id: string; number: number; title: string }> | null = null;
+      const isCreate = !args.id;
+      if (isCreate && args.episodeIds === undefined) {
+        autoEpisodes = await episodesAppearingIn(dataRoot(), projectId, [args.name, ...(args.aliases ?? [])]);
+        if (autoEpisodes.length > 0) {
+          subject.episodeIds = autoEpisodes.map((ep) => ep.id);
+        }
+      }
       const res = await upsertSubject(dataRoot(), projectId, { baseVersion, subject, dryRun });
-      return { written: res.written, created: res.created, version: res.after.version, subject: res.subject };
+      return {
+        written: res.written,
+        created: res.created,
+        version: res.after.version,
+        subject: res.subject,
+        ...(autoEpisodes
+          ? {
+              autoEpisodes: autoEpisodes.map((ep) => `第 ${ep.number} 集${ep.title ? ` · ${ep.title}` : ""}`),
+              autoEpisodeHint: autoEpisodes.length > 0
+                ? "已按剧本出现自动关联集数"
+                : "剧本里没找到这个名字：episodeIds 为空（页面会显示为全部集），请在页面上手动选择出现集数",
+            }
+          : {}),
+      };
     },
   });
 

@@ -2690,7 +2690,14 @@
     "undo": "撤销",
     "undoDone": "已撤销，恢复原内容",
     "promptCopied": "已复制提示词",
-    "copyFailed": "复制失败，请手动选择复制"
+    "copyFailed": "复制失败，请手动选择复制",
+    "appearEpisodesSelected": "已选 {{n}} 集",
+    "appearEpisodesAllShort": "未选（全部剧集）",
+    "chooseEpisodes": "选择集数",
+    "episodeSearchPlaceholder": "搜索集数 / 标题",
+    "episodeSearchEmpty": "没有匹配的集",
+    "selectAllEpisodes": "全选",
+    "clearEpisodes": "清空"
   },
   "episode": {
     "pending": "等待中",
