@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
 
 /** 参考素材类型 */
@@ -211,6 +212,33 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
     const promptTextRef = useRef('');
     const mentionOpenRef = useRef(false);
     const mentionFilterRef = useRef('');
+
+    /**
+     * @ 提及弹层定位（2026-11-11 修复 z-index）：弹层 portal 到 body + fixed 定位，
+     * 避免被画布节点 / dock 的层叠上下文盖住；每次打开按编辑器位置重算。
+     */
+    const positionMentionPopup = useCallback(() => {
+      const el = mentionPopupRef.current;
+      const host = promptInputRef.current;
+      if (!el || !host) return;
+      const rect = host.getBoundingClientRect();
+      el.style.left = `${Math.round(rect.left)}px`;
+      el.style.width = `${Math.round(rect.width)}px`;
+      el.style.bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
+    }, []);
+    const showMentionPopup = useCallback(() => {
+      positionMentionPopup();
+      showMentionPopup();
+    }, [positionMentionPopup]);
+    useEffect(() => {
+      const reflow = (): void => positionMentionPopup();
+      window.addEventListener('resize', reflow);
+      window.addEventListener('scroll', reflow, true);
+      return () => {
+        window.removeEventListener('resize', reflow);
+        window.removeEventListener('scroll', reflow, true);
+      };
+    }, [positionMentionPopup]);
 
     // ref 追踪最新的 props
     const referencesRef = useRef(references);
@@ -538,7 +566,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
               if (inputE.data === '@') {
                 if (!mentionOpenRef.current) {
                   mentionOpenRef.current = true;
-                  if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'flex';
+                  showMentionPopup();
                 }
               } else {
                 const filtered = s.references.filter((r) =>
@@ -548,7 +576,8 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                 if (shouldOpen !== mentionOpenRef.current) {
                   mentionOpenRef.current = shouldOpen;
                   if (mentionPopupRef.current)
-                    mentionPopupRef.current.style.display = shouldOpen ? 'flex' : 'none';
+                    if (shouldOpen) showMentionPopup();
+                    else mentionPopupRef.current.style.display = 'none';
                 }
               }
             } else if (inputE.inputType === 'deleteContentBackward') {
@@ -573,7 +602,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
               if (shouldOpen !== mentionOpenRef.current) {
                 mentionOpenRef.current = shouldOpen;
                 if (mentionPopupRef.current)
-                  mentionPopupRef.current.style.display = shouldOpen ? '' : 'none';
+                  if (shouldOpen) showMentionPopup(); else mentionPopupRef.current.style.display = 'none';
               }
             }
           }}
@@ -710,22 +739,23 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         {contentEditableEl}
 
         {/* @ 提及弹出菜单 — Agent MentionPopover 同款(2026-08-25 用户拍板):投影无边框 + 搜索头 + 两行列表行 */}
-        {!readOnly && references.length > 0 && (
+        {!readOnly && references.length > 0 && createPortal(
           <div
             ref={mentionPopupRef}
             style={{
               display: 'none',
               flexDirection: 'column',
-              position: 'absolute',
-              bottom: '100%',
+              // 2026-11-11：portal + fixed + 高层级，避免被 dock / 画布节点/组按层叠上下文盖住（用户反馈 z-index 错）
+              position: 'fixed',
               left: 0,
-              right: 0,
+              bottom: 0,
+              width: 240,
               background: mentionBg,
               borderRadius: 12,
               boxShadow: '0 8px 28px rgba(0,0,0,0.22)',
               maxHeight: 280,
               overflow: 'hidden',
-              zIndex: 1000,
+              zIndex: 4000,
               marginBottom: 6,
               color: textColor,
             }}
@@ -806,7 +836,8 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                 ))
               )}
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );

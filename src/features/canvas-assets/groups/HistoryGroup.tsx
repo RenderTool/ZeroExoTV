@@ -153,6 +153,12 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   const videoRef = useRef<HTMLVideoElement>(null);
   const data = asset.data as { kind: string; dataUrl?: string; url?: string; storageKey?: string; width?: number; height?: number; durationMs?: number; guide?: { id?: string } };
   const isVideo = data.kind === 'video';
+  // 2026-11-11 用户反馈：历史卡片固定 16:9 + cover 会把竖图裁掉（看不到完整资源）。
+  // 按素材真实宽高比铺卡片（瀑布流由 MasonryGrid 负责），极端长图限幅避免单卡过高。
+  const mediaRatio = typeof data.width === 'number' && typeof data.height === 'number' && data.width > 0 && data.height > 0
+    ? data.width / data.height
+    : 239.2 / 135.4;
+  const coverRatio = Math.min(2.4, Math.max(0.5, mediaRatio));
   const hasGuide = isVideo && assetMayHaveGuide(asset);
   const isDark = theme.mode === 'dark';
   // 缩略图三档契约（与 asset-card 同款）：未进入视口时不解析（懒加载）
@@ -196,7 +202,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
         style={{
           position: 'relative',
           width: '100%',
-          aspectRatio: '239.2 / 135.4',
+          aspectRatio: coverRatio,
           borderRadius: 12,
           overflow: 'hidden',
           background: isDark ? 'rgba(255,255,255,0.02)' : '#ffffff',
@@ -220,14 +226,14 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
               loop
               playsInline
               preload="metadata"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
             />
           ) : (
             <img
               src={hydrated}
               alt={asset.title}
               loading="lazy"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
             />
           )
         ) : (

@@ -478,7 +478,14 @@ export function NodeGenerateDock({
           try {
             const u = await resolveAnyThumbUrl(n.storageKey);
             if (u) next[n.id] = u;
+            else if (typeof n.content === 'string' && (n.content.startsWith('data:') || n.content.startsWith('http'))) {
+              next[n.id] = n.content;
+            }
           } catch { /* 无缩略图回退内容直链 */ }
+        } else if ((n.type === 'image' || n.type === 'video') && typeof n.content === 'string'
+          && (n.content.startsWith('data:') || n.content.startsWith('http'))) {
+          // 没有 storageKey 但有内联内容（刚生成/外部拖入）：直接用作槽位缩略图，避免空槽黑块
+          next[n.id] = n.content;
         } else if (n.type === 'stacked-media') {
           // 堆叠:展开解析各卡片缩略图(@ 列表与参考区展示用)
           const graph = store.getGraph();

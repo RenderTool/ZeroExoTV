@@ -67,6 +67,7 @@ import {
   HISTORY_PAGE_SIZE,
   countHistoryByKind,
   countHistoryBySourceAndKind,
+  dedupeGenerationAssets,
   filterHistoryAssets,
   findAssetNodeId,
   fmtRelativeTime,
@@ -91,7 +92,7 @@ function mkAsset(partial: Partial<Asset> & { id: string }): Asset {
     projectId: PID,
     bytes: 1024,
     mimeType: 'image/png',
-    data: { kind: 'image', dataUrl: '', storageKey: 'cas:abc.png', width: 800, height: 450, origin: 'generation', generation: GEN_META },
+    data: { kind: 'image', dataUrl: '', storageKey: `cas:${partial.id}.png`, width: 800, height: 450, origin: 'generation', generation: GEN_META },
     createdAt: '2026-11-04T04:00:00.000Z',
     updatedAt: '2026-11-04T04:00:00.000Z',
     folderId: null,
@@ -279,7 +280,7 @@ describe('分页与懒加载', () => {
 describe('定位画布节点', () => {
   const graph = {
     nodes: [
-      { id: 'node-1', data: { storageKey: 'cas:abc.png' } },
+      { id: 'node-1', data: { storageKey: 'cas:x2.png' } },
       { id: 'node-2', data: {} },
     ],
   };
@@ -488,5 +489,23 @@ describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', 
     const src = readSrc('src/features/canvas-assets/groups/HistoryGroup.tsx');
     expect(src).toContain('data-guide-badge');
     expect(src).not.toContain('data-guide-download');
+  });
+
+  it('历史卡片按真实宽高比铺（瀑布流），图片 contain 不裁切（2026-11-11 反馈）', () => {
+    const src = readSrc('src/features/canvas-assets/groups/HistoryGroup.tsx');
+    expect(src).toContain('aspectRatio: coverRatio');
+    expect(src).not.toContain("aspectRatio: '239.2 / 135.4'");
+    expect(src).toContain("objectFit: 'contain'");
+  });
+
+  it('同一产物重复落库 → 列表与计数都只算一条（2026-11-11 反馈）', () => {
+    const dupA = mkAsset({ id: 'dup-a', createdAt: '2026-11-11T10:00:00.000Z' });
+    const dupB = mkAsset({ id: 'dup-b', createdAt: '2026-11-11T09:00:00.000Z' });
+    (dupA.data as Record<string, unknown>).storageKey = 'cas:same.png';
+    (dupB.data as Record<string, unknown>).storageKey = 'cas:same.png';
+    expect(dedupeGenerationAssets([dupA, dupB])).toHaveLength(1);
+    expect(filterHistoryAssets([dupA, dupB], PID, 'image')).toHaveLength(1);
+    expect(countHistoryByKind([dupA, dupB], PID).image).toBe(1);
+    expect(countHistoryBySourceAndKind([dupA, dupB], PID).canvas.image).toBe(1);
   });
 });

@@ -61,6 +61,25 @@ describe('连接预热与网络层重试（点两次才生成 / 参考图被静�
     }
   });
 
+  it('submitQwenImageJob：POST 首次 Failed to fetch 自动重试（用户不再需要点第二次）', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify({ ok: true, jobId: 'job-retry', state: 'queued' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const res = await submitQwenImageJob('http://127.0.0.1:8188', {
+        project: 'p', episode: 'e', params: { prompt: 'x' },
+      } as never);
+      expect(res.jobId).toBe('job-retry');
+      expect(calls).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('uploadZeroexoReference：POST 网络失败重试一次，参考图不再被静默丢弃', async () => {
     let calls = 0;
     const fetchMock = vi.fn(async () => {

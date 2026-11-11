@@ -125,26 +125,37 @@ export async function probeZeroexoPlugin(baseUrl: string, timeoutMs = 4000): Pro
   }
 }
 
-/** 网络层失败保留完整 URL，避免只看到 Failed to fetch */
-async function jobFetch(url: string, init?: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (err) {
-    throw new Error(`请求 ${url} 失败：${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
 /** 提交单段作业（一个片段 = 一个 ComfyUI prompt） */
 async function submitJob(
   baseUrl: string,
   kind: 'reference_video' | 'qwen_image_edit' | 'krea2_t2i',
   body: { clientJobId?: string; clientId?: string; project: string; episode: string; models?: Record<string, string>; params: object },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
-  const res = await jobFetch(`${trimBase(baseUrl)}/zeroexo/v1/jobs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind, ...body }),
-  });
+  const url = `${trimBase(baseUrl)}/zeroexo/v1/jobs`;
+  const payload = JSON.stringify({ kind, ...body });
+  // 2026-11-11 用户反馈「第一次点生成必 Failed to fetch，重试才好」：
+  // 云端网关冷启动 / 旧 keep-alive 被关时，浏览器对 POST 不自动重试。这里对网络层失败自动重试
+  // （POST 用同一 clientJobId，HTTP 错误/业务拒绝不重试，避免把真正的参数错误也重发）。
+  let res: Response | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      });
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 2000));
+    }
+  }
+  if (!res) {
+    const detail = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    throw new Error(`请求 ${url} 失败：${detail}（已自动重试 2 次；云端网关可能正在唤醒，请再试一次）`);
+  }
   if (!res.ok) throw new Error(`/zeroexo/v1/jobs ${await readError(res)}`);
   const data = (await res.json().catch(() => null)) as
     | { ok?: boolean; jobId?: string; state?: ZeroexoJobState; error?: string | null }

@@ -10,12 +10,16 @@ afterEach(() => {
 });
 
 describe('resolveKrea2Size', () => {
+  it('1MP = 1024×1024（1024² 定义，不是十进制 1,000,000）', () => {
+    expect(resolveKrea2Size('1:1', 1)).toEqual({ width: 1024, height: 1024 });
+  });
+
   it('3MP 16:9 → 32 对齐的横向尺寸', () => {
     const { width, height } = resolveKrea2Size('16:9', 3);
     expect(width % 32).toBe(0);
     expect(height % 32).toBe(0);
     expect(width).toBeGreaterThan(height);
-    expect(Math.abs((width * height) / 1_000_000 - 3)).toBeLessThan(0.15);
+    expect(Math.abs((width * height) / (1024 * 1024) - 3)).toBeLessThan(0.15);
   });
 
   it('1:1 2MP → 近似正方形且 32 对齐', () => {
@@ -25,7 +29,7 @@ describe('resolveKrea2Size', () => {
   });
 
   it('非法比例回退 1:1；像素夹在 0.5–8MP', () => {
-    expect(resolveKrea2Size(undefined, 3)).toEqual({ width: 1728, height: 1728 });
+    expect(resolveKrea2Size(undefined, 3)).toEqual({ width: 1760, height: 1760 });
     const huge = resolveKrea2Size('1:1', 99);
     expect(huge.width).toBeLessThanOrEqual(8 * 1024);
     expect(KREA2_DEFAULT_STEPS).toBe(10);

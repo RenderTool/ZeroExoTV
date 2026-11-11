@@ -41,6 +41,24 @@ export function isGenerationAsset(asset: Asset): boolean {
 }
 
 /**
+ * 同一产物被重复落库时只保留一条（2026-11-11 用户反馈：历史里同图两张卡）。
+ * 判据：生成产物的 CAS storageKey 相同 = 同一份内容；保留列表里先出现的那条（已按时间倒序）。
+ */
+export function dedupeGenerationAssets(assets: Asset[]): Asset[] {
+  const seen = new Set<string>();
+  const out: Asset[] = [];
+  for (const a of assets) {
+    const key = (a.data as { storageKey?: string } | undefined)?.storageKey;
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+/**
  * 过滤某项目的历史产出（仅生成产物 + 指定 kind），按 createdAt 倒序。
  * source 省略或 'all' = 不按来源过滤（存量调用方/测试零影响）；
  * 传 'canvas' / 'director' = 抽屉来源 Tab 的分区口径。
@@ -52,12 +70,12 @@ export function filterHistoryAssets(
   source?: HistorySource | 'all',
 ): Asset[] {
   if (!projectId) return [];
-  return assets
+  return dedupeGenerationAssets(assets
     .filter((a) => isGenerationAsset(a)
       && a.projectId === projectId
       && (kind === 'all' || a.kind === kind)
       && (!source || source === 'all' || getHistorySource(a) === source))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
 }
 
 /** 两分类计数（一次遍历；仅生成产物，不分来源；保留给旧调用方） */
@@ -65,8 +83,7 @@ export function countHistoryByKind(assets: Asset[], projectId: string | null): {
   let image = 0;
   let video = 0;
   if (projectId) {
-    for (const a of assets) {
-      if (!isGenerationAsset(a) || a.projectId !== projectId) continue;
+    for (const a of dedupeGenerationAssets(assets.filter((x) => isGenerationAsset(x) && x.projectId === projectId))) {
       if (a.kind === 'image') image++;
       else if (a.kind === 'video') video++;
     }
@@ -87,8 +104,7 @@ export function countHistoryBySourceAndKind(
     director: { image: 0, video: 0, total: 0 },
   };
   if (!projectId) return result;
-  for (const a of assets) {
-    if (!isGenerationAsset(a) || a.projectId !== projectId) continue;
+  for (const a of dedupeGenerationAssets(assets.filter((x) => isGenerationAsset(x) && x.projectId === projectId))) {
     const bucket = result[getHistorySource(a)];
     bucket.total++;
     if (a.kind === 'image') bucket.image++;

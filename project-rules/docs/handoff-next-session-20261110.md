@@ -198,6 +198,12 @@
   1.0 → 1376×768；前端与 MCP 共用同一公式
 - 图片结果节点比例（2026-11-11）：生成完成用 `fitImageNodeSize` 同时重算宽高（长边 ≤320），
   修复 Krea2/Qwen 返回后节点停在旧比例、图片 contain 出黑边
+- 图片尺寸口径（2026-11-11）：Krea2 的 1MP = 1024×1024（1024²，不是 1e6）；1MP 1:1 → 1024×1024
+- @ 提及弹层：portal 到 body + fixed + z-index 4000，避免被 dock/节点盖住；参考槽缩略图补内联内容回退
+- 历史卡片：MasonryGrid 瀑布流 + 真实宽高比 + `object-fit: contain`，不再固定 16:9 裁图
+- 提交作业：网络层 Failed to fetch 自动重试 2 次（同一 clientJobId），首点不再必失败
+- 历史去重（2026-11-11）：`autoLandGenerationBlob` 用内容哈希在途锁防止并发重复落库；
+  `filterHistoryAssets` / 计数按 storageKey 去重（存量重复卡不再展示）
 
 ## 4. 接手检查
 

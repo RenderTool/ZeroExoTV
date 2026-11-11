@@ -32,7 +32,7 @@ export { KREA2_MODEL_KEY };
 
 /** Krea2 默认采样步数（turbo 底模；与 Qwen 的 25 步不是一套） */
 export const KREA2_DEFAULT_STEPS = 10;
-/** 默认百万像素（ResolutionSelector 口径）；3MP ≈ 1536×1024 */
+/** 默认百万像素（ResolutionSelector 口径：1MP = 1024×1024，与视频尺寸同一套定义） */
 export const KREA2_DEFAULT_MEGAPIXELS = 3;
 
 export interface LocalKrea2Request {
@@ -67,7 +67,10 @@ export function resolveKrea2Size(aspect: string | undefined, megapixels = KREA2_
   if (!rw || !rh) return { width: 1024, height: 1024 };
   const mp = Math.max(0.5, Math.min(8, Number.isFinite(megapixels) ? megapixels : KREA2_DEFAULT_MEGAPIXELS));
   const ratio = rw / rh;
-  const width = Math.sqrt(mp * 1_000_000 * ratio);
+  // 2026-11-11 用户纠正：1MP = 1024×1024（1024²），不是十进制 1,000,000；
+  // 之前 1MP 算出 992×992 就是用了 1e6 的十进制定义。
+  const total = mp * 1024 * 1024;
+  const width = Math.sqrt(total * ratio);
   return { width: align(width), height: align(width / ratio) };
 }
 

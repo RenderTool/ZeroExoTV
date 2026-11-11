@@ -59,6 +59,9 @@ export interface AutoLandBlobInput extends Omit<AutoLandInput, 'content'> {
  * 返回落库结果（storageKey / guide）：节点侧可把它写回 data.storageKey，
  * 刷新后仍能按 key 重新解析媒体（否则只剩会话级 blob: 地址，下载/播放都会失效）。
  */
+/** 正在落库的内容（同一产物被两条链路同时落库时，只建一条记录，避免历史里出现重复卡片） */
+const landingInFlight = new Set<string>();
+
 export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<{ storageKey: string; guide?: GuideMeta } | null> {
   const projectId = input.projectId ?? getCurrentCanvasId();
   if (!projectId || !input.blob.size) return null;
@@ -69,35 +72,44 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
   const staged = await stageCasUpload(input.blob, input.kind, { projectId });
   // 同内容已有资产记录（用户已保存到素材 / 重复生成同一产物）→ 不重复建记录
   if (staged.dedupedExistingAsset) return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
-  const generation = {
-    jobId: input.jobId,
-    provider: input.provider,
-    model: input.model,
-    prompt: input.prompt,
-    durationSec: input.durationMs != null ? Math.round((input.durationMs / 1000) * 100) / 100 : undefined,
-    frames: input.frames,
-    createdAt: new Date().toISOString(),
-  };
-  const originSource: HistorySource = input.originSource ?? 'canvas';
-  const data: Parameters<typeof addAsset>[0]['data'] =
-    input.kind === 'image'
-      ? { kind: 'image', dataUrl: '', storageKey: staged.storageKey, width: input.width, height: input.height, originNodeId: input.nodeId, origin: 'generation', originSource, generation }
-      : { kind: 'video', url: '', storageKey: staged.storageKey, width: input.width, height: input.height, durationMs: input.durationMs, originNodeId: input.nodeId, origin: 'generation', originSource, generation, ...(guideMeta ? { guide: guideMeta } : {}) };
-  await addAsset(
-    {
-      id: staged.id,
-      cas: staged.cas,
-      title: input.title || (input.kind === 'image' ? '画布图片产出' : '画布视频产出'),
-      kind: input.kind,
-      bytes: staged.bytes,
-      mimeType: staged.mimeType,
-      data,
-      scope: 'project',
-      projectId,
-    },
-    { source: 'autoland' },
-  );
-  return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
+  // 并发落库竞态：两条链路同时 stage 同一字节时，dedupedExistingAsset 都还看不到记录，
+  // 会各建一条（历史里同图两卡）。用内容哈希做在途锁，后来者直接复用 key、不再写记录。
+  const landingKey = `${projectId}:${staged.cas?.hash ?? staged.storageKey}`;
+  if (landingInFlight.has(landingKey)) return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
+  landingInFlight.add(landingKey);
+  try {
+    const generation = {
+      jobId: input.jobId,
+      provider: input.provider,
+      model: input.model,
+      prompt: input.prompt,
+      durationSec: input.durationMs != null ? Math.round((input.durationMs / 1000) * 100) / 100 : undefined,
+      frames: input.frames,
+      createdAt: new Date().toISOString(),
+    };
+    const originSource: HistorySource = input.originSource ?? 'canvas';
+    const data: Parameters<typeof addAsset>[0]['data'] =
+      input.kind === 'image'
+        ? { kind: 'image', dataUrl: '', storageKey: staged.storageKey, width: input.width, height: input.height, originNodeId: input.nodeId, origin: 'generation', originSource, generation }
+        : { kind: 'video', url: '', storageKey: staged.storageKey, width: input.width, height: input.height, durationMs: input.durationMs, originNodeId: input.nodeId, origin: 'generation', originSource, generation, ...(guideMeta ? { guide: guideMeta } : {}) };
+    await addAsset(
+      {
+        id: staged.id,
+        cas: staged.cas,
+        title: input.title || (input.kind === 'image' ? '画布图片产出' : '画布视频产出'),
+        kind: input.kind,
+        bytes: staged.bytes,
+        mimeType: staged.mimeType,
+        data,
+        scope: 'project',
+        projectId,
+      },
+      { source: 'autoland' },
+    );
+    return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
+  } finally {
+    landingInFlight.delete(landingKey);
+  }
 }
 
 export async function autoLandGenerationOutput(input: AutoLandInput): Promise<{ storageKey: string; guide?: GuideMeta } | null> {
