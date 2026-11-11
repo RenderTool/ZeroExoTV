@@ -120,6 +120,14 @@ const SUBJECTS = `# 技能：主体库（subjects）
   （同名/同别名已存在），并告诉你现有 subjectId；不要换名字绕过。
 - 建主体前先 \`list_subjects\` 查重；不确定是不是新角色时，先问用户。
 
+### 3.7 清理重复主体：有工具，不要让用户去前端手动删（2026-11-12）
+
+- 重复主体（同名/同别名、合并产生的副本）用 \`merge_subjects({ sourceId, targetId })\` 并回本体：
+  图片/别名/集数/状态都会并入 target，source 删除；先 \`dryRun\` 看 \`movedImages / movedStates\`，再 \`userConfirmed:true\`。
+- 只删坏图：\`delete_subject_image({ subjectId, storageKey })\`；删整个主体：\`delete_subject({ subjectId })\`。
+- 这三个都是破坏性写，必须 **先 dryRun 给用户确认清单，再 userConfirmed:true**；禁止说「MCP 没有删主体/删图的工具，请你去前端删」。
+- 合并前必须确认 source/target 是同一演员；不同演员不能合并（服务端只允许同 kind，但同名不同人仍需人工判断）。
+
 ## 4. 落地步骤
 
 1. \`upsert_subject({ name, kind, aliases, note:身份锚点句 })\` —— 先 dryRun，清单给用户确认后才写。

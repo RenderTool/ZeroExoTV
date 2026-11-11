@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
-import { matchSubjectCandidates, readStoryboard, setSubjectImage, upsertSubject } from "../store/storyboard.js";
+import { matchSubjectCandidates, deleteSubject, deleteSubjectImage, mergeSubjects, readStoryboard, setSubjectImage, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -151,6 +151,85 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         imageCount: res.subject.images.length,
         coverKey: res.subject.coverKey,
       };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "delete_subject",
+    description:
+      "删除主体（连同主体树状态）。破坏性写：先 dryRun 给用户看，真实删除必须 userConfirmed:true。只删主体库，不级联删画布/导演台引用。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      subjectId: z.string(),
+      userConfirmed: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "删除主体必须 userConfirmed:true（先 dryRun 把要删的主体报给用户确认）");
+      }
+      const res = await deleteSubject(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        subjectId: args.subjectId,
+        dryRun: args.dryRun,
+      });
+      return { written: res.written, deleted: res.deleted, version: res.after.version, subject: res.subject };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "delete_subject_image",
+    description:
+      "删除主体的某张状态图（同步清理主体树 media）。破坏性写：需 userConfirmed:true；cover 被删会自动回落下一张。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      subjectId: z.string(),
+      storageKey: z.string().min(1),
+      userConfirmed: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "删除状态图必须 userConfirmed:true（先 dryRun 给用户确认）");
+      }
+      const res = await deleteSubjectImage(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        subjectId: args.subjectId,
+        storageKey: args.storageKey,
+        dryRun: args.dryRun,
+      });
+      return { written: res.written, deleted: res.deleted, version: res.after.version, imageCount: res.subject?.images.length };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "merge_subjects",
+    description:
+      "把重复主体并回本体：图片/别名/集数并入 target，状态并进 target 树，然后删除 source。破坏性写：需 userConfirmed:true；先 dryRun 核对数量。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      sourceId: z.string(),
+      targetId: z.string(),
+      userConfirmed: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "合并主体必须 userConfirmed:true（先 dryRun 确认 source/target 与移动数量）");
+      }
+      const res = await mergeSubjects(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        sourceId: args.sourceId,
+        targetId: args.targetId,
+        dryRun: args.dryRun,
+      });
+      return { written: res.written, merged: res.merged, movedImages: res.movedImages, movedStates: res.movedStates, version: res.after.version };
     },
   });
 

@@ -219,8 +219,7 @@ function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
  * - 定妆/无 stateTag → 基础状态 states[0] 的 media；
  * - 其它 stateTag → 对应状态节点（不存在则创建），前端主体页按状态展示。
  */
-export async function setSubjectImage(
-  root: string,
+export async function setSubjectImage(  root: string,
   projectId: string,
   opts: { baseVersion: number; image: SubjectImageInput; dryRun?: boolean },
 ): Promise<UpdateResult<StoryboardContainer> & { subject: ProductionItem }> {
@@ -254,4 +253,136 @@ export async function setSubjectImage(
     },
   });
   return { ...res, subject };
+}
+
+/**
+ * 删除主体（连同主体树）。2026-11-12：MCP 之前没有删除工具，弱模型只能让用户去前端删。
+ * 画布/导演台里对该主体的引用不在这里级联（避免误删片段），由调用方决定是否再清理。
+ */
+export async function deleteSubject(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; subjectId: string; dryRun?: boolean },
+): Promise<UpdateResult<StoryboardContainer> & { deleted: boolean; subject?: ProductionItem }> {
+  let deleted: ProductionItem | undefined;
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
+    baseVersion: opts.baseVersion,
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      const idx = s.entities.findIndex((e) => e.id === opts.subjectId);
+      if (idx < 0) throw new McpError("NOT_FOUND", `主体不存在: ${opts.subjectId}`, { subjectId: opts.subjectId });
+      deleted = s.entities[idx];
+      s.entities.splice(idx, 1);
+      if (Array.isArray(s.subjectTree)) {
+        s.subjectTree = (s.subjectTree as TreeLike[]).filter((t) => t.itemId !== opts.subjectId);
+      }
+    },
+  });
+  return { ...res, deleted: Boolean(deleted), subject: deleted };
+}
+
+/** 删除主体的一张状态图（同时删树里对应状态/基础状态的 media；状态空了且非基础状态则移除该状态） */
+export async function deleteSubjectImage(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; subjectId: string; storageKey: string; dryRun?: boolean },
+): Promise<UpdateResult<StoryboardContainer> & { deleted: boolean; subject?: ProductionItem }> {
+  let deleted = false;
+  let subject: ProductionItem | undefined;
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
+    baseVersion: opts.baseVersion,
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      subject = s.entities.find((e) => e.id === opts.subjectId);
+      if (!subject) throw new McpError("NOT_FOUND", `主体不存在: ${opts.subjectId}`, { subjectId: opts.subjectId });
+      const before = subject.images.length;
+      subject.images = subject.images.filter((i) => i.storageKey !== opts.storageKey);
+      deleted = subject.images.length !== before;
+      if (subject.coverKey === opts.storageKey) {
+        subject.coverKey = subject.images[0]?.storageKey ?? null;
+      }
+      if (Array.isArray(s.subjectTree)) {
+        const trees = s.subjectTree as TreeLike[];
+        const tree = trees.find((t) => t.itemId === opts.subjectId);
+        if (tree) {
+          tree.states = tree.states.filter((st) => {
+            const had = st.media.some((m) => m.key === opts.storageKey);
+            if (!had) return true;
+            st.media = st.media.filter((m) => m.key !== opts.storageKey);
+            return st.id === "__base__" || st.media.length > 0;
+          });
+          if (tree.coverKey === opts.storageKey) tree.coverKey = tree.states[0]?.media[0]?.key ?? null;
+        }
+      }
+    },
+  });
+  return { ...res, deleted, subject };
+}
+
+/**
+ * 合并两个主体（把重复主体并回本体）：图片/别名/集数并入 target，source 树的状态并入 target 树，然后删除 source。
+ * 状态同名时保留 target 的，source 的图挂到 target 同名状态 media 里（去重）。
+ */
+export async function mergeSubjects(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; sourceId: string; targetId: string; dryRun?: boolean },
+): Promise<UpdateResult<StoryboardContainer> & { merged: boolean; movedImages: number; movedStates: number }> {
+  let movedImages = 0;
+  let movedStates = 0;
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
+    baseVersion: opts.baseVersion,
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      if (opts.sourceId === opts.targetId) throw new McpError("VALIDATION", "sourceId 与 targetId 不能相同");
+      const source = s.entities.find((e) => e.id === opts.sourceId);
+      const target = s.entities.find((e) => e.id === opts.targetId);
+      if (!source || !target) throw new McpError("NOT_FOUND", "source 或 target 主体不存在", { sourceId: opts.sourceId, targetId: opts.targetId });
+      if (source.kind !== target.kind) throw new McpError("VALIDATION", "只能合并同类型主体（角色↔角色 / 场景↔场景 / 道具↔道具）");
+      const keys = new Set(target.images.map((i) => i.storageKey));
+      for (const img of source.images) {
+        if (!keys.has(img.storageKey)) {
+          target.images.push(img);
+          keys.add(img.storageKey);
+          movedImages += 1;
+        }
+      }
+      target.aliases = Array.from(new Set([...(target.aliases ?? []), source.name, ...(source.aliases ?? [])])).filter((a) => a !== target.name);
+      target.episodeIds = Array.from(new Set([...(target.episodeIds ?? []), ...(source.episodeIds ?? [])]));
+      if (!target.coverKey) target.coverKey = source.coverKey ?? target.images[0]?.storageKey ?? null;
+
+      if (Array.isArray(s.subjectTree)) {
+        const trees = s.subjectTree as TreeLike[];
+        const sourceTree = trees.find((t) => t.itemId === opts.sourceId);
+        const targetTree = ensureTree(s, target);
+        if (sourceTree) {
+          for (const st of sourceTree.states) {
+            if (st.id === "__base__") {
+              if (targetTree.states[0].media.length === 0 && st.media.length > 0) {
+                targetTree.states[0].media = st.media;
+              } else {
+                for (const m of st.media) {
+                  if (!targetTree.states[0].media.some((x) => x.key === m.key)) targetTree.states[0].media.push(m);
+                }
+              }
+              if (!targetTree.states[0].fullPrompt && st.fullPrompt) targetTree.states[0].fullPrompt = st.fullPrompt;
+              continue;
+            }
+            const exists = targetTree.states.find((x) => x.state === st.state);
+            if (exists) {
+              for (const m of st.media) {
+                if (!exists.media.some((x) => x.key === m.key)) exists.media.push(m);
+              }
+            } else {
+              targetTree.states.push({ ...st, id: `snode-${targetTree.rootId}-${targetTree.states.length}`, baseRef: targetTree.rootId });
+              movedStates += 1;
+            }
+          }
+          s.subjectTree = trees.filter((t) => t.itemId !== opts.sourceId);
+        }
+      }
+      s.entities = s.entities.filter((e) => e.id !== opts.sourceId);
+    },
+  });
+  return { ...res, merged: res.written !== false, movedImages, movedStates };
 }
