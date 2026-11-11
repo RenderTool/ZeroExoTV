@@ -26,11 +26,30 @@
         background: #ffffff;
       }
     </style>
-    <script type="module" crossorigin src="/ZeroExoTV/assets/index-CYAUitV5.js"></script>
+    <script type="module" crossorigin src="/ZeroExoTV/assets/index-5g3ZYFae.js"></script>
     <link rel="stylesheet" crossorigin href="/ZeroExoTV/assets/index-9dXYkrgP.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // 静态资源 404 自愈：自定义域名/CDN 上 index.html 未及时更新时会引用旧 hash 资源，
+      // 这里检测 /assets/ 资源加载失败后带 cache-bust 重载一次（10 秒内只重试一次，避免死循环）。
+      (function () {
+        var KEY = 'zx_asset_reload_at';
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          if (!t || (t.tagName !== 'SCRIPT' && t.tagName !== 'LINK')) return;
+          var url = t.src || t.href || '';
+          if (url.indexOf('/assets/') < 0) return;
+          var last = Number(sessionStorage.getItem(KEY) || 0);
+          if (Date.now() - last < 10000) return;
+          sessionStorage.setItem(KEY, String(Date.now()));
+          var u = new URL(location.href);
+          u.searchParams.set('_r', String(Date.now()));
+          location.replace(u.toString());
+        }, true);
+      })();
+    </script>
     <script src="/ZeroExoTV/runtime-config.js"></script>
   </body>
 </html>
