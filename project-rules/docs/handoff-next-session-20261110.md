@@ -192,6 +192,8 @@
 - 下载/发送修正（2026-11-11）：胶囊下载对带引导的视频自动打 zip（取不到引导才退回单文件并提示）；
   引导地址回退链为「当前地址 → guide.baseUrl → localJob.base」；历史卡「发送到导演台」对图片/音频/视频全开放
 - 「含引导」角标改为纯标签（`data-guide-badge`，不再带下载图标/点击）：下载只走 hover 菜单、右键菜单与胶囊
+- 引导本地缓存（2026-11-11）：生成即下载到 `<数据根>/media/guides/gd_*.safetensors` 并写 `localKey`；
+  `fetchGuideBlob` 优先读本地；MCP `sync_job_results` 回写前也缓存（云端清盘后仍可下载/发送）
 
 ## 4. 接手检查
 

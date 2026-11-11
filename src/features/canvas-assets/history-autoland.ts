@@ -16,6 +16,7 @@ import { stageCasUpload } from '@/features/asset-picker/services/cas-upload.js';
 import { addAsset } from '@/features/asset-picker/asset-store.js';
 import type { GuideMeta, HistorySource } from '@/features/asset-picker/index.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
+import { cacheGuideLocally } from '@/shared/utils/guide-file.js';
 
 export interface AutoLandInput {
   nodeId: string;
@@ -58,12 +59,16 @@ export interface AutoLandBlobInput extends Omit<AutoLandInput, 'content'> {
  * 返回落库结果（storageKey / guide）：节点侧可把它写回 data.storageKey，
  * 刷新后仍能按 key 重新解析媒体（否则只剩会话级 blob: 地址，下载/播放都会失效）。
  */
-export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<{ storageKey: string } | null> {
+export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<{ storageKey: string; guide?: GuideMeta } | null> {
   const projectId = input.projectId ?? getCurrentCanvasId();
   if (!projectId || !input.blob.size) return null;
+  // 2026-11-11：云端 ComfyUI 不持久化，引导必须生成即缓存到本地（media/guides），
+  // 历史资产记录拿 localKey，云端清盘后「下载视频+引导/发送引导」依然可用。
+  const cachedGuide = input.guide?.id ? await cacheGuideLocally(input.guide).catch(() => null) : null;
+  const guideMeta = cachedGuide ?? input.guide;
   const staged = await stageCasUpload(input.blob, input.kind, { projectId });
   // 同内容已有资产记录（用户已保存到素材 / 重复生成同一产物）→ 不重复建记录
-  if (staged.dedupedExistingAsset) return { storageKey: staged.storageKey };
+  if (staged.dedupedExistingAsset) return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
   const generation = {
     jobId: input.jobId,
     provider: input.provider,
@@ -77,7 +82,7 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
   const data: Parameters<typeof addAsset>[0]['data'] =
     input.kind === 'image'
       ? { kind: 'image', dataUrl: '', storageKey: staged.storageKey, width: input.width, height: input.height, originNodeId: input.nodeId, origin: 'generation', originSource, generation }
-      : { kind: 'video', url: '', storageKey: staged.storageKey, width: input.width, height: input.height, durationMs: input.durationMs, originNodeId: input.nodeId, origin: 'generation', originSource, generation, ...(input.guide ? { guide: input.guide } : {}) };
+      : { kind: 'video', url: '', storageKey: staged.storageKey, width: input.width, height: input.height, durationMs: input.durationMs, originNodeId: input.nodeId, origin: 'generation', originSource, generation, ...(guideMeta ? { guide: guideMeta } : {}) };
   await addAsset(
     {
       id: staged.id,
@@ -92,10 +97,10 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
     },
     { source: 'autoland' },
   );
-  return { storageKey: staged.storageKey };
+  return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
 }
 
-export async function autoLandGenerationOutput(input: AutoLandInput): Promise<{ storageKey: string } | null> {
+export async function autoLandGenerationOutput(input: AutoLandInput): Promise<{ storageKey: string; guide?: GuideMeta } | null> {
   const projectId = getCurrentCanvasId();
   if (!projectId || !input.content) return null;
   const res = await fetch(input.content);

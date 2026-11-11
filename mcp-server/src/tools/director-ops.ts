@@ -52,7 +52,7 @@ function snapGuide(n: unknown): number {
   return GUIDE_FRAME_OPTIONS.reduce((best, g) => (Math.abs(g - v) < Math.abs(best - v) ? g : best), GUIDE_FRAME_OPTIONS[0]!);
 }
 
-interface GuideInfo { id?: string; path?: string; frames?: number; sha256?: string }
+interface GuideInfo { id?: string; path?: string; frames?: number; sha256?: string; localKey?: string }
 interface HistoryRecord {
   id: string;
   title: string;
@@ -130,6 +130,38 @@ async function waitForJobTerminal(
       return { ...job, state: "error", error: `等待作业超时（${Math.round(timeoutMs / 60000)} 分钟）: ${jobId}` };
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+/**
+ * 云端不会长期保存产物：同步作业结果时立刻把引导 .safetensors 拉到本地 media/guides。
+ * 返回本地键（`guide:<id>.safetensors`），失败返回 null（不阻断视频落库）。
+ */
+async function cacheGuideFromCloud(root: string, base: string, guide: GuideInfo | null | undefined): Promise<string | null> {
+  if (!guide?.id || !/^gd_[A-Za-z0-9_-]{4,64}$/.test(guide.id)) return null;
+  const dir = path.join(root, "media", "guides");
+  const file = path.join(dir, `${guide.id}.safetensors`);
+  try {
+    const s = await fs.stat(file);
+    if (s.size > 0) return `guide:${guide.id}.safetensors`;
+  } catch {
+    // 还没缓存，继续下载
+  }
+  try {
+    const qs = new URLSearchParams({
+      filename: `${guide.id}.safetensors`,
+      subfolder: "zeroexo/guides",
+      type: "output",
+    }).toString();
+    const res = await fetch(`${base}/view?${qs}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) return null;
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(file, buf);
+    return `guide:${guide.id}.safetensors`;
+  } catch {
+    return null;
   }
 }
 
@@ -481,6 +513,13 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       }
       if (args.dryRun) return { written: false, dryRun: true, rows };
 
+      // 云端不持久化：回写前先把每段引导拉到本地 media/guides（失败不阻断视频落库）
+      for (const r of rows) {
+        if (r.skipped || !r.guide?.id) continue;
+        const localKey = await cacheGuideFromCloud(root, base, r.guide);
+        if (localKey) r.guide = { ...r.guide, localKey };
+      }
+
       // 标题与导演台片段同名（「片段 N · Ns」）：引导数据不是独立素材，历史/引导候选必须和来源视频同名
       const wbBefore = await readWorkbench(root, args.projectId).catch(() => null);
       const shotLabel = (shotId: string): string => {
@@ -542,7 +581,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
               ...(shot.media ?? {}),
               storageKey: r.storageKey ?? r.videoPath,
               ...(r.guide?.id ? {
-                guide: { id: r.guide.id, path: r.guide.path, frames: r.guide.frames, sha256: r.guide.sha256 },
+                guide: { id: r.guide.id, path: r.guide.path, frames: r.guide.frames, sha256: r.guide.sha256, localKey: r.guide.localKey },
               } : {}),
             };
           }

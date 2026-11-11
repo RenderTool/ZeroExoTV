@@ -11,7 +11,18 @@ vi.mock('@/features/canvas-tabs/comfyui-endpoint.js', () => ({
   useComfyuiEndpointStore: { getState: () => ({ address: endpointMock.address }) },
 }));
 
-import { fetchGuideBlob, guideViewUrl, guideViewUrls, isGuideId } from './guide-file.js';
+const localGuides = vi.hoisted(() => new Map<string, Blob>());
+vi.mock('@/entities/guide-store.js', () => ({
+  readCachedGuideBlob: async (guide: { id?: string } | null) =>
+    (guide?.id && localGuides.get(guide.id)) || null,
+  guideStorageKey: (id: string) => `guide:${id}.safetensors`,
+  writeGuideBlob: async (id: string, blob: Blob) => {
+    localGuides.set(id, blob);
+    return { localKey: `guide:${id}.safetensors`, bytes: blob.size };
+  },
+}));
+
+import { cacheGuideLocally, fetchGuideBlob, guideViewUrl, guideViewUrls, isGuideId } from './guide-file.js';
 
 beforeEach(() => {
   endpointMock.address = 'http://127.0.0.1:8188';
@@ -74,5 +85,31 @@ describe('fetchGuideBlob', () => {
     const urls = guideViewUrls({ id: 'gd_abc12345', baseUrl: 'https://cloud.example.com' });
     expect(urls).toHaveLength(1);
     expect(urls[0]).toContain('cloud.example.com/view');
+  });
+
+  it('本地已缓存 → 直接读本地，不再发网络请求（云端清盘也能用）', async () => {
+    const blob = new Blob(['cached-guide']);
+    localGuides.set('gd_cached1234', blob);
+    endpointMock.address = 'http://127.0.0.1:8188';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchGuideBlob({ id: 'gd_cached1234' })).resolves.toBe(blob);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('cacheGuideLocally：远程取到后写入本地并返回 localKey', async () => {
+    const blob = new Blob(['remote-guide']);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => blob })));
+    const res = await cacheGuideLocally({ id: 'gd_remote1234', frames: 22 });
+    expect(res?.localKey).toBe('guide:gd_remote1234.safetensors');
+    expect(localGuides.get('gd_remote1234')).toBe(blob);
+    vi.unstubAllGlobals();
+  });
+
+  it('cacheGuideLocally：取不到时返回 null（不伪造缓存）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, blob: async () => null })));
+    await expect(cacheGuideLocally({ id: 'gd_none12345' })).resolves.toBeNull();
+    vi.unstubAllGlobals();
   });
 });

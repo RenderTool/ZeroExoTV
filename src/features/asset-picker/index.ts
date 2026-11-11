@@ -84,6 +84,8 @@ export interface GuideMeta {
   sha256?: string;
   /** 产出该引导的 ComfyUI 地址（换地址/重启后仍能按原地址取回，2026-11-11） */
   baseUrl?: string;
+  /** 本地缓存键（`guide:gd_x.safetensors`；云端清盘后仍可下载/发送，2026-11-11） */
+  localKey?: string;
 }
 
 export interface Asset {

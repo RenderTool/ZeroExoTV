@@ -8,6 +8,7 @@
 
 import type { GuideMeta } from '@/features/asset-picker/index.js';
 import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
+import { readCachedGuideBlob, guideStorageKey, writeGuideBlob } from '@/entities/guide-store.js';
 
 const GUIDE_ID_PATTERN = /^gd_[A-Za-z0-9_-]{4,64}$/;
 
@@ -40,8 +41,10 @@ export function guideViewUrl(guide: GuideMeta | { id?: string; baseUrl?: string 
   return guideViewUrls(guide)[0] ?? null;
 }
 
-/** 取回引导文件字节（按候选地址逐个试；失败返回 null，调用方提示） */
-export async function fetchGuideBlob(guide: GuideMeta | { id?: string; baseUrl?: string } | null | undefined): Promise<Blob | null> {
+/** 取回引导文件字节：先读本地缓存（云端已清盘也能用），再按候选地址逐个试 */
+export async function fetchGuideBlob(guide: GuideMeta | { id?: string; baseUrl?: string; localKey?: string } | null | undefined): Promise<Blob | null> {
+  const cached = await readCachedGuideBlob(guide).catch(() => null);
+  if (cached?.size) return cached;
   for (const url of guideViewUrls(guide)) {
     const res = await fetch(url).catch(() => null);
     if (!res?.ok) continue;
@@ -49,6 +52,23 @@ export async function fetchGuideBlob(guide: GuideMeta | { id?: string; baseUrl?:
     if (blob?.size) return blob;
   }
   return null;
+}
+
+/**
+ * 生成完成即把引导缓存到本地（云端 ComfyUI 不持久化，必须立即落盘）。
+ * 返回带 localKey 的 guide；取不到时返回 null（调用方保留原 guide 元数据）。
+ */
+export async function cacheGuideLocally(
+  guide: GuideMeta | { id?: string; baseUrl?: string; localKey?: string } | null | undefined,
+): Promise<GuideMeta | null> {
+  if (!isGuideId(guide?.id)) return null;
+  const cached = await readCachedGuideBlob(guide).catch(() => null);
+  if (cached?.size) return { ...(guide as GuideMeta), id: guide.id, localKey: guideStorageKey(guide.id) };
+  const blob = await fetchGuideBlob(guide).catch(() => null);
+  if (!blob?.size) return null;
+  const written = await writeGuideBlob(guide.id, blob).catch(() => null);
+  if (!written) return null;
+  return { ...(guide as GuideMeta), id: guide.id, localKey: written.localKey };
 }
 
 function triggerDownload(blob: Blob, filename: string): void {

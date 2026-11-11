@@ -614,6 +614,8 @@ export function useAgentBridgeHooks(
           }).then((landed) => {
             // 写回 CAS storageKey：刷新后节点仍能按 key 重新解析/下载视频（否则只剩会话级 blob 地址）
             if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
+            // 引导已缓存到本地（media/guides）：把 localKey 写回节点，云端清盘后仍可下载/发送
+            if (landed?.guide) applyResult({ guide: landed.guide } as Record<string, unknown>);
           }).catch((err) => console.warn('[history] 视频产出落库失败:', err));
           if (result.lastFrameUrl) {
             const graph = refs.store.getGraph();

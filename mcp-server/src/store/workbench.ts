@@ -36,7 +36,7 @@ export interface WorkbenchShot {
   continuation?: { enabled: boolean };
   /** 2026-11-09：与前端 workbench-types.ts 对齐，MCP 侧新增可读写字段（旧数据缺省兼容） */
   guide?: { id: string; title?: string; frames?: number; sha256?: string; fromAssetId?: string; createdAt?: string } | null;
-  media?: { storageKey?: string; guide?: { id?: string; path?: string; frames?: number; sha256?: string } | null; [k: string]: unknown } | null;
+  media?: { storageKey?: string; guide?: { id?: string; path?: string; frames?: number; sha256?: string; localKey?: string } | null; [k: string]: unknown } | null;
   negativePrompt?: string;
 }
 
