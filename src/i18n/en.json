@@ -3126,11 +3126,12 @@
     "copyBootstrap": "Copy install command",
     "bootstrapPending": "Generating install command (authorize the data folder first)…",
     "rootManaged": "Managed by the local data service:",
-    "rootManagedHint": "Choosing a folder in the browser does not apply in this mode (MCP and web must share one root). Enter an absolute path below to switch; web and MCP both move to it.",
+    "rootManagedHint": "In local-service mode the browser cannot expose the real path. Pick a folder, confirm/edit the absolute path below, then click Switch; web and MCP move together.",
     "rootPathPlaceholder": "Absolute path, e.g. D:\\\\ZeroExo",
     "switchRoot": "Switch to this folder",
     "rootPathRequired": "Enter an absolute path for the data folder",
     "rootSwitched": "Data folder switched, reloading…",
-    "rootSwitchFailed": "Failed to switch folder"
+    "rootSwitchFailed": "Failed to switch folder",
+    "rootGuess": "The browser does not expose absolute paths; guessed {{path}} from the folder name. Confirm and click Switch."
   }
 }

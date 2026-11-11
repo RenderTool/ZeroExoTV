@@ -99,9 +99,6 @@ export function setRootHandleForTest(handle: DirHandle | null): void {
 /** 用户手动选择目录（必须由点击等用户手势触发） */
 export async function pickRoot(suggestPath?: string): Promise<string> {
   await httpFsReady;
-  if (httpFs.online) {
-    throw new Error('本地数据服务已托管数据目录：浏览器里选目录不会生效，请在「使用指引」里填绝对路径切换');
-  }
   // startIn 只接受两种形状：WellKnownDirectory 字符串枚举，或 { mode: 'path', path }
   // 传对象字面量（如 { id: 'documents' }）会直接抛 TypeError
   type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };

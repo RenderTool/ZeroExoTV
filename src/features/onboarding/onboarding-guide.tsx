@@ -138,9 +138,19 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
 
   const chooseRoot = useCallback(async () => {
     try {
-      await pickRoot();
+      const pickedName = await pickRoot();
+      const current = currentDataRootPath();
+      if (current) {
+        // 本地服务模式：浏览器不暴露绝对路径，只能按「父目录 + 所选目录名」推测，交给用户确认
+        const sep = current.includes('\\') ? '\\' : '/';
+        const parent = current.replace(/[\\/][^\\/]*$/, '');
+        const guess = `${parent}${sep}${pickedName}`;
+        setRootPathInput(guess);
+        message.info(t('onboarding.rootGuess', '浏览器不提供绝对路径，已按所选目录名推测为 {{path}}；确认后点「切换到此目录」', { path: guess }));
+        return;
+      }
       setRoot(rootName() ?? null);
-      setRootPathInput(currentDataRootPath() ?? '');
+      setRootPathInput('');
       message.success(t('onboarding.rootSelected', '存储路径已指定'));
     } catch (err) {
       message.error(err instanceof Error ? err.message : t('onboarding.rootFailed', '选择目录失败'));
@@ -238,15 +248,18 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
                 <code style={{ marginLeft: 6 }}>{currentDataRootPath()}</code>
               </span>
               <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
-                {t('onboarding.rootManagedHint', '该模式下浏览器里选目录不生效（MCP 与网页必须同源）。要换目录：填下面的绝对路径并切换，网页和 MCP 会同时改用新目录。')}
+                {t('onboarding.rootManagedHint', '本地服务模式下，浏览器选目录后需要确认绝对路径（浏览器不暴露真实路径）。可在下方粘贴/修改后点切换，网页和 MCP 会同时改用新目录。')}
               </span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Button size="small" icon={<FolderOpen size={13} />} onClick={() => void chooseRoot()}>
+                  {t('onboarding.chooseRoot', '选择存储目录')}
+                </Button>
                 <Input
                   size="small"
                   value={rootPathInput}
                   onChange={(e) => setRootPathInput(e.target.value)}
                   placeholder={t('onboarding.rootPathPlaceholder', '绝对路径，例如 D:\\ZeroExo')}
-                  style={{ width: 360 }}
+                  style={{ width: 320 }}
                 />
                 <Button size="small" type="primary" onClick={() => void applyRootPath()}>
                   {t('onboarding.switchRoot', '切换到此目录')}

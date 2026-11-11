@@ -3137,11 +3137,12 @@
     "copyBootstrap": "一键复制安装命令",
     "bootstrapPending": "正在生成安装命令（需要先授权存储目录）…",
     "rootManaged": "当前由本地数据服务托管：",
-    "rootManagedHint": "该模式下浏览器里选目录不生效（MCP 与网页必须同源）。要换目录：填下面的绝对路径并切换，网页和 MCP 会同时改用新目录。",
+    "rootManagedHint": "本地服务模式下，浏览器选目录后需要确认绝对路径（浏览器不暴露真实路径）。可在下方粘贴/修改后点切换，网页和 MCP 会同时改用新目录。",
     "rootPathPlaceholder": "绝对路径，例如 D:\\\\ZeroExo",
     "switchRoot": "切换到此目录",
     "rootPathRequired": "请填写数据目录的绝对路径",
     "rootSwitched": "数据目录已切换，正在重新加载…",
-    "rootSwitchFailed": "切换目录失败"
+    "rootSwitchFailed": "切换目录失败",
+    "rootGuess": "浏览器不提供绝对路径，已按所选目录名推测为 {{path}}；确认后点「切换到此目录」"
   }
 }
