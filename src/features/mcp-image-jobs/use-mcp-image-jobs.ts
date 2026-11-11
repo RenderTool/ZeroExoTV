@@ -139,12 +139,20 @@ export function useMcpImageJobs(opts: {
         })),
         updatedAt: new Date().toISOString(),
       };
+      // 刷新/重进页面：已完成的条目直接沿用，避免把同一张图重复生成（作业文件要等全部完成才删）
+      const prior = await readJson<JobStatus>(statusRel).catch(() => null);
+      for (const it of status.items) {
+        const done = prior?.items?.find((x) => x.index === it.index && x.state === 'done');
+        if (done) Object.assign(it, done);
+      }
+      status.completed = status.items.filter((it) => it.state === 'done').length;
       await writeJson(statusRel, status).catch(() => undefined);
 
       for (let i = 0; i < job.requests.length; i += 1) {
         if (disposed) return;
         const req = job.requests[i]!;
         const item = status.items[i]!;
+        if (item.state === 'done') continue;
         const nodeId = item.nodeId;
         const modelKey = MODEL_KEYS[req.model ?? 'moss'];
         const col = i % 5;
