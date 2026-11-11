@@ -127,6 +127,8 @@ export const MCP_TOOLS: ToolInfo[] = [
   { name: 'import_script', access: 'write' },
   { name: 'split_script_to_shots', access: 'write' },
   { name: 'plan_continuity_edit', access: 'write' },
+  { name: 'mcp_update_status', access: 'read' },
+  { name: 'update_mcp_server', access: 'write' },
   { name: 'upsert_subject', access: 'write' },
   { name: 'set_subject_image', access: 'write' },
   { name: 'link_subject_to_shot', access: 'write' },

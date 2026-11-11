@@ -29,6 +29,7 @@ import { registerWorkbenchTools } from "./tools/workbench.js";
 import { registerStoryboardIngestTools } from "./tools/storyboard-ingest.js";
 import { registerPreflightTools } from "./tools/preflight.js";
 import { registerContinuityTools } from "./tools/continuity.js";
+import { registerUpdateTools } from "./tools/update.js";
 import { registerCanvasTools } from "./tools/canvases.js";
 import { registerPlanTools } from "./tools/plan.js";
 import { registerDirectorOpsTools } from "./tools/director-ops.js";
@@ -73,6 +74,7 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerStoryboardIngestTools(server, ctx);
   registerPreflightTools(server, ctx);
   registerContinuityTools(server, ctx);
+  registerUpdateTools(server, ctx);
   registerCanvasTools(server, ctx);
   registerPlanTools(server, ctx);
   registerDirectorOpsTools(server, ctx);

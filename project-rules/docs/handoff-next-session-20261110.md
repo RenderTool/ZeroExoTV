@@ -188,6 +188,8 @@
 - 导演台工具行右侧显示「总时长 mm:ss · N 段」（2026-11-10），数据 = 全部片段 duration 之和
 - 延续法硬闸门（2026-11-11 事故后加）：`plan_continuity_edit` 计划（17k+5 段长 / 22 帧尾帧 / ≤736 帧）+
   `run_generation` 串行准入（`CONTINUITY_NOT_PLANNED` / `CONTINUITY_ORDER`）；说明与技能写明「照搬原稿段长/跳段/只做一半 = 不合格」
+- MCP 自我更新感知（2026-11-11）：网页写 `.lf/zeroexo/app_meta/mcp-required.json`；旧版 MCP 工具返回自动带 `_mcpOutdated`；
+  Agent 用 `mcp_update_status` 体检、`update_mcp_server`（需用户确认）git 快进 + 重编译，重启 MCP 后生效
 
 ## 4. 接手检查
 

@@ -50,6 +50,7 @@ import {
 import { ServiceCenterDialog } from '@/features/service-center/service-center-dialog.js';
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
+import { publishMcpRequiredManifest } from '@/platform/mcp-manifest.js';
 import { cleanupExpiredRecycleItems, sweepOrphansToRecycle } from '@/entities/media-recycle-bin.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
 import { TaskQueueDock } from '@/features/task-center/task-queue-dock.js';
@@ -155,6 +156,12 @@ export function App(): React.ReactElement {
   // 首次使用指引：只在数据目录就绪且没看过时弹一次（看过标记写 localStorage）
   useEffect(() => {
     if (rootReady && !isOnboardingDone()) setOnboardingOpen(true);
+  }, [rootReady]);
+
+  // 把「前端要求的 MCP 工具清单」写给 MCP：旧版服务连上来时，Agent 工具自己就会提示更新
+  useEffect(() => {
+    if (!rootReady) return;
+    void publishMcpRequiredManifest();
   }, [rootReady]);
 
   // 媒体回收站定时任务（2026-11-10）：每天最多跑一次——先把没人引用的孤立媒体移入回收站，

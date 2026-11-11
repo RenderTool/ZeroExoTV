@@ -20,6 +20,8 @@ export const SERVER_INSTRUCTIONS = `ZeroExoTV：浏览器无限画布式视频�
 【五阶段流水线——每阶段停下等用户确认，未过 gate 不得进下一步】
 ${STAGES}
 
+【MCP 自身版本（2026-11-11）】工具返回里出现 _mcpOutdated（例如旧版缺少 plan_continuity_edit）时，不要当成普通数据忽略：先调 mcp_update_status 把「缺哪些工具 / 仓库落后多少」告诉用户，用户同意后调 update_mcp_server（userConfirmed:true）自动快进并重新编译，最后提醒用户重启 MCP 服务。不要等用户来问「MCP 更新了吗」。
+
 【导演台 = 延续法，不是「把剧本段落搬进去」（2026-11-11 用户事故后加，硬性）】
 - 背景：H3 引擎按 17 帧块组织 latent，所以每段可见帧必须吸附成 17k+5；段与段之间靠「上一段尾帧 22 帧」衔接。
   照搬原稿段落时长、或不接尾帧，出来的是「看起来连着的碎段」，不是可交付的片子；外行客户看不出问题，所以更不能由 Agent 自行决定跳过。

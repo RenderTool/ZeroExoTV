@@ -7,6 +7,31 @@ import { authorize, type TokenRecord } from "../auth.js";
 import { audit, summarizeArgs } from "../audit.js";
 import { dataRoot } from "../config.js";
 import { McpError, okResult, toErrorResult } from "../errors.js";
+import { buildUpdateStatus, type UpdateStatus } from "../lib/update-check.js";
+
+/** 本进程启动时刻（判断磁盘 dist 是否比进程新） */
+export const PROCESS_STARTED_AT = Date.now();
+let statusCache: { at: number; value: UpdateStatus } | null = null;
+
+/**
+ * MCP 自我更新感知（2026-11-11）：读网页写的 mcp-required.json，比对工具清单 / dist / 仓库落后。
+ * 30 秒缓存，避免每个工具调用都读盘；失败一律不阻断工具主流程。
+ */
+export async function getUpdateStatus(root: string): Promise<UpdateStatus | null> {
+  if (statusCache && Date.now() - statusCache.at < 30_000) return statusCache.value;
+  try {
+    const value = await buildUpdateStatus({
+      root,
+      tools: TOOL_REGISTRY,
+      serverEntry: process.argv[1] ?? "",
+      startedAtMs: PROCESS_STARTED_AT,
+    });
+    statusCache = { at: Date.now(), value };
+    return value;
+  } catch {
+    return null;
+  }
+}
 
 export interface Ctx {
   /** stdio 模式返回 env token；HTTP 模式返回当前请求的 Authorization Bearer。 */
@@ -52,7 +77,24 @@ export function defTool<S extends z.ZodRawShape>(server: McpServer, ctx: Ctx, de
         if (out && typeof out === "object" && (out as { __mcpContent?: unknown }).__mcpContent === true) {
           return { content: (out as { content: unknown }).content as never };
         }
-        return okResult(out);
+        // 旧版 MCP 连上新网页：把「你该更新了」直接塞进工具返回，Agent 第一次调用就能感知
+        let payload: unknown = out;
+        const status = await getUpdateStatus(root);
+        if (
+          status?.hint
+          && out && typeof out === "object" && !Array.isArray(out)
+        ) {
+          payload = {
+            ...(out as Record<string, unknown>),
+            _mcpOutdated: {
+              missing: status.missing,
+              distOutdated: status.distOutdated,
+              gitBehind: status.gitBehind,
+              hint: status.hint,
+            },
+          };
+        }
+        return okResult(payload);
       } catch (err) {
         const code = err instanceof McpError ? err.code : "IO_ERROR";
         audit(root, {

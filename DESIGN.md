@@ -334,6 +334,13 @@ page container (height: 100%, flex column, overflow: hidden)
   「该模型只支持文生图，不支持参考图（连入的素材不会作为输入）」，禁止让用户以为可以垫图。
 - 有参考图能力的模型（Qwen Image 2.1 / H3ZeroExo）保持现有参考区与兼容性红叉提示。
 
+### MCP 自我更新感知（2026-11-11 用户要求）
+- 网页启动时把「前端要求的 MCP 工具清单」写到 `<数据根>/.lf/zeroexo/app_meta/mcp-required.json`。
+- 旧版 MCP 每次工具返回都带 `_mcpOutdated`（缺哪些工具 / dist 是否比进程新 / 仓库落后多少），Agent 第一次调用就能感知，
+  不需要客户去问「MCP 更新了吗」。
+- Agent 先用 `mcp_update_status` 说明情况；用户同意后 `update_mcp_server`（`userConfirmed:true`）自动 git 快进 + 重新编译，
+  最后必须提示「重启 MCP 服务」（stdio 进程无法热替换已加载代码）；仓库有未提交改动时拒绝自动更新，绝不覆盖用户修改。
+
 ### 导演台延续法（2026-11-11 用户事故后定为硬性）
 - 段长：可见帧必须吸附 **17k+5**（fps 24，向上吸附）；每段可见帧 + **22 帧引导** ≤ **736**；第 2 段起必须吃上一段尾帧。
 - 必须走 `plan_continuity_edit`（MCP，dryRun 出「段/帧/秒/是否吃上一段」表 → 用户确认 → confirm+userConfirmed）再生成；
