@@ -412,6 +412,9 @@ page container (height: 100%, flex column, overflow: hidden)
   用于「CDN/镜像的 index.html 还是旧版」时自动拿到新 index；若镜像本身没同步资源，仍需重新发布完整 dist。
 - 自定义域名部署必须**整包同步** `dist/`（index.html + assets/ + runtime-config.js + version.json + downloads/ + openlib/），
   不能只覆盖 index.html 或只覆盖 assets；服务器缓存规则：`index.html` 用 `no-cache`，`/assets/*` 用长缓存（文件名带 hash）。
+- **域名根 vs 子路径是两套构建**：`renderdoc.space`（gh-pages）挂在域名根，必须 `VITE_BASE_PATH=/`；
+  `rendertool.github.io/ZeroExoTV/`（Pages artifact）用 `VITE_BASE_PATH=/ZeroExoTV/`。
+  两套由各自的 GitHub Actions 工作流分别构建，互不覆盖；gh-pages 额外生成 `/ZeroExoTV/index.html` 跳转到域名根（保留 hash 路由）。
 - 判断是否「只同步了一半」：`/version.json` 的 commit 与 `index.html` 引用的 assets hash 必须来自同一次构建；
   若 index 引用的 hash 在 `assets/` 里不存在，就是镜像没同步完整。
 
