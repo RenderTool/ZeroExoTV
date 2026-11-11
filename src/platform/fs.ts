@@ -11,7 +11,7 @@
  * File System Access 授权；离线时走原授权路径，二者互斥、不产生双写。
  */
 
-import { httpFs, httpFsReady } from './http-fs.js';
+import { httpFs, httpFsReady, switchHttpFsRoot } from './http-fs.js';
 
 const DB_NAME = 'zeroexo-local';
 const DB_STORE = 'handles';
@@ -98,6 +98,10 @@ export function setRootHandleForTest(handle: DirHandle | null): void {
 
 /** 用户手动选择目录（必须由点击等用户手势触发） */
 export async function pickRoot(suggestPath?: string): Promise<string> {
+  await httpFsReady;
+  if (httpFs.online) {
+    throw new Error('本地数据服务已托管数据目录：浏览器里选目录不会生效，请在「使用指引」里填绝对路径切换');
+  }
   // startIn 只接受两种形状：WellKnownDirectory 字符串枚举，或 { mode: 'path', path }
   // 传对象字面量（如 { id: 'documents' }）会直接抛 TypeError
   type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };
@@ -122,6 +126,38 @@ export async function restoreRoot(ask = false): Promise<string | null> {
   root = saved;
   return root.name;
 }
+
+const SAVED_DATA_ROOT_KEY = 'zeroexo.dataRootPath';
+
+/** 当前数据目录的绝对路径（本地服务模式才有；浏览器目录模式没有绝对路径） */
+export function currentDataRootPath(): string | null {
+  return httpFs.online ? (httpFs.info?.dataRoot ?? null) : null;
+}
+
+/**
+ * 切换数据目录（2026-11-11 用户要求）：本地服务模式走 POST /root，网页与 MCP 同时生效；
+ * 记到 localStorage，下次打开页面由 applySavedDataRoot 自动重新应用。
+ */
+export async function switchDataRoot(next: string): Promise<string> {
+  await httpFsReady;
+  if (!httpFs.online) {
+    throw new Error('当前未连接本地数据服务：请先用「选择目录」授权一个浏览器目录');
+  }
+  const info = await switchHttpFsRoot(next);
+  try { localStorage.setItem(SAVED_DATA_ROOT_KEY, info.dataRoot); } catch { /* 隐私模式忽略 */ }
+  return info.dataRoot;
+}
+
+/** 启动时把上次切换的目录重新应用到本地服务（服务重启后仍生效） */
+export async function applySavedDataRoot(): Promise<void> {
+  await httpFsReady;
+  if (!httpFs.online) return;
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(SAVED_DATA_ROOT_KEY); } catch { return; }
+  if (!saved || saved === httpFs.info?.dataRoot) return;
+  try { await switchHttpFsRoot(saved); } catch { /* 目录可能已不可用：保持当前根 */ }
+}
+
 
 export function rootName(): string | null {
   if (httpFs.online) return httpFs.info?.rootName ?? null;

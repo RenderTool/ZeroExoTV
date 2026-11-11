@@ -4,17 +4,17 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 const read = (p: string): string => readFileSync(resolve(process.cwd(), p), 'utf8');
 
 describe('首次启动 MCP 状态', () => {
-  it('onboarding：无 server-info 时给下载+刷新，不显示旧版本/未生成告警', () => {
+  it('onboarding：无 server-info 时只给一个复制安装命令按钮，并自动轮询识别', () => {
     const src = read('src/features/onboarding/onboarding-guide.tsx');
     expect(src).toContain('stepMcpFirstRun');
-    expect(src).toContain('downloadMcp');
-    expect(src).toContain('refreshMcp');
-    expect(src).toContain('message.info(');
+    expect(src).toContain('copyBootstrap');
+    expect(src).toContain('buildBootstrapCommand');
+    expect(src).toContain('window.setInterval');
     expect(src).not.toContain('MCP 服务信息还没有生成');
   });
 

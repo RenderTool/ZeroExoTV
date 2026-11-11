@@ -16,7 +16,7 @@ import http from "node:http";
 import path from "node:path";
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
-import { dataRoot } from "./config.js";
+import { dataRoot, setDataRoot } from "./config.js";
 
 export function fsServerPort(): number {
   const n = Number(process.env.ZEROEXO_FS_PORT ?? "");
@@ -87,6 +87,33 @@ export async function handleFsRequest(req: http.IncomingMessage, res: http.Serve
     res.writeHead(204, CORS_HEADERS);
     res.end();
     return;
+  }
+
+  if (url.pathname === "/root") {
+    if (req.method !== "POST") return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
+    // 运行时切换数据根（2026-11-11 用户要求：在网页里换目录要真的生效）
+    // 只接受绝对路径；目录不存在则创建；立即对网页(http-fs)与 MCP 工具同时生效。
+    const raw = (await readBody(req)).toString("utf8");
+    let next = "";
+    try {
+      const parsed = JSON.parse(raw) as { path?: string };
+      next = String(parsed.path ?? "").trim();
+    } catch {
+      return sendJson(res, 400, { error: "BAD_JSON", message: "请求体必须是 { path: '绝对路径' }" });
+    }
+    if (!next || !path.isAbsolute(next)) {
+      return sendJson(res, 400, { error: "INVALID_PATH", message: "必须填绝对路径（例如 D:\\ZeroExo 或 /Users/you/ZeroExo）" });
+    }
+    const abs = path.resolve(next);
+    try {
+      await fs.mkdir(abs, { recursive: true });
+      const st = await fs.stat(abs);
+      if (!st.isDirectory()) return sendJson(res, 400, { error: "NOT_DIRECTORY", message: "该路径不是目录" });
+    } catch (err) {
+      return sendJson(res, 400, { error: "ROOT_UNAVAILABLE", message: (err as Error).message });
+    }
+    setDataRoot(abs);
+    return sendJson(res, 200, { ok: true, dataRoot: abs, rootName: path.basename(abs) });
   }
 
   if (url.pathname === "/health") {

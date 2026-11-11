@@ -42,7 +42,6 @@ import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
 import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
 import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL, MOSS_MODEL_KEY, MOSS_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
-import { isLocalComfyuiAddress, useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
@@ -339,7 +338,6 @@ export function NodeGenerateDock({
   }, []);
 
   // 当前 ComfyUI 地址：Krea2 只在线上地址露出（本机没有 krea2 底模 / RES4LYF 采样器）
-  const comfyAddress = useComfyuiEndpointStore((s) => s.address);
 
   const modelOptions = useMemo(() => {
     const encoded = filterChannelModelsByCapability(channels, modeCapability(mode));
@@ -357,14 +355,13 @@ export function NodeGenerateDock({
     // 本机 Qwen Image 2.1：图像编辑/文生图，作为图片节点常驻选项
     if (mode === 'image') {
       options.push({ value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL, iconKey: 'zeroexo' });
-      // Krea2 / Moss 只在线上 ComfyUI 有底模：本机模式不露出，避免点了必然失败
-      if (!isLocalComfyuiAddress(comfyAddress)) {
-        options.push({ value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL, iconKey: 'zeroexo' });
-        options.push({ value: MOSS_MODEL_KEY, label: MOSS_MODEL_LABEL, iconKey: 'zeroexo' });
-      }
+      // 2026-11-11 用户要求：Krea2 / Moss 始终出现在图片节点下拉（本机也可能装了底模，
+      // 云端/反代更常见）；缺模型时由生成错误明确提示，不再按地址静默隐藏。
+      options.push({ value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL, iconKey: 'zeroexo' });
+      options.push({ value: MOSS_MODEL_KEY, label: MOSS_MODEL_LABEL, iconKey: 'zeroexo' });
     }
     return options;
-  }, [channels, mode, comfyAddress]);
+  }, [channels, mode]);
 
   // ===== 连入参考素材(复用生成器 deriveIncomingReferences 归一化) =====
   const [graphVersion, setGraphVersion] = useState(0);

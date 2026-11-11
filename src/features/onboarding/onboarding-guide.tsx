@@ -8,17 +8,15 @@
  *
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开（代替已经不存在的政策公告位）。
  */
-import { getRootPathHint } from '@/platform/fs.js';
 import { buildBootstrapCommand, detectBootstrapPlatform } from '@/features/mcp-settings/mcp-bootstrap.js';
 import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Input, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Circle, Copy, Cpu, FolderOpen, Plug } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, Cpu, FolderOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { pickRoot, rootName } from '@/platform/fs.js';
+import { pickRoot, rootName, currentDataRootPath, switchDataRoot } from '@/platform/fs.js';
 import {
-  buildStartCommands,
   buildStdioConfig,
   ensureIdeToken,
   loadServerInfo,
@@ -100,8 +98,8 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [mcpToken, setMcpToken] = useState<string | null>(null);
   /** 服务端跑的是旧代码时缺的工具（网页自动感知更新） */
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
-  /** 全新机器：一键安装并启动 MCP 的命令（下载官方包 + 当前数据根/token） */
-  const [bootstrapCommand, setBootstrapCommand] = useState('');
+  /** 本地服务托管时的绝对路径输入（浏览器目录选择在该模式下不生效） */
+  const [rootPathInput, setRootPathInput] = useState('');
   // 步骤 3：ComfyUI
   const [address, setAddress] = useState(endpoint.address || DEFAULT_COMFYUI);
   const [testing, setTesting] = useState(false);
@@ -110,25 +108,13 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!open) return;
     setRoot(rootName() ?? null);
+    setRootPathInput(currentDataRootPath() ?? '');
     void (async () => {
       try {
         const info = await loadServerInfo();
         setServerInfo(info);
         setMcpStaleTools(mcpServerMissingTools(info));
         if (info) setMcpToken(await ensureIdeToken());
-        else {
-          // 全新机器还没有服务：生成一条可复制的「安装并启动」命令（不显示告警）
-          const [token, dataRoot] = await Promise.all([ensureIdeToken(), getRootPathHint()]);
-          if (token && dataRoot) {
-            const base = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
-            setBootstrapCommand(buildBootstrapCommand({
-              platform: detectBootstrapPlatform(),
-              downloadUrl: `${window.location.origin}${base}downloads/zeroexo-mcp-server.tgz`,
-              dataRoot,
-              token,
-            }));
-          }
-        }
       } catch {
         setServerInfo(null);
       }
@@ -136,20 +122,50 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     setAddress(endpoint.address || DEFAULT_COMFYUI);
   }, [open, endpoint.address]);
 
+  // 全新机器：用户跑完安装命令后，MCP 会写 server-info；这里自动轮询识别，不需要「刷新」按钮。
+  useEffect(() => {
+    if (!open || serverInfo) return;
+    const timer = window.setInterval(() => {
+      void loadServerInfo().then(async (info) => {
+        if (!info) return;
+        setServerInfo(info);
+        setMcpStaleTools(mcpServerMissingTools(info));
+        setMcpToken(await ensureIdeToken().catch(() => null));
+      }).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [open, serverInfo]);
+
   const chooseRoot = useCallback(async () => {
     try {
       await pickRoot();
       setRoot(rootName() ?? null);
+      setRootPathInput(currentDataRootPath() ?? '');
       message.success(t('onboarding.rootSelected', '存储路径已指定'));
     } catch (err) {
       message.error(err instanceof Error ? err.message : t('onboarding.rootFailed', '选择目录失败'));
     }
   }, [message, t]);
 
+  const applyRootPath = useCallback(async () => {
+    const next = rootPathInput.trim();
+    if (!next) {
+      message.warning(t('onboarding.rootPathRequired', '请填写数据目录的绝对路径'));
+      return;
+    }
+    try {
+      const applied = await switchDataRoot(next);
+      message.success(t('onboarding.rootSwitched', '数据目录已切换，正在重新加载…'));
+      void applied;
+      window.setTimeout(() => window.location.reload(), 600);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : t('onboarding.rootSwitchFailed', '切换目录失败'));
+    }
+  }, [rootPathInput, message, t]);
+
   const mcpConfig = serverInfo && mcpToken
     ? buildStdioConfig({ serverEntry: serverInfo.serverEntry, dataRoot: serverInfo.dataRoot }, mcpToken)
     : '';
-  const startCommand = buildStartCommands(serverInfo).stdio;
 
   const copy = useCallback(async (text: string, label: string) => {
     if (!text) {
@@ -215,73 +231,65 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
           <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
             {t('onboarding.stepRootHint', '项目、素材、生成结果都会写在同一个本地目录；换机器时把这个目录拷走即可。')}
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Button size="small" icon={<FolderOpen size={13} />} onClick={() => void chooseRoot()}>
-              {root ? t('onboarding.changeRoot', '重新选择目录') : t('onboarding.chooseRoot', '选择存储目录')}
-            </Button>
-            <span style={{ fontSize: 12, color: theme.toolbar.textMuted, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {root ?? t('onboarding.rootNone', '尚未指定（浏览器需要授权一次）')}
-            </span>
-          </div>
+          {currentDataRootPath() ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
+                {t('onboarding.rootManaged', '当前由本地数据服务托管：')}
+                <code style={{ marginLeft: 6 }}>{currentDataRootPath()}</code>
+              </span>
+              <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
+                {t('onboarding.rootManagedHint', '该模式下浏览器里选目录不生效（MCP 与网页必须同源）。要换目录：填下面的绝对路径并切换，网页和 MCP 会同时改用新目录。')}
+              </span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Input
+                  size="small"
+                  value={rootPathInput}
+                  onChange={(e) => setRootPathInput(e.target.value)}
+                  placeholder={t('onboarding.rootPathPlaceholder', '绝对路径，例如 D:\\ZeroExo')}
+                  style={{ width: 360 }}
+                />
+                <Button size="small" type="primary" onClick={() => void applyRootPath()}>
+                  {t('onboarding.switchRoot', '切换到此目录')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Button size="small" icon={<FolderOpen size={13} />} onClick={() => void chooseRoot()}>
+                {root ? t('onboarding.changeRoot', '重新选择目录') : t('onboarding.chooseRoot', '选择存储目录')}
+              </Button>
+              <span style={{ fontSize: 12, color: theme.toolbar.textMuted, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {root ?? t('onboarding.rootNone', '尚未指定（浏览器需要授权一次）')}
+              </span>
+            </div>
+          )}
         </StepCard>
 
         {/* 2 MCP */}
         <StepCard index={2} title={t('onboarding.stepMcp', '启动 MCP 服务（给 Agent IDE）')} done={Boolean(serverInfo)} theme={theme}>
-          {serverInfo ? (
-            <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
-              {t('onboarding.stepMcpHint', '复制下面的配置，粘到 Agent IDE（如 Cursor / Claude Code）的 MCP 设置里；配置里已带 token。')}
-            </span>
-          ) : (
-            <span style={{ fontSize: 12, color: theme.toolbar.textMuted, lineHeight: 1.7 }}>
-              {t('onboarding.stepMcpFirstRun', '还没有检测到 MCP 服务。首次使用先下载安装包并启动一次；启动后这里会自动出现带 token 的配置，不用重启网页。')}
-            </span>
-          )}
-          {!serverInfo ? (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Button
-                size="small"
-                type="primary"
-                icon={<Copy size={13} />}
-                disabled={!bootstrapCommand}
-                onClick={() => void copy(bootstrapCommand, '安装命令')}
-              >
-                {t('onboarding.copyBootstrap', '一键复制安装命令')}
-              </Button>
-              <Button
-                size="small"
-                href={`${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}downloads/zeroexo-mcp-server.tgz`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t('onboarding.downloadMcp', '下载 MCP 安装包')}
-              </Button>
-              <Button
-                size="small"
-                onClick={() => void loadServerInfo().then((info) => {
-                  setServerInfo(info);
-                  setMcpStaleTools(mcpServerMissingTools(info));
-                  if (info) void ensureIdeToken().then(setMcpToken).catch(() => undefined);
-                }).catch(() => undefined)}
-              >
-                {t('onboarding.refreshMcp', '我已启动，刷新状态')}
-              </Button>
-            </div>
-          ) : null}
-          <pre style={{
-            margin: 0, padding: 10, borderRadius: 8, maxHeight: 150, overflow: 'auto', fontSize: 11, lineHeight: 1.5,
-            background: theme.mode === 'dark' ? 'rgba(0,0,0,0.35)' : 'rgba(15,23,42,0.05)',
-            border: `1px solid ${theme.toolbar.border}`, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-          }}>
-{serverInfo
-  ? (startCommand || t('onboarding.startCmdPlaceholder', '启动一次 MCP 服务后这里会给出命令'))
-  : (bootstrapCommand || t('onboarding.bootstrapPending', '正在生成安装命令（需要先授权存储目录）…'))}
-          </pre>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button size="small" type="primary" icon={<Copy size={13} />} onClick={() => void copy(mcpConfig, 'MCP 配置')}>
-              {t('onboarding.copyMcp', '一键复制配置')}
-            </Button>
-            <Button size="small" icon={<Plug size={13} />} onClick={() => void copy(startCommand, '启动命令')}>
-              {t('onboarding.copyStartCmd', '复制启动命令')}
+          <span style={{ fontSize: 12, color: theme.toolbar.textMuted, lineHeight: 1.7 }}>
+            {serverInfo
+              ? t('onboarding.stepMcpHint', '复制下面的配置，粘到 Agent IDE（如 Cursor / Claude Code）的 MCP 设置里；配置里已带 token。')
+              : t('onboarding.stepMcpFirstRun', '首次使用：点下面按钮复制一条命令，粘到终端跑一次（需要 Node 18+）。它会自动下载并启动 MCP，成功后本页会自动识别。')}
+          </span>
+          <div>
+            <Button
+              size="small"
+              type="primary"
+              icon={<Copy size={13} />}
+              onClick={() => void copy(
+                serverInfo
+                  ? mcpConfig
+                  : buildBootstrapCommand({
+                      platform: detectBootstrapPlatform(),
+                      downloadUrl: `${window.location.origin}${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}downloads/zeroexo-mcp-server.tgz`,
+                    }),
+                serverInfo ? 'MCP 配置' : '安装命令',
+              )}
+            >
+              {serverInfo
+                ? t('onboarding.copyMcp', '复制 MCP 配置')
+                : t('onboarding.copyBootstrap', '一键复制安装命令')}
             </Button>
           </div>
           {mcpStaleTools.length > 0 ? (

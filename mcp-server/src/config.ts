@@ -1,14 +1,20 @@
 import path from "node:path";
 
 /**
- * 全局配置：数据根**硬性固定为 D:\Test**（2026-11-05 用户拍板，覆盖此前所有方案；
- * 目录不存在时由 file-server 启动逻辑自动创建，允许创建）。
- * 网页（http-fs）与 MCP（stdio/--http）共用同一 dataRoot()，即"同源"的锚点。
- * ZEROEXO_DATA_ROOT 仅在测试等场景需要显式覆盖时使用。
+ * 全局配置：数据根默认 D:\Test（2026-11-05 用户拍板）。
+ * 2026-11-11：支持运行时切换（网页设置里改数据目录 → POST /root），切换立即对
+ * 网页（http-fs）与 MCP 工具（同一进程）同时生效；重启后由网页在 boot 时重新应用。
  */
 
+let rootOverride: string | null = null;
+
+/** 运行时切换数据根（仅 fs-server 的 /root 接口调用；必须已校验为绝对路径） */
+export function setDataRoot(next: string): void {
+  rootOverride = next;
+}
+
 export function dataRoot(): string {
-  return process.env.ZEROEXO_DATA_ROOT ?? "D:\\Test";
+  return rootOverride ?? process.env.ZEROEXO_DATA_ROOT ?? "D:\\Test";
 }
 
 export function frontendBaseUrl(): string {

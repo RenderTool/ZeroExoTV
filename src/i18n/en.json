@@ -3124,6 +3124,13 @@
     "downloadMcp": "Download MCP package",
     "refreshMcp": "I started it, refresh",
     "copyBootstrap": "Copy install command",
-    "bootstrapPending": "Generating install command (authorize the data folder first)…"
+    "bootstrapPending": "Generating install command (authorize the data folder first)…",
+    "rootManaged": "Managed by the local data service:",
+    "rootManagedHint": "Choosing a folder in the browser does not apply in this mode (MCP and web must share one root). Enter an absolute path below to switch; web and MCP both move to it.",
+    "rootPathPlaceholder": "Absolute path, e.g. D:\\\\ZeroExo",
+    "switchRoot": "Switch to this folder",
+    "rootPathRequired": "Enter an absolute path for the data folder",
+    "rootSwitched": "Data folder switched, reloading…",
+    "rootSwitchFailed": "Failed to switch folder"
   }
 }

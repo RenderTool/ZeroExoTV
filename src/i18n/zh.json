@@ -3135,6 +3135,13 @@
     "downloadMcp": "下载 MCP 安装包",
     "refreshMcp": "我已启动，刷新状态",
     "copyBootstrap": "一键复制安装命令",
-    "bootstrapPending": "正在生成安装命令（需要先授权存储目录）…"
+    "bootstrapPending": "正在生成安装命令（需要先授权存储目录）…",
+    "rootManaged": "当前由本地数据服务托管：",
+    "rootManagedHint": "该模式下浏览器里选目录不生效（MCP 与网页必须同源）。要换目录：填下面的绝对路径并切换，网页和 MCP 会同时改用新目录。",
+    "rootPathPlaceholder": "绝对路径，例如 D:\\\\ZeroExo",
+    "switchRoot": "切换到此目录",
+    "rootPathRequired": "请填写数据目录的绝对路径",
+    "rootSwitched": "数据目录已切换，正在重新加载…",
+    "rootSwitchFailed": "切换目录失败"
   }
 }

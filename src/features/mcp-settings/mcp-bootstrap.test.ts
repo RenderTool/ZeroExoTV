@@ -1,34 +1,32 @@
-/** 全新机器一键安装命令（2026-11-11 用户要求）：复制给任意 Agent IDE 用户，终端跑一次即可。 */
+/** 全新机器一键安装命令（2026-11-11 用户要求）：只需一个复制按钮，命令自包含安装目录/数据根。 */
 import { describe, expect, it } from 'vitest';
 import { buildBootstrapCommand, detectBootstrapPlatform } from './mcp-bootstrap.js';
 
 describe('buildBootstrapCommand', () => {
   const base = {
     downloadUrl: 'https://rendertool.github.io/ZeroExoTV/downloads/zeroexo-mcp-server.tgz',
-    dataRoot: "D:\\Test",
-    token: 'zxp_abc',
   };
 
-  it('Windows：下载 → 解压 → 用数据根+token 启动 HTTP 服务', () => {
+  it('Windows：下载 → 解压 → 启动（沿用默认数据根，不劫持现有数据目录）', () => {
     const cmd = buildBootstrapCommand({ ...base, platform: 'windows' });
     expect(cmd).toContain('powershell');
     expect(cmd).toContain('Invoke-WebRequest');
-    expect(cmd).toContain("ZEROEXO_DATA_ROOT='D:\\Test'");
-    expect(cmd).toContain("ZEROEXO_MCP_TOKEN='zxp_abc'");
+    expect(cmd).not.toContain('ZEROEXO_DATA_ROOT');
     expect(cmd).toContain('--http --port 8787');
     expect(cmd).toContain('tar -xzf');
   });
 
-  it('mac/linux：curl 下载 + tar 解压 + env 启动', () => {
-    const cmd = buildBootstrapCommand({ ...base, platform: 'mac', dataRoot: '/Users/a/ZeroExo' });
+  it('mac/linux：curl 下载 + tar 解压 + 自动数据根启动', () => {
+    const cmd = buildBootstrapCommand({ ...base, platform: 'mac' });
     expect(cmd).toContain("curl -fsSL 'https://");
-    expect(cmd).toContain("ZEROEXO_DATA_ROOT='/Users/a/ZeroExo'");
+    expect(cmd).toContain('ZEROEXO_DATA_ROOT="$HOME/ZeroExo"');
     expect(cmd).toContain('node ~/.zeroexo/mcp/package/dist/index.js');
   });
 
-  it('单引号路径做转义，不破坏命令', () => {
-    const cmd = buildBootstrapCommand({ ...base, platform: 'linux', dataRoot: "/tmp/a'b" });
-    expect(cmd).toContain("ZEROEXO_DATA_ROOT='/tmp/a''b'");
+  it('命令不再依赖网页传入绝对路径或 token（全新机器自包含）', () => {
+    const cmd = buildBootstrapCommand({ ...base, platform: 'linux' });
+    expect(cmd).not.toContain('zxp_');
+    expect(cmd).not.toContain('D:\\Test');
   });
 
   it('按 UA 识别平台', () => {

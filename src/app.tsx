@@ -50,6 +50,7 @@ import {
 import { ServiceCenterDialog } from '@/features/service-center/service-center-dialog.js';
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
+import { applySavedDataRoot } from '@/platform/fs.js';
 import { publishMcpRequiredManifest } from '@/platform/mcp-manifest.js';
 import { purgeOrphanMedia } from '@/entities/orphan-media.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
@@ -159,6 +160,12 @@ export function App(): React.ReactElement {
   }, [rootReady]);
 
   // 把「前端要求的 MCP 工具清单」写给 MCP：旧版服务连上来时，Agent 工具自己就会提示更新
+  useEffect(() => {
+    if (!rootReady) return;
+    // 上次在网页里切换过的数据目录：服务重启后自动重新应用（否则会悄悄回到默认根）
+    void applySavedDataRoot();
+  }, [rootReady]);
+
   useEffect(() => {
     if (!rootReady) return;
     void publishMcpRequiredManifest();

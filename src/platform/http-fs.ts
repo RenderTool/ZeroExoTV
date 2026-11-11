@@ -97,6 +97,24 @@ async function probeOnce(): Promise<HttpFsInfo | null> {
   }
 }
 
+/**
+ * 切换本地数据服务的根目录（2026-11-11 用户要求：网页里换目录必须真的生效）。
+ * 服务端 POST /root 会校验绝对路径、建目录，并让网页与 MCP 工具同时改用新根。
+ */
+export async function switchHttpFsRoot(next: string): Promise<HttpFsInfo> {
+  if (!info) throw new Error('本地数据服务不在线：无法切换数据目录');
+  const res = await fetch(`${info.baseUrl}/root`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: next }),
+  });
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; dataRoot?: string; rootName?: string; message?: string } | null;
+  if (!res.ok || !body?.ok) throw new Error(body?.message ?? `切换失败（HTTP ${res.status}）`);
+  info = { ...info, dataRoot: body.dataRoot ?? '', rootName: body.rootName ?? '本地数据服务' };
+  return info;
+}
+
+
 function err(path: string, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause);
   return new Error(`本地数据服务读写失败（${path}）：${detail}。请确认 fs-server（端口 ${baseUrl().split(':').pop()}）仍在运行。`);

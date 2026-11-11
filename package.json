@@ -1,10 +1,11 @@
 {
   "name": "zeroextv",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "ZeroExo Canvas - Visual node editor",
   "scripts": {
+    "version:bump": "node tools/bump-version.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
