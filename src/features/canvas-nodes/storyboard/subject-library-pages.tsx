@@ -236,7 +236,7 @@ function episodesSummary(node: { appearEpisodes?: number[] }, episodes: Array<{ 
   const valid = new Set(episodes.map((e) => e.number));
   const picked = Array.from(new Set((node.appearEpisodes ?? []).filter((n) => valid.has(n)))).sort((a, b) => a - b);
   if (picked.length === 0) return t('subject.appearEpisodesAll', '全部');
-  if (picked.length === episodes.length) return t('subject.appearEpisodesAllCount', '全部（{{n}} 集）', { n: picked.length });
+  if (picked.length === episodes.length) return t('subject.appearEpisodesAllCount', { n: picked.length, defaultValue: `全部（${picked.length} 集）` });
 
   // 连续集压成区间，避免 100 集时卡片里铺一整段「第 1 集、第 2 集…」
   const ranges: string[] = [];
@@ -249,7 +249,7 @@ function episodesSummary(node: { appearEpisodes?: number[] }, episodes: Array<{ 
     if (cur !== undefined) { start = cur; prev = cur; }
   }
   const shown = ranges.length > 4 ? `${ranges.slice(0, 3).join('、')}…` : ranges.join('、');
-  return t('subject.appearEpisodesRange', '第 {{ranges}} 集（共 {{n}} 集）', { ranges: shown, n: picked.length });
+  return t('subject.appearEpisodesRange', { ranges: shown, n: picked.length, defaultValue: `第 ${shown} 集（共 ${picked.length} 集）` });
 }
 
 /**
@@ -1172,11 +1172,11 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   // 计数与结果共用 episodeCards / filteredCards 同一 predicate，避免「有数字没内容」
   const counts = useMemo(() => {
     const c: Record<ProductionItemKind, number> = { character: 0, scene: 0, prop: 0 };
-    for (const card of episodeCards) {
+    for (const card of cards) {
       if (card.kind) c[card.kind] = (c[card.kind] ?? 0) + 1;
     }
     return c;
-  }, [episodeCards]);
+  }, [cards]);
 
   /** 打开主体：找不到绑定的树时按卡片幂等建树（新树直接带 itemId，不再走名字配对） */
   const openSubject = useCallback((card: SubjectCardData | null, rootId?: string) => {
@@ -1560,7 +1560,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       >
         {activeEpisode === null
           ? t('subject.episodeAll', '全集')
-          : t('subject.episodeN', { n: activeEpisode, defaultValue: `第 ${activeEpisode} 集` })}
+          : `${t('subject.episodeN', { n: activeEpisode, defaultValue: `第 ${activeEpisode} 集` })} · ${episodeCards.length} 个`}
       </Button>
     </Dropdown>
   );
