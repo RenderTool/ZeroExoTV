@@ -366,6 +366,12 @@ page container (height: 100%, flex column, overflow: hidden)
   不能只改高度或停留在旧比例；否则 `objectFit: contain` 会在节点里留黑边，看起来“比例不对”。
 - 与图片节点 onload 校正同一规则；用户手动 resize 后仍保留（onload 只纠正比例失配且每图源只纠一次）。
 
+### MCP 图片作业桥（2026-11-11）
+- MCP 不能直接写 1 号主画布（浏览器防抖自动保存会覆盖），所以图片生成走共享作业目录：
+  `generate_canvas_images` 写 `.lf/zeroexo/app_meta/image-jobs/<jobId>.json`，网页端 `useMcpImageJobs` 每 2 秒轮询，
+  建图片节点 → 调 Moss/Krea2/Qwen 生成 → 写回节点与历史 → 写 `<jobId>.status.json` 供 `get_canvas_image_job` 轮询。
+- 只有网页打开同一项目时作业才会被消费；pending 超过 30 秒先检查网页项目。
+
 ### 图片尺寸（Krea2，2026-11-11 用户纠正）
 - **1MP = 1024×1024（1024²）**，不是十进制 1,000,000；Krea2 的「百万像素 × 比例 → 宽高」必须用 1024² 再 32 对齐。
   - 1MP 1:1 → 1024×1024；2MP 1:1 → 1440×1440；3MP 1:1 → 1760×1760（32 对齐后约 3.03MP）。
@@ -514,6 +520,10 @@ page container (height: 100%, flex column, overflow: hidden)
   Qwen 尺寸最长边 ≤2048 且 16 对齐（`QWEN_MAX_EDGE` / `QWEN_DEFAULT_STEPS` 单点维护）。
 - **Krea2 文生图**（`zeroexo:krea2`）：只在连接线上 ComfyUI 时出现在图片节点的模型下拉里（本机没有底模，禁止露出）；
   参数是比例 + 百万像素（默认 3MP，32 对齐）+ 10 步、cfg 1、eta 0.55；不支持参考图。
+- **Moss Image 文生图**（`zeroexo:moss`）：同样只在线上 ComfyUI 出现；参数是比例 + 百万像素（默认 1MP，**16 对齐**）
+  + 25 步、cfg 2.5、种子；纯文生图不支持参考图。插件模板 `templates/moss_image_t2i.json`：
+  `moss_image_sft_int8_convrot` + `qwen3.5_9b_w4a8_gptq`（type=moss_image）+ `flux2-vae_small`，
+  采样 `er_sde` / `simple`。尺寸口径与其他图片一致：1MP = 1024²。
 - 生成中刷新页面不得丢预览/进度：提交成功把 `{jobId, clientId, base}` 写进节点 `data.localJob`，
   重开画布用同一 clientId 重连 `/ws` 继续收预览与步进，并继续轮询把产物写回；结束（成功/失败/中止）必须清 `localJob`。
 - 有输入图时提交给插件的 `edit_prompt` 必须以「参考图1：」开头（`buildQwenEditPrompt` 统一加），

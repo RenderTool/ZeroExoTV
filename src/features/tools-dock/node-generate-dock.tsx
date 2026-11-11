@@ -41,7 +41,7 @@ import {
 import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
 import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL, MOSS_MODEL_KEY, MOSS_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { isLocalComfyuiAddress, useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
@@ -357,9 +357,10 @@ export function NodeGenerateDock({
     // 本机 Qwen Image 2.1：图像编辑/文生图，作为图片节点常驻选项
     if (mode === 'image') {
       options.push({ value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL, iconKey: 'zeroexo' });
-      // Krea2 只在线上 ComfyUI 有底模 + RES4LYF 采样器：本机模式不露出，避免点了必然失败
+      // Krea2 / Moss 只在线上 ComfyUI 有底模：本机模式不露出，避免点了必然失败
       if (!isLocalComfyuiAddress(comfyAddress)) {
         options.push({ value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL, iconKey: 'zeroexo' });
+        options.push({ value: MOSS_MODEL_KEY, label: MOSS_MODEL_LABEL, iconKey: 'zeroexo' });
       }
     }
     return options;
@@ -450,7 +451,7 @@ export function NodeGenerateDock({
     // 本机 Qwen Image 2.1：图像编辑（文本 + 参考图）
     if (currentModelValue === LOCAL_IMAGE_MODEL_KEY) return ['text', 'image'];
     // Krea2 文生图：只有文本输入（模型没有参考图槽）
-    if (currentModelValue === KREA2_MODEL_KEY) return ['text'];
+    if (currentModelValue === KREA2_MODEL_KEY || currentModelValue === MOSS_MODEL_KEY) return ['text'];
     return getModelInputTypes(channels, currentModelValue);
   }, [channels, currentModelValue]);
 
@@ -995,7 +996,7 @@ export function NodeGenerateDock({
             || (model ?? '').startsWith('zeroexo:')
             || model === LOCAL_VIDEO_MODEL_KEY
             || model === LOCAL_IMAGE_MODEL_KEY
-            || model === KREA2_MODEL_KEY}
+            || model === KREA2_MODEL_KEY || model === MOSS_MODEL_KEY}
           onAction={handleAction}
           onConfigChange={onConfigChange}
           onParamValuesChange={handleParamValuesChange}

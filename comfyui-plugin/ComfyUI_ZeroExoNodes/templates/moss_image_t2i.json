@@ -1,0 +1,83 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "moss_image_sft_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "UNet 加载器" }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors",
+      "type": "moss_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "加载 CLIP" }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "flux2-vae_small.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": { "title": "加载 VAE" }
+  },
+  "4": {
+    "inputs": {
+      "text": "__zx:prompt__",
+      "clip": ["2", 0]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "提示词" }
+  },
+  "5": {
+    "inputs": {
+      "text": "__zx:negative_prompt__",
+      "clip": ["2", 0]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示词" }
+  },
+  "6": {
+    "inputs": {
+      "width": "__zx:width__",
+      "height": "__zx:height__",
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": { "title": "空 Latent（Flux2）" }
+  },
+  "7": {
+    "inputs": {
+      "seed": "__zx:seed__",
+      "steps": "__zx:steps__",
+      "cfg": "__zx:cfg__",
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": ["1", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "Moss 采样器" }
+  },
+  "8": {
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["3", 0]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE 解码" }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "zeroexo/__zx:project__/__zx:episode__/moss",
+      "images": ["8", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "保存图像" }
+  }
+}

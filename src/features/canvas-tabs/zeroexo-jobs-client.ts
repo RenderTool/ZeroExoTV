@@ -79,6 +79,10 @@ export const LOCAL_IMAGE_MODEL_LABEL = 'QwenImage2.1';
 export const KREA2_MODEL_KEY = 'zeroexo:krea2';
 export const KREA2_MODEL_LABEL = 'Krea2';
 
+/** Moss Image 文生图伪模型 key（moss_image_sft + qwen3.5_9b 文本编码 + flux2 VAE） */
+export const MOSS_MODEL_KEY = 'zeroexo:moss';
+export const MOSS_MODEL_LABEL = 'MossImage';
+
 /** 画布视频节点的「本机」伪模型 key（node.data.model 存它即走 /zeroexo/v1/jobs） */
 export const LOCAL_VIDEO_MODEL_KEY = 'zeroexo:minimax-h3';
 export const LOCAL_VIDEO_MODEL_LABEL = 'H3ZeroExo';
@@ -128,7 +132,7 @@ export async function probeZeroexoPlugin(baseUrl: string, timeoutMs = 4000): Pro
 /** 提交单段作业（一个片段 = 一个 ComfyUI prompt） */
 async function submitJob(
   baseUrl: string,
-  kind: 'reference_video' | 'qwen_image_edit' | 'krea2_t2i',
+  kind: 'reference_video' | 'qwen_image_edit' | 'krea2_t2i' | 'moss_image_t2i',
   body: { clientJobId?: string; clientId?: string; project: string; episode: string; models?: Record<string, string>; params: object },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
   const url = `${trimBase(baseUrl)}/zeroexo/v1/jobs`;
@@ -187,6 +191,24 @@ export async function submitKrea2Job(
   body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: Krea2JobParams },
 ): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
   return submitJob(baseUrl, 'krea2_t2i', body);
+}
+
+export interface MossJobParams {
+  prompt: string;
+  negative_prompt: string;
+  width: number;
+  height: number;
+  steps: number;
+  cfg: number;
+  seed: number;
+}
+
+/** 提交 Moss Image 文生图作业 */
+export async function submitMossJob(
+  baseUrl: string,
+  body: { clientJobId?: string; clientId?: string; project: string; episode: string; params: MossJobParams },
+): Promise<{ jobId: string; state: ZeroexoJobState; error?: string | null }> {
+  return submitJob(baseUrl, 'moss_image_t2i', body);
 }
 
 /**

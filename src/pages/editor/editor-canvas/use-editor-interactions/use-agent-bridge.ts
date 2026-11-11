@@ -20,10 +20,11 @@ import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, setGenerat
 import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_VIDEO_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, KREA2_MODEL_KEY, KREA2_MODEL_LABEL, MOSS_MODEL_KEY, MOSS_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { cancelLocalJob, generateLocalMiniMaxVideo } from '../interactions/local-minimax-video.js';
 import { generateLocalQwenImage } from '../interactions/local-qwen-image.js';
 import { generateKrea2Image } from '../interactions/local-krea2-image.js';
+import { generateMossImage } from '../interactions/local-moss-image.js';
 import { canvasDocNodeKey, getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
@@ -166,7 +167,13 @@ export function useAgentBridgeHooks(
           }).catch(fail);
         } else {
           const isKrea2 = job.model === KREA2_MODEL_KEY;
-          const run = isKrea2
+          const isMoss = job.model === MOSS_MODEL_KEY;
+          const run = isMoss
+            ? generateMossImage({
+                prompt: String(data.prompt ?? ''), aspect: pv.aspect as string | undefined, params: pv,
+                nodeId, resume, onPreview, onProgress: onStep,
+              })
+            : isKrea2
             ? generateKrea2Image({
                 prompt: String(data.prompt ?? ''), aspect: pv.aspect as string | undefined, params: pv,
                 nodeId, resume, onPreview, onProgress: onStep,
@@ -183,7 +190,7 @@ export function useAgentBridgeHooks(
               nodeId, kind: 'image', title: (data.title as string) || '',
               content: url, width: result.width, height: result.height, bytes: result.bytes,
               mimeType: result.mimeType, jobId: result.generationId,
-              model: isKrea2 ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY, prompt: String(data.prompt ?? ''),
+              model: isMoss ? MOSS_MODEL_KEY : isKrea2 ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY, prompt: String(data.prompt ?? ''),
             }).catch(() => undefined);
           }).catch(fail);
         }
@@ -407,7 +414,9 @@ export function useAgentBridgeHooks(
         || modelValue.startsWith('zeroexo:qwen'));
       // Krea2 只有线上 ComfyUI 有底模 + RES4LYF 采样器
       const isKrea2Model = mode === 'image' && modelValue === KREA2_MODEL_KEY;
+      const isMossModel = mode === 'image' && modelValue === MOSS_MODEL_KEY;
       const taskLabel = isLocalVideoModel ? LOCAL_VIDEO_MODEL_LABEL
+        : isMossModel ? MOSS_MODEL_LABEL
         : isKrea2Model ? KREA2_MODEL_LABEL
           : isLocalImageModel ? LOCAL_IMAGE_MODEL_LABEL
             : (modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined);
@@ -455,9 +464,9 @@ export function useAgentBridgeHooks(
         if (mode === 'image') {
           const data = nodeData;
           const sizeStr = fallback.size ? `${fallback.size.width}x${fallback.size.height}` : undefined;
-          if (isLocalImageModel || isKrea2Model) {
+          if (isLocalImageModel || isKrea2Model || isMossModel) {
             const pv = (nodeData.paramValues ?? {}) as Record<string, unknown>;
-            const modelKey = isKrea2Model ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY;
+            const modelKey = isMossModel ? MOSS_MODEL_KEY : isKrea2Model ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY;
             // 本机链路：先用参考图垫底显示，随后被 ComfyUI 推送的采样预览帧替换（首帧不空白）
             if (isLocalImageModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!, jobDocId);
             // 作业身份写进节点：刷新后据此续接预览/进度（否则刷新即丢）
@@ -476,7 +485,9 @@ export function useAgentBridgeHooks(
               onJobSubmitted: persistJob,
               signal: ctl.signal,
             };
-            const result = await (isKrea2Model
+            const result = await (isMossModel
+              ? generateMossImage({ prompt: effectivePrompt, aspect: pv.aspect as string | undefined, params: pv, ...callbacks })
+              : isKrea2Model
               ? generateKrea2Image({ prompt: effectivePrompt, aspect: pv.aspect as string | undefined, params: pv, ...callbacks })
               : generateLocalQwenImage({
                   prompt: effectivePrompt,

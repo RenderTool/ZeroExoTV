@@ -104,6 +104,17 @@ KREA2_VISIBLE_PARAMS = {
     "eta": {"type": "number", "default": 0.55},
 }
 
+# Moss Image 文生图可见参数（2026-11-11：moss_image_sft_int8 + qwen3.5_9b 文本编码 + flux2 VAE）
+MOSS_VISIBLE_PARAMS = {
+    "prompt": {"type": "string", "default": ""},
+    "negative_prompt": {"type": "string", "default": ""},
+    "width": {"type": "integer", "default": 1024, "min": 64, "max": 2048},
+    "height": {"type": "integer", "default": 1024, "min": 64, "max": 2048},
+    "steps": {"type": "integer", "default": 25, "min": 1, "max": 100},
+    "cfg": {"type": "number", "default": 2.5},
+    "seed": {"type": "integer", "default": 1, "min": 0},
+}
+
 # 模板非可见占位符兜底：模板里出现的 __zx:<name>__ 都必须有值，
 # 否则替换后留下字面量，INT/FLOAT 校验直接失败。
 TEMPLATE_DEFAULTS = {
@@ -304,7 +315,7 @@ def refresh_job(job: dict[str, Any]) -> dict[str, Any]:
     if state != "success":
         return job
     output_dir = folder_paths.get_output_directory()
-    image_kinds = ("qwen_image_edit", "krea2_t2i")
+    image_kinds = ("qwen_image_edit", "krea2_t2i", "moss_image_t2i")
     out_kind = "image" if job.get("kind") in image_kinds else "video"
     outputs: list[dict[str, Any]] = []
     for node_out in (entry.get("outputs") or {}).values():
@@ -554,6 +565,18 @@ async def capabilities(_request):
                 "visibleParams": IMAGE_VISIBLE_PARAMS,
                 "defaults": {"seed": 1, "steps": 25, "cfg": 1.0, "denoise": 1.0, "width": 1344, "height": 1008},
             },
+            {
+                "kind": "krea2_t2i",
+                "label": "Krea2 文生图",
+                "visibleParams": KREA2_VISIBLE_PARAMS,
+                "defaults": {"seed": 1, "steps": 10, "cfg": 1.0, "width": 1024, "height": 1024},
+            },
+            {
+                "kind": "moss_image_t2i",
+                "label": "Moss Image 文生图",
+                "visibleParams": MOSS_VISIBLE_PARAMS,
+                "defaults": {"seed": 1, "steps": 25, "cfg": 2.5, "width": 1024, "height": 1024},
+            },
         ],
     })
 
@@ -562,7 +585,12 @@ async def capabilities(_request):
 async def submit_job(request):
     body = await request.json()
     kind = body.get("kind") or "reference_video"
-    visible = IMAGE_VISIBLE_PARAMS if kind == "qwen_image_edit" else VISIBLE_PARAMS
+    visible = (
+        IMAGE_VISIBLE_PARAMS if kind == "qwen_image_edit"
+        else KREA2_VISIBLE_PARAMS if kind == "krea2_t2i"
+        else MOSS_VISIBLE_PARAMS if kind == "moss_image_t2i"
+        else VISIBLE_PARAMS
+    )
     params: dict[str, Any] = {name: spec.get("default") for name, spec in visible.items()}
     params.update(TEMPLATE_DEFAULTS)
     params.update({k: v for k, v in (body.get("params") or {}).items() if v is not None})
@@ -573,6 +601,14 @@ async def submit_job(request):
                 params[key] = max(64, min(2048, int(params.get(key) or 1024)))
             except (TypeError, ValueError):
                 params[key] = 1024
+    # Moss：Flux2 latent 要求 16 对齐；宽高同样夹到 2048
+    if kind == "moss_image_t2i":
+        for key in ("width", "height"):
+            try:
+                v = max(64, min(2048, int(params.get(key) or 1024)))
+            except (TypeError, ValueError):
+                v = 1024
+            params[key] = max(64, int(round(v / 16.0)) * 16)
     # 多参考图：数组 → 逗号串（节点输入是 STRING）
     if isinstance(params.get("reference_images"), list):
         params["reference_images"] = ",".join(str(x).strip() for x in params["reference_images"] if str(x).strip())

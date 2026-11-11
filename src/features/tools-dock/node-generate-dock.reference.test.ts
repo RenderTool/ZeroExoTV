@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(dir, 'node-generate-dock.tsx'), 'utf8');
 
-describe('Krea2 = 纯文生图，不给参考图假入口', () => {
-  it('Krea2 的输入类型只有 text', () => {
-    expect(src).toMatch(/KREA2_MODEL_KEY\)\s*return \['text'\]/);
+describe('Krea2 / Moss = 纯文生图，不给参考图假入口', () => {
+  it('Krea2 与 Moss 的输入类型只有 text', () => {
+    expect(src).toMatch(/currentModelValue === KREA2_MODEL_KEY \|\| currentModelValue === MOSS_MODEL_KEY\)\s*return \['text'\]/);
   });
 
   it('参考素材区按 supportsReferenceInput 条件渲染，否则显示「不支持参考图」说明', () => {

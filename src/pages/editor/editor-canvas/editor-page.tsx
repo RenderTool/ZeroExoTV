@@ -89,6 +89,7 @@ import { WORKSPACE_SURFACE_STYLE } from '@/shared/components/LAYOUT_CONSTANTS.js
 import { useAiConfigStore } from '@/features/ai-config/use-ai-config-store.js';
 import { useEditorDialogs } from './use-editor-dialogs.js';
 import { useEditorInteractions } from './use-editor-interactions.js';
+import { useMcpImageJobs } from '@/features/mcp-image-jobs/use-mcp-image-jobs.js';
 
 import { useStackToast } from './use-stack-toast.js';
 import { ReadOnlyCanvasOverlay } from './read-only-canvas-overlay.js';
@@ -521,6 +522,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     uploadQueueRef.current = new UploadQueue({ concurrency: 5, maxRetries: 2 });
   }
   const commandQueue = refs.commandQueue;
+  // MCP 图片作业：网页在线时消费 .lf/.../image-jobs，把 MCP 生成的图落到当前实时画布
+  useMcpImageJobs({ projectId: canvasId, commandQueue });
   const { processFiles } = useUploadQueue(commandQueue, uploadQueueRef.current);
   // 组件卸载时重置队列
   useEffect(() => {

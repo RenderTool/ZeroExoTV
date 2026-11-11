@@ -9,7 +9,7 @@ import { pipelineStagesText } from "./module-specs.js";
 
 const STAGES = pipelineStagesText();
 
-const SKILLS_POINTER = `【技能层——工具只回答「能做什么」，技能回答「怎么做」】开工前先读：zeroexo://skills/index（索引）、zeroexo://skills/pipeline（合订本：收料→剧本→主体→分镜提示词→参数→出片）、单技能 zeroexo://skills/<key>（script-import 剧本落地 / subjects 主体库 / shots-prompts 分镜与视频提示词 / params 参数与 H3 延续法）。写提示词、切段、配参数前必须先读对应技能，禁止凭感觉写。
+const SKILLS_POINTER = `【技能层——工具只回答「能做什么」，技能回答「怎么做」】开工前先读：zeroexo://skills/index（索引）、zeroexo://skills/pipeline（合订本：收料→剧本→主体→分镜提示词→参数→出片）、单技能 zeroexo://skills/<key>（script-import 剧本落地 / subjects 主体库 / shots-prompts 分镜与视频提示词 / image-prompts 画布图片提示词（Moss/Krea2/Qwen）/ params 参数与 H3 延续法）。写提示词、切段、配参数前必须先读对应技能，禁止凭感觉写。
 
 【参数纪律】aspect / scaleFactor / steps / cfg / seed / 引导帧 / 每段时长必须逐项问用户；联调小参数（如 608×352、49 帧、1 步）也要先说清并在用户同意后使用，禁止自行拍板。
 

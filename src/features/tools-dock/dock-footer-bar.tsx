@@ -11,9 +11,10 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { LoaderCircle, Lock, Sparkles } from 'lucide-react';
 import { StyledSelect, type StyledSelectOption } from './styled-select.js';
 import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
-import { LOCAL_VIDEO_MODEL_KEY, LOCAL_IMAGE_MODEL_KEY, KREA2_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { LOCAL_VIDEO_MODEL_KEY, LOCAL_IMAGE_MODEL_KEY, KREA2_MODEL_KEY, MOSS_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { LocalQwenParamForm } from './local-qwen-param-form.js';
 import { Krea2ParamForm } from './krea2-param-form.js';
+import { MossParamForm } from './moss-param-form.js';
 import { LocalH3ParamForm } from './local-h3-param-form.js';
 import { PromptLibraryMenu } from '@/features/prompt-library/prompt-library-menu.js';
 import type { GenerationMode } from './node-generate-dock.js';
@@ -97,6 +98,8 @@ export const DockFooterBar = memo(function DockFooterBar({
           <LocalQwenParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} hasReference={hasImageReference} />
         ) : mode === 'image' && model === KREA2_MODEL_KEY ? (
           <Krea2ParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} />
+        ) : mode === 'image' && model === MOSS_MODEL_KEY ? (
+          <MossParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} />
         ) : (
           <DynamicParamForm
             model={model}
