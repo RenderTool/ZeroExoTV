@@ -19,7 +19,7 @@
  */
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CircleX, FileUp, Eye, EyeOff, ArrowUpDown, GripVertical, Undo2, Redo2, History, ChevronDown } from 'lucide-react';
+import { Bot, CircleX, FileUp, Eye, EyeOff, ArrowUpDown, GripVertical, Undo2, Redo2, History, ChevronDown } from 'lucide-react';
 import { App, Button, ConfigProvider, Tooltip, Input, Modal, Dropdown } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -31,6 +31,8 @@ import type { ScriptHistoryControls } from '@/features/canvas-nodes/script-edito
 import { ScriptSnapshotPanel } from './script-snapshot-panel.js';
 import type { ScriptSnapshot } from '@/entities/script-store.js';
 import { displayEpisodeTitle } from '@/entities/script-store.js';
+import { buildScriptAiBrief } from '../script-editor/script-ai-brief.js';
+import { htmlToPlainText } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
 import { EpisodeList } from './components/EpisodeList.js';
 import { getEpisodePageCount, splitContentIntoPages } from './hooks/use-episode-manager.js';
 import type { Episode } from './script-types.js';
@@ -95,7 +97,7 @@ export function ScriptFullscreenEditor({
 }: ScriptFullscreenEditorProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
-  const { modal } = App.useApp();
+  const { modal, message } = App.useApp();
   const isDark = theme.mode === 'dark';
 
   const activeEpisode = episodes.find((e) => e.id === activeEpisodeId) ?? episodes[0];
@@ -105,6 +107,26 @@ export function ScriptFullscreenEditor({
     const pageCount = getEpisodePageCount(ep);
     return { ...ep, number: index + 1, pageCount, estimatedDuration: pageCount };
   }), [episodes]);
+
+  /** 问AI：复制本集剧本（含项目/集定位与修改要求），直接粘给任意 Agent（2026-11-12 用户要求） */
+  const handleAskAi = async (): Promise<void> => {
+    if (!activeEpisode) return;
+    const index = Math.max(0, episodes.findIndex((e) => e.id === activeEpisode.id));
+    const brief = buildScriptAiBrief({
+      projectId: snapshotProjectId,
+      episode: activeEpisode,
+      episodeIndex: index,
+      totalEpisodes: episodes.length,
+      plainText: htmlToPlainText(activeEpisode.content ?? ''),
+    });
+    try {
+      await navigator.clipboard.writeText(brief);
+      message.success(t('scriptEditor.askAiCopied', '已复制本集剧本，粘给 AI 修改即可'));
+    } catch {
+      message.error(t('scriptEditor.copyFailed', '复制失败，请手动选择复制'));
+    }
+  };
+
 
   const totalPages = useMemo(
     () => normalizedEpisodes.reduce((acc, ep) => acc + (ep.pageCount ?? 0), 0),
@@ -441,6 +463,18 @@ export function ScriptFullscreenEditor({
               />
             </Tooltip>
           ) : null}
+          <Tooltip title={t('scriptEditor.askAi', '问AI：复制本集剧本给 AI 修改')}>
+            <Button
+              type="text"
+              size="small"
+              data-script-ask-ai
+              icon={<Bot size={15} />}
+              onClick={() => void handleAskAi()}
+              style={{ ...toolBtnStyle, color: mutedColor }}
+            >
+              {t('scriptEditor.askAiBtn', '问AI')}
+            </Button>
+          </Tooltip>
           <Tooltip title={effectiveShowLabels ? t('scriptEditor.hideLabels') || '隐藏标签' : t('scriptEditor.showLabels') || '显示标签'}>
             <Button
               type="text"
