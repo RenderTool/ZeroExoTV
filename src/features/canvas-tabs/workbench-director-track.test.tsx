@@ -718,11 +718,11 @@ describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 =
     expect(paramsBtn.style.height).toBe('25px');
     expect(runBtn.disabled).toBe(false);
 
-    // 预览区文字标签：在预览区内、初始 = 公共参数 16:9 · 864×480、不参与点击（aria-hidden 只读文本）
+    // 预览区文字标签：在预览区内、初始 = 公共参数 16:9 · 1376×768、不参与点击（aria-hidden 只读文本）
     const stage = container.querySelector('[data-mock="video-stage"]') as HTMLElement;
     const label = stage.querySelector('[data-params-label]') as HTMLElement;
     expect(label).toBeTruthy();
-    expect(label.textContent).toBe('16:9 · 864×480');
+    expect(label.textContent).toBe('16:9 · 1376×768');
     expect(label.tagName).toBe('SPAN');
 
     // 点开「参数」→ 浮层面板含三类控件（比例下拉 / ×系数输入 / 换算尺寸只读 chip）
@@ -735,14 +735,14 @@ describe('参数 = 合并进「参数」按钮（裸控件 0）；运行按钮 =
     expect(panel.querySelector('[data-aspect-picker]')).toBeTruthy();
     expect(panel.querySelector('[data-aspect-option="16:9"]')).toBeTruthy();
     expect(panel.querySelector('[data-param-key="scaleFactor"]')).toBeTruthy();
-    expect((panel.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480');
+    expect((panel.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1376×768');
 
     // 面板改比例 16:9 → 9:16：chip 与预览标签实时联动
     fireEvent.click(panel.querySelector('[data-aspect-option="9:16"]') as Element);
     await waitFor(() =>
-      expect((document.querySelector('[data-params-panel] [data-resolved-size]') as HTMLElement).textContent).toBe('480×864'));
+      expect((document.querySelector('[data-params-panel] [data-resolved-size]') as HTMLElement).textContent).toBe('768×1376'));
     await waitFor(() =>
-      expect((container.querySelector('[data-params-label]') as HTMLElement).textContent).toBe('9:16 · 480×864'));
+      expect((container.querySelector('[data-params-label]') as HTMLElement).textContent).toBe('9:16 · 768×1376'));
 
     // 「运行」→ 打开片段选择面板（2026-11-07 统一生成入口）
     fireEvent.click(runBtn);
@@ -782,33 +782,33 @@ describe('DirectorParamsButton/RunButton/Panel 单测（比例/系数/运行链�
   }
   const panel = () => document.querySelector('[data-params-panel]') as HTMLElement;
 
-  it('比例切换 16:9 → 9:16：onSharedChange 收到 params.aspect，换算尺寸 chip 联动 864×480 → 480×864', async () => {
+  it('比例切换 16:9 → 9:16：onSharedChange 收到 params.aspect，换算尺寸 chip 联动 1376×768 → 768×1376', async () => {
     const { onSharedChange } = renderGroup();
-    expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480');
+    expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1376×768');
     fireEvent.click(panel().querySelector('[data-aspect-option="9:16"]') as Element);
     expect(onSharedChange).toHaveBeenLastCalledWith({ params: { aspect: '9:16' } });
     await waitFor(() =>
-      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('480×864'));
+      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('768×1376'));
   });
 
   it('×系数：越界输入 blur 夹取（9 → 2）；非法输入 blur 回退默认（abc → 1）；chip 同步换算', async () => {
     const { onSharedChange } = renderGroup({ scaleFactor: 1.5 });
-    expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1056×608'); // ×1.5 = 0.6MP
+    expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1664×928'); // ×1.5 = 1.5MP
     const input = panel().querySelector('input[data-param-key="scaleFactor"]') as HTMLInputElement;
 
-    // 越界 → 夹到上限 2（0.8MP → 1216×672）
+    // 越界 → 夹到上限 2（官方 2.0MP → 1920×1088）
     fireEvent.change(input, { target: { value: '9' } });
     fireEvent.blur(input);
     await waitFor(() => expect(onSharedChange).toHaveBeenLastCalledWith({ params: { scaleFactor: 2 } }));
     await waitFor(() =>
-      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1216×672'));
+      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1920×1088'));
 
     // 非法 → 回退默认 1
     fireEvent.change(input, { target: { value: 'abc' } });
     fireEvent.blur(input);
     await waitFor(() => expect(onSharedChange).toHaveBeenLastCalledWith({ params: { scaleFactor: 1 } }));
     await waitFor(() =>
-      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480'));
+      expect((panel().querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1376×768'));
   });
 
   it('运行：点击透传 onRun；禁用态 disabled + title「没有选中片段」，点击不透传', () => {
@@ -835,7 +835,7 @@ describe('DirectorParamsButton/RunButton/Panel 单测（比例/系数/运行链�
     expect(container.querySelector('[data-param-key="scaleFactor"]')).toBeTruthy();
     expect(container.querySelector('[data-param-key="steps"]')).toBeTruthy();
     expect(container.querySelector('[data-param-key="seed"]')).toBeTruthy();
-    expect((container.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('864×480');
+    expect((container.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1376×768');
   });
 });
 

@@ -349,12 +349,13 @@ const ASPECT_RATIO: Record<DirectorAspect, number> = {
   '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:3': 4 / 3, '3:4': 3 / 4, '21:9': 21 / 9,
 };
 /**
- * 官方 Size Settings Reference：1 MP = 1024² 像素，按面积开方求宽高再就近对齐 ×32。
- * ×1 对应 0.4MP（16:9 → 864×480，即节点默认 nodes/director_common.py L61-62）；
- * 系数语义 = 像素量倍数（×0.5 → 0.2MP、×1.5 → 0.6MP），不是宽高倍数。
+ * 官方 Size Settings Reference（2026-11-11 按官方表纠正）：
+ * 系数 = 目标百万像素（MP，1MP = 1024²），面积 = 系数 × 1024² → 宽高各自 32 对齐。
+ * 16:9 命中官方表：0.2→608×352、0.4→864×480、0.6→1056×608、0.8→1216×672、
+ * 0.9→1280×736、0.98→1344×768、1.0→1376×768、1.2→1504×832、1.5→1664×928、
+ * 1.8→1824×1024、2.0→1920×1088（1080 不是 32 倍数，取最近合法值）。
  */
 const PIXELS_PER_MEGAPIXEL = 1024 * 1024;
-const BASE_MEGAPIXELS = 0.4;
 const round32 = (n: number): number => Math.max(32, Math.round(n / 32) * 32);
 
 /** 尺寸系数范围（2026-11-04 约定：自由数字输入，不再固定档位） */
@@ -373,17 +374,19 @@ export function clampScaleFactor(n: unknown): number {
 }
 
 /**
- * 宽度/高度 = f(比例, 尺寸系数)：官方 Size Settings Reference 换算（2026-11-10 对齐）。
- * 面积 = 0.4MP × 系数 × 1024² → w = √(面积 × r)、h = √(面积 / r) → 各自就近对齐 ×32。
- * 16:9 命中官方表：×0.5 → 608×352(0.2MP)、×1 → 864×480(0.4MP)、×1.25 → 960×544(0.5MP)、
- * ×1.5 → 1056×608(0.6MP)、×2 → 1216×672(0.8MP)。
+ * 宽度/高度 = f(比例, 尺寸系数)：官方 Size Settings Reference 换算（2026-11-11 按官方表纠正）。
+ * 面积 = 系数(MP) × 1024² → w = √(面积 × r)、h = √(面积 / r) → 各自就近对齐 ×32。
+ * 16:9 命中官方表：0.2→608×352、0.4→864×480、0.6→1056×608、0.8→1216×672、
+ * 0.9→1280×736、0.98→1344×768、1.0→1376×768、1.2→1504×832、1.5→1664×928、
+ * 1.8→1824×1024、2.0→1920×1088（1080 不是 32 倍数，取最近合法值）。
  * 系数经 clampScaleFactor 夹取（×3 按 ×2 算）；所有结果恒 32 对齐且 ≥32
  * （MiniMax H3 VAE÷16 再 2×2 patch，非 32 倍数会被节点拒收）。
  */
 export function resolveVideoSize(aspect: string, scaleFactor: number): { width: number; height: number } {
   const r = ASPECT_RATIO[aspect as DirectorAspect] ?? 16 / 9;
   const f = clampScaleFactor(scaleFactor);
-  const total = BASE_MEGAPIXELS * f * PIXELS_PER_MEGAPIXEL;
+  // 系数直接是目标 MP（官方表口径）：2.0 → 2.0MP → 16:9 = 1920×1088
+  const total = f * PIXELS_PER_MEGAPIXEL;
   return {
     width: round32(Math.sqrt(total * r)),
     height: round32(Math.sqrt(total / r)),
@@ -450,8 +453,8 @@ export const DIRECTOR_PARAM_SCHEMA: DirectorParamField[] = [
   { key: 'cfg', label: 'CFG', type: 'float', default: 1.0, min: 0, max: 30, step: 0.01, scope: 'shared', source: 'nodes/director_common.py L43-46', verified: true },
   { key: 'seed', label: '随机种子', type: 'int', default: 0, min: 0, max: 0xffffffffffffffff, step: 1, scope: 'shared', source: 'nodes/director_common.py L47-56', verified: true },
   { key: 'frame_rate', label: '帧率', type: 'float', default: 24.0, min: 1, max: 240, step: 0.1, scope: 'shared', source: 'nodes/director_common.py L57-59（内部恒 24）', verified: true },
-  { key: 'width', label: '宽度', type: 'int', default: 864, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L61', verified: true },
-  { key: 'height', label: '高度', type: 'int', default: 480, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L62', verified: true },
+  { key: 'width', label: '宽度', type: 'int', default: 1376, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L61', verified: true },
+  { key: 'height', label: '高度', type: 'int', default: 768, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L62', verified: true },
   { key: 'ref_max_size', label: '参考图最大边', type: 'int', default: 864, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L63', verified: true },
   { key: 'total_frames', label: '总帧数', type: 'int', default: 124, min: 5, max: 100000, step: 1, scope: 'shared', source: 'nodes/director_common.py L64-72', verified: true },
   { key: 'steps', label: '采样步数', type: 'int', default: 8, min: 1, max: 200, step: 1, scope: 'shared', source: 'nodes/director.py L161-172', verified: true },

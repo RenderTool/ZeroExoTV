@@ -49,8 +49,34 @@ export function triggerAnchorDownload(url: string, filename: string, revoke = fa
   if (revoke) URL.revokeObjectURL(url);
 }
 
-/** 下载单个节点内容（withGuide=true 时附带本机 H3 引导数据 .safetensors） */
-export async function downloadNodeAsFile(
+/**
+ * 生成结果 → 图片节点尺寸（与 image-node-view 的 onload 校正同一规则）：
+ * 按原图比例重算宽高，长边 ≤ maxLong、短边 ≥ minShort。
+ * 2026-11-11 修复：Krea2/Qwen 返回后节点仍停在旧比例，图片被 contain 出黑边。
+ */
+export function fitImageNodeSize(
+  currentWidth: number,
+  naturalWidth: number,
+  naturalHeight: number,
+  maxLong = 320,
+  minShort = 120,
+): { width: number; height: number } {
+  if (!naturalWidth || !naturalHeight) return { width: currentWidth, height: currentWidth };
+  const ratio = naturalHeight / naturalWidth;
+  let width = Math.min(maxLong, Math.max(minShort, Math.round(currentWidth)));
+  let height = Math.round(width * ratio);
+  if (height > maxLong) {
+    height = maxLong;
+    width = Math.round(maxLong / ratio);
+  }
+  if (height < minShort) {
+    height = minShort;
+    width = Math.round(minShort / ratio);
+  }
+  return { width: Math.max(1, width), height: Math.max(1, height) };
+}
+
+/** 下载单个节点内容（withGuide=true 时附带本机 H3 引导数据 .safetensors） */export async function downloadNodeAsFile(
   node: NodeRecord,
   opts?: { withGuide?: boolean },
 ): Promise<{ ok: boolean; guideOk?: boolean }> {

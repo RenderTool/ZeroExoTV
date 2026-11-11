@@ -138,26 +138,24 @@ describe('clampScaleFactor（0.1–2 夹取，非法回退 1）', () => {
     expect(clampScaleFactor('')).toBe(1);        // 空串回退默认
   });
 
-  it('历史枚举值自然兼容；换算实时跟随（×0.5 → 608×352，×1.5 → 1056×608）', () => {
+  it('历史枚举值自然兼容；换算实时跟随（×0.5 → 960×544，×1.5 → 1664×928）', () => {
     expect(clampScaleFactor(0.5)).toBe(0.5);
     expect(clampScaleFactor(1.25)).toBe(1.25);
-    expect(resolveVideoSize('16:9', 0.5)).toEqual({ width: 608, height: 352 });
-    expect(resolveVideoSize('16:9', 1.5)).toEqual({ width: 1056, height: 608 });
+    expect(resolveVideoSize('16:9', 0.5)).toEqual({ width: 960, height: 544 });
+    expect(resolveVideoSize('16:9', 1.5)).toEqual({ width: 1664, height: 928 });
     // 超限输入也先夹取再换算：×3 → 按 ×2 算
     expect(resolveVideoSize('16:9', 3)).toEqual(resolveVideoSize('16:9', 2));
   });
 });
 
 describe('视频尺寸换算（比例 × 系数 → 宽高，32 对齐）', () => {
-  it('16:9 × 1 → 864×480（= 节点默认）', () => {
-    expect(resolveVideoSize('16:9', 1)).toEqual({ width: 864, height: 480 });
+  it('16:9 × 1 → 1376×768（官方表 1.0MP）', () => {
+    expect(resolveVideoSize('16:9', 1)).toEqual({ width: 1376, height: 768 });
   });
 
-  it('9:16 × 1 → 480×864；1:1 × 1 → 640×640', () => {
-    expect(resolveVideoSize('9:16', 1)).toEqual({ width: 480, height: 864 });
-    const sq = resolveVideoSize('1:1', 1);
-    expect(sq.width).toBe(sq.height);
-    expect(sq.width % 32).toBe(0);
+  it('9:16 × 1 → 768×1376；1:1 × 1 → 1024×1024', () => {
+    expect(resolveVideoSize('9:16', 1)).toEqual({ width: 768, height: 1376 });
+    expect(resolveVideoSize('1:1', 1)).toEqual({ width: 1024, height: 1024 });
   });
 
   it('各比例 × 各系数恒 32 对齐且 ≥32（缩放档也验，修前只验了 ×1）', () => {
@@ -175,14 +173,28 @@ describe('视频尺寸换算（比例 × 系数 → 宽高，32 对齐）', () =
     expect(min.height % 32).toBe(0);
   });
 
-  it('官方 16:9 Size Settings Reference：系数 = MP/0.4 逐行命中，×1 = 0.4MP = 864×480', () => {
-    // 0.9MP 以上超出系数上限 2（=0.8MP），此处覆盖官方表在合法区间内的全部行
+  it('官方 16:9 Size Settings Reference 逐行命中（系数 = 目标 MP）', () => {
+    // 官方表（节点 Note: Size Settings Reference）：2.0 → 1920×1088
     const rows: Array<[number, number, number]> = [
       [0.2, 608, 352], [0.3, 736, 416], [0.4, 864, 480], [0.5, 960, 544],
-      [0.6, 1056, 608], [0.7, 1152, 640], [0.8, 1216, 672],
+      [0.6, 1056, 608], [0.7, 1152, 640], [0.8, 1216, 672], [0.9, 1280, 736],
+      [0.98, 1344, 768], [1.0, 1376, 768], [1.2, 1504, 832], [1.5, 1664, 928],
+      [1.8, 1824, 1024], [2.0, 1920, 1088],
     ];
     for (const [mp, w, h] of rows) {
-      expect(resolveVideoSize('16:9', mp / 0.4)).toEqual({ width: w, height: h });
+      expect(resolveVideoSize('16:9', mp), `mp=${mp}`).toEqual({ width: w, height: h });
+    }
+  });
+
+  it('×2（上限）= 2.0MP：16:9 → 1920×1088（1080 不是 32 倍数，取最近合法值）', () => {
+    expect(resolveVideoSize('16:9', 2)).toEqual({ width: 1920, height: 1088 });
+    expect(resolveVideoSize('9:16', 2)).toEqual({ width: 1088, height: 1920 });
+    expect(resolveVideoSize('21:9', 2)).toEqual({ width: 2208, height: 960 });
+    // 32 对齐是硬约束
+    for (const aspect of DIRECTOR_ASPECT_OPTIONS) {
+      const { width, height } = resolveVideoSize(aspect, 2);
+      expect(width % 32).toBe(0);
+      expect(height % 32).toBe(0);
     }
   });
 
@@ -209,7 +221,7 @@ describe('参数模板（本地预设）', () => {
     expect(Object.keys(DIRECTOR_PRESETS.h3.params)).toHaveLength(sharedVerified.length);
     expect(DIRECTOR_PRESETS.h3.params['cfg']).toBe(1.0);
     expect(DIRECTOR_PRESETS.h3.params['steps']).toBe(8);
-    expect(DIRECTOR_PRESETS.h3.params['width']).toBe(864);
+    expect(DIRECTOR_PRESETS.h3.params['width']).toBe(1376);
     expect(DIRECTOR_PRESETS.h3.params['continuityEnabled']).toBe(false);
     expect(DIRECTOR_PRESETS.h3.params['continuityOverlapFrames']).toBe(22);
   });

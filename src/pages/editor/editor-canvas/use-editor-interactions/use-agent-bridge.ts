@@ -29,7 +29,7 @@ import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
 import { buildTemplateParams, promptTitleSummary, collectInputReferences, formatInputRefs, resolveLocalVideoRequest } from './use-ai-generation.js';
-import { IMAGE_PROMPT_REVERSE_PRESET, contentToDataUrl } from './helpers.js';
+import { IMAGE_PROMPT_REVERSE_PRESET, contentToDataUrl, fitImageNodeSize } from './helpers.js';
 // 本地版（Plan#83）：前端不含 Agent/LLM。原本「节点生成 = 投递 Agent 会话」，
 // 现改为：图/音/视频直负本地渠道属 Phase 2 T2.4（未接入，调用即报错）；
 // 剧本/分镜类 LLM 产物由外部工具经 MCP 直接读写数据目录。
@@ -387,8 +387,14 @@ export function useAgentBridgeHooks(
         if (!node) return;
         const currentWidth = node.size?.width ?? fallbackWidth;
         const ratio = height / width;
-        const newHeight = Math.round(currentWidth * ratio);
         const oldRect = { x: node.position.x, y: node.position.y, width: node.size?.width ?? fallbackWidth, height: node.size?.height ?? fallbackHeight };
+        if (mode === 'image') {
+          // 图片：宽高同时按原图比例重算（Krea2/Qwen 返回后不能再停在旧比例，否则 contain 出黑边）
+          const fitted = fitImageNodeSize(currentWidth, width, height);
+          cq.execute(new ResizeNodeCommand(nodeId, oldRect, { ...oldRect, ...fitted }));
+          return;
+        }
+        const newHeight = Math.round(currentWidth * ratio);
         cq.execute(new ResizeNodeCommand(nodeId, oldRect, { ...oldRect, height: newHeight }));
       };
 
