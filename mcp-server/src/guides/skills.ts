@@ -139,6 +139,17 @@ const SUBJECTS = `# 技能：主体库（subjects）
   以剧本实际出现重算；否则页面会全部显示「全部」。
 - 禁止把「页面没图」解释成浏览器缓存或让用户重新导入；先跑 audit 拿证据。
 
+### 3.9 剧本「本剧信息」是交付必检项（2026-11-12 用户反馈）
+
+- 每次 \`import_script\` 或重建剧本后，必须调用 \`set_script_meta\` 写 **logline（整部剧一句话概述）+ tags（推荐标签）**。
+- \`get_script\` 返回 \`metaAudit\`；\`complete=false\` 视为未完成，不允许交付。
+- \`import_script\` 若返回 \`scriptMetaWarning\`，必须立刻补写，不能忽略、不能等用户提醒。
+
+### 3.10 主体类型新增「备选」（candidate）
+
+- kind 可为 \`candidate\`（备选）：演员/场景/道具还没定、但不想删的资产放这里，不算正式角色。
+- 备选主体同样可挂状态图；定下来后用 \`upsert_subject\` 改 kind 为正式类型。
+
 ## 4. 落地步骤
 
 1. \`upsert_subject({ name, kind, aliases, note:身份锚点句 })\` —— 先 dryRun，清单给用户确认后才写。

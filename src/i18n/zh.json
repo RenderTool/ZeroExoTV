@@ -2795,7 +2795,8 @@
     "confirm": "确认",
     "remapToEntity": "重映射到此实体",
     "noConflicts": "暂无实体冲突",
-    "conflictGroup": "冲突组"
+    "conflictGroup": "冲突组",
+    "candidate": "备选"
   },
   "entityState": {
     "noStates": "暂无状态",

@@ -57,7 +57,7 @@ export interface GuideCandidate {
   url?: string;
 }
 
-const SUBJECT_KIND_NAME: Record<ProductionItem['kind'], string> = { character: '角色', scene: '场景', prop: '道具' };
+const SUBJECT_KIND_NAME: Record<ProductionItem['kind'], string> = { character: '角色', scene: '场景', prop: '道具', candidate: '备选' };
 const KIND_NAME: Record<DirectorAssetRef['kind'], string> = { image: '图片', video: '视频', audio: '音频' };
 const KIND_ICON = { image: ImageIcon, video: Film, audio: Music } as const;
 

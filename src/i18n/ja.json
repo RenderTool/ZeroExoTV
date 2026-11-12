@@ -2762,7 +2762,8 @@
     "confirm": "確認",
     "remapToEntity": "このエンティティにリマップ",
     "noConflicts": "エンティティ競合はありません",
-    "conflictGroup": "競合グループ"
+    "conflictGroup": "競合グループ",
+    "candidate": "候補"
   },
   "entityState": {
     "noStates": "ステートがありません",

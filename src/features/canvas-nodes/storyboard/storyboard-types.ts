@@ -19,7 +19,7 @@ import type { SubjectTree, ProjectColorCard } from './subject-tree-types';
 export type ShotType = string;
 export type CameraMovement = string;
 export type ShotTransition = 'cut' | 'fade' | 'dissolve' | 'wipe' | 'match' | 'jump';
-export type EntityKind = 'character' | 'scene' | 'prop';
+export type EntityKind = 'character' | 'scene' | 'prop' | 'candidate';
 
 // ===== 主体引用 =====
 

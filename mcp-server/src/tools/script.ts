@@ -12,6 +12,23 @@ import { normalizeScript } from "../lib/script-normalize.js";
 import { analyzeSource } from "../lib/preflight.js";
 import { defTool, diffSummary, guardDryRunConfirm, guardForeignSource, guardUserConfirmed, type Ctx } from "./_register.js";
 
+function auditScriptMeta(meta?: { logline?: string; tags?: string[] }): {
+  logline: boolean;
+  tags: boolean;
+  complete: boolean;
+  hint: string;
+} {
+  const logline = Boolean(meta?.logline?.trim());
+  const tags = (meta?.tags ?? []).filter((t) => t.trim()).length > 0;
+  return {
+    logline,
+    tags,
+    complete: logline && tags,
+    hint: logline && tags
+      ? "本剧信息完整"
+      : "缺「整部剧一句话概述」或「推荐标签」：调用 set_script_meta 补齐（交付必检项）",
+  };
+}
 export function registerScriptTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "list_episodes",
@@ -44,7 +61,7 @@ export function registerScriptTools(server: McpServer, ctx: Ctx): void {
       const id = args.episodeId ?? script.activeEpisodeId;
       const ep = script.episodes.find((e) => e.id === id);
       if (!ep) throw new McpError("NOT_FOUND", `episode 不存在: ${id}`);
-      return { version: script.version, meta: script.meta ?? null, blocks: listScriptBlocks(ep.content ?? ""), episode: ep };
+      return { version: script.version, meta: script.meta ?? null, metaAudit: auditScriptMeta(script.meta), blocks: listScriptBlocks(ep.content ?? ""), episode: ep };
     },
   });
 
@@ -283,9 +300,18 @@ export function registerScriptTools(server: McpServer, ctx: Ctx): void {
         diff: diffSummary(res.before?.episodes ?? [], res.after.episodes, "episodes"),
       };
       // raw = 允许入库；只给「优先规范化」建议，不报错、不算失败
+      const metaAudit = auditScriptMeta(res.after.meta);
+      const withMeta = metaAudit.complete
+        ? result
+        : {
+            ...result,
+            metaAudit,
+            scriptMetaWarning:
+              "本剧信息未写完整（logline / tags）。请立即调用 set_script_meta 补齐；这是交付必检项，不要跳过。",
+          };
       return args.mode === "raw"
-        ? { ...result, hint: "原文已导入。建议下次先调 normalize_script 按规范整理。" }
-        : result;
+        ? { ...withMeta, hint: "原文已导入。建议下次先调 normalize_script 按规范整理。" }
+        : withMeta;
     },
   });
 }

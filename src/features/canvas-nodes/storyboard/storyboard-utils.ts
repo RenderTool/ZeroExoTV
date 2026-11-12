@@ -150,6 +150,7 @@ export const ENTITY_KIND_META: Record<EntityKind, { emoji: string; color: string
   character: { emoji: '\u{1F464}', color: '#22c55e', labelKey: 'entity.character' }, // 角色绿色
   scene: { emoji: '\u{1F4CD}', color: '#3b82f6', labelKey: 'entity.scene' },        // 场景蓝色
   prop: { emoji: '\u{1F4E6}', color: '#a855f7', labelKey: 'entity.prop' },           // 道具紫色
+  candidate: { emoji: '\u{2B50}', color: '#f59e0b', labelKey: 'entity.candidate' }, // 备选琥珀色
 };
 
 /**

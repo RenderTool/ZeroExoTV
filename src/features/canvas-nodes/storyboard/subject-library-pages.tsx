@@ -418,9 +418,9 @@ function SubjectBreadcrumb({
 }
 
 /** 真实取值域（ProductionItemKind 只有三值，不额外自造「其它」） */
-const KIND_OPTIONS: ProductionItemKind[] = ['character', 'scene', 'prop'];
+const KIND_OPTIONS: ProductionItemKind[] = ['character', 'scene', 'prop', 'candidate'];
 const KIND_LABEL_FALLBACK: Record<ProductionItemKind, string> = {
-  character: '角色', scene: '场景', prop: '道具',
+  character: '角色', scene: '场景', prop: '道具', candidate: '备选',
 };
 
 /** 类型徽标文案：缺字段 / 非法值 → 未分类 */
@@ -1103,7 +1103,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   }, [episodeCards, activeKind, search]);
   // 计数与结果共用 episodeCards / filteredCards 同一 predicate，避免「有数字没内容」
   const counts = useMemo(() => {
-    const c: Record<ProductionItemKind, number> = { character: 0, scene: 0, prop: 0 };
+    const c: Record<ProductionItemKind, number> = { character: 0, scene: 0, prop: 0, candidate: 0 };
     for (const card of cards) {
       if (card.kind) c[card.kind] = (c[card.kind] ?? 0) + 1;
     }

@@ -2784,7 +2784,8 @@
     "confirm": "Confirm",
     "remapToEntity": "Remap to this entity",
     "noConflicts": "No entity conflicts",
-    "conflictGroup": "Conflict group"
+    "conflictGroup": "Conflict group",
+    "candidate": "Candidate"
   },
   "entityState": {
     "noStates": "No states",

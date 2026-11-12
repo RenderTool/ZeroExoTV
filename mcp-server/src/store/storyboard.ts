@@ -10,7 +10,7 @@ import { McpError } from "../errors.js";
 import { paths } from "../config.js";
 import { readJsonIfExists, updateVersionedJson, type UpdateResult } from "./fs-node.js";
 
-export type SubjectKind = "character" | "scene" | "prop";
+export type SubjectKind = "character" | "scene" | "prop" | "candidate";
 
 export interface ProductionItem {
   id: string;
@@ -585,7 +585,15 @@ export async function syncSubjectEpisodes(
         if (opts.subjectId && e.id !== opts.subjectId) continue;
         let numbers = e.episodeIds.map((id) => byId.get(id)).filter((n): n is number => typeof n === "number");
         if (episodes.length > 0) {
-          const needles = [e.name, ...(e.aliases ?? [])]
+          // 场景名常用「大地名·小地点」（云顶大厦·保安部）：拆分后按小地点再匹配一次，
+          // 否则场景永远关联不上集数（2026-11-12 用户反馈：道具/场景也没关联）。
+          const nameParts = e.kind === "scene"
+            ? e.name.split(/[·・]/).map((s) => s.trim()).filter((s) => s.length >= 2)
+            // 道具名常带修饰（天山寒铁匕首 / 十亿钻戒）：取 2~4 字尾词兜底匹配
+            : e.kind === "prop"
+              ? [2, 3, 4].map((n) => e.name.slice(-n)).filter((s) => s.length >= 2 && !/[的与和]$/.test(s))
+              : [];
+          const needles = Array.from(new Set([e.name, ...(e.aliases ?? []), ...nameParts]))
             .map((n) => stripHtmlText(n))
             .filter((n) => n.length >= 2 && !n.includes("⚠️"));
           const mentioned = episodes

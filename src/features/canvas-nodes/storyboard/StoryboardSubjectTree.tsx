@@ -74,6 +74,7 @@ const KIND_META: Record<ProductionItemKind, { labelKey: string }> = {
   character: { labelKey: 'entity.character' },
   scene: { labelKey: 'entity.scene' },
   prop: { labelKey: 'entity.prop' },
+  candidate: { labelKey: 'entity.candidate' },
 };
 
 function clampCopy(text: string): void {
@@ -691,7 +692,7 @@ export const StoryboardSubjectTree = memo(function StoryboardSubjectTree({
 
   const changeKind = useCallback((rootId: string, kind: ProductionItemKind) => {
     const DEFAULT_TEMPLATE: Record<ProductionItemKind, SubjectTemplateType> = {
-      character: 'character_lineup', scene: 'environment_panorama', prop: 'prop_detail',
+      character: 'character_lineup', scene: 'environment_panorama', prop: 'prop_detail', candidate: 'character_lineup',
     };
     onChange(trees.map((tr) => {
       if (tr.rootId !== rootId || tr.kind === kind) return tr;

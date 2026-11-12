@@ -1,4 +1,4 @@
-﻿/**
+/**
  * production-manager-panels - 统筹编辑器子组件（Plan#29 V3）
  *
  * 严格复刻基线子组件（SubjectEditorModal 原版），低对比设计：
@@ -32,6 +32,7 @@ export const KIND_ICON: Record<ProductionItemKind, React.ComponentType<{ size?: 
   character: UserRound,
   scene: MapPin,
   prop: Package,
+  candidate: Star,
 };
 
 // ===== 网格图片卡片（资产浏览器 asset-card.tsx AssetCardGrid 1:1） =====

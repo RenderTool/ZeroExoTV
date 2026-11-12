@@ -7,13 +7,14 @@
  * - 「状态」已废弃：条目图片为「剧照集」，每张图挂自由标签（不约束语义）
  */
 
-export type ProductionItemKind = 'character' | 'scene' | 'prop';
+export type ProductionItemKind = 'character' | 'scene' | 'prop' | 'candidate';
 
-/** 实体类型颜色标准：角色绿色、场景蓝色、道具紫色 */
+/** 实体类型颜色标准：角色绿色、场景蓝色、道具紫色、备选琥珀色 */
 export const KIND_COLOR: Record<ProductionItemKind, string> = {
   character: '#22c55e', // 绿色
   scene: '#3b82f6',     // 蓝色
   prop: '#a855f7',      // 紫色
+  candidate: '#f59e0b', // 琥珀色（备选：暂不确定但先留着）
 };
 
 /** 剧照（prompt=生成提示词，note=备注，tags=自由标签，stateTag=状态标记——对齐资产库提示词 card 标签体系） */

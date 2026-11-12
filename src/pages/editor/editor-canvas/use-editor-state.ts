@@ -759,6 +759,15 @@ export function useEditorState(canvasId: string): {
 
     // wheel 挂容器(非 passive,允许 preventDefault 阻止页面缩放)
     const onWheel = (e: WheelEvent) => {
+      // 2026-11-12：面板/列表内部滚动不能被画布缩放吞掉。
+      // 从事件目标向上找可滚动容器（overflow auto/scroll 且内容超出），命中就放行原生滚动。
+      let el = e.target as HTMLElement | null;
+      while (el && el !== containerRef.current) {
+        const style = window.getComputedStyle(el);
+        const oy = style.overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return;
+        el = el.parentElement;
+      }
       ic.handleWheel(e);
     };
     containerRef.current?.addEventListener('wheel', onWheel, { passive: false });

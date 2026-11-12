@@ -135,7 +135,7 @@ const LegacyStoryboardSubjectTab = memo(function StoryboardSubjectTab({
   }, [productionItems]);
 
   const counts = useMemo(() => {
-    const c: Record<ProductionItemKind, number> = { character: 0, scene: 0, prop: 0 };
+    const c: Record<ProductionItemKind, number> = { character: 0, scene: 0, prop: 0, candidate: 0 };
     for (const card of cards) {
       c[card.kind] = (c[card.kind] ?? 0) + 1;
     }

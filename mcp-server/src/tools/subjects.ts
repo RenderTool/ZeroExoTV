@@ -52,7 +52,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     bits: ["subject.read"],
     schema: {
       projectId: z.string(),
-      kind: z.enum(["character", "scene", "prop"]).optional(),
+      kind: z.enum(["character", "scene", "prop", "candidate"]).optional(),
     },
     handler: async (args) => {
       const sb = await readStoryboard(dataRoot(), args.projectId);
@@ -159,7 +159,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       baseVersion: z.number().int().min(0),
       id: z.string().optional(),
       name: z.string().min(1),
-      kind: z.enum(["character", "scene", "prop"]),
+      kind: z.enum(["character", "scene", "prop", "candidate"]),
       aliases: z.array(z.string()).optional(),
       note: z.string().optional(),
       episodeIds: z.array(z.string()).optional(),
