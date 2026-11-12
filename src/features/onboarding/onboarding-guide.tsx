@@ -165,7 +165,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     }
     try {
       const applied = await switchDataRoot(next);
-      message.success(t('onboarding.rootSwitched', '数据目录已切换，正在重新加载…'));
+      message.success(t('onboarding.rootSwitched', '数据目录已切换，正在重新加载…（IDE 里单独运行的 MCP 需重启后生效）'));
       void applied;
       window.setTimeout(() => window.location.reload(), 600);
     } catch (err) {

@@ -1,20 +1,46 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
  * 全局配置：数据根默认 D:\Test（2026-11-05 用户拍板）。
- * 2026-11-11：支持运行时切换（网页设置里改数据目录 → POST /root），切换立即对
- * 网页（http-fs）与 MCP 工具（同一进程）同时生效；重启后由网页在 boot 时重新应用。
+ * 运行时切换（网页 POST /root）会写入 ~/.zeroexo/data-root.txt：
+ * 网页与同进程 MCP 立即生效；IDE 里单独启动的 MCP 进程重启后按该文件生效，
+ * 不再被旧的 ZEROEXO_DATA_ROOT 环境变量拽回旧目录（2026-11-12 用户反馈「切换不生效」）。
  */
 
 let rootOverride: string | null = null;
 
+/** 持久化的数据根覆盖文件（跨进程/重启生效） */
+export const DATA_ROOT_FILE = path.join(os.homedir(), ".zeroexo", "data-root.txt");
+
+let fileRoot: string | null | undefined;
+
+function persistedRoot(): string | null {
+  if (fileRoot !== undefined) return fileRoot;
+  try {
+    const v = fs.readFileSync(DATA_ROOT_FILE, "utf8").trim();
+    fileRoot = v || null;
+  } catch {
+    fileRoot = null;
+  }
+  return fileRoot;
+}
+
 /** 运行时切换数据根（仅 fs-server 的 /root 接口调用；必须已校验为绝对路径） */
 export function setDataRoot(next: string): void {
   rootOverride = next;
+  fileRoot = next;
+  try {
+    fs.mkdirSync(path.dirname(DATA_ROOT_FILE), { recursive: true });
+    fs.writeFileSync(DATA_ROOT_FILE, next, "utf8");
+  } catch {
+    // 写不了用户目录也不影响本进程切换
+  }
 }
 
 export function dataRoot(): string {
-  return rootOverride ?? process.env.ZEROEXO_DATA_ROOT ?? "D:\\Test";
+  return rootOverride ?? persistedRoot() ?? process.env.ZEROEXO_DATA_ROOT ?? "D:\\Test";
 }
 
 export function frontendBaseUrl(): string {

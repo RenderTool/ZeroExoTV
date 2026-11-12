@@ -24,7 +24,7 @@ import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } f
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, Layers, MapPin, Package, Pencil, Plus, Search,
-  Shapes, Square, Star, Trash2, UserRound,
+  Shapes, Square, Star, Trash2, UserRound, X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -1999,11 +1999,42 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
                       ) : (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                          <span data-episodes-summary style={{ fontSize: 12, color: theme.toolbar.text }}>
-                            {selectedEpisodes.length > 0
-                              ? t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selectedEpisodes.length })
-                              : t('subject.appearEpisodesAllShort', '未选（全部剧集）')}
-                          </span>
+                          {/* 2026-11-12 用户要求：已选集数以标签展示，可直接点 × 移除 */}
+                          {selectedEpisodes.length > 0 ? (
+                            <div data-episodes-summary style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              {[...selectedEpisodes].sort((a, b) => a - b).map((n) => (
+                                <span
+                                  key={n}
+                                  data-episode-chip={n}
+                                  style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    height: 24, padding: '0 4px 0 8px', borderRadius: 6, fontSize: 11,
+                                    border: `1px solid ${theme.toolbar.accent}`,
+                                    background: `${theme.toolbar.accent}18`,
+                                    color: theme.toolbar.accent,
+                                  }}
+                                >
+                                  {t('subject.episodeN', { n, defaultValue: `第 ${n} 集` })}
+                                  <button
+                                    type="button"
+                                    aria-label={`移除第 ${n} 集`}
+                                    onClick={() => toggleEpisode(n)}
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                      width: 16, height: 16, padding: 0, border: 'none', borderRadius: 4,
+                                      background: 'transparent', color: 'inherit', cursor: 'pointer',
+                                    }}
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span data-episodes-summary style={{ fontSize: 12, color: theme.toolbar.text }}>
+                              {t('subject.appearEpisodesAllShort', '未选（全部剧集）')}
+                            </span>
+                          )}
                           <Popover
                             trigger="click"
                             placement="bottomLeft"
