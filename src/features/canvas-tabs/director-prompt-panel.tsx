@@ -54,6 +54,7 @@ import {
 } from '@/entities/director-params.js';
 import type { WorkbenchSharedParams } from '@/entities/slot-containers.js';
 import { useAssets } from '@/features/asset-picker/use-assets.js';
+import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import type { WorkbenchShot, WorkbenchShotReference } from '@/features/canvas-nodes/storyboard/workbench-types.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
@@ -215,6 +216,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   /** 插槽拖拽中：不弹 hover 大图预览（拖拽经过别的槽位时预览会挡住落点） */
   const draggingSlotRef = useRef(false);
   const { assets: allAssets } = useAssets();
+  /** 当前项目 id（素材作用域过滤）：project 素材只列本项目，库素材全局可见 */
+  const currentProjectId = useCanvasTabStore((s) => s.slotBindings.script);
   const palette = useCardPalette(theme, isDark);
   const editorRef = useRef<MentionEditorHandle>(null);
   /** @ 面板「导入资产」：与素材抽屉同一条 CAS 链（只落 CAS，导入后 useAssets 订阅自动刷新） */
@@ -251,8 +254,10 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
 
   const mentionCandidates = useMemo(
     () => allAssets.filter((a) => (a.data.kind === 'image' || a.data.kind === 'video' || a.data.kind === 'audio')
-      && !isGeneratedAsset(a)),
-    [allAssets],
+      && !isGeneratedAsset(a)
+      // 2026-11-12：project 作用域只列本项目素材，避免别的项目/已删素材串进来
+      && (a.scope !== 'project' || !a.projectId || a.projectId === currentProjectId)),
+    [allAssets, currentProjectId],
   );
 
   const segmentAssets = useMemo(

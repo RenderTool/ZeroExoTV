@@ -466,7 +466,7 @@ export function AssetPickPanel({
       data-asset-detail
       style={{
         width: ASSET_PICK_DETAIL_WIDTH, flexShrink: 0, borderLeft: `1px solid ${palette.popBorder}`, paddingLeft: 12,
-        display: 'flex', flexDirection: 'column', gap: 8, height: '100%', minHeight: 0, overflowY: 'auto',
+        display: 'flex', flexDirection: 'column', gap: 8, height: '100%', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain',
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
@@ -588,14 +588,14 @@ export function AssetPickPanel({
       width: ASSET_PICK_PANEL_WIDTH, height: ASSET_PICK_PANEL_HEIGHT, boxSizing: 'border-box',
       background: palette.popBg, border: `1px solid ${palette.popBorder}`,
       borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', padding: 12,
-      display: 'flex', gap: 10,
+      display: 'flex', gap: 10, overflow: 'hidden',
     }
     : {
       position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 30,
       width: ASSET_PICK_PANEL_WIDTH, height: ASSET_PICK_PANEL_HEIGHT, boxSizing: 'border-box',
       background: palette.popBg, border: `1px solid ${palette.popBorder}`,
       borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', padding: 12,
-      display: 'flex', gap: 10,
+      display: 'flex', gap: 10, overflow: 'hidden',
     };
 
   return (
@@ -606,6 +606,8 @@ export function AssetPickPanel({
       data-director-asset-panel=""
       style={rootStyle}
       onMouseDown={(e) => e.stopPropagation()}
+      /* 画布/编辑器有全局滚轮缩放处理；面板内部滚动不能被它吞掉（2026-11-12 用户反馈滚不动） */
+      onWheel={(e) => e.stopPropagation()}
     >
       <div style={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {/* 顶部当前资源（主体状态媒体替换语义）：已有媒体时展示 + 移除 */}
@@ -701,7 +703,7 @@ export function AssetPickPanel({
 
         {/* 引导数据页签：只列已生成视频的 guide，单击写片段独立引导槽（不占标准素材槽） */}
         {panelTab === 'guide' && (
-          <div data-guide-candidate-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div data-guide-candidate-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {filteredGuides.length === 0 ? (
               <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
                 {t('director.guideCandidatesEmpty', '暂无可用的引导数据（先在导演台生成视频）')}
@@ -755,7 +757,7 @@ export function AssetPickPanel({
         )}
 
         {panelTab === 'canvas' && (
-          <div data-canvas-media-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div data-canvas-media-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {filteredCanvasMedia.length === 0 ? (
               <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
                 {emptyCanvasText ?? t('director.canvasMediaEmpty', '画布上暂无图片/视频/音频节点')}
@@ -801,7 +803,7 @@ export function AssetPickPanel({
         )}
 
         {panelTab === 'asset' && (
-          <div data-asset-panel-list ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div data-asset-panel-list ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* 导入资产：列表顶部一行（导入类按钮统一放顶部，不埋底部） */}
             {flat.length > 0 && onUploadFiles && (
               <button
@@ -957,7 +959,7 @@ export function AssetPickPanel({
         {/* 主体页签（文件夹语义 1 对 N）：
             一级行单击 = 整主体引用；chevron 独立命中区 = 展开/收起；展开后子行 = 精确插状态图 */}
         {panelTab === 'subject' && (
-          <div data-asset-panel-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div data-asset-panel-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {subjRows.map((row, idx) => {
               const showHeader = row.type === 'subject'
                 && (idx === 0 || subjRows[idx - 1]!.item.kind !== row.item.kind);

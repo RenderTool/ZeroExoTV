@@ -260,8 +260,6 @@ async function readAssetsFromLegacy(): Promise<Asset[]> {
   }
 }
 
-/** 旧通道里的孤儿记录迁回磁盘（每会话一次；磁盘已有的同 id 记录不覆盖） */
-let legacyMergedOnce = false;
 /** CAS 自愈重建（每会话一次；仅磁盘可用时执行） */
 let casRebuiltOnce = false;
 
@@ -296,19 +294,8 @@ async function readAll(): Promise<Asset[]> {
   let list: Asset[] = disk.list ?? [];
   let changed = false;
 
-  // 旧 localforage 通道孤儿记录合并（每会话一次）：驱动回退年代写进 IndexedDB 的幸存记录迁回磁盘
-  if (!legacyMergedOnce) {
-    legacyMergedOnce = true;
-    const legacy = await readAssetsFromLegacy();
-    if (legacy.length > 0) {
-      const byId = new Set(list.map((a) => a.id));
-      const orphans = legacy.filter((a) => !byId.has(a.id));
-      if (orphans.length > 0) {
-        list = [...list, ...orphans];
-        changed = true;
-      }
-    }
-  }
+  // 2026-11-12：不再从旧 localforage 合并孤儿记录——会把磁盘上已删除的素材从 IndexedDB
+  // “复活”（用户反馈“早就删掉的资产又出现”）。旧通道只在磁盘不可用时兜底读取。
 
   // CAS 自愈重建（每会话一次，仅磁盘可用时）：只补缺失记录，不动存量
   if (!casRebuiltOnce) {
@@ -363,9 +350,8 @@ function now(): string {
   return new Date().toISOString();
 }
 
-/** 仅供单测：重置会话级一次性守卫（旧通道合并 / CAS 自愈重建），使每条用例可独立验证 */
+/** 仅供单测：重置会话级一次性守卫（CAS 自愈重建），使每条用例可独立验证 */
 export function __resetAssetStoreSessionGuardsForTest(): void {
-  legacyMergedOnce = false;
   casRebuiltOnce = false;
 }
 

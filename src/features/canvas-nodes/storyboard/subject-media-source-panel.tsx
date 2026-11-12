@@ -105,6 +105,8 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
         if (!cancelled) {
           for (const a of all) {
             if (!a || (a.kind !== 'image' && a.kind !== 'audio')) continue; // 视频不显示
+            // 2026-11-12：只列本项目 + 公共库素材；别的项目（或已删项目）的资产不能串进来
+            if (a.scope === 'project' && a.projectId && projectId && a.projectId !== projectId) continue;
             const d = a.data as { storageKey?: string } | undefined;
             if (!d?.storageKey) continue;
             assets.push({
