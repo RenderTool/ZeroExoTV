@@ -69,7 +69,6 @@ import {
   nextStateStep,
   nonBaseStates,
   subjectCoverCandidates,
-  treeEpisodeRank,
   type SubjectNodeMediaRef,
   type SubjectTreeNode,
   type SubjectTree,
@@ -150,6 +149,7 @@ const KIND_FILTERS: Array<{ key: 'all' | ProductionItemKind; labelKey: string }>
   { key: 'character', labelKey: 'entity.character' },
   { key: 'scene', labelKey: 'entity.scene' },
   { key: 'prop', labelKey: 'entity.prop' },
+  { key: 'candidate', labelKey: 'entity.candidate' },
 ];
 
 /** 剧集摘要（空 = 全部；悬空编号只过滤显示，不清数据） */
@@ -1045,7 +1045,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
 
   const storedKind = useViewPrefsStore((s) => s.subjectLibrary.activeKind);
   const setSubjectActiveKind = useViewPrefsStore((s) => s.setSubjectActiveKind);
-  const activeKind = (storedKind === 'character' || storedKind === 'scene' || storedKind === 'prop'
+  const activeKind = (storedKind === 'character' || storedKind === 'scene' || storedKind === 'prop' || storedKind === 'candidate'
     ? storedKind : 'all') as 'all' | ProductionItemKind;
 
   // 按项目记忆的集筛选（复用 view-prefs.subjectLibrary 切片，不新增存储键）
@@ -1092,8 +1092,11 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     if (activeEpisode === null) return cards;
     return cards.filter((card) => {
       const tree = treeOfCard(card);
-      if (!tree) return true; // 无集信息 → 全集适用
-      return treeEpisodeRank(tree.states, activeEpisode) === 0;
+      if (!tree) return false;
+      // 2026-11-12：未分配集数的状态不参与集筛选（空 = 未知，不等于“全剧出场”）
+      const explicit = tree.states.filter((st) => (st.appearEpisodes ?? []).length > 0);
+      if (explicit.length === 0) return false;
+      return explicit.some((st) => (st.appearEpisodes ?? []).includes(activeEpisode));
     });
   }, [cards, treeOfCard, activeEpisode]);
   const filteredCards = useMemo(() => {

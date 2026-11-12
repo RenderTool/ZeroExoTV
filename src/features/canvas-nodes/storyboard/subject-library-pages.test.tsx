@@ -661,12 +661,17 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
     expect(document.querySelector('[data-subject-episode-option="all"]')).toBeTruthy();
     expect(document.querySelector('[data-subject-episode-option="2"]')).toBeTruthy();
 
-    // 选第 2 集（makeTree 的 state-1 只标第 1 集 / base 未标 → 全集适用 → 主体仍显示）
+    // 选第 2 集：state-1 只标第 1 集，未标注状态不算“全剧出场” → 主体隐藏
     fireEvent.click(document.querySelector('[data-subject-episode-option="2"]') as Element);
     await waitFor(() => expect((document.querySelector('[data-subject-episode-filter]') as HTMLElement).dataset.episode).toBe('2'));
-    expect(document.querySelector('[data-subject-card="item-1"]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-card="item-1"]')).toBeNull();
+    expect(document.querySelector('[data-subject-episode-empty]')).toBeTruthy();
 
-    // 与类型交叉：切成「场景」→ 无结果
+    // 回全集后再验证类型交叉
+    fireEvent.click(document.querySelector('[data-subject-episode-filter]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-episode-option="all"]')).toBeTruthy());
+    fireEvent.click(document.querySelector('[data-subject-episode-option="all"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-card="item-1"]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-subject-kind-filter="scene"]') as Element);
     expect(document.querySelector('[data-subject-card="item-1"]')).toBeNull();
     fireEvent.click(document.querySelector('[data-subject-kind-filter="all"]') as Element);
@@ -677,7 +682,7 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
     expect(document.querySelector('[data-subject-list-empty]')).toBeTruthy();
   });
 
-  it('未标注状态按全集适用；全部状态都不命中 → 整卡隐藏 + 一键回全集', async () => {
+  it('未标注状态不参与集筛选（空 ≠ 全剧）；全部状态都不命中 → 整卡隐藏 + 一键回全集', async () => {
     const tree = makeTree();
     const state1 = tree.states.find((s) => s.id === 'state-1')!;
     const unmarked = { ...state1, id: 'state-unmarked', step: 3, appearEpisodes: [] as number[] };
@@ -685,9 +690,9 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
     renderPages(tree);
     await act(async () => { await Promise.resolve(); });
 
-    // 选第 2 集：state-1 不命中，但 state-unmarked 未标注 → 全集适用 → 主体仍显示
+    // 选第 2 集：只有未标注状态 → 视为未分配，不显示
     act(() => useViewPrefsStore.getState().setSubjectActiveEpisode(PID, 2));
-    await waitFor(() => expect(document.querySelector('[data-subject-card="item-1"]')).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('[data-subject-card="item-1"]')).toBeNull());
 
     // 去掉未标注状态 → 选第 2 集时主体整卡隐藏
     cleanup();
