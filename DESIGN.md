@@ -291,16 +291,17 @@ page container (height: 100%, flex column, overflow: hidden)
 - 所有列表/管理页面使用 `AppLayout`（antd Layout 的封装，增加移动端适配和主题注入）
 - 编辑器页面直接使用 antd Layout，不包裹 `AppLayout`
 
-### 主体库页（三级页面，2026-11-05）
+### 主体库页（两级页面，2026-11-12）
 规格见 `project-rules/specs/subject-library-ui/spec.md`，实现见 `features/canvas-nodes/storyboard/subject-library-pages.tsx`。
 
-- 三级结构：列表页（主体卡网格）→ 主体状态页（状态卡网格）→ 状态编辑页；三级共用**一个页头**：面包屑 + 计数徽标 + 右侧主操作。
-- 面包屑：当前层级 = 页面标题（16/600），祖先层级 = 次级导航（11/500 muted）；不使用 18px 自造标题。
+- 两级结构：列表页（主体卡网格）→ 主体状态页（状态卡网格）；编辑不跳页——点状态卡就地展开该卡的编辑面板。
+- 面包屑只到「主体库 / 主体名」；编辑态**不再追加第三级状态名**（基础状态名就是主体名，会连出三个同名）。
+- 状态编辑面板**拉通整行**（`grid-column: 1 / -1`，左媒体 / 右字段，窄窗落单列）：提示词、状态名、媒体、集数不能挤在 240px 卡里；编辑态隐藏卡片 16:9 封面大图，避免图片把编辑区顶出屏幕。
 - 卡片一律走 `@/shared/ui`（`CardShell` / `Badge` / `IconButton` / `uiCardNameStyle` / `uiCardMetaStyle`），**禁止**再新建一套卡片 token；类型角标统一 `Badge tone="neutral"`，业务类型不承载颜色。
 - 工具栏：搜索用 antd `Input`（240 + prefix 图标 + `allowClear`）；分类筛选用**下划线 Tab**（36 高 / 13px / 选中主文本色 + 2px accent 下划线 + 11px 计数）；次级筛选用 antd `Button size="small"`。
 - 卡内动作：悬停/聚焦露出 `IconButton size="sm"` + antd `Tooltip`，危险动作走 `danger` + `Modal.confirm`。卡内有按钮时根节点用 `div[role="button"]`，禁止 `button` 嵌套 `button`。
-- 状态编辑页：两列响应式（左素材接收位 16:9 预览 + 动作行 / 右字段），窄窗落成单列；控件一律 antd `Input` / `Input.TextArea`。
-- 抽屉内嵌（`embedded`）：页边距 16、取消定宽、面包屑可折叠中间层。
+- **出现集数只显示一枚摘要按钮**（「全部剧集」/「第 1–12 集」/「已选 N 集」），点开弹层搜索/勾选，单集增删在弹层里完成；**禁止把每个已选集铺成标签**（58 集会铺十几行、把卡片撑爆），也禁止把全部集号平铺成一行长文本。
+- 抽屉内嵌（`embedded`）：页边距 20、取消定宽；面包屑不再需要折叠中间层（只有两级）。
 
 ### 顶部栏（TopBar）
 - 三个变体：导航栏、编辑器顶部栏、创作详情顶部栏

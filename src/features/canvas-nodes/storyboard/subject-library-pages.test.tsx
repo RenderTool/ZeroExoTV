@@ -13,10 +13,15 @@ import { App as AntdApp } from 'antd';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string | { defaultValue?: string }) => {
-      if (typeof fallback === 'string') return fallback;
-      if (fallback && typeof fallback === 'object' && fallback.defaultValue) return fallback.defaultValue;
-      return key;
+    t: (key: string, fallback?: string | Record<string, unknown>, options?: Record<string, unknown>) => {
+      const opts = (typeof fallback === 'object' ? fallback : options) as Record<string, unknown> | undefined;
+      const tpl = typeof fallback === 'string'
+        ? fallback
+        : (opts?.defaultValue as string | undefined) ?? key;
+      // 模拟 i18next 的 {{name}} 插值（3 参 / 2 参两种调用都覆盖）
+      return opts
+        ? Object.entries(opts).reduce((s, [k, v]) => s.replaceAll(`{{${k}}}`, String(v)), tpl)
+        : tpl;
     },
   }),
 }));
@@ -127,7 +132,7 @@ function renderPages(
   onChangeTree = vi.fn(),
   onUpdateItem = vi.fn(),
   opts: {
-    embedded?: boolean; compactBreadcrumb?: boolean; onAddSubject?: () => void;
+    embedded?: boolean; onAddSubject?: () => void;
     items?: ProductionItem[]; trees?: SubjectTree[];
     onUpdateItems?: (ids: readonly string[], patch: Partial<ProductionItem>) => void;
     onDeleteItems?: (ids: readonly string[]) => void;
@@ -151,7 +156,6 @@ function renderPages(
       createElement(SubjectLibraryPages, {
         ...shared,
         embedded: opts.embedded,
-        compactBreadcrumb: opts.compactBreadcrumb,
       }),
       createElement(SubjectLinkDialogHost),
     ),
@@ -186,8 +190,8 @@ beforeEach(() => {
   useSubjectMediaLinkEventStore.setState({ version: 0, last: null });
 });
 
-describe('三级导航与面包屑', () => {
-  it('列表 → 主体 → 状态，面包屑逐级可点返回（真实 DOM 可见）', async () => {
+describe('两级导航与面包屑', () => {
+  it('列表 → 主体（就地展开编辑，不再叠第三级面包屑）', async () => {
     const tree = makeTree();
     renderPages(tree);
 
@@ -203,14 +207,15 @@ describe('三级导航与面包屑', () => {
 
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    // 面包屑三级
-    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('东海龙王 · 状态2');
-    // 状态编辑页字段（真实输入控件）
+    // 仍在同一页：面包屑只到主体，状态由卡内编辑面板标出
+    expect(document.querySelector('[data-subject-crumb="state"]')).toBeNull();
+    expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('state-1');
+    // 状态编辑字段（真实输入控件）
     expect((document.querySelector('[data-field="name"]') as HTMLInputElement).value).toBe('东海龙王 · 状态2');
     expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value).toBe('');
     expect(screen.getByText('出现集数')).toBeTruthy();
 
-    // 点二级面包屑 → 回主体状态页
+    // 点二级面包屑 → 收起编辑面板，回主体状态页
     fireEvent.click(document.querySelector('[data-subject-crumb="subject"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
     expect(document.querySelector('[data-subject-page="state"]')).toBeNull();
@@ -277,11 +282,11 @@ describe('三级导航与面包屑', () => {
 });
 
 describe('刷新/重进项目恢复层级（按项目记忆）', () => {
-  it('上次停在状态编辑页 → 重挂载直接回到该状态', async () => {
+  it('上次停在状态编辑页 → 重挂载直接展开该状态的编辑面板', async () => {
     useViewPrefsStore.getState().setSubjectPageLast(PID, { rootId: 'subj-1', stateId: 'state-1' });
     renderPages(makeTree());
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('东海龙王 · 状态2');
+    expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('state-1');
   });
 
   it('记忆的主体已被删除 → 回落到列表页', async () => {
@@ -342,7 +347,7 @@ describe('发送资产到主体', () => {
 });
 
 describe('统一导航入口扩展 subject', () => {
-  it("navigateToView('subject', {rootId,stateId}) → 事件直达状态编辑页", async () => {
+  it("navigateToView('subject', {rootId,stateId}) → 事件直达状态编辑面板", async () => {
     const tree = makeTree();
     renderPages(tree);
     expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy();
@@ -351,7 +356,7 @@ describe('统一导航入口扩展 subject', () => {
       navigateToView('subject', { rootId: 'subj-1', stateId: 'state-1', projectId: PID });
     });
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('东海龙王 · 状态2');
+    expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('state-1');
     expect(useCanvasTabStore.getState().activeTabKey).toBe('storyboard');
   });
 });
@@ -545,6 +550,9 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     const panel = document.querySelector('[data-state-edit-panel]') as HTMLElement;
     // 面板挂在被编辑的那张卡内部，不是独立页面，也不是右侧抽屉
     expect(panel.closest('[data-state-card="state-1"]')).toBeTruthy();
+    // 2026-11-12 用户指令：编辑卡拉通整行，且不再顶一张 16:9 大图
+    expect((document.querySelector('[data-state-card="state-1"]') as HTMLElement).style.gridColumn).toBe('1 / -1');
+    expect(document.querySelector('[data-state-card="state-1"] [data-state-cover]')).toBeNull();
     expect(panel.querySelector('[data-field="prompt"]')).toBeTruthy();
     expect(panel.querySelector('[data-episodes-picker]')).toBeTruthy();
     // 点另一张卡，编辑面板跟着换
@@ -552,19 +560,20 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('__base__'));
   });
 
-  it('出现集数：一个按钮，点击后展开下拉列表勾选', async () => {
+  it('出现集数：只给一个摘要按钮，不再把每个已选集铺成标签', async () => {
     renderPages(makeTree());
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
-    // 已选集数以标签呈现，下拉选项列表未点开时不渲染
-    expect(document.querySelector('[data-episode-chip="1"]')).toBeTruthy();
-    expect(document.querySelector('[data-episode-option="1"]')).toBeNull();
-    // 点按钮才展开下拉列表；勾选第 2 集后立刻多一枚标签
+    // 已选第 1 集：摘要写在按钮上，不渲染标签
+    expect(document.querySelector('[data-episode-chip]')).toBeNull();
+    expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第 1 集');
+    // 点按钮才展开下拉列表；勾选第 2 集后摘要压成区间，仍然不铺标签
     fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
     await waitFor(() => expect(document.querySelector('[data-episode-option="2"]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-episode-option="2"]') as Element);
-    await waitFor(() => expect(document.querySelector('[data-episode-chip="2"]')).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第 1–2 集'));
+    expect(document.querySelector('[data-episode-chip]')).toBeNull();
   });
 
   it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {
@@ -795,14 +804,14 @@ describe('主体库入口归并：只保留资产抽屉内的主体分段', () =
     expect(window.history.length).toBe(historyBefore);
   });
 
-  it('嵌在资产抽屉内时分段内面包屑照旧：窄宽折叠中间层，点「…」回上级', async () => {
-    renderPages(makeTree(), PID, vi.fn(), vi.fn(), { embedded: true, compactBreadcrumb: true });
+  it('嵌在资产抽屉内：面包屑只到主体，返回按钮先收编辑面板再回列表', async () => {
+    renderPages(makeTree(), PID, vi.fn(), vi.fn(), { embedded: true });
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(document.querySelector('[data-subject-crumb="subject"]')).toBeNull();
-    expect(document.querySelector('[data-subject-crumb="subject-collapsed"]')).toBeTruthy();
-    fireEvent.click(document.querySelector('[data-subject-crumb="subject-collapsed"]') as Element);
+    expect(document.querySelector('[data-subject-crumb="state"]')).toBeNull();
+    expect(document.querySelector('[data-subject-crumb="subject-collapsed"]')).toBeNull();
+    fireEvent.click(document.querySelector('[data-subject-back]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-subject-crumb="library"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy());
@@ -1004,7 +1013,9 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
     expect(document.querySelector('[data-state-card="__base__"]')?.textContent).toContain('东海龙王');
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('东海龙王');
+    // 基础状态即主体：编辑面板直接用主体名，面包屑不再重复第三级
+    expect(document.querySelector('[data-base-state-name]')?.textContent).toContain('东海龙王');
+    expect(document.querySelector('[data-subject-crumb="state"]')).toBeNull();
   });
 
   it('数据层统一：基础状态是 states[0] 真节点，旧单树不再有第二套卡片', () => {

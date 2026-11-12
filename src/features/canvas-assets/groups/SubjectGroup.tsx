@@ -7,15 +7,12 @@
  * 抽屉内层级只走面包屑内存态：不写 history、不监听 popstate、不调用 navigateToView。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { SubjectLibraryPages } from '@/features/canvas-nodes/storyboard/subject-library-pages';
 import { useStoryboardSubjectData } from '@/features/canvas-nodes/storyboard/use-storyboard-subject-data';
 import { useTranslation } from 'react-i18next';
-
-/** 面包屑三项以内保持完整；再窄只留「第一级 + 当前级」 */
-const COMPACT_BREADCRUMB_MAX_WIDTH = 560;
 
 export function SubjectGroup({ theme }: { theme: ThemeConfig }): React.ReactElement {
   const { t } = useTranslation();
@@ -26,17 +23,6 @@ export function SubjectGroup({ theme }: { theme: ThemeConfig }): React.ReactElem
     useStoryboardSubjectData(projectId, true);
 
   const hostRef = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width ?? 0;
-      if (width > 0) setCompact(width < COMPACT_BREADCRUMB_MAX_WIDTH);
-    });
-    ro.observe(host);
-    return () => ro.disconnect();
-  }, []);
 
   const shell = (children: React.ReactNode) => (
     <div
@@ -71,7 +57,6 @@ export function SubjectGroup({ theme }: { theme: ThemeConfig }): React.ReactElem
       onAddSubject={() => addSubject('character')}
       onChangeTree={changeTree}
       embedded
-      compactBreadcrumb={compact}
     />,
   );
 }

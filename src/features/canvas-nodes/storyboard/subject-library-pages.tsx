@@ -6,12 +6,14 @@
  * 2. 主体状态页：面包屑「主体库 / 主体名」，状态卡网格（基础状态 + states[]）。
  *    **所有编辑都在这一页的状态卡上完成，不再有第三个整页**：
  *    - 双击状态名改名；星标设封面；换图；删除；画布生成（只挂提示词、不发起 API）；
- *    - 点卡或「编辑」按钮 → 卡片内展开编辑面板（StateEditPanel）：
- *      状态名 / 提示词文本块 / 出现集数（一个按钮点开下拉列表）/ 媒体与历史图。
- *    - 面包屑第三级只是「当前正在编辑的状态」指示，不代表又进了一层页面。
+ *    - 点卡或「编辑」按钮 → 该卡拉通整行（`grid-column: 1 / -1`、`order: -1`）展开
+ *      编辑面板（StateEditPanel）：左媒体 / 右字段（状态名 / 提示词文本块 /
+ *      出现集数摘要按钮）；集数只显示摘要，不把每个已选集铺成标签。
+ *    - 面包屑只有两级，编辑态不追加第三级状态名（基础状态名 = 主体名，会重复）。
  *
  * 2026-11-12 方案演进：独立状态编辑页 → 同页右栏检查器（抽屉里挤成一列，作废）
- * → 恢复独立整页（作废）→ **最终定为卡片内编辑面板**。
+ * → 恢复独立整页（作废）→ 卡片内编辑面板（窄卡挤成一条，作废）
+ * → **最终定为卡片内编辑面板 + 编辑卡拉通整行**。
  * level 的 'state' 保留为「哪张卡在编辑」，用于层级记忆、前进/后退、navigate 定位、
  * 资产发送直达上下文；UI 上不再对应任何新页面。
  * UI 文案一律客户口吻，禁止出现 API / 自动跑 / 内部实现说明（可写在代码注释里）。
@@ -34,7 +36,7 @@ import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } f
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
-  Shapes, Square, Star, Trash2, UserRound, Wand2, X,
+  Shapes, Square, Star, Trash2, UserRound, Wand2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -136,8 +138,6 @@ export interface SubjectLibraryPagesProps {
   onChangeTree?: (trees: SubjectTree[]) => void;
   /** 抽屉内嵌模式：层级只在内存，不写 history / 不读项目记忆 / 不处理 popstate */
   embedded?: boolean;
-  /** 窄宽面包屑折叠（…） */
-  compactBreadcrumb?: boolean;
 }
 
 interface SubjectCardData {
@@ -170,8 +170,10 @@ function compressEpisodeRanges(nums: number[]): string[] {
   const out: string[] = [];
   let start = 0;
   for (let i = 0; i < sorted.length; i += 1) {
-    if (i + 1 === sorted.length || sorted[i + 1] !== sorted[i] + 1) {
-      out.push(sorted[start] === sorted[i] ? `${sorted[start]}` : `${sorted[start]}–${sorted[i]}`);
+    const cur = sorted[i]!;
+    if (sorted[i + 1] !== cur + 1) {
+      const from = sorted[start]!;
+      out.push(from === cur ? `${from}` : `${from}–${cur}`);
       start = i + 1;
     }
   }
@@ -314,21 +316,18 @@ function SubjectPageHeader({
  * 每级都是原生 button（可点、可 Tab 聚焦、Enter/Space 触发）。
  */
 function SubjectBreadcrumb({
-  theme, subjectName, stateName, onLibrary, onSubject, compact = false,
+  theme, subjectName, onLibrary, onSubject, onBack,
 }: {
   theme: ThemeConfig;
   subjectName?: string;
-  stateName?: string;
   onLibrary: () => void;
   onSubject?: () => void;
-  /** 抽屉窄宽：深层时用「…」折叠中间层，只留第一级 + 当前级 */
-  compact?: boolean;
+  /** 返回按钮的落点（由页面给：编辑态先收面板，未编辑回列表；不传 = 一级页不渲染返回） */
+  onBack?: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
   const muted = theme.toolbar.textMuted;
   const isDark = theme.mode === 'dark';
-  /** 当前层级 → 上一级（返回按钮的唯一落点；一级页面不渲染返回） */
-  const onBack = stateName ? onSubject : subjectName ? onLibrary : undefined;
   const titleStyle: CSSProperties = {
     border: 'none', background: 'transparent', padding: 0, borderRadius: 0,
     fontSize: 15, fontWeight: 600, lineHeight: 1.4, letterSpacing: -0.2,
@@ -381,59 +380,19 @@ function SubjectBreadcrumb({
         >
           {t('subject.library', '主体库')}
         </button>
-        {subjectName && (!compact || !stateName) && (
+        {subjectName && (
           <>
             {divider}
+            {/* 编辑状态时不再追加第三级「状态名」：状态由卡内编辑面板自己标出（避免基础状态与主体名重复） */}
             <button
               type="button"
               data-subject-crumb="subject"
-              aria-current={stateName ? undefined : 'page'}
+              aria-current="page"
               onClick={onSubject}
-              style={stateName ? ancestorStyle : titleStyle}
-              onMouseEnter={(e) => {
-                if (!stateName) return;
-                e.currentTarget.style.color = theme.toolbar.text;
-                e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
-              }}
-              onMouseLeave={(e) => {
-                if (!stateName) return;
-                e.currentTarget.style.color = muted;
-                e.currentTarget.style.background = 'transparent';
-              }}
+              style={titleStyle}
             >
               {subjectName}
             </button>
-          </>
-        )}
-        {compact && subjectName && stateName && (
-          <>
-            {divider}
-            <button
-              type="button"
-              data-subject-crumb="subject-collapsed"
-              aria-label={subjectName}
-              title={subjectName}
-              onClick={onSubject}
-              style={ancestorStyle}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = theme.toolbar.text;
-                e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = muted;
-                e.currentTarget.style.background = 'transparent';
-              }}
-            >
-              …
-            </button>
-          </>
-        )}
-        {subjectName && stateName && (
-          <>
-            {divider}
-            <span data-subject-crumb="state" aria-current="page" style={{ ...titleStyle, cursor: 'default', maxWidth: 360 }}>
-              {stateName}
-            </span>
           </>
         )}
       </nav>
@@ -814,15 +773,18 @@ function StateGridCard({
         display: 'flex', flexDirection: 'column', gap: UI_CARD_GAP,
         width: '100%', minWidth: SUBJECT_STATE_CARD_MIN_WIDTH,
         cursor: 'pointer', outline: 'none', color: theme.toolbar.text,
+        /* 编辑态拉通整行：编辑区不再挤在 240px 卡里（2026-11-12 用户指令）；
+           置顶（order -1）避免网格在整行卡片前留一个空列 */
+        ...(editMode ? { gridColumn: '1 / -1', order: -1 } : {}),
       }}
     >
+      {!editMode && (
       <CardShell
         theme={theme}
         data-state-cover
-        hovered={active || editMode}
+        hovered={active}
         style={{
           width: '100%', aspectRatio: '16 / 9',
-          ...(editMode ? { outline: `2px solid ${theme.toolbar.accent}`, outlineOffset: -2 } : {}),
         }}
       >
         <SubjectMediaThumb
@@ -843,6 +805,7 @@ function StateGridCard({
           opacity: hover ? 1 : 0, transition: 'opacity .3s', pointerEvents: 'none',
         }} />
       </CardShell>
+      )}
       <div data-state-info style={{
         display: 'flex', flexDirection: 'column', gap: 2,
         paddingLeft: UI_CARD_INFO_PADDING_X, paddingRight: UI_CARD_INFO_PADDING_X,
@@ -886,7 +849,7 @@ function StateGridCard({
             data-state-actions
             style={{
               display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
-              opacity: active ? 1 : 0, transition: 'opacity .2s',
+              opacity: active || editMode ? 1 : 0, transition: 'opacity .2s',
             }}
           >
             {onReplaceMedia && (
@@ -1007,9 +970,13 @@ function StateEditPanel({
     : episodeRanges.length > 5 || selectedEpisodes.length > 12
       ? t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selectedEpisodes.length })
       : t('subject.appearEpisodesRanges', '第 {{ranges}} 集', { ranges: episodeRanges.join('、') });
+  // 编辑卡置顶后，点下方状态卡时把展开的编辑区滚进视野（已在视野内则不动）
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { rootRef.current?.scrollIntoView?.({ block: 'nearest' }); }, []);
 
   return (
     <div
+      ref={rootRef}
       data-subject-page="state"
       data-state-edit-panel
       data-root-id={tree.rootId}
@@ -1023,9 +990,13 @@ function StateEditPanel({
         background: isDark ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.025)',
       }}
     >
-      <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+      <section data-form-section="basic" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 24, minWidth: 0 }}>
         {/* 媒体工具：小预览 + 右上角换图 / 删除媒体 + 历史图恢复 */}
-        <div data-form-section="media" data-media-slot style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+        <div
+          data-form-section="media"
+          data-media-slot
+          style={{ flex: '0 1 220px', minWidth: 180, maxWidth: 260, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}
+        >
           <CardShell theme={theme} style={{ width: '100%', height: 132, position: 'relative' }}>
             <SubjectMediaThumb
               storageKey={slotMedia?.key}
@@ -1112,64 +1083,66 @@ function StateEditPanel({
           )}
         </div>
 
-        {/* 状态名 */}
-        <div>
-          <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
-          {isBase ? (
-            <div data-base-state-name style={{ ...hintStyle, fontSize: 13, fontWeight: 600, color: theme.toolbar.text, padding: '4px 0' }}>
-              {tree.name}
-            </div>
-          ) : (
-            <DraftStateName
-              key={node.id}
-              value={stateName}
-              ariaLabel={t('subject.stateNameLabel', '状态名')}
-              placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
-              onCommit={(next) => onUpdateNode({ state: next })}
-            />
-          )}
-        </div>
-
-        {/* 提示词：卡片内编辑文本块 */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={labelStyle} title={t('subject.stateRemarkHint', '该状态的生成提示词')}>
-              {t('subject.statePromptLabel', '提示词')}
-            </div>
-            <Button
-              size="small"
-              type="text"
-              data-copy-base-prompt
-              disabled={!promptValue.trim()}
-              onClick={() => {
-                if (!navigator.clipboard) {
-                  antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
-                  return;
-                }
-                void navigator.clipboard.writeText(promptValue).then(
-                  () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
-                  () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
-                );
-              }}
-            >
-              {t('subject.copyPrompt', '复制')}
-            </Button>
+        {/* 右列：状态名 / 提示词 / 出现集数（整宽编辑区，2026-11-12 用户指令） */}
+        <div style={{ flex: '1 1 320px', minWidth: 280, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* 状态名 */}
+          <div>
+            <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
+            {isBase ? (
+              <div data-base-state-name style={{ ...hintStyle, fontSize: 13, fontWeight: 600, color: theme.toolbar.text, padding: '4px 0' }}>
+                {tree.name}
+              </div>
+            ) : (
+              <DraftStateName
+                key={node.id}
+                value={stateName}
+                ariaLabel={t('subject.stateNameLabel', '状态名')}
+                placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
+                onCommit={(next) => onUpdateNode({ state: next })}
+              />
+            )}
           </div>
-          <DraftPromptField
-            key={node.id}
-            value={promptValue}
-            placeholder={t('subject.statePromptPlaceholder', '描述这个状态的外形、服装、动作，或与其它状态的差异…')}
-            onCommit={(next) => onUpdateNode({ fullPrompt: next, deltaPrompt: next })}
-          />
-        </div>
 
-        {/* 出现集数：一个按钮 → 点击展开下拉列表编辑 */}
-        <div data-episodes-field>
-          <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
-          {validEpisodes.length === 0 ? (
-            <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
-          ) : (
-            <>
+          {/* 提示词：卡片内编辑文本块 */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={labelStyle} title={t('subject.stateRemarkHint', '该状态的生成提示词')}>
+                {t('subject.statePromptLabel', '提示词')}
+              </div>
+              <Button
+                size="small"
+                type="text"
+                data-copy-base-prompt
+                disabled={!promptValue.trim()}
+                onClick={() => {
+                  if (!navigator.clipboard) {
+                    antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
+                    return;
+                  }
+                  void navigator.clipboard.writeText(promptValue).then(
+                    () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
+                    () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
+                  );
+                }}
+              >
+                {t('subject.copyPrompt', '复制')}
+              </Button>
+            </div>
+            <DraftPromptField
+              key={node.id}
+              value={promptValue}
+              placeholder={t('subject.statePromptPlaceholder', '描述这个状态的外形、服装、动作，或与其它状态的差异…')}
+              onCommit={(next) => onUpdateNode({ fullPrompt: next, deltaPrompt: next })}
+            />
+          </div>
+
+          {/* 出现集数：一个按钮 → 点击展开下拉列表编辑 */}
+          <div data-episodes-field>
+            <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
+            {validEpisodes.length === 0 ? (
+              <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
+            ) : (
+              /* 集数只给摘要按钮：已选集不铺标签（58 集 = 15 行），单集增删在弹层里完成 */
               <Popover
                 trigger="click"
                 placement="bottomLeft"
@@ -1183,45 +1156,12 @@ function StateEditPanel({
                   />
                 )}
               >
-                <Button size="small" data-episodes-picker>
+                <Button size="small" data-episodes-picker style={{ maxWidth: '100%' }}>
                   {episodeLabel} <ChevronDown size={12} />
                 </Button>
               </Popover>
-              {selectedEpisodes.length > 0 ? (
-                <div data-episodes-summary style={{ display: 'flex', alignItems: 'flex-start', alignContent: 'flex-start', gap: 6, flexWrap: 'wrap', marginTop: 8, maxHeight: 76, overflowY: 'auto' }}>
-                  {[...selectedEpisodes].sort((a, b) => a - b).map((n) => (
-                    <span
-                      key={n}
-                      data-episode-chip={n}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                        height: 22, padding: '0 4px 0 8px', borderRadius: 6, fontSize: 11,
-                        border: `1px solid ${theme.toolbar.accent}`,
-                        background: `${theme.toolbar.accent}18`,
-                        color: theme.toolbar.accent,
-                      }}
-                    >
-                      {t('subject.episodeN', { n, defaultValue: `第 ${n} 集` })}
-                      <button
-                        type="button"
-                        aria-label={`移除第 ${n} 集`}
-                        onClick={() => toggleEpisode(n)}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 16, height: 16, padding: 0, border: 'none', borderRadius: 4,
-                          background: 'transparent', color: 'inherit', cursor: 'pointer',
-                        }}
-                      >
-                        <X size={10} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span data-episodes-summary style={{ display: 'none' }} />
-              )}
-            </>
-          )}
+            )}
+          </div>
         </div>
       </section>
     </div>
@@ -1253,7 +1193,7 @@ function SubjectStateGrid({ children }: { children: ReactNode }): React.ReactEle
 
 export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   productionItems, theme, projectId, onUpdateItem, onDeleteItem, onUpdateItems, onDeleteItems, onAddSubject, subjectTree, onChangeTree,
-  embedded = false, compactBreadcrumb = false,
+  embedded = false,
 }: SubjectLibraryPagesProps): React.ReactElement {
   const { t } = useTranslation();
   const { modal: antdModal, message: antdMessage } = AntdApp.useApp();
@@ -2141,7 +2081,13 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           maxWidth={maxWidthFor(STATE_MAX_WIDTH)}
           pad={pagePad}
         >
-          <SubjectBreadcrumb theme={theme} subjectName={openTree.name} stateName={openStateName} compact={compactBreadcrumb} onLibrary={goLibrary} onSubject={goSubject} />
+          <SubjectBreadcrumb
+            theme={theme}
+            subjectName={openTree.name}
+            onLibrary={goLibrary}
+            onSubject={goSubject}
+            onBack={openState ? goSubject : goLibrary}
+          />
           {/* 主体名在本页改，状态名与其余字段都在卡片内编辑 */}
           <Input
             size="small"
