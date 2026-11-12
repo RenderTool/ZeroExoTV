@@ -194,8 +194,8 @@ describe('三级导航与面包屑', () => {
 
     fireEvent.click(document.querySelector('[data-subject-card="item-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
-    // 面包屑二级：主体库 / 东海龙王
-    expect(screen.getByRole('button', { name: '东海龙王' })).toBeTruthy();
+    // 面包屑二级：主体库 / 东海龙王（基础状态卡同名，限定面包屑内查找）
+    expect(document.querySelector('[data-subject-crumb="subject"]')?.textContent).toContain('东海龙王');
     expect(document.querySelector('[data-state-card="state-1"]')).toBeTruthy();
     expect(document.querySelector('[data-state-card="__base__"]')).toBeTruthy();
 
@@ -264,6 +264,8 @@ describe('三级导航与面包屑', () => {
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
 
     fireEvent.change(document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement, { target: { value: '左臂缠白色绷带' } });
+    // 2026-11-12：提示词改为失焦提交（避免逐字落盘卡顿）
+    fireEvent.blur(document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement);
     fireEvent.click(document.querySelector('[data-subject-crumb="subject"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
@@ -916,7 +918,7 @@ describe('基础状态 = 独立状态（2026-11-08）', () => {
 });
 
 describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出现集数」（2026-11-08）', () => {
-  it('基础状态的状态名独立写回 states[0].state，不再改主体名', async () => {
+  it('基础状态 = 主体本身：不单独起名、不写 state', async () => {
     const onChangeTree = vi.fn();
     renderPages(makeTree(), PID, onChangeTree);
     await openSubjectPage();
@@ -925,29 +927,22 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
 
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    const nameInput = document.querySelector('[data-field="name"]') as HTMLInputElement;
-    expect(nameInput.value).toBe(''); // 不再复用主体名
+    // 2026-11-12：基础状态即主体本身，不再提供独立状态名输入
+    expect(document.querySelector('[data-base-state-name]')?.textContent).toContain('东海龙王');
+    expect(document.querySelector('[data-field="name"]')).toBeNull();
     expect(document.querySelector('[data-field="prompt"]')).toBeTruthy();
     expect(screen.getByText('出现集数')).toBeTruthy();
-
-    fireEvent.change(nameInput, { target: { value: '正常人类' } });
-    await waitFor(() => {
-      const calls = onChangeTree.mock.calls;
-      const next = calls[calls.length - 1]?.[0] as SubjectTree[] | undefined;
-      expect(next?.[0]?.states[0]?.state).toBe('正常人类');
-      expect(next?.[0]?.name).toBe('东海龙王'); // 主体名不动
-    });
   });
 
-  it('状态卡与面包屑显示基础状态自己的状态名', async () => {
+  it('基础状态卡与面包屑显示主体名（基础状态即主体）', async () => {
     const tr = makeTree();
     tr.states[0]!.state = '正常人类';
     renderPages(tr);
     await openSubjectPage();
-    expect(document.querySelector('[data-state-card="__base__"]')?.textContent).toContain('正常人类');
+    expect(document.querySelector('[data-state-card="__base__"]')?.textContent).toContain('东海龙王');
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('正常人类');
+    expect(document.querySelector('[data-subject-crumb="state"]')?.textContent).toContain('东海龙王');
   });
 
   it('数据层统一：基础状态是 states[0] 真节点，旧单树不再有第二套卡片', () => {

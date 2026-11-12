@@ -429,10 +429,60 @@ function kindLabelOf(kind: ProductionItemKind | undefined | null, t: ReturnType<
   return t(`entity.${kind}`, KIND_LABEL_FALLBACK[kind]);
 }
 
-/**
- * 类型筛选：下划线 Tab（与资产库分类 Tab 同构 —— 36 高 / 13px / 选中主文本色 +
- * 2px accent 下划线 + 计数 11/50%）。业务类型不承载颜色。
- */
+/** 状态名草稿输入：只在失焦/回车时写盘，避免每敲一个字就落盘导致卡顿与回退（2026-11-12 用户反馈） */
+function DraftStateName({ value, onCommit, placeholder, ariaLabel }: {
+  value: string;
+  onCommit: (next: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+}): React.ReactElement {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = (): void => { if (draft !== value) onCommit(draft); };
+  return (
+    <Input
+      data-field="name"
+      aria-label={ariaLabel}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onPressEnter={commit}
+    />
+  );
+}
+
+/** 提示词草稿框：同样只在失焦时写盘 */
+function DraftPromptField({ value, onCommit, placeholder }: {
+  value: string;
+  onCommit: (next: string) => void;
+  placeholder: string;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <>
+      <Input.TextArea
+        data-field="prompt"
+        aria-label={t('subject.statePromptLabel', '提示词')}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft !== value) onCommit(draft); }}
+        autoSize={{ minRows: 8, maxRows: 18 }}
+        placeholder={placeholder}
+        style={{ minHeight: 200, lineHeight: 1.6 }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <span data-prompt-count style={{ fontSize: 11, opacity: 0.6, fontVariantNumeric: 'tabular-nums' }}>
+          {t('subject.charCount', { n: draft.length, defaultValue: `${draft.length} 字` })}
+        </span>
+      </div>
+    </>
+  );
+}
+
+
 function KindTabs({
   theme, activeKind, total, counts, onChange,
 }: {
@@ -1006,8 +1056,9 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   // 基础状态也是 states[0] 真节点：所有状态走同一查找路径
   const openNode = openState ? openTree?.states.find((n) => n.id === openState.stateId) : undefined;
   const openStateName = openState
-    ? (openNode?.state?.trim()
-      || (openState.stateId === SUBJECT_BASE_STATE_ID ? t('subject.baseState', BASE_BALL) : ''))
+    ? (openState.stateId === SUBJECT_BASE_STATE_ID
+      ? (openTree?.name ?? t('subject.baseState', BASE_BALL))
+      : (openNode?.state?.trim() || ''))
     : undefined;
   useEffect(() => {
     // 2026-11-08：基础状态已是 states[0] 真节点，与其余状态同样支持「资产发送直达」
@@ -1789,9 +1840,9 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                   <StateGridCard
                     key={node.id}
                     stateId={node.id}
-                    title={node.state?.trim() || (isBase
-                      ? t('subject.baseState', BASE_BALL)
-                      : t('subject.stateLabelN', { n: node.step ?? 1, defaultValue: `状态${node.step ?? 1}` }))}
+                    title={isBase
+                      ? openTree.name
+                      : (node.state?.trim() || t('subject.stateLabelN', { n: node.step ?? 1, defaultValue: `状态${node.step ?? 1}` }))}
                     thumbKey={first?.key}
                     thumbKind={slotMediaKind(first ?? null)}
                     emptyLabel={t('subject.noCover', '暂无封面')}
@@ -1943,13 +1994,21 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                   <div style={editPaneStyle}>
                     <div>
                       <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
-                      <Input
-                        data-field="name"
-                        aria-label={t('subject.stateNameLabel', '状态名')}
-                        value={stateName}
-                        placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
-                        onChange={(e) => updateNode(openTree.rootId, node.id, { state: e.target.value })}
-                      />
+                      {node.id === SUBJECT_BASE_STATE_ID ? (
+                        // 基础状态 = 主体本身（2026-11-12 用户要求）：不单独起名、不写 state 字段
+                        <div data-base-state-name style={{ ...hintStyle, fontSize: 13, color: theme.toolbar.text, padding: '4px 0' }}>
+                          {openTree.name}
+                          <span style={{ marginLeft: 8, opacity: 0.5 }}>{t('subject.baseStateIsSubject', '基础状态即主体本身')}</span>
+                        </div>
+                      ) : (
+                        <DraftStateName
+                          key={node.id}
+                          value={stateName}
+                          ariaLabel={t('subject.stateNameLabel', '状态名')}
+                          placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
+                          onCommit={(next) => updateNode(openTree.rootId, node.id, { state: next })}
+                        />
+                      )}
                     </div>
 
                     <div>
@@ -1976,23 +2035,15 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                           {t('subject.copyPrompt', '复制')}
                         </Button>
                       </div>
-                      <Input.TextArea
-                        data-field="prompt"
-                        aria-label={t('subject.statePromptLabel', '提示词')}
+                      <DraftPromptField
+                        key={node.id}
                         value={promptValue}
-                        onChange={(e) => updateNode(openTree.rootId, node.id, {
-                          fullPrompt: e.target.value,
-                          deltaPrompt: e.target.value,
-                        })}
-                        autoSize={{ minRows: 8, maxRows: 18 }}
                         placeholder={t('subject.statePromptPlaceholder', '描述该状态的形象/动作/差异，AI 会结合基础形态自动完善…')}
-                        style={{ minHeight: 200, lineHeight: 1.6 }}
+                        onCommit={(next) => updateNode(openTree.rootId, node.id, {
+                          fullPrompt: next,
+                          deltaPrompt: next,
+                        })}
                       />
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                        <span data-prompt-count style={{ ...hintStyle, fontVariantNumeric: 'tabular-nums' }}>
-                          {t('subject.charCount', { n: promptValue.length, defaultValue: `${promptValue.length} 字` })}
-                        </span>
-                      </div>
                     </div>
 
                     {/* 出现集数：每个状态（含基础状态）独立；默认只显示摘要，点「选择集数」再开搜索列表（2026-11-12 简化） */}
