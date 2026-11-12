@@ -30,5 +30,6 @@
 
 | S-22 | 2026-11-11 | 首页三项：回收站弹窗尺寸 / 复制项目 / 资产选择模式对齐 | 独立热修 | 🟢 merged | [2026-11-11-homepage-three-fixes.md](2026-11-11-homepage-three-fixes.md) |
 | S-23 | 2026-11-12 | 取消状态详情页：两级整页 + 卡片内编辑面板（提示词文本块 / 集数下拉按钮），清开发者文案 | 独立热修 | 🟢 merged | [2026-11-12-comfyui-drop-state-detail-page.md](2026-11-12-comfyui-drop-state-detail-page.md) |
+| S-24 | 2026-11-12 | MCP 防跨主体共用图（audit cross_subject_image + set_subject_image 闸门）；主体编辑面板集数区间压缩美化 | 独立热修 | 🟢 merged | [2026-11-12-comfyui-cross-subject-image-guard.md](2026-11-12-comfyui-cross-subject-image-guard.md) |
 
-状态：open 0 / merged 23。
+状态：open 0 / merged 24。

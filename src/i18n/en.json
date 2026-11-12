@@ -2686,6 +2686,7 @@
     "promptCopied": "Prompt copied",
     "copyFailed": "Copy failed, please select and copy manually",
     "appearEpisodesSelected": "{{n}} episode(s) selected",
+    "appearEpisodesRanges": "Ep. {{ranges}}",
     "appearEpisodesAllShort": "All episodes (none selected)",
     "chooseEpisodes": "Choose episodes",
     "episodeSearchPlaceholder": "Search episode / title",

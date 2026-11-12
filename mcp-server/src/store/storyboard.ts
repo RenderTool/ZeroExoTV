@@ -221,9 +221,10 @@ function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
  * - 定妆/无 stateTag → 基础状态 states[0] 的 media；
  * - 其它 stateTag → 对应状态节点（不存在则创建），前端主体页按状态展示。
  */
-export async function setSubjectImage(  root: string,
+export async function setSubjectImage(
+  root: string,
   projectId: string,
-  opts: { baseVersion: number; image: SubjectImageInput; dryRun?: boolean },
+  opts: { baseVersion: number; image: SubjectImageInput; dryRun?: boolean; allowCrossSubject?: boolean },
 ): Promise<UpdateResult<StoryboardContainer> & { subject: ProductionItem }> {
   let subject!: ProductionItem;
   const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
@@ -235,6 +236,18 @@ export async function setSubjectImage(  root: string,
       if (!found) throw new McpError("NOT_FOUND", `主体不存在: ${opts.image.subjectId}`, { subjectId: opts.image.subjectId });
       subject = found;
       const input = opts.image;
+      // 2026-11-12 防呆（沈少误挂秦羽定妆图事故）：同一张图不允许挂到两个主体。
+      // 幂等更新（同主体同 storageKey）不受影响；确需共享须显式 allowCrossSubject:true。
+      if (!opts.allowCrossSubject) {
+        const clash = s.entities.find((e) => e.id !== subject.id && (e.images ?? []).some((i) => i.storageKey === input.storageKey));
+        if (clash) {
+          throw new McpError(
+            "VALIDATION",
+            `这张图已挂在主体「${clash.name}」下，同一张图禁止跨主体复用；如确需共享请传 allowCrossSubject:true`,
+            { ownerSubjectId: clash.id, ownerSubjectName: clash.name, storageKey: input.storageKey },
+          );
+        }
+      }
       const existing = subject.images.find((i) => i.storageKey === input.storageKey);
       const entry = {
         storageKey: input.storageKey,
@@ -454,7 +467,7 @@ export interface SubjectAuditIssue {
   subjectId: string;
   name: string;
   kind: SubjectKind;
-  issue: "missing_tree" | "images_not_in_tree" | "base_state_empty" | "no_image" | "duplicate_name" | "duplicate_image";
+  issue: "missing_tree" | "images_not_in_tree" | "base_state_empty" | "no_image" | "duplicate_name" | "duplicate_image" | "cross_subject_image";
   detail: string;
 }
 
@@ -462,7 +475,7 @@ export interface SubjectAudit {
   version: number;
   entities: number;
   trees: number;
-  counts: { missingTree: number; imagesNotInTree: number; baseStateEmpty: number; noImage: number; duplicateName: number; duplicateImage: number };
+  counts: { missingTree: number; imagesNotInTree: number; baseStateEmpty: number; noImage: number; duplicateName: number; duplicateImage: number; crossSubjectImage: number };
   issues: SubjectAuditIssue[];
 }
 
@@ -473,7 +486,7 @@ export async function auditSubjects(root: string, projectId: string): Promise<Su
     version: 0,
     entities: 0,
     trees: 0,
-    counts: { missingTree: 0, imagesNotInTree: 0, baseStateEmpty: 0, noImage: 0, duplicateName: 0, duplicateImage: 0 },
+    counts: { missingTree: 0, imagesNotInTree: 0, baseStateEmpty: 0, noImage: 0, duplicateName: 0, duplicateImage: 0, crossSubjectImage: 0 },
     issues: [],
   };
   if (!s) return empty;
@@ -492,6 +505,41 @@ export async function auditSubjects(root: string, projectId: string): Promise<Su
       empty.counts.duplicateImage += 1;
     } else {
       byImage.set(key, e.name);
+    }
+  }
+  // 2026-11-12 升级（沈少误挂秦羽定妆图事故）：老口径只看第一张/封面，
+  // 漏掉「基础状态/普通状态误挂了别人的状态图」。这里全量扫描 entity.images +
+  // 主体树 state.media，任一 storageKey 出现在两个主体下即报 cross_subject_image。
+  const imageOwners = new Map<string, Array<{ subjectId: string; name: string; kind: SubjectKind; label: string }>>();
+  const pushOwner = (e: ProductionItem, key: string, label: string) => {
+    if (!key) return;
+    const list = imageOwners.get(key) ?? [];
+    if (!list.some((o) => o.subjectId === e.id)) list.push({ subjectId: e.id, name: e.name, kind: e.kind, label });
+    imageOwners.set(key, list);
+  };
+  for (const e of s.entities) {
+    for (const img of e.images ?? []) {
+      pushOwner(e, img.storageKey, img.stateTag ? `状态「${img.stateTag}」` : "未标注状态的图");
+    }
+    const tree = byTree.get(e.id);
+    for (const st of tree?.states ?? []) {
+      for (const m of st.media ?? []) pushOwner(e, m.key, st.state ? `状态「${st.state}」` : "基础状态");
+    }
+  }
+  for (const [key, owners] of imageOwners) {
+    if (owners.length < 2) continue;
+    const shortKey = key.replace(/^cas:/, "").slice(0, 10);
+    for (const o of owners) {
+      const others = owners.filter((x) => x.subjectId !== o.subjectId);
+      if (others.length === 0) continue;
+      issues.push({
+        subjectId: o.subjectId,
+        name: o.name,
+        kind: o.kind,
+        issue: "cross_subject_image",
+        detail: `${o.label}与 ${others.map((x) => `「${x.name}」(${x.label})`).join("、")} 使用同一张图（${shortKey}…），人像定妆禁止跨主体复用`,
+      });
+      empty.counts.crossSubjectImage += 1;
     }
   }
   for (const e of s.entities) {

@@ -2664,6 +2664,7 @@
     "promptCopied": "プロンプトをコピーしました",
     "copyFailed": "コピーに失敗しました。手動で選択してコピーしてください",
     "appearEpisodesSelected": "{{n}} 話を選択",
+    "appearEpisodesRanges": "第 {{ranges}} 話",
     "appearEpisodesAllShort": "全話（未選択）",
     "chooseEpisodes": "話を選択",
     "episodeSearchPlaceholder": "話数 / タイトルを検索",

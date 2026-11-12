@@ -163,6 +163,21 @@ const KIND_FILTERS: Array<{ key: 'all' | ProductionItemKind; labelKey: string }>
 
 /** 剧集摘要（空 = 全部；悬空编号只过滤显示，不清数据） */
 /**
+ * 已选集数压缩成连续区间（1–3、5、8–10），避免 80+ 集时把每个数字平铺出来。
+ */
+function compressEpisodeRanges(nums: number[]): string[] {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const out: string[] = [];
+  let start = 0;
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (i + 1 === sorted.length || sorted[i + 1] !== sorted[i] + 1) {
+      out.push(sorted[start] === sorted[i] ? `${sorted[start]}` : `${sorted[start]}–${sorted[i]}`);
+      start = i + 1;
+    }
+  }
+  return out;
+}
+/**
  * 出现集数选择器（2026-11-12 简化）：
  * 80+ 集时不再把每个集铺成一行 chip；默认只显示「已选 N 集」，点开后在弹层里搜索/勾选。
  */
@@ -986,9 +1001,12 @@ function StateEditPanel({
   };
   const labelStyle: CSSProperties = { fontSize: 12, fontWeight: 500, color: theme.toolbar.textMuted, marginBottom: 8 };
   const hintStyle: CSSProperties = { fontSize: 11, lineHeight: 1.6, color: theme.toolbar.textMuted };
-  const episodeLabel = selectedEpisodes.length > 0
-    ? `${selectedEpisodes.join('、')} 集`
-    : t('subject.appearEpisodesAllShort', '全部剧集');
+  const episodeRanges = compressEpisodeRanges(selectedEpisodes);
+  const episodeLabel = selectedEpisodes.length === 0
+    ? t('subject.appearEpisodesAllShort', '全部剧集')
+    : episodeRanges.length > 5 || selectedEpisodes.length > 12
+      ? t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selectedEpisodes.length })
+      : t('subject.appearEpisodesRanges', '第 {{ranges}} 集', { ranges: episodeRanges.join('、') });
 
   return (
     <div
@@ -1170,7 +1188,7 @@ function StateEditPanel({
                 </Button>
               </Popover>
               {selectedEpisodes.length > 0 ? (
-                <div data-episodes-summary style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                <div data-episodes-summary style={{ display: 'flex', alignItems: 'flex-start', alignContent: 'flex-start', gap: 6, flexWrap: 'wrap', marginTop: 8, maxHeight: 76, overflowY: 'auto' }}>
                   {[...selectedEpisodes].sort((a, b) => a - b).map((n) => (
                     <span
                       key={n}

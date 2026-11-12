@@ -81,8 +81,9 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "audit_subjects",
     description:
-      "只读自检主体库：主体是否缺树、图是否没映射进状态（页面不显示）、基础状态是否没图、空主体、同名重复。" +
-      "写主体后建议先跑它；有 images_not_in_tree / missing_tree 就调用 repair_subject_trees。",
+      "只读自检主体库：主体是否缺树、图是否没映射进状态（页面不显示）、基础状态是否没图、空主体、同名重复，" +
+      "以及 **cross_subject_image（同一张图挂在两个主体下，人像定妆禁止跨主体复用）**——全量扫描 entity.images 与状态 media。" +
+      "写主体后建议先跑它；有 images_not_in_tree / missing_tree 就调用 repair_subject_trees；有 cross_subject_image 必须先清理再继续。",
     bits: ["subject.read"],
     schema: { projectId: z.string() },
     handler: async (args) => {
@@ -213,7 +214,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "set_subject_image",
     description:
-      "给主体挂状态图（写 ProductionItem.images[] 与 coverKey）。storageKey 来自 upload_asset 返回的 'cas:<hash>.<ext>'；stateTag=状态名（如「定妆」「美艳态」「恶鬼态」）。幂等：同 storageKey 已存在则原地更新。baseVersion = storyboard version。",
+      "给主体挂状态图（写 ProductionItem.images[] 与 coverKey）。storageKey 来自 upload_asset 返回的 'cas:<hash>.<ext>'；stateTag=状态名（如「定妆」「美艳态」「恶鬼态」）。幂等：同 storageKey 已存在则原地更新。" +
+      "防呆：同一张图已挂在其它主体下时直接拒绝（沈少误挂主演图事故），确需共享才传 allowCrossSubject:true。baseVersion = storyboard version。",
     bits: ["subject.write"],
     schema: {
       projectId: z.string(),
@@ -224,11 +226,12 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       prompt: z.string().optional(),
       note: z.string().optional(),
       cover: z.boolean().optional(),
+      allowCrossSubject: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     },
     handler: async (args) => {
-      const { projectId, baseVersion, dryRun, ...image } = args;
-      const res = await setSubjectImage(dataRoot(), projectId, { baseVersion, image, dryRun });
+      const { projectId, baseVersion, dryRun, allowCrossSubject, ...image } = args;
+      const res = await setSubjectImage(dataRoot(), projectId, { baseVersion, image, allowCrossSubject, dryRun });
       return {
         written: res.written,
         version: res.after.version,
