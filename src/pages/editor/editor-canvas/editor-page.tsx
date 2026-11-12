@@ -63,7 +63,7 @@ import { buildDefaultEpisodes } from '@/services/canvas-script.js';
 import { ensureScript } from '@/entities/script-store.js';
 import { ensureProjectMounts } from '@/entities/slot-containers.js';
 import type { ScriptEpisode } from '@/entities/script-store.js';
-import { nodeActionBus, STACKED_MEDIA_DEFAULT_SIZE } from '@zeroexo/plugin-nodes';
+import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { navigateToView } from '@/features/canvas-tabs/navigate-to-view.js';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
@@ -641,54 +641,51 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   useStackToast(t, message);
 
   /**
-   * 主体 ↔ 画布（2026-11-10）：
-   * - subject:sendToCanvas：主体除「发送到画布」→ 在视口中心建一个「主体节点」。
-   *   复用 stacked-media 框架（预览/切换/保存都不另写），只加 data.subject 语义标记；
-   * - canvas:subject:open：点主体节点里的某张资产 → 切回主体库并定位到该主体/状态。
+   * 主体 ↔ 画布（2026-11-12 起只保留状态级入口）：
+   * - subject:sendStateToCanvas：状态卡「画布生成」→ 建 320×320 图片节点，
+   *   只挂提示词与参考图 key，status 保持 idle，**不发起 API**；
+   * - canvas:subject:open：点主体节点里的某张资产 → 切回主体库并选中该主体/状态。
+   * 旧的主体级全局「发送到画布」（subject:sendToCanvas → stacked-media）已下线。
    */
   useEffect(() => {
-    const unsubSend = nodeActionBus.on('subject:sendToCanvas', (event) => {
+    const unsubSendState = nodeActionBus.on('subject:sendStateToCanvas', (event) => {
       const store = refs.store;
       const cq = refs.commandQueue;
       if (!store || !cq) return;
-      const detail = event as {
-        rootId?: string;
-        name?: string;
-        data?: { cards?: unknown[]; activeIndex?: number };
-      };
-      const cards = detail.data?.cards;
-      if (!detail.rootId || !Array.isArray(cards) || cards.length === 0) return;
+      const detail = event as { name?: string; prompt?: string; storageKey?: string };
       const vp = store.getViewport();
       const el = containerRef.current;
       const viewW = el?.clientWidth ?? 800;
       const viewH = el?.clientHeight ?? 600;
       const k = vp.k > 0 ? vp.k : 1;
-      const size = STACKED_MEDIA_DEFAULT_SIZE;
+      const size = { width: 320, height: 320 };
       const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       cq.execute(new AddNodeCommand({
         id: nodeId,
-        type: 'stacked-media',
+        type: 'image',
         position: {
           x: (viewW / 2 - vp.x) / k - size.width / 2,
           y: (viewH / 2 - vp.y) / k - size.height / 2,
         },
-        size: { ...size },
-        title: detail.name || '主体',
+        size,
+        title: detail.name || '主体状态',
         data: {
-          cards,
-          activeIndex: detail.data?.activeIndex ?? 0,
-          subject: { rootId: detail.rootId, name: detail.name ?? '' },
+          prompt: detail.prompt ?? '',
+          content: '',
+          status: 'idle',
+          ...(detail.storageKey ? { referenceStorageKey: detail.storageKey } : {}),
         },
       } as NodeRecord));
       store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
       store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
+      message.success('已添加到画布');
     });
     const unsubOpen = nodeActionBus.on('canvas:subject:open', (event) => {
       const detail = event as { rootId?: string; stateId?: string };
       if (!detail.rootId) return;
       navigateToView('subject', { rootId: detail.rootId, stateId: detail.stateId });
     });
-    return () => { unsubSend(); unsubOpen(); };
+    return () => { unsubSendState(); unsubOpen(); };
   }, [refs.store, refs.commandQueue]);
 
   return (

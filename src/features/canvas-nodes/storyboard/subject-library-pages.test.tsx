@@ -33,6 +33,7 @@ vi.mock('@/platform/fs', () => ({
 // 取图解析链：测试里把 storageKey 映射成可断言的 src（真实链路已由 use-media-object-url 单测覆盖）
 vi.mock('@zeroexo/plugin-nodes', () => ({
   usePreviewImage: (key: string, fallback: string) => (key ? `/media/${key}` : fallback),
+  nodeActionBus: { emit: vi.fn(), on: vi.fn(() => () => {}) },
 }));
 vi.mock('@/shared/utils/resource-url.js', () => ({
   getResourceUrl: (key: string) => `/media/${key}`,
@@ -59,6 +60,7 @@ vi.mock('./subject-media-source-panel.js', () => ({
   SubjectMediaSourcePanel: () => null,
 }));
 
+import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { SubjectLibraryPages } from './subject-library-pages';
 import { SubjectLinkDialogHost, useSubjectLinkDialogStore } from './subject-link-dialog';
 import { sendAssetToSubject } from './subject-send';
@@ -526,6 +528,66 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     await waitFor(() => expect((base.querySelector('[data-state-actions]') as HTMLElement).style.opacity).toBe('1'));
     expect(base.querySelector('[data-state-action="edit"]')).toBeTruthy();
     expect(base.querySelector('[data-state-action="delete"]')).toBeNull();
+  });
+
+  it('2026-11-12 最终形态：点状态卡不跳新页面，编辑面板就在卡片内展开', async () => {
+    renderPages(makeTree());
+    await openSubjectPage();
+    expect(document.querySelector('[data-state-edit-panel]')).toBeNull();
+
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    // 仍在主体状态页：网格、主体名、其它状态卡都还在
+    expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-state-grid]')).toBeTruthy();
+    expect(document.querySelector('[data-field="subject-name"]')).toBeTruthy();
+    expect(document.querySelector('[data-state-card="__base__"]')).toBeTruthy();
+    const panel = document.querySelector('[data-state-edit-panel]') as HTMLElement;
+    // 面板挂在被编辑的那张卡内部，不是独立页面，也不是右侧抽屉
+    expect(panel.closest('[data-state-card="state-1"]')).toBeTruthy();
+    expect(panel.querySelector('[data-field="prompt"]')).toBeTruthy();
+    expect(panel.querySelector('[data-episodes-picker]')).toBeTruthy();
+    // 点另一张卡，编辑面板跟着换
+    fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('__base__'));
+  });
+
+  it('出现集数：一个按钮，点击后展开下拉列表勾选', async () => {
+    renderPages(makeTree());
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    // 已选集数以标签呈现，下拉选项列表未点开时不渲染
+    expect(document.querySelector('[data-episode-chip="1"]')).toBeTruthy();
+    expect(document.querySelector('[data-episode-option="1"]')).toBeNull();
+    // 点按钮才展开下拉列表；勾选第 2 集后立刻多一枚标签
+    fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-episode-option="2"]')).toBeTruthy());
+    fireEvent.click(document.querySelector('[data-episode-option="2"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-episode-chip="2"]')).toBeTruthy());
+  });
+
+  it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {
+    const tree = makeTree();
+    const st = tree.states.find((s) => s.id === 'state-1')!;
+    st.fullPrompt = '左臂缠白色绷带';
+    st.media = [{ key: 'state-key-1', type: 'image' }];
+    const emit = vi.mocked(nodeActionBus.emit);
+    emit.mockClear();
+    renderPages(tree);
+    await openSubjectPage();
+
+    const card = document.querySelector('[data-state-card="state-1"]') as HTMLElement;
+    fireEvent.mouseEnter(card);
+    fireEvent.click(card.querySelector('[data-state-action="canvas-generate"]') as Element);
+
+    expect(emit).toHaveBeenCalledWith('subject:sendStateToCanvas', expect.objectContaining({
+      prompt: '左臂缠白色绷带',
+      storageKey: 'state-key-1',
+    }));
+    expect(emit).not.toHaveBeenCalledWith('subject:sendToCanvas', expect.anything());
+    // 点画布生成不会展开编辑面板（动作按钮 stopPropagation）
+    expect(document.querySelector('[data-state-edit-panel]')).toBeNull();
   });
 
   it('卡内删除状态：确认后该状态卡消失（不必进详情页）', async () => {

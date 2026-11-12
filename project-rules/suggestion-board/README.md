@@ -29,5 +29,6 @@
 | S-21 | 2026-11-11 | 项目 ZIP 导出范围补全：剧本转 MD、主体格式化、无缝迁移 | C-05 | 🟢 merged | [2026-11-11-project-zip-full-migration.md](2026-11-11-project-zip-full-migration.md) |
 
 | S-22 | 2026-11-11 | 首页三项：回收站弹窗尺寸 / 复制项目 / 资产选择模式对齐 | 独立热修 | 🟢 merged | [2026-11-11-homepage-three-fixes.md](2026-11-11-homepage-three-fixes.md) |
+| S-23 | 2026-11-12 | 取消状态详情页：两级整页 + 卡片内编辑面板（提示词文本块 / 集数下拉按钮），清开发者文案 | 独立热修 | 🟢 merged | [2026-11-12-comfyui-drop-state-detail-page.md](2026-11-12-comfyui-drop-state-detail-page.md) |
 
-状态：open 0 / merged 22。
+状态：open 0 / merged 23。

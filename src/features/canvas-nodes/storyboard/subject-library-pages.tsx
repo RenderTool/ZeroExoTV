@@ -1,16 +1,26 @@
 /**
  * subject-library-pages - 主体库页面化（2026-11-05 约定）
  *
- * 三层页面（替换原「列表 → 单树弹层」）：
+ * 两级整页（替换原「列表 → 单树弹层」）：
  * 1. 主体库列表页：搜索 + 类型 Tab + 主体卡网格；
- * 2. 主体状态页：面包屑「主体库 / 主体名」，状态卡网格（基础状态 + states[]）；
- * 3. 状态编辑页：面包屑「主体库 / 主体名 / 状态名」，状态名 / 提示词（备注）/ 出现集数 / 媒体接收位。
+ * 2. 主体状态页：面包屑「主体库 / 主体名」，状态卡网格（基础状态 + states[]）。
+ *    **所有编辑都在这一页的状态卡上完成，不再有第三个整页**：
+ *    - 双击状态名改名；星标设封面；换图；删除；画布生成（只挂提示词、不发起 API）；
+ *    - 点卡或「编辑」按钮 → 卡片内展开编辑面板（StateEditPanel）：
+ *      状态名 / 提示词文本块 / 出现集数（一个按钮点开下拉列表）/ 媒体与历史图。
+ *    - 面包屑第三级只是「当前正在编辑的状态」指示，不代表又进了一层页面。
+ *
+ * 2026-11-12 方案演进：独立状态编辑页 → 同页右栏检查器（抽屉里挤成一列，作废）
+ * → 恢复独立整页（作废）→ **最终定为卡片内编辑面板**。
+ * level 的 'state' 保留为「哪张卡在编辑」，用于层级记忆、前进/后退、navigate 定位、
+ * 资产发送直达上下文；UI 上不再对应任何新页面。
+ * UI 文案一律客户口吻，禁止出现 API / 自动跑 / 内部实现说明（可写在代码注释里）。
  *
  * 视觉口径（project-rules/specs/subject-library-ui/spec.md，2026-11-05 UI 重新设计）：
  * - 唯一强调色 = theme.toolbar.accent；主体库全量禁用绿色；
  * - 卡片走 @/shared/ui（CardShell / Badge / IconButton + 文本 token），与资产卡同一取值源；
  * - 工具栏与表单走 antd（Input / Button / TextArea / Checkbox / Dropdown / Tooltip）；
- * - 三级页面共用一个页头：面包屑 + 计数徽标 + 右侧主操作。
+ * - 两级整页共用一个页头：面包屑 + 计数徽标 + 右侧主操作。
  *
  * 约束：
  * - 只改主体库这一块；旧单树弹层保留在 StoryboardSubjectTab 的非 pages 模式（分镜全屏编辑器）；
@@ -23,8 +33,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
 import {
   ArrowLeft,
-  Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, Layers, MapPin, Package, Pencil, Plus, Search,
-  Shapes, Square, Star, Trash2, UserRound, X,
+  Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
+  Shapes, Square, Star, Trash2, UserRound, Wand2, X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -50,7 +60,6 @@ import {
 } from '@/shared/components/masonry-grid.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import { buildSubjectStackNodeData } from './subject-stack-cards.js';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
 import { readScript, watchScript, displayEpisodeTitle } from '@/entities/script-store.js';
 import {
@@ -469,11 +478,11 @@ function DraftPromptField({ value, onCommit, placeholder }: {
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => { if (draft !== value) onCommit(draft); }}
-        autoSize={{ minRows: 8, maxRows: 18 }}
+        autoSize={{ minRows: 5, maxRows: 14 }}
         placeholder={placeholder}
-        style={{ minHeight: 200, lineHeight: 1.6 }}
+        style={{ minHeight: 140, lineHeight: 1.6 }}
       />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
         <span data-prompt-count style={{ fontSize: 11, opacity: 0.6, fontVariantNumeric: 'tabular-nums' }}>
           {t('subject.charCount', { n: draft.length, defaultValue: `${draft.length} 字` })}
         </span>
@@ -725,7 +734,9 @@ function SubjectGridCard({
  * 封面卡额外留一枚常驻「封面」徽标（不靠 hover 才能看出来哪个状态被选了）。
  */
 function StateGridCard({
-  stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, onClick, onToggleCover, onDelete,
+  stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, editMode, editPanel,
+  onClick, onToggleCover, onDelete, onToggleEdit,
+  onRename, onReplaceMedia, onCanvasGenerate,
 }: {
   stateId: string;
   title: string;
@@ -736,15 +747,29 @@ function StateGridCard({
   theme: ThemeConfig;
   /** 当前作为主体封面的状态（常驻徽标 + 星标高亮） */
   isCover?: boolean;
+  /** 当前卡片处于编辑态（封面描边 + 展开卡内编辑面板） */
+  editMode?: boolean;
+  /** 卡内编辑面板：由外层按需构造，编辑态下渲染在信息行下方 */
+  editPanel?: ReactNode;
   onClick: () => void;
+  /** 切换本卡编辑态；点卡与「编辑」按钮都走它 */
+  onToggleEdit?: () => void;
   /** 缺省 = 不渲染封面入口（无树的老数据） */
   onToggleCover?: () => void;
   /** 缺省 = 不渲染删除入口（基础状态） */
   onDelete?: () => void;
+  /** 就地改状态名（基础状态不传 = 不可改，名称即主体名） */
+  onRename?: (next: string) => void;
+  /** 就地换图：打开媒体来源面板 */
+  onReplaceMedia?: (anchor: HTMLElement) => void;
+  /** 画布生成：只建节点并挂提示词，不发起 API */
+  onCanvasGenerate?: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(title);
   const alive = useSubjectMediaAlive(thumbKey ?? undefined);
   const dead = thumbKey ? !alive : false;
   const active = hover || focus;
@@ -756,9 +781,16 @@ function StateGridCard({
       aria-label={title}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return;
-        onClick();
+        if (onToggleEdit) onToggleEdit(); else onClick();
       }}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+      onKeyDown={(e) => {
+        // 编辑面板内的输入不应冒泡成「卡片 Enter/Space 切换」（会打断打字）
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (onToggleEdit) onToggleEdit(); else onClick();
+        }
+      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onFocus={() => setFocus(true)}
@@ -772,8 +804,11 @@ function StateGridCard({
       <CardShell
         theme={theme}
         data-state-cover
-        hovered={active}
-        style={{ width: '100%', aspectRatio: '16 / 9' }}
+        hovered={active || editMode}
+        style={{
+          width: '100%', aspectRatio: '16 / 9',
+          ...(editMode ? { outline: `2px solid ${theme.toolbar.accent}`, outlineOffset: -2 } : {}),
+        }}
       >
         <SubjectMediaThumb
           storageKey={thumbKey}
@@ -798,7 +833,28 @@ function StateGridCard({
         paddingLeft: UI_CARD_INFO_PADDING_X, paddingRight: UI_CARD_INFO_PADDING_X,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', height: 24 }}>
-          <span data-state-name style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}>{title}</span>
+          {editing && onRename ? (
+            <Input
+              size="small"
+              autoFocus
+              data-state-name-input
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={() => { setEditing(false); const v = draftTitle.trim(); if (v && v !== title) onRename(v); }}
+              onPressEnter={() => { setEditing(false); const v = draftTitle.trim(); if (v && v !== title) onRename(v); }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '100%' }}
+            />
+          ) : (
+            <span
+              data-state-name
+              title={onRename ? t('subject.inlineRenameHint', '双击改状态名') : undefined}
+              onDoubleClick={(e) => { if (!onRename) return; e.stopPropagation(); setDraftTitle(title); setEditing(true); }}
+              style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}
+            >
+              {title}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <span style={{
@@ -818,6 +874,32 @@ function StateGridCard({
               opacity: active ? 1 : 0, transition: 'opacity .2s',
             }}
           >
+            {onReplaceMedia && (
+              <Tooltip title={t('subject.replaceMediaInline', '换图')}>
+                <IconButton
+                  theme={theme}
+                  size="sm"
+                  aria-label={t('subject.replaceMediaInline', '换图')}
+                  data-state-action="replace"
+                  onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
+                >
+                  <ImagePlus size={13} />
+                </IconButton>
+              </Tooltip>
+            )}
+            {onCanvasGenerate && (
+              <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
+                <IconButton
+                  theme={theme}
+                  size="sm"
+                  aria-label={t('subject.canvasGenerate', '画布生成')}
+                  data-state-action="canvas-generate"
+                  onClick={(e) => { e.stopPropagation(); onCanvasGenerate(); }}
+                >
+                  <Wand2 size={13} />
+                </IconButton>
+              </Tooltip>
+            )}
             <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
               <IconButton
                 theme={theme}
@@ -831,13 +913,15 @@ function StateGridCard({
                 <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
               </IconButton>
             </Tooltip>
-            <Tooltip title={t('subject.editState', '编辑状态')}>
+            <Tooltip title={editMode ? t('subject.closeEdit', '收起编辑') : t('subject.editState', '编辑状态')}>
               <IconButton
                 theme={theme}
                 size="sm"
-                aria-label={t('subject.editState', '编辑状态')}
+                aria-label={editMode ? t('subject.closeEdit', '收起编辑') : t('subject.editState', '编辑状态')}
                 data-state-action="edit"
-                onClick={(e) => { e.stopPropagation(); onClick(); }}
+                data-edit-active={editMode ? '1' : undefined}
+                style={editMode ? { color: theme.toolbar.accent } : undefined}
+                onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
               >
                 <Pencil size={13} />
               </IconButton>
@@ -858,6 +942,270 @@ function StateGridCard({
           </div>
         </div>
       </div>
+      {editMode && editPanel}
+    </div>
+  );
+}
+
+/**
+ * 卡片内编辑面板（2026-11-12 最终形态）：
+ * 不再跳第三个整页，点状态卡的「编辑」按钮就在卡片下方展开本区。
+ * 原状态编辑页的状态名 / 提示词 / 出现集数 / 媒体与历史图全部收在这里。
+ * data-subject-page="state" 保留为「当前有状态处于编辑态」的口径标记。
+ */
+function StateEditPanel({
+  tree, node, theme, isDark, episodes, onUpdateNode,
+  onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
+}: {
+  tree: SubjectTree;
+  node: SubjectTreeNode;
+  theme: ThemeConfig;
+  isDark: boolean;
+  episodes: Array<{ number: number; title?: string }>;
+  onUpdateNode: (patch: Partial<SubjectTreeNode>) => void;
+  onReplaceMedia: (anchor: HTMLElement) => void;
+  onRemoveMedia: () => void;
+  onRestoreMedia: (ref: SubjectNodeMediaRef) => void;
+  onDeleteHistoryMedia: (ref: SubjectNodeMediaRef) => void;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  const { message: antdMessage } = AntdApp.useApp();
+  const slotMedia = slotMediaOf(tree, node.id);
+  const slotKind = slotMediaKind(slotMedia);
+  const hasMedia = Boolean(slotMedia);
+  const promptValue = node.fullPrompt || node.deltaPrompt || '';
+  const stateName = node.state ?? '';
+  const isBase = node.id === SUBJECT_BASE_STATE_ID;
+  const validEpisodes = episodes.slice().sort((a, b) => a.number - b.number);
+  const selectedEpisodes = (node.appearEpisodes ?? []).filter((n) => validEpisodes.some((e) => e.number === n));
+  const toggleEpisode = (n: number) => {
+    const next = selectedEpisodes.includes(n)
+      ? selectedEpisodes.filter((x) => x !== n)
+      : [...selectedEpisodes, n].sort((a, b) => a - b);
+    onUpdateNode({ appearEpisodes: next });
+  };
+  const labelStyle: CSSProperties = { fontSize: 12, fontWeight: 500, color: theme.toolbar.textMuted, marginBottom: 8 };
+  const hintStyle: CSSProperties = { fontSize: 11, lineHeight: 1.6, color: theme.toolbar.textMuted };
+  const episodeLabel = selectedEpisodes.length > 0
+    ? `${selectedEpisodes.join('、')} 集`
+    : t('subject.appearEpisodesAllShort', '全部剧集');
+
+  return (
+    <div
+      data-subject-page="state"
+      data-state-edit-panel
+      data-root-id={tree.rootId}
+      data-state-id={node.id}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      style={{
+        width: '100%', boxSizing: 'border-box', marginTop: 10,
+        padding: '12px 12px 14px', borderRadius: 8,
+        border: `1px solid ${theme.toolbar.accent}55`,
+        background: isDark ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.025)',
+      }}
+    >
+      <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+        {/* 媒体工具：小预览 + 右上角换图 / 删除媒体 + 历史图恢复 */}
+        <div data-form-section="media" data-media-slot style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+          <CardShell theme={theme} style={{ width: '100%', height: 132, position: 'relative' }}>
+            <SubjectMediaThumb
+              storageKey={slotMedia?.key}
+              kind={slotKind}
+              dark={isDark}
+              fill
+              fit="contain"
+              emptyLabel={t('subject.mediaPending', '待补媒体')}
+            />
+            <div
+              data-media-actions
+              style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 2 }}
+            >
+              <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}>
+                <IconButton
+                  theme={theme}
+                  size="sm"
+                  variant="overlay"
+                  aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}
+                  data-media-action="replace"
+                  onClick={(e) => onReplaceMedia(e.currentTarget)}
+                >
+                  <ImagePlus size={13} />
+                </IconButton>
+              </Tooltip>
+              {hasMedia && (
+                <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
+                  <IconButton
+                    theme={theme}
+                    size="sm"
+                    variant="overlay"
+                    aria-label={t('subject.deleteMedia', '删除媒体')}
+                    data-media-action="remove"
+                    onClick={onRemoveMedia}
+                  >
+                    <Trash2 size={13} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </div>
+          </CardShell>
+          {(node.mediaHistory?.length ?? 0) > 0 && (
+            <div data-media-history>
+              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
+                {t('subject.mediaHistory', '历史图片')}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(node.mediaHistory ?? []).map((ref, i) => (
+                  <div key={`${ref.key}-${i}`} style={{ position: 'relative', width: 46, height: 46 }}>
+                    <Tooltip title={t('subject.restoreMedia', '恢复这张图')}>
+                      <button
+                        type="button"
+                        data-media-history-item
+                        aria-label={t('subject.restoreMedia', '恢复这张图')}
+                        onClick={() => onRestoreMedia(ref)}
+                        style={{
+                          width: 46, height: 46, padding: 0, overflow: 'hidden',
+                          borderRadius: 6, border: '1px solid rgba(128,128,128,0.28)', cursor: 'pointer',
+                        }}
+                      >
+                        <SubjectMediaThumb storageKey={ref.key} kind={slotMediaKind(ref)} dark={isDark} fill />
+                      </button>
+                    </Tooltip>
+                    <Tooltip title={t('subject.deleteHistory', '永久删除这张图')}>
+                      <button
+                        type="button"
+                        data-media-history-delete
+                        aria-label={t('subject.deleteHistory', '永久删除这张图')}
+                        onClick={() => onDeleteHistoryMedia(ref)}
+                        style={{
+                          position: 'absolute', top: -6, right: -6, width: 16, height: 16, padding: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          borderRadius: 8, border: 'none', cursor: 'pointer',
+                          background: 'rgba(0,0,0,0.62)', color: '#fff',
+                        }}
+                      >
+                        <Trash2 size={9} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 状态名 */}
+        <div>
+          <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
+          {isBase ? (
+            <div data-base-state-name style={{ ...hintStyle, fontSize: 13, fontWeight: 600, color: theme.toolbar.text, padding: '4px 0' }}>
+              {tree.name}
+            </div>
+          ) : (
+            <DraftStateName
+              key={node.id}
+              value={stateName}
+              ariaLabel={t('subject.stateNameLabel', '状态名')}
+              placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
+              onCommit={(next) => onUpdateNode({ state: next })}
+            />
+          )}
+        </div>
+
+        {/* 提示词：卡片内编辑文本块 */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={labelStyle} title={t('subject.stateRemarkHint', '该状态的生成提示词')}>
+              {t('subject.statePromptLabel', '提示词')}
+            </div>
+            <Button
+              size="small"
+              type="text"
+              data-copy-base-prompt
+              disabled={!promptValue.trim()}
+              onClick={() => {
+                if (!navigator.clipboard) {
+                  antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
+                  return;
+                }
+                void navigator.clipboard.writeText(promptValue).then(
+                  () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
+                  () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
+                );
+              }}
+            >
+              {t('subject.copyPrompt', '复制')}
+            </Button>
+          </div>
+          <DraftPromptField
+            key={node.id}
+            value={promptValue}
+            placeholder={t('subject.statePromptPlaceholder', '描述这个状态的外形、服装、动作，或与其它状态的差异…')}
+            onCommit={(next) => onUpdateNode({ fullPrompt: next, deltaPrompt: next })}
+          />
+        </div>
+
+        {/* 出现集数：一个按钮 → 点击展开下拉列表编辑 */}
+        <div data-episodes-field>
+          <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
+          {validEpisodes.length === 0 ? (
+            <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
+          ) : (
+            <>
+              <Popover
+                trigger="click"
+                placement="bottomLeft"
+                content={(
+                  <EpisodePickerContent
+                    episodes={validEpisodes}
+                    selected={selectedEpisodes}
+                    onToggle={toggleEpisode}
+                    theme={theme}
+                    t={t}
+                  />
+                )}
+              >
+                <Button size="small" data-episodes-picker>
+                  {episodeLabel} <ChevronDown size={12} />
+                </Button>
+              </Popover>
+              {selectedEpisodes.length > 0 ? (
+                <div data-episodes-summary style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  {[...selectedEpisodes].sort((a, b) => a - b).map((n) => (
+                    <span
+                      key={n}
+                      data-episode-chip={n}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        height: 22, padding: '0 4px 0 8px', borderRadius: 6, fontSize: 11,
+                        border: `1px solid ${theme.toolbar.accent}`,
+                        background: `${theme.toolbar.accent}18`,
+                        color: theme.toolbar.accent,
+                      }}
+                    >
+                      {t('subject.episodeN', { n, defaultValue: `第 ${n} 集` })}
+                      <button
+                        type="button"
+                        aria-label={`移除第 ${n} 集`}
+                        onClick={() => toggleEpisode(n)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 16, height: 16, padding: 0, border: 'none', borderRadius: 4,
+                          background: 'transparent', color: 'inherit', cursor: 'pointer',
+                        }}
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span data-episodes-summary style={{ display: 'none' }} />
+              )}
+            </>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -912,18 +1260,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     overflowX: 'hidden',
     paddingBottom: 32,
   };
-  /** 状态编辑页：左「素材接收位」/ 右「字段」两列；窄窗（抽屉）自动落成单列 */
-  const editColumnsStyle: CSSProperties = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
-    gap: 28,
-    alignItems: 'start',
-  };
-  const editPaneStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 };
-  /** 表单标签：12/500 muted，控件在上方 8px */
-  const labelStyle: CSSProperties = { fontSize: 12, fontWeight: 500, color: theme.toolbar.textMuted, marginBottom: 8 };
+  /** 列表空态的次级文字；卡片内编辑面板的字段样式在 StateEditPanel 内自洽 */
   const hintStyle: CSSProperties = { fontSize: 11, lineHeight: 1.6, color: theme.toolbar.textMuted };
-  const sectionStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0, boxSizing: 'border-box' };
 
   const [trees, setTrees] = useState<SubjectTree[]>(() => subjectTree ?? []);
   const treesRef = useRef<SubjectTree[]>(trees);
@@ -1485,22 +1823,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     });
   }, [antdModal, projectId, commitTrees, antdMessage, t]);
 
-  /** 2026-11-10 用户要求：主体发送到画布——复用堆叠节点框架，节点语义是「主体」 */
-  const sendSubjectToCanvas = useCallback((tree: SubjectTree) => {
-    const data = buildSubjectStackNodeData(tree);
-    if (!data) {
-      antdMessage.warning(t('subject.sendToCanvasEmpty', '该主体还没有图片/视频/音频，先挂一张再发送'));
-      return;
-    }
-    nodeActionBus.emit('subject:sendToCanvas', {
-      nodeId: '',
-      rootId: tree.rootId,
-      name: tree.name,
-      data,
-    });
-    antdMessage.success(t('subject.sendToCanvasDone', '已发送到画布（主体节点）'));
-  }, [antdMessage, t]);
-
   // ===== 工具栏片段（整页与抽屉共用同一实现，2026-11-06）=====
   /** 按集筛选：选项来自剧本真实集数；落位由调用处决定（旧版自带 marginLeft:auto，抽屉里被右边缘裁成半截） */
   const episodeFilter = (
@@ -1778,7 +2100,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         </div>
       </div>
     );
-  } else if (level.view === 'subject') {
+  } else {
     const coverKey = coverKeyOfTree(openTree);
     // 无图状态与「无封面」都是 null，必须先排空才不会被误判成封面
     const isCoverState = (stateId: string): boolean => {
@@ -1789,6 +2111,11 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     const stateCount = nonBaseStates(openTree).length;
     const stateCountText = t('subject.stateCount', { n: stateCount, defaultValue: `${stateCount} 状态` });
     const stateFrame = frame(STATE_MAX_WIDTH);
+    /** 点卡 / 点「编辑」= 展开或收起这张卡自己的编辑面板；不切页面 */
+    const toggleEdit = (stateId: string): void => {
+      if (openState?.stateId === stateId) goSubject();
+      else applyLevel({ view: 'state', rootId: openTree.rootId, stateId }, { push: true });
+    };
     content = (
       <div data-subject-page="subject" data-root-id={openTree.rootId} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <SubjectPageHeader
@@ -1796,8 +2123,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           maxWidth={maxWidthFor(STATE_MAX_WIDTH)}
           pad={pagePad}
         >
-          <SubjectBreadcrumb theme={theme} subjectName={openTree.name} compact={compactBreadcrumb} onLibrary={goLibrary} onSubject={goSubject} />
-          {/* 主体名与状态名分离：主体名在主体页改，状态编辑页只管状态自己的三项 */}
+          <SubjectBreadcrumb theme={theme} subjectName={openTree.name} stateName={openStateName} compact={compactBreadcrumb} onLibrary={goLibrary} onSubject={goSubject} />
+          {/* 主体名在本页改，状态名与其余字段都在卡片内编辑 */}
           <Input
             size="small"
             data-field="subject-name"
@@ -1809,15 +2136,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           <span data-state-count={stateCount} style={{ fontSize: 12, color: theme.toolbar.textMuted, flexShrink: 0 }}>
             {stateCountText}
           </span>
-          <Button
-            size="small"
-            data-send-subject-canvas=""
-            icon={<Layers size={13} />}
-            onClick={() => sendSubjectToCanvas(openTree)}
-            style={{ flexShrink: 0 }}
-          >
-            {t('subject.sendToCanvas', '发送到画布')}
-          </Button>
         </SubjectPageHeader>
         {/* 主操作统一放顶部（2026-11-06 用户指令）：添加状态在页头下方，不再埋到列表底端 */}
         <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
@@ -1849,9 +2167,35 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     deadText={t('subject.mediaDead', '引用已失效')}
                     theme={theme}
                     isCover={isCoverState(node.id)}
+                    editMode={openState?.stateId === node.id}
+                    onToggleEdit={() => toggleEdit(node.id)}
+                    editPanel={openState?.stateId === node.id && openNode ? (
+                      <StateEditPanel
+                        tree={openTree}
+                        node={node}
+                        theme={theme}
+                        isDark={isDark}
+                        episodes={episodes}
+                        onUpdateNode={(patch) => updateNode(openTree.rootId, node.id, patch)}
+                        onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
+                        onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
+                        onRestoreMedia={(ref) => { void restoreMedia(openTree.rootId, node.id, ref); }}
+                        onDeleteHistoryMedia={(ref) => deleteHistoryMedia(openTree.rootId, node.id, ref)}
+                      />
+                    ) : undefined}
                     onToggleCover={() => toggleCover(openTree, node.id)}
-                    onClick={() => applyLevel({ view: 'state', rootId: openTree.rootId, stateId: node.id }, { push: true })}
+                    onClick={() => toggleEdit(node.id)}
                     onDelete={isBase ? undefined : () => handleDeleteState(openTree.rootId, node)}
+                    onRename={isBase ? undefined : (next) => updateNode(openTree.rootId, node.id, { state: next })}
+                    onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
+                    onCanvasGenerate={() => {
+                      nodeActionBus.emit('subject:sendStateToCanvas', {
+                        nodeId: '',
+                        name: isBase ? openTree.name : (node.state?.trim() || openTree.name),
+                        prompt: node.fullPrompt || node.deltaPrompt || '',
+                        storageKey: first?.key,
+                      });
+                    }}
                   />
                 );
               })}
@@ -1860,264 +2204,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         </div>
       </div>
     );
-  } else {
-    // ===== 状态编辑页（基础状态是 states[0]，与其它状态完全同一套取值/写回）=====
-    const node = openNode;
-    const editFrame = frame(960);
-    if (!node) {
-      content = (
-        <div data-subject-page="missing" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <SubjectPageHeader theme={theme} maxWidth={maxWidthFor(LIST_MAX_WIDTH)} pad={pagePad}>
-            <SubjectBreadcrumb theme={theme} subjectName={openTree.name} stateName={undefined} onLibrary={goLibrary} onSubject={goSubject} />
-          </SubjectPageHeader>
-          <div style={{ ...editFrame.content, marginTop: 24, fontSize: 12, opacity: 0.65 }} data-subject-missing>{t('subject.stateNotFound', '状态不存在或已被删除')}</div>
-        </div>
-      );
-    } else {
-      // 媒体槽位单一口径（2026-11-06）：基础状态与状态同一取数，
-      // 类型不再限定图片，语音同样可上传 / 可替换。
-      const slotMedia = slotMediaOf(openTree, level.stateId);
-      const slotKind = slotMediaKind(slotMedia);
-      const hasMedia = Boolean(slotMedia);
-      const promptValue = node.fullPrompt || node.deltaPrompt || '';
-      const stateName = node.state ?? '';
-      const validEpisodes = episodes.slice().sort((a, b) => a.number - b.number);
-      const selectedEpisodes = (node.appearEpisodes ?? []).filter((n) => validEpisodes.some((e) => e.number === n));
-      const toggleEpisode = (n: number) => {
-        const next = selectedEpisodes.includes(n) ? selectedEpisodes.filter((x) => x !== n) : [...selectedEpisodes, n].sort((a, b) => a - b);
-        updateNode(openTree.rootId, node.id, { appearEpisodes: next });
-      };
-      content = (
-        <div data-subject-page="state" data-root-id={openTree.rootId} data-state-id={level.stateId} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {/* 页头只留面包屑（2026-11-06 用户指令）：右侧「修改即时保存」提示已删
-              （2026-11-07 用户指令：去掉右边提示，别再挤到抽屉收起按钮上）。 */}
-          <SubjectPageHeader
-            theme={theme}
-            maxWidth={maxWidthFor(LIST_MAX_WIDTH)}
-            pad={pagePad}
-          >
-            <SubjectBreadcrumb theme={theme} subjectName={openTree.name} stateName={openStateName} compact={compactBreadcrumb} onLibrary={goLibrary} onSubject={goSubject} />
-          </SubjectPageHeader>
-          <div style={scrollStyle}>
-            <div style={{ ...editFrame.content, paddingTop: 16 }}>
-              <section data-form-section="basic" style={sectionStyle}>
-                <div style={editColumnsStyle}>
-                  {/* 媒体卡：动作不再排在图片下方成一条，改到封面右上角（与状态卡 / 主体卡同一落位、同一 overlay 按钮） */}
-                  <div data-form-section="media" data-media-slot style={{ ...editPaneStyle, maxWidth: 380 }}>
-                    <CardShell theme={theme} style={{ width: '100%', height: 'min(60vh, 560px)' }}>
-                      <SubjectMediaThumb
-                        storageKey={slotMedia?.key}
-                        kind={slotKind}
-                        dark={isDark}
-                        fill
-                        fit="contain"
-                        emptyLabel={t('subject.mediaPending', '待补媒体')}
-                      />
-                      <div
-                        data-media-actions
-                        style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 2 }}
-                      >
-                        <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}>
-                          <IconButton
-                            theme={theme}
-                            size="sm"
-                            variant="overlay"
-                            aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}
-                            data-media-action="replace"
-                            onClick={(e) => setPanel({ rootId: openTree.rootId, stateId: level.stateId, anchorEl: e.currentTarget })}
-                          >
-                            <ImagePlus size={13} />
-                          </IconButton>
-                        </Tooltip>
-                        {hasMedia && (
-                          <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
-                            <IconButton
-                              theme={theme}
-                              size="sm"
-                              variant="overlay"
-                              aria-label={t('subject.deleteMedia', '删除媒体')}
-                              data-media-action="remove"
-                              onClick={() => { void removeMedia(openTree.rootId, level.stateId); }}
-                            >
-                              <Trash2 size={13} />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                      </div>
-                    </CardShell>
-                    {(openNode?.mediaHistory?.length ?? 0) > 0 && (
-                      <div data-media-history style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
-                          {t('subject.mediaHistory', '历史图片')}
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {(openNode?.mediaHistory ?? []).map((ref, i) => (
-                            <div key={`${ref.key}-${i}`} style={{ position: 'relative', width: 54, height: 54 }}>
-                              <Tooltip title={t('subject.restoreMedia', '恢复这张图')}>
-                                <button
-                                  type="button"
-                                  data-media-history-item
-                                  aria-label={t('subject.restoreMedia', '恢复这张图')}
-                                  onClick={() => { void restoreMedia(openTree.rootId, level.stateId, ref); }}
-                                  style={{
-                                    width: 54, height: 54, padding: 0, overflow: 'hidden',
-                                    borderRadius: 6, border: '1px solid rgba(128,128,128,0.28)', cursor: 'pointer',
-                                  }}
-                                >
-                                  <SubjectMediaThumb storageKey={ref.key} kind={slotMediaKind(ref)} dark={isDark} fill />
-                                </button>
-                              </Tooltip>
-                              <Tooltip title={t('subject.deleteHistory', '永久删除这张图')}>
-                                <button
-                                  type="button"
-                                  data-media-history-delete
-                                  aria-label={t('subject.deleteHistory', '永久删除这张图')}
-                                  onClick={() => deleteHistoryMedia(openTree.rootId, level.stateId, ref)}
-                                  style={{
-                                    position: 'absolute', top: -6, right: -6, width: 18, height: 18, padding: 0,
-                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                    borderRadius: 9, border: 'none', cursor: 'pointer',
-                                    background: 'rgba(0,0,0,0.62)', color: '#fff',
-                                  }}
-                                >
-                                  <Trash2 size={10} />
-                                </button>
-                              </Tooltip>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 右列：状态名 / 提示词 / 出现集数（基础状态与更多状态同一套表单） */}
-                  <div style={editPaneStyle}>
-                    <div>
-                      <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
-                      {node.id === SUBJECT_BASE_STATE_ID ? (
-                        // 基础状态 = 主体本身（2026-11-12 用户要求）：不单独起名、不写 state 字段
-                        <div data-base-state-name style={{ ...hintStyle, fontSize: 13, color: theme.toolbar.text, padding: '4px 0' }}>
-                          {openTree.name}
-                          <span style={{ marginLeft: 8, opacity: 0.5 }}>{t('subject.baseStateIsSubject', '基础状态即主体本身')}</span>
-                        </div>
-                      ) : (
-                        <DraftStateName
-                          key={node.id}
-                          value={stateName}
-                          ariaLabel={t('subject.stateNameLabel', '状态名')}
-                          placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
-                          onCommit={(next) => updateNode(openTree.rootId, node.id, { state: next })}
-                        />
-                      )}
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <div style={labelStyle} title={t('subject.stateRemarkHint', '该状态的生成提示词')}>
-                          {t('subject.statePromptLabel', '提示词')}
-                        </div>
-                        <Button
-                          size="small"
-                          type="text"
-                          data-copy-base-prompt
-                          disabled={!promptValue.trim()}
-                          onClick={() => {
-                            if (!navigator.clipboard) {
-                              antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
-                              return;
-                            }
-                            void navigator.clipboard.writeText(promptValue).then(
-                              () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
-                              () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
-                            );
-                          }}
-                        >
-                          {t('subject.copyPrompt', '复制')}
-                        </Button>
-                      </div>
-                      <DraftPromptField
-                        key={node.id}
-                        value={promptValue}
-                        placeholder={t('subject.statePromptPlaceholder', '描述该状态的形象/动作/差异，AI 会结合基础形态自动完善…')}
-                        onCommit={(next) => updateNode(openTree.rootId, node.id, {
-                          fullPrompt: next,
-                          deltaPrompt: next,
-                        })}
-                      />
-                    </div>
-
-                    {/* 出现集数：每个状态（含基础状态）独立；默认只显示摘要，点「选择集数」再开搜索列表（2026-11-12 简化） */}
-                    <div data-episodes-field>
-                      <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
-                      {validEpisodes.length === 0 ? (
-                        <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                          {/* 2026-11-12 用户要求：已选集数以标签展示，可直接点 × 移除 */}
-                          {selectedEpisodes.length > 0 ? (
-                            <div data-episodes-summary style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              {[...selectedEpisodes].sort((a, b) => a - b).map((n) => (
-                                <span
-                                  key={n}
-                                  data-episode-chip={n}
-                                  style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    height: 24, padding: '0 4px 0 8px', borderRadius: 6, fontSize: 11,
-                                    border: `1px solid ${theme.toolbar.accent}`,
-                                    background: `${theme.toolbar.accent}18`,
-                                    color: theme.toolbar.accent,
-                                  }}
-                                >
-                                  {t('subject.episodeN', { n, defaultValue: `第 ${n} 集` })}
-                                  <button
-                                    type="button"
-                                    aria-label={`移除第 ${n} 集`}
-                                    onClick={() => toggleEpisode(n)}
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                      width: 16, height: 16, padding: 0, border: 'none', borderRadius: 4,
-                                      background: 'transparent', color: 'inherit', cursor: 'pointer',
-                                    }}
-                                  >
-                                    <X size={10} />
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span data-episodes-summary style={{ fontSize: 12, color: theme.toolbar.text }}>
-                              {t('subject.appearEpisodesAllShort', '未选（全部剧集）')}
-                            </span>
-                          )}
-                          <Popover
-                            trigger="click"
-                            placement="bottomLeft"
-                            content={(
-                              <EpisodePickerContent
-                                episodes={validEpisodes}
-                                selected={selectedEpisodes}
-                                onToggle={toggleEpisode}
-                                theme={theme}
-                                t={t}
-                              />
-                            )}
-                          >
-                            <Button size="small" data-episodes-picker>{t('subject.chooseEpisodes', '选择集数')}</Button>
-                          </Popover>
-                        </div>
-                      )}
-                      <div style={{ ...hintStyle, marginTop: 8 }}>
-                        {t('subject.appearEpisodesHint', '勾选该状态出现的集数；未选 = 全部剧集')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
-      );
-    }
   }
 
   return (

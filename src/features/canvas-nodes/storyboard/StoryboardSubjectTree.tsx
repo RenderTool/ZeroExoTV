@@ -200,7 +200,7 @@ function EpisodeMultiSelect({
       >
         <button
           type="button"
-          title={t('subject.appearEpisodesHint', '勾选该状态出现的集数；未选 = 全部剧集')}
+          title={t('subject.appearEpisodesHint', '选择该状态在哪些集数出现')}
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between', gap: 3, minWidth: 220, maxWidth: '100%', border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', cursor: 'pointer', borderRadius: 6, padding: '2px 8px', fontSize: 9, color: 'inherit', fontFamily: 'inherit', textAlign: 'left' }}
         >
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
@@ -289,7 +289,7 @@ function StateCard({
         {/* 方案 C：标注为其它集的小号次要标签（如「标注为第 3 集」）；未标注/命中本集不显示 */}
         {otherEpisodeTags.length > 0 && (
           <span
-            title={t('subject.appearEpisodesHint', '勾选该状态出现的集数；未选 = 全部剧集')}
+            title={t('subject.appearEpisodesHint', '选择该状态在哪些集数出现')}
             style={{ display: 'inline-flex', alignItems: 'center', fontSize: 8.5, color: 'rgba(255,255,255,0.62)', background: 'rgba(255,255,255,0.08)', borderRadius: 999, padding: '1px 6px', flexShrink: 0, whiteSpace: 'nowrap' }}
           >
             {t('subject.taggedEpisodes', { list: otherEpisodeTags.join('、'), defaultValue: `标注为第 ${otherEpisodeTags.join('、')} 集` })}
@@ -432,7 +432,7 @@ function StateCard({
             onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             rows={6}
-            placeholder={t('subject.statePromptPlaceholder', '描述该状态的形象/动作/差异，AI 会结合基础形态自动完善…')}
+            placeholder={t('subject.statePromptPlaceholder', '描述这个状态的外形、服装、动作，或与其它状态的差异…')}
             style={{
               width: '100%', resize: 'vertical', border: `1px solid ${border}`, borderRadius: 6,
               background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)',

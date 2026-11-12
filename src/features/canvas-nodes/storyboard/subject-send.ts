@@ -2,9 +2,10 @@
  * subject-send - 「发送资产到主体」统一执行器（2026-11-05 主体库页面化）
  *
  * 资产卡片/抽屉里的「发送到主体」都走这里，避免各写一套：
- * - 用户当前停在某个「状态编辑页」→ 直接绑定到该状态（linkSubjectStateMedia 唯一写入）
- *   → 容器写回 → 广播外部写入事件（状态页缩略图即时刷新）→ navigateToView('subject') 跳转；
- * - 无当前状态 → 复用 openSubjectLinkDialog（主体→状态选择弹层）。
+ * - 用户在主体状态页展开了某张状态卡的卡内编辑面板 → 直接绑定到该状态
+ *   （linkSubjectStateMedia 唯一写入）→ 容器写回 → 广播外部写入事件（卡片缩略图即时刷新）
+ *   → navigateToView('subject') 定位；
+ * - 无正在编辑的状态 → 复用 openSubjectLinkDialog（主体→状态选择弹层）。
  *
  * 不复制文件、不新增写入路径；取不到目标状态时降级到选择弹层（不静默失败）。
  */
@@ -26,7 +27,7 @@ function treesOf(container: Awaited<ReturnType<typeof readStoryboardContainer>>)
   return migrateSubjectTrees(container?.subjectTree);
 }
 
-/** 发送资产到主体：有当前状态页 → 直接绑定；否则弹主体→状态选择 */
+/** 发送资产到主体：有正在编辑的状态卡 → 直接绑定；否则弹主体→状态选择 */
 export async function sendAssetToSubject(
   payload: SubjectLinkDialogPayload,
   opts: { notify?: (text: string) => void } = {},
