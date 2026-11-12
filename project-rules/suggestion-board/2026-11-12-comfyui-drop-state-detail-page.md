@@ -71,6 +71,7 @@
 - **卡片快捷操作**（保留既有热修）：双击改状态名、Star 设封面、ImagePlus 换图、Trash2 删除、Wand2 画布生成（只 emit `subject:sendStateToCanvas` 挂 prompt + referenceStorageKey，不发起 API）。编辑态卡片有 accent 描边。
 - **卡内编辑面板**：`StateEditPanel` 挂在被编辑卡片内部（不是独立页、不是右栏抽屉），**卡片拉通整行**（`grid-column: 1 / -1`），编辑态隐藏 16:9 封面大图。包含状态名输入（基础状态只读）、**提示词文本块**（`DraftPromptField`，失焦写回 `fullPrompt`/`deltaPrompt`，行数收敛到 5–14）、**出现集数一枚摘要按钮 + 弹层**（「全部剧集」/「第 1–12 集」/「已选 N 集」，单集增删在弹层里；**已选集不再铺标签**）、媒体小预览 + 换图 / 删媒体 + 历史图恢复 / 永久删除。原有详情页能力一项不丢。
 - **面包屑两级**：只到「主体库 / 主体名」；编辑态不再追加第三级状态名（基础状态名 = 主体名，会连出三个同名）；返回按钮在编辑态先收面板。
+- **收起按钮**：编辑态标题行右侧固定「收起编辑」（accent 文字按钮 + ChevronUp），点击收纳回卡片；不再只靠再点一次卡片（用户 18:44 指出）。
 - **文案治理**：删除 `画布生成（只挂提示词，不自动跑 API）`、`基础状态即主体本身`、`勾选该状态出现的集数；未选 = 全部剧集`、`AI 会结合基础形态自动完善…`；成功 toast 改「已添加到画布」；三语 i18n 同步，删 `canvasGenerateHint` / `closeInspector`，加 `closeEdit`。实现说明只留代码注释，不进 UI。
 - **排版**：编辑面板紧凑多层（12px 内距 / 16px 间距 / 132px 媒体预览 / 46px 历史缩略），提示词框由 8–18 行、200px 收敛到 5–14 行、140px；面板根节点拦截 click / keydown 冒泡，避免打字时误触发卡片切换。
 - **清死代码**：`editor-page.tsx` 移除 `subject:sendToCanvas` 接收端与 `STACKED_MEDIA_DEFAULT_SIZE` import；`subject-library-pages.tsx` 移除未用的 `buildSubjectStackNodeData` / `Layers` import 与旧两列表单样式常量。

@@ -297,6 +297,7 @@ page container (height: 100%, flex column, overflow: hidden)
 - 两级结构：列表页（主体卡网格）→ 主体状态页（状态卡网格）；编辑不跳页——点状态卡就地展开该卡的编辑面板。
 - 面包屑只到「主体库 / 主体名」；编辑态**不再追加第三级状态名**（基础状态名就是主体名，会连出三个同名）。
 - 状态编辑面板**拉通整行**（`grid-column: 1 / -1`，左媒体 / 右字段，窄窗落单列）：提示词、状态名、媒体、集数不能挤在 240px 卡里；编辑态隐藏卡片 16:9 封面大图，避免图片把编辑区顶出屏幕。
+- 编辑态**必须有明确的「收起编辑」按钮**（标题行右侧、accent 色文字按钮 + `ChevronUp`），不能只靠「再点一次卡片」这种隐藏操作收纳回卡片。
 - 卡片一律走 `@/shared/ui`（`CardShell` / `Badge` / `IconButton` / `uiCardNameStyle` / `uiCardMetaStyle`），**禁止**再新建一套卡片 token；类型角标统一 `Badge tone="neutral"`，业务类型不承载颜色。
 - 工具栏：搜索用 antd `Input`（240 + prefix 图标 + `allowClear`）；分类筛选用**下划线 Tab**（36 高 / 13px / 选中主文本色 + 2px accent 下划线 + 11px 计数）；次级筛选用 antd `Button size="small"`。
 - 卡内动作：悬停/聚焦露出 `IconButton size="sm"` + antd `Tooltip`，危险动作走 `danger` + `Modal.confirm`。卡内有按钮时根节点用 `div[role="button"]`，禁止 `button` 嵌套 `button`。

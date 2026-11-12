@@ -35,7 +35,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
 import {
   ArrowLeft,
-  Check, CheckSquare, ChevronDown, ChevronRight, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
+  Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
   Shapes, Square, Star, Trash2, UserRound, Wand2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -810,7 +810,7 @@ function StateGridCard({
         display: 'flex', flexDirection: 'column', gap: 2,
         paddingLeft: UI_CARD_INFO_PADDING_X, paddingRight: UI_CARD_INFO_PADDING_X,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', height: 24, gap: 8 }}>
           {editing && onRename ? (
             <Input
               size="small"
@@ -832,6 +832,19 @@ function StateGridCard({
             >
               {title}
             </span>
+          )}
+          {/* 2026-11-12 用户指令：编辑态要有一个明确的「收纳回卡片」按钮，不能只靠再点一次卡 */}
+          {editMode && (
+            <Button
+              size="small"
+              type="text"
+              data-state-action="collapse"
+              icon={<ChevronUp size={13} />}
+              onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
+              style={{ flexShrink: 0, color: theme.toolbar.accent }}
+            >
+              {t('subject.closeEdit', '收起编辑')}
+            </Button>
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -891,19 +904,19 @@ function StateGridCard({
                 <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
               </IconButton>
             </Tooltip>
-            <Tooltip title={editMode ? t('subject.closeEdit', '收起编辑') : t('subject.editState', '编辑状态')}>
-              <IconButton
-                theme={theme}
-                size="sm"
-                aria-label={editMode ? t('subject.closeEdit', '收起编辑') : t('subject.editState', '编辑状态')}
-                data-state-action="edit"
-                data-edit-active={editMode ? '1' : undefined}
-                style={editMode ? { color: theme.toolbar.accent } : undefined}
-                onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
-              >
-                <Pencil size={13} />
-              </IconButton>
-            </Tooltip>
+            {!editMode && (
+              <Tooltip title={t('subject.editState', '编辑状态')}>
+                <IconButton
+                  theme={theme}
+                  size="sm"
+                  aria-label={t('subject.editState', '编辑状态')}
+                  data-state-action="edit"
+                  onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
+                >
+                  <Pencil size={13} />
+                </IconButton>
+              </Tooltip>
+            )}
             {onDelete && (
               <Tooltip title={t('subject.deleteState', '删除状态')}>
                 <IconButton

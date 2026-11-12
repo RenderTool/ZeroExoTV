@@ -555,6 +555,12 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(document.querySelector('[data-state-card="state-1"] [data-state-cover]')).toBeNull();
     expect(panel.querySelector('[data-field="prompt"]')).toBeTruthy();
     expect(panel.querySelector('[data-episodes-picker]')).toBeTruthy();
+    // 2026-11-12 用户指令：编辑态有明确的「收纳回卡片」按钮，不必再点一次卡
+    const collapse = document.querySelector('[data-state-card="state-1"] [data-state-action="collapse"]') as HTMLElement;
+    expect(collapse).toBeTruthy();
+    expect(collapse.textContent).toContain('收起编辑');
+    fireEvent.click(collapse);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeNull());
     // 点另一张卡，编辑面板跟着换
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('__base__'));
