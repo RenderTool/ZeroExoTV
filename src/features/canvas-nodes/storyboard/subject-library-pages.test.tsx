@@ -462,7 +462,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy();
   });
 
-  it('状态卡：瀑布流真实比例 / 最小宽 260 / 信息在封面下 / 无右侧箭头', async () => {
+  it('状态卡：固定卡片尺寸 / 最小宽 260 / 信息在封面下 / 无右侧箭头', async () => {
     renderPages(makeTree());
     await openSubjectPage();
 
@@ -470,9 +470,8 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(card.style.minWidth).toBe(`${SUBJECT_STATE_CARD_MIN_WIDTH}px`);
     expect(card.style.flexDirection).toBe('column');
     const cover = card.querySelector('[data-state-cover]') as HTMLElement;
-    // 2026-11-12：状态卡不再固定 16:9，改由瀑布流按真实宽高比给高度
-    expect(cover.hasAttribute('data-card-cover-fit')).toBe(false);
-    expect(cover.style.aspectRatio).toBe('');
+    // 2026-11-12：详情页用固定卡片（16:9），图片 contain 完整显示
+    expect(cover.style.aspectRatio.replace(/\s/g, '')).toBe('16/9');
     expect(cover.style.borderRadius).toBe('12px');
 
     // 信息区是最后一个直接子节点（右侧箭头已删除）

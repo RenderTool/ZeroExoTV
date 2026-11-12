@@ -47,10 +47,6 @@ import {
 // 2026-11-05 用户指令：主体列表与资产列表共用同一套弹性排列规则（列数 = 实测容器宽度取断点，
 // 封面高度 = 列宽 / 真实宽高比并夹在 [0.75, 1.9]×列宽）——直接复用共享瀑布流，不再自写网格。
 import {
-  CARD_COVER_TRANSITION,
-  MasonryGrid,
-  cardCoverMetrics,
-  useMasonryColumnWidth,
 } from '@/shared/components/masonry-grid.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
@@ -518,13 +514,6 @@ function SubjectGridCard({
   const [focused, setFocused] = useState(false);
   const isDark = theme.mode === 'dark';
   const active = hovered || focused;
-  /* 2026-11-05 与资产卡同一瀑布流尺寸算法：列宽由 MasonryGrid 实测下发，
-     封面高度 = 列宽/宽高比（夹 0.75~1.9×列宽）；未知比例先 1:1 占位，
-     img 解码后只过渡一次（与 asset-card 的 learnAspect 同构）。 */
-  const columnWidth = useMasonryColumnWidth();
-  const [aspect, setAspect] = useState<number | null>(null);
-  useEffect(() => { setAspect(null); }, [card.coverKey]);
-  const coverMetrics = cardCoverMetrics(columnWidth, aspect);
   const kindLabel = kindLabelOf(card.kind, t);
   const coverGlyph = card.kind === 'character' ? <UserRound size={24} />
     : card.kind === 'scene' ? <MapPin size={24} />
@@ -582,13 +571,12 @@ function SubjectGridCard({
       }}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (multiSelect) onToggleSelect?.(); else onOpen(); } }}
     >
-      {/* 封面区：CardShell 统一圆角/细边界/底色；高度 = 列宽/宽高比（与资产卡同源，
-          不再固定 16:9）。hover 不再亮选中环（资产卡 hover 也不改边框，只上遮罩 + 浮出动作）。 */}
+      {/* 封面：统一固定卡片尺寸（2026-11-12 用户要求：主体列表不用瀑布流），
+          图片 contain 完整显示，不裁切人物。 */}
       <CardShell
         theme={theme}
         data-subject-card-cover
-        data-card-cover-fit={coverMetrics.fit}
-        style={{ width: '100%', height: coverMetrics.height, transition: CARD_COVER_TRANSITION }}
+        style={{ width: '100%', aspectRatio: '16 / 9' }}
       >
         {card.coverKey ? (
           <SubjectMediaThumb
@@ -596,8 +584,8 @@ function SubjectGridCard({
             kind="image"
             dark={isDark}
             fill
+            fit="contain"
             emptyLabel="暂无封面"
-            onLoaded={(w, h) => { if (w > 0 && h > 0) setAspect((prev) => prev ?? w / h); }}
           />
         ) : (
           <div style={{
@@ -707,10 +695,6 @@ function StateGridCard({
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
-  const columnWidth = useMasonryColumnWidth();
-  const [aspect, setAspect] = useState<number | null>(null);
-  useEffect(() => { setAspect(null); }, [thumbKey]);
-  const coverMetrics = cardCoverMetrics(columnWidth, aspect);
   const alive = useSubjectMediaAlive(thumbKey ?? undefined);
   const dead = thumbKey ? !alive : false;
   const active = hover || focus;
@@ -739,16 +723,15 @@ function StateGridCard({
         theme={theme}
         data-state-cover
         hovered={active}
-        style={{ width: '100%', height: coverMetrics.height, transition: CARD_COVER_TRANSITION }}
+        style={{ width: '100%', aspectRatio: '16 / 9' }}
       >
         <SubjectMediaThumb
           storageKey={thumbKey}
           kind={thumbKind}
           dark={theme.mode === 'dark'}
           fill
-          fit={coverMetrics.fit}
+          fit="contain"
           emptyLabel={emptyLabel}
-          onLoaded={(w, h) => { if (w > 0 && h > 0) setAspect((prev) => prev ?? w / h); }}
         />
         {isCover && (
           <ThumbBadge data-state-cover-badge style={{ position: 'absolute', top: 6, left: 6, zIndex: 3 }}>
@@ -836,12 +819,19 @@ function StateGridCard({
  * 共享 AddTile（与资产「上传素材」同款同形、中性色，hover 不亮强调色边框；2026-11-06 起统一放顶部）。
  */
 function SubjectStateGrid({ children }: { children: ReactNode }): React.ReactElement {
-  // 2026-11-12 用户要求：主体/状态/素材统一走同一套瀑布流；状态卡也按真实宽高比显示完整图，
-  // 不再固定 16:9 裁切。
+  // 2026-11-12 用户要求：主体外面不用瀑布流；详情页用固定卡片网格，每张卡尺寸一致。
   return (
-    <MasonryGrid gap={SUBJECT_STATE_CARD_GAP} paddingX={0}>
+    <div
+      data-subject-state-grid
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+        gap: SUBJECT_STATE_CARD_GAP,
+        alignContent: 'start',
+      }}
+    >
       {children}
-    </MasonryGrid>
+    </div>
   );
 }
 
@@ -1657,13 +1647,21 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         )}
 
         <div style={scrollStyle}>
-          {/* 2026-11-05 用户指令：主体列表改用与素材抽屉完全同一瀑布流容器——
-              列数 = masonryColumnsForWidth（实测容器宽度取 360/560/768/960/1280/1440/1920 断点），
-              不再自写 auto-fill minmax(240px,1fr)；卡片高度由列宽与封面真实比例推导。 */}
+          {/* 2026-11-12 用户要求：主体列表不用瀑布流，用统一尺寸的固定网格；
+              卡片图片 contain 完整显示，不裁人物。 */}
           {filteredCards.length > 0 && (
-            <MasonryGrid
-              paddingBottom={16}
-              style={{ width: '100%', maxWidth: maxWidthFor(LIST_MAX_WIDTH), margin: '0 auto', boxSizing: 'border-box' }}
+            <div
+              data-subject-grid
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: 16,
+                width: '100%',
+                maxWidth: maxWidthFor(LIST_MAX_WIDTH),
+                margin: '0 auto',
+                paddingBottom: 16,
+                boxSizing: 'border-box',
+              }}
             >
               {filteredCards.map((card) => (
                 <SubjectGridCard
@@ -1679,7 +1677,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                   onChangeKind={(kind) => changeKindByCard(card, kind)}
                 />
               ))}
-            </MasonryGrid>
+            </div>
           )}
           <div style={listFrame.content}>
             {activeEpisode !== null && episodeCards.length === 0 ? (
