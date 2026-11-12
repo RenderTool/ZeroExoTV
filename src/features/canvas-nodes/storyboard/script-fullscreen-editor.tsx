@@ -616,7 +616,7 @@ export function ScriptFullscreenEditor({
         </div>
 
         {/* 剧集列表(paddingBottom 10 与左侧 editorArea 对齐底部新增按钮基线) */}
-        <div style={{ width: episodeListWidth, flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column', paddingBottom: 10 }}>
+        <div style={{ width: episodeListWidth, flexShrink: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', paddingBottom: 10, overflow: 'hidden' }}>
           <EpisodeList
             episodes={normalizedEpisodes}
             activeEpisodeId={activeEpisodeId}

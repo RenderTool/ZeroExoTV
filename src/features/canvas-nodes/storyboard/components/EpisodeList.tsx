@@ -167,7 +167,7 @@ export function EpisodeList({
       </div>
 
       {/* 列表 */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
         {episodes.map((ep, idx) => {
           const isActive = ep.id === activeEpisodeId;
           return (
@@ -303,17 +303,19 @@ export function EpisodeList({
 
 const wrapStyle = (border: string, theme: ReturnType<typeof useTheme>['theme']): CSSProperties => ({
   width: '100%',
+  height: '100%',
   flex: 1,
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
+  // 剧集多（100+）时列表内部滚动；容器必须限高，否则整列会把页面撑长导致滚不动
+  overflow: 'hidden',
   // 底部 padding 40 与左侧 ScriptStructuredEditor 的 paperStyle(paddingBottom 40)对齐:
   // 两侧「新增」按钮底边在同一水平线(2026-08-30 实测:12 vs 40 → 按钮底差 27px)
   padding: '12px 10px 40px',
   background: theme.toolbar.editorSurface,
   border: `1px solid ${border}`,
   borderRadius: 0,
-  overflow: 'hidden',
 });
 
 const headerStyle = (muted: string): CSSProperties => ({
