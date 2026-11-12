@@ -454,7 +454,7 @@ export interface SubjectAuditIssue {
   subjectId: string;
   name: string;
   kind: SubjectKind;
-  issue: "missing_tree" | "images_not_in_tree" | "base_state_empty" | "no_image" | "duplicate_name";
+  issue: "missing_tree" | "images_not_in_tree" | "base_state_empty" | "no_image" | "duplicate_name" | "duplicate_image";
   detail: string;
 }
 
@@ -462,7 +462,7 @@ export interface SubjectAudit {
   version: number;
   entities: number;
   trees: number;
-  counts: { missingTree: number; imagesNotInTree: number; baseStateEmpty: number; noImage: number; duplicateName: number };
+  counts: { missingTree: number; imagesNotInTree: number; baseStateEmpty: number; noImage: number; duplicateName: number; duplicateImage: number };
   issues: SubjectAuditIssue[];
 }
 
@@ -473,7 +473,7 @@ export async function auditSubjects(root: string, projectId: string): Promise<Su
     version: 0,
     entities: 0,
     trees: 0,
-    counts: { missingTree: 0, imagesNotInTree: 0, baseStateEmpty: 0, noImage: 0, duplicateName: 0 },
+    counts: { missingTree: 0, imagesNotInTree: 0, baseStateEmpty: 0, noImage: 0, duplicateName: 0, duplicateImage: 0 },
     issues: [],
   };
   if (!s) return empty;
@@ -481,6 +481,19 @@ export async function auditSubjects(root: string, projectId: string): Promise<Su
   const byTree = new Map(trees.map((t) => [t.itemId, t]));
   const issues: SubjectAuditIssue[] = [];
   const seen = new Map<string, string>();
+  // 同一张图挂到多个主体 = 重复主体（2026-11-12 用户反馈：一眼看到多个重复资产）
+  const byImage = new Map<string, string>();
+  for (const e of s.entities) {
+    const key = e.coverKey ?? e.images?.[0]?.storageKey;
+    if (!key) continue;
+    const prev = byImage.get(key);
+    if (prev) {
+      issues.push({ subjectId: e.id, name: e.name, kind: e.kind, issue: 'duplicate_image', detail: `与 ${prev} 使用同一张图` });
+      empty.counts.duplicateImage += 1;
+    } else {
+      byImage.set(key, e.name);
+    }
+  }
   for (const e of s.entities) {
     const tree = byTree.get(e.id);
     if (!tree) {
