@@ -125,21 +125,15 @@ https://RenderTool.github.io/ZeroExoTV/downloads/ComfyUI_ZeroExoNodes.zip
 
 ## GitHub Pages 部署
 
-仓库包含 `.github/workflows/deploy-pages.yml`，推送到 `main` 后自动执行：
+渲染站点由 `.github/workflows/deploy-gh-pages.yml` 发布到 **gh-pages 分支**（自定义域名 `renderdoc.space`，`VITE_BASE_PATH=./`）。推送到 `main` 后自动执行：
 
 1. 安装依赖。
 2. `pnpm build`。
-3. 上传静态产物并通过 GitHub Pages 发布。
+3. 把 `dist/` 发布到 `gh-pages` 分支，并写入 `CNAME=renderdoc.space`。
 
-部署使用仓库名作为子路径，构建时自动设置：
+不再保留 `deploy-pages.yml`：仓库的 Pages 来源是 gh-pages 分支，`actions/deploy-pages` 的 artifact 发布与 branch-based Pages 冲突（会在 deploy 步骤报错），两条链路只会互相覆盖。自定义域名请只认 gh-pages 这一条。
 
-```text
-VITE_BASE_PATH=/ZeroExoTV/
-```
-
-如果使用自定义域名，把工作流中的 `VITE_BASE_PATH` 改成 `/`。
-
-首次部署如果 Pages 尚未启用，工作流会尝试自动启用；若仓库权限不允许，需要在仓库 Settings → Pages 手动选择 GitHub Actions 或对应发布分支。
+如果 Pages 尚未启用，需要在仓库 Settings → Pages 选择 **Deploy from a branch → gh-pages / (root)**，并配置自定义域名。
 
 ## 更新发布
 

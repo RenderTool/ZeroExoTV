@@ -24,7 +24,13 @@ export type McpErrorCode =
   /** 主体人设/场景/道具模板字段不全（2026-11-13） */
   | "SUBJECT_PROFILE_INCOMPLETE"
   /** 主体还没写人设模板（基础提示词为空）就想挂图（2026-11-13） */
-  | "SUBJECT_PROFILE_REQUIRED";
+  | "SUBJECT_PROFILE_REQUIRED"
+  /** 同名主体已存在（禁止悄悄造第二个） */
+  | "SUBJECT_EXISTS"
+  /** 来源/目标项目参数非法（空、或同项目） */
+  | "INVALID_PROJECT"
+  /** 跨项目直接引用素材（必须 import_subject_from_project / 上传到本项目） */
+  | "CROSS_PROJECT_ASSET";
 
 export class McpError extends Error {
   constructor(
