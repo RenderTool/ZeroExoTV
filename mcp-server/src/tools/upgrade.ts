@@ -7,7 +7,21 @@ import { readScript } from "../store/script.js";
 import { readStoryboard } from "../store/storyboard.js";
 import { readWorkbench } from "../store/workbench.js";
 import { auditProjectData, UPGRADE_GUIDE } from "../lib/upgrade-audit.js";
+import { buildMinimalSubjectPrompt } from "../lib/subject-profile.js";
+import { updateVersionedJson } from "../store/fs-node.js";
+import { paths } from "../config.js";
+import { setSubjectProfile } from "../store/storyboard.js";
+import type { ScriptEntity } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
+
+
+/** 从第一集正文提炼一句简介（去掉 HTML，取前 80 字） */
+function deriveLogline(script: ScriptEntity): string {
+  const first = script.episodes?.[0]?.content ?? "";
+  const text = String(first).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
 
 export function registerUpgradeTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
@@ -52,4 +66,86 @@ export function registerUpgradeTools(server: McpServer, ctx: Ctx): void {
       };
     },
   });
+
+  defTool(server, ctx, {
+    name: "ensure_project_ready",
+    description:
+      "交付前自愈：给还没有提示词的主体补一条最小可用提示词、给没写简介的剧本补一句（从第一集正文提炼），" +
+      "并汇报还缺什么（主体没图 / 片段没提示词）。**只补缺，不覆盖已有内容**；默认直接生效，dryRun 可先看。" +
+      "Agent 在说「完成 / 可以出片」之前必须先调一次，把 repaired/remaining 用大白话告诉用户。",
+    bits: ["script.write", "subject.write"],
+    schema: { projectId: z.string(), dryRun: z.boolean().optional() },
+    handler: async (args) => {
+      const script = await readScript(dataRoot(), args.projectId);
+      if (!script) return { ok: false, error: "NOT_FOUND", message: `项目没有剧本: ${args.projectId}` };
+      const stylePrompt = script.meta?.visualStyle?.prompt;
+      const sb = await readStoryboard(dataRoot(), args.projectId);
+      const entities = (sb?.entities ?? []) as Array<{ id?: string; name?: string; kind?: string; note?: string }>;
+      const trees = (Array.isArray(sb?.subjectTree) ? sb.subjectTree : []) as Array<{
+        itemId?: string; rootId?: string; states?: Array<{ fullPrompt?: string; media?: unknown[] }>;
+      }>;
+      const promptMissing = entities.filter((e) => {
+        if (!e.id) return false;
+        const tree = trees.find((t) => t.itemId === e.id || t.rootId === e.id);
+        return !String(tree?.states?.[0]?.fullPrompt ?? "").trim();
+      });
+      const noImage = trees.filter((t) => !(t.states?.[0]?.media ?? []).length);
+      const shotMissing = ((await readWorkbench(dataRoot(), args.projectId))?.shots ?? [])
+        .filter((s) => !String(s.imagePrompt ?? "").trim() || !String(s.videoPrompt ?? "").trim()).length;
+      const needsLogline = !String(script.meta?.logline ?? "").trim();
+      const derivedLogline = needsLogline ? deriveLogline(script) : "";
+      if (args.dryRun) {
+        return {
+          dryRun: true,
+          willFillSubjectPrompts: promptMissing.map((e) => e.name),
+          willFillLogline: Boolean(derivedLogline),
+          remaining: { subjectsWithoutImage: noImage.length, shotsWithoutPrompt: shotMissing },
+        };
+      }
+      const repaired: string[] = [];
+      for (const e of promptMissing) {
+        try {
+          const fresh = await readStoryboard(dataRoot(), args.projectId);
+          if (!fresh) break;
+          const prompt = buildMinimalSubjectPrompt(
+            (e.kind as "character" | "scene" | "prop" | "candidate") ?? "character",
+            e.name ?? "未命名主体",
+            e.note,
+            stylePrompt,
+          );
+          await setSubjectProfile(dataRoot(), args.projectId, {
+            baseVersion: fresh.version,
+            subjectId: e.id!,
+            anchor: e.note ?? "",
+            prompt,
+          });
+          repaired.push(`「${e.name ?? "未命名主体"}」补了提示词`);
+        } catch { /* 单个失败继续 */ }
+      }
+      if (derivedLogline) {
+        try {
+          const freshScript = await readScript(dataRoot(), args.projectId);
+          if (freshScript) {
+            await updateVersionedJson<ScriptEntity>(paths.script(args.projectId, dataRoot()), {
+              baseVersion: freshScript.version,
+              mutate: (s) => { if (!s.meta?.logline) s.meta = { ...(s.meta ?? {}), logline: derivedLogline }; },
+            });
+            repaired.push("补了本剧一句话简介");
+          }
+        } catch { /* 忽略 */ }
+      }
+      return {
+        repaired,
+        remaining: {
+          subjectsWithoutImage: noImage.length,
+          shotsWithoutPrompt: shotMissing,
+        },
+        summary: repaired.length > 0
+          ? `已自动补 ${repaired.length} 项；还有 ${noImage.length} 个主体没图、${shotMissing} 段没写提示词。`
+          : `没有需要自动补的；还有 ${noImage.length} 个主体没图、${shotMissing} 段没写提示词。`,
+        nextAction: "把 summary 用大白话告诉用户；remaining 里缺图/缺提示词的部分问用户要不要现在补，不要提字段名或错误码。",
+      };
+    },
+  });
+
 }

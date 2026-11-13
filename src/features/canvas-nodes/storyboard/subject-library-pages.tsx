@@ -613,6 +613,7 @@ function SubjectGridCard({
           }}>
             <span style={{ lineHeight: 1, display: 'inline-flex' }}>{coverGlyph}</span>
             <span style={{ fontSize: 10, lineHeight: '14px' }}>{t('subject.cardCoverEmpty', '暂无封面图')}</span>
+            <span style={{ fontSize: 10, lineHeight: '14px', color: theme.toolbar.accent }}>{t('subject.cardCoverHint', '点开可生成')}</span>
           </div>
         )}
         {multiSelect && (
@@ -1530,6 +1531,39 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }
   }, [projectId, antdMessage, t]);
 
+  /** 新手可见的项目体检（2026-11-13）：只列「还差什么」，一键补能补的 */
+  const subjectHealth = useMemo(() => {
+    const noPrompt = trees.filter((tr) => !String(tr.states?.[0]?.fullPrompt ?? '').trim());
+    const noImage = trees.filter((tr) => !tr.coverKey && !(tr.states?.[0]?.media ?? []).length);
+    return { noPrompt, noImage };
+  }, [trees]);
+  const fillMissingPrompts = useCallback(() => {
+    const targets = new Set(subjectHealth.noPrompt.map((tr) => tr.rootId));
+    if (targets.size === 0) return;
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    let filled = 0;
+    const next = treesRef.current.map((tr) => {
+      if (!targets.has(tr.rootId)) return tr;
+      const base = tr.states?.[0];
+      if (!base) return tr;
+      const card = tr.itemId ? byId.get(tr.itemId) : undefined;
+      const prompt = buildBaseStatePrompt((tr.kind ?? 'character') as ProductionItemKind, {
+        roleDesc: card?.content || card?.prompt || '',
+        name: tr.name,
+        stylePrompt: visualStyle?.prompt,
+      });
+      filled += 1;
+      return {
+        ...tr,
+        states: tr.states.map((st, i) => (i === 0 ? { ...st, fullPrompt: prompt, deltaPrompt: prompt } : st)),
+      };
+    });
+    if (filled > 0) {
+      commitTrees(next);
+      antdMessage.success(t('subject.healthPromptFilled', { n: filled, defaultValue: `已为 ${filled} 个主体补上提示词` }));
+    }
+  }, [subjectHealth.noPrompt, cards, visualStyle?.prompt, commitTrees, antdMessage, t]);
+
   /** 打开主体：找不到绑定的树时按卡片幂等建树（新树直接带 itemId，不再走名字配对） */
   const openSubject = useCallback((card: SubjectCardData | null, rootId?: string) => {
     let rid = rootId;
@@ -1556,6 +1590,20 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       }
     }
     if (!rid) return;
+    // 防「主体卡有、提示词空白」：旧数据/只建了名的树，打开时自动补模板，用户不该看到半成品
+    const tree = treesRef.current.find((t) => t.rootId === rid);
+    const base = tree?.states?.[0];
+    if (tree && base && !String(base.fullPrompt ?? '').trim()) {
+      const kind = (tree.kind ?? card?.kind ?? 'character') as ProductionItemKind;
+      const prompt = buildBaseStatePrompt(kind, {
+        roleDesc: card?.content || card?.prompt || '',
+        name: tree.name || card?.name || '',
+        stylePrompt: visualStyle?.prompt,
+      });
+      commitTrees(treesRef.current.map((t) => (t.rootId === rid
+        ? { ...t, states: t.states.map((st, i) => (i === 0 ? { ...st, fullPrompt: prompt, deltaPrompt: prompt } : st)) }
+        : t)));
+    }
     applyLevel({ view: 'subject', rootId: rid }, { push: true });
   }, [applyLevel, commitTrees, productionItems, visualStyle?.prompt]);
 
@@ -2087,6 +2135,36 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
               ))}
             </div>
           )}
+          {(subjectHealth.noPrompt.length > 0 || subjectHealth.noImage.length > 0 || !visualStyle) && (
+            <div
+              data-subject-health
+              style={{
+                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, margin: '8px 0',
+                padding: '8px 10px', borderRadius: 8,
+                border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`,
+                background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+              }}
+            >
+              {!visualStyle && (
+                <div data-subject-health-style style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: theme.toolbar.text }}>还没设全剧风格</span>
+                  <Button size="small" onClick={() => setStyleGalleryOpen(true)}>选择风格</Button>
+                </div>
+              )}
+              {subjectHealth.noPrompt.length > 0 && (
+                <div data-subject-health-prompt style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: theme.toolbar.text }}>有 {subjectHealth.noPrompt.length} 个主体还没提示词</span>
+                  <Button size="small" onClick={fillMissingPrompts}>补上</Button>
+                </div>
+              )}
+              {subjectHealth.noImage.length > 0 && (
+                <div data-subject-health-image style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: theme.toolbar.text }}>有 {subjectHealth.noImage.length} 个主体还没定妆图</span>
+                  <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>点开主体 → 画布生成</span>
+                </div>
+              )}
+            </div>
+          )}
           <div style={listFrame.content}>
             {activeEpisode !== null && episodeCards.length === 0 ? (
               <div data-subject-episode-empty style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 0', textAlign: 'center' }}>
@@ -2106,7 +2184,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                 <div style={{ ...hintStyle, maxWidth: 360 }}>
                   {search.trim()
                     ? t('subject.searchEmptyHint', '换个关键词，或切换上方类型筛选')
-                    : t('subject.libraryEmptyHint', '创建第一个主体后，即可为它维护形象状态与出现集数')}
+                    : t('subject.libraryEmptyHint', '可以让 Agent 从剧本里提取主体，也可以手动添加第一个主体')}
                 </div>
                 {!embedded && !search.trim() && onAddSubject && (
                   <Button type="primary" size="small" icon={<Plus size={14} />} onClick={onAddSubject}>

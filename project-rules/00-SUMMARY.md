@@ -15,10 +15,10 @@
 
 状态：in-progress 3 / done 2 / 待拍板 0 / deprecated 0。
 
-## 二、需求征集（30 条，全部 merged）
+## 二、需求征集（31 条，全部 merged）
 
 索引见 [suggestion-board/README.md](suggestion-board/README.md)；模板见 [suggestion-board/_template.md](suggestion-board/_template.md)。
-2026-11-02 起全部为 comfyui 需求，2026-11-06 由外部库迁回本目录；S-23（2026-11-12）为之后新增，S-25~30 为 2026-11-13 主体图闸门、全剧风格画廊、画廊直达 + MCP 读写、导演台分集、MCP 升级自查、本集检查。
+2026-11-02 起全部为 comfyui 需求，2026-11-06 由外部库迁回本目录；S-23（2026-11-12）为之后新增，S-25~31 为 2026-11-13 主体图闸门、全剧风格画廊、画廊直达 + MCP 读写、导演台分集、MCP 升级自查、本集检查、半成品自愈。
 
 ## 三、交接 / 设计记录
 
@@ -31,6 +31,7 @@
 | [docs/entities-redesign-2026-11-04.md](docs/entities-redesign-2026-11-04.md) | 三页签取证 + 实体层 schema |
 | [docs/mcp-server-design.md](docs/mcp-server-design.md) | MCP Server 设计 |
 | [docs/2026-11-13-drama-skills-gap-audit.md](docs/2026-11-13-drama-skills-gap-audit.md) | drama-skills 对照查漏补缺：镜头卡 / 场次站位 / 起始帧 / 图片八段式 / 审片清单（已落地部分） |
+| [docs/2026-11-13-novice-journey-audit.md](docs/2026-11-13-novice-journey-audit.md) | 小白用户旅程审计：创建/打开/主体/导演台/交付的漏洞与自愈保证 |
 
 ## 四、规格与技术契约（2026-11-06 全部迁入本库）
 

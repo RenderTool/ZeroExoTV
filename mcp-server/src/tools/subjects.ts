@@ -5,7 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import { isImageReviewed } from "../lib/image-review.js";
-import { buildSubjectProfile } from "../lib/subject-profile.js";
+import { buildMinimalSubjectPrompt, buildSubjectProfile } from "../lib/subject-profile.js";
 import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, setSubjectProfile, syncSubjectEpisodes, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
@@ -196,10 +196,43 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         }
       }
       const res = await upsertSubject(dataRoot(), projectId, { baseVersion, subject, dryRun });
+      // 防「主体建了但没有提示词」：新建/空树时立刻补一条最小可用提示词（set_subject_profile 再精修）
+      let promptSeeded = false;
+      let seededVersion: number | undefined;
+      if (!dryRun) {
+        try {
+          const sbNow = await readStoryboard(dataRoot(), projectId);
+          const trees = (Array.isArray(sbNow?.subjectTree) ? sbNow.subjectTree : []) as Array<{
+            itemId?: string; rootId?: string; states?: Array<{ fullPrompt?: string }>;
+          }>;
+          const tree = trees.find((t) => t.itemId === res.subject.id || t.rootId === res.subject.id);
+          if (sbNow && !String(tree?.states?.[0]?.fullPrompt ?? "").trim()) {
+            const script = await readScript(dataRoot(), projectId).catch(() => null);
+            const prompt = buildMinimalSubjectPrompt(
+              args.kind,
+              args.name,
+              args.note,
+              script?.meta?.visualStyle?.prompt,
+            );
+            const seeded = await setSubjectProfile(dataRoot(), projectId, {
+              baseVersion: sbNow.version,
+              subjectId: res.subject.id,
+              anchor: args.note ?? "",
+              prompt,
+            });
+            promptSeeded = true;
+            seededVersion = seeded.after.version;
+          }
+        } catch { /* 兜底失败不阻断主体创建；页面打开主体时仍会补模板 */ }
+      }
       return {
         written: res.written,
         created: res.created,
-        version: res.after.version,
+        version: seededVersion ?? res.after.version,
+        promptSeeded,
+        ...(promptSeeded
+          ? { promptSeededHint: "已自动补一条最小提示词；再调 set_subject_profile 补全字段会覆盖成完整模板" }
+          : {}),
         subject: res.subject,
         ...(autoEpisodes
           ? {

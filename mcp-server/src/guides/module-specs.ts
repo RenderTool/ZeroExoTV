@@ -102,7 +102,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     mcpTools: [
       "list_projects", "get_project", "open_project", "create_project",
       // 画布是项目的一等挂载物（Spec v2 / 征集#184）：1 号主画布 + N 份副本均属本项目
-      "list_canvases", "get_canvas", "patch_canvas_nodes", "audit_upgrade", "get_upgrade_guide",
+      "list_canvases", "get_canvas", "patch_canvas_nodes", "audit_upgrade", "get_upgrade_guide", "ensure_project_ready",
     ],
     caveats: [
       "前置阶段1 收料：项目名必须用户给出（gate：项目名与剧本原文齐备才进阶段2）",
@@ -191,6 +191,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
       "场景只收录 ≥2 场复用或承载关键剧情的；道具只收有剧情推动或象征意义的（通常一部短片 0-5 个）",
       "link_subject_to_shot 可先 matchByName 拿候选清单（不写盘），再给 subjectId 直写",
       "连上/更新后先 audit_upgrade（只读）按旧流程纰漏报给用户并问是否修复；不要只说版本已更新",
+      "说「完成 / 可以出片」前先 ensure_project_ready：自动补主体提示词与本剧简介，再把 repaired/remaining 用大白话告诉用户",
       "全剧风格是项目级单值（script.meta.visualStyle）：list_style_presets 23 套 → 用户选 id → set_global_style（dryRun→确认→userConfirmed+baseVersion）；会改写所有主体提示词的风格块，单主体不覆盖",
     ],
   },

@@ -88,6 +88,29 @@ function styleBlock(stylePrompt?: string): string {
   ].join("\n");
 }
 
+/**
+ * 最小可用主体提示词（2026-11-13）：新建主体还没跑 set_subject_profile 时兜底，
+ * 保证「主体已经有提示词」而不是空白；后续 set_subject_profile 会覆盖成完整模板。
+ */
+export function buildMinimalSubjectPrompt(
+  kind: SubjectKindInput,
+  name: string,
+  note?: string,
+  stylePrompt?: string,
+): string {
+  const desc = (note ?? "").trim() || `${name}（${kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具"}）`;
+  if (kind === "scene") {
+    return `专业电影级场景参考图。场景：${name}。${desc}
+空场景，画面中不得出现人物、动物、字幕、水印；保持空间结构与材质真实。\n${styleBlock(stylePrompt)}`;
+  }
+  if (kind === "prop") {
+    return `专业电影级道具参考图。道具：${name}。${desc}
+单品居中，无人物、无手、无文字水印；材质与做旧程度与描述一致。\n${styleBlock(stylePrompt)}`;
+  }
+  return `专业电影级角色定妆参考图（单人）。角色：${name}。${desc}
+画面只出现这一个角色，同一张脸、同一套服装；禁止第二个人、多人合照、模特合集、候选人群像。\n${styleBlock(stylePrompt)}`;
+}
+
 /** 角色模板：sheet = 三视图；single/white-bg = 单张定妆照（白底用于快速抠图） */
 export function buildCharacterPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
   const earring = v(profile, "耳饰");

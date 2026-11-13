@@ -13,7 +13,7 @@ function shot(patch: Partial<WorkbenchShot> = {}): WorkbenchShot {
     videoPrompt: '视频',
     status: 'pending',
     clipState: 'placeholder',
-    references: [{ id: 'r1', kind: 'image', storageKey: 'cas:x' } as WorkbenchShot['references'][number]],
+    references: [{ id: 'r1', kind: 'image', storageKey: 'cas:x' } as never],
     paramValues: {},
     ...patch,
   };
