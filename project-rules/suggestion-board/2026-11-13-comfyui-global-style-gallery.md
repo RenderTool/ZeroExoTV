@@ -54,7 +54,15 @@
 `script-store.ts`（`ScriptMeta.visualStyle`）、`subject-library-pages.tsx`（只读显示 + 提交对齐 + 模板传风格）、
 `subject-prompt-templates.ts`（styleBlock）、`mcp-server` 的 `store/script.ts` / `lib/subject-profile.ts` / `tools/subjects.ts`。
 
-## 五、边界
+## 五、后续补齐：16 套题材基础（2026-11-13 用户追问）
+
+用户：全局风格没写全，都市风格呢？基础写实呢？邵氏风格呢？经典港片？
+
+- 新增分类「题材」，补 16 套：基础写实、都市写实、都市言情、古装仙侠、民国年代、青春校园、甜宠、悬疑犯罪、家庭生活、职场商战、战争历史、科幻末日、港风复古、日系清新、邵氏风格、经典港片。
+- 题材卡没有示例图，画廊用渐变卡（避免拿别人的图硬凑）；电影美学 23 套仍有缩略图。
+- 总数 39；MCP `list_style_presets` 与前端同一份数据。
+
+## 六、边界
 
 - 缩略图来自文章示例图，仅作风格预览；上线前如需替换为自有图，直接替换 `public/style-presets/*.webp` 即可。
 - 全剧风格保存后，已打开的主体库页面需重新进入/刷新才看到改写后的提示词（容器外部变更刷新机制既有）。

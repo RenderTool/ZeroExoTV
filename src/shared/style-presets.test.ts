@@ -4,14 +4,15 @@ import {
 } from './style-presets.js';
 
 describe('风格画廊数据（2026-11-13）', () => {
-  it('23 套：9 导演 / 6 主流 / 8 动画，每套有中文提示词与缩略图', () => {
-    expect(STYLE_PRESETS).toHaveLength(23);
+  it('39 套：9 导演 / 6 主流 / 8 动画 / 16 题材；电影美学有缩略图，题材卡用渐变', () => {
+    expect(STYLE_PRESETS).toHaveLength(39);
     expect(STYLE_PRESETS.filter((s) => s.category === 'director')).toHaveLength(9);
     expect(STYLE_PRESETS.filter((s) => s.category === 'mainstream')).toHaveLength(6);
     expect(STYLE_PRESETS.filter((s) => s.category === 'animation')).toHaveLength(8);
+    expect(STYLE_PRESETS.filter((s) => s.category === 'genre')).toHaveLength(16);
     for (const s of STYLE_PRESETS) {
       expect(s.promptZh.startsWith('[主体]')).toBe(true);
-      expect(s.image.startsWith('style-presets/')).toBe(true);
+      if (s.category !== 'genre') expect(s.image?.startsWith('style-presets/')).toBe(true);
     }
     expect(stylePresetById('wong-kar-wai')?.nameZh).toContain('王家卫');
   });

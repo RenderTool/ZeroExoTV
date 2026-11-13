@@ -192,7 +192,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
       "link_subject_to_shot 可先 matchByName 拿候选清单（不写盘），再给 subjectId 直写",
       "连上/更新后先 audit_upgrade（只读）按旧流程纰漏报给用户并问是否修复；不要只说版本已更新",
       "说「完成 / 可以出片」前先 ensure_project_ready：自动补主体提示词与本剧简介，再把 repaired/remaining 用大白话告诉用户",
-      "全剧风格是项目级单值（script.meta.visualStyle）：list_style_presets 23 套 → 用户选 id → set_global_style（dryRun→确认→userConfirmed+baseVersion）；会改写所有主体提示词的风格块，单主体不覆盖",
+      "全剧风格是项目级单值（script.meta.visualStyle）：list_style_presets 39 套 → 用户选 id → set_global_style（dryRun→确认→userConfirmed+baseVersion）；会改写所有主体提示词的风格块，单主体不覆盖",
     ],
   },
   {

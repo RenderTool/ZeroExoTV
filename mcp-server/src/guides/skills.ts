@@ -147,7 +147,7 @@ const SUBJECTS = `# 技能：主体库（subjects）
 
 - 风格不是每个主体各写一套：\`script.meta.visualStyle\` 存一套快照（presetId / name / prompt / image），
   所有主体/状态提示词继承；单主体不覆盖。
-- 工具：\`list_style_presets\`（23 套：9 导演 / 6 主流 / 8 动画）→ 把候选 id 与名称报给用户选 →
+- 工具：\`list_style_presets\`（39 套：9 导演 / 6 主流 / 8 动画 / 16 题材，含都市、基础写实、邵氏、经典港片）→ 把候选 id 与名称报给用户选 →
   \`get_global_style\` 看现状 → \`set_global_style({ presetId, baseVersion, dryRun, userConfirmed })\`。
 - \`set_global_style\` 会删所有主体提示词里的「风格 / 灯光 / 色彩 / 质感」旧行，末尾追加一行
   「风格：<该套片段>」；空提示词不动，人设 / 版式 / 硬约束不动。**必须先把 presetId 与影响报用户确认再写**。

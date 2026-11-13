@@ -6,7 +6,7 @@
  * 用法：全剧只选一套；主体提示词拼这套的 promptZh（去掉 [主体], 前缀），不再每个主体各写风格。
  */
 
-export type StylePresetCategory = 'director' | 'mainstream' | 'animation';
+export type StylePresetCategory = 'director' | 'mainstream' | 'animation' | 'genre';
 
 export interface StylePreset {
   id: string;
@@ -19,8 +19,10 @@ export interface StylePreset {
   promptZh: string;
   /** 英文提示词模板（含 [subject] 占位） */
   promptEn: string;
-  /** public 下的缩略图文件名 */
-  image: string;
+  /** public 下的缩略图文件名（题材风格没有示例图时为空，画廊用渐变卡） */
+  image?: string;
+  /** 无示例图时的渐变配色 */
+  palette?: [string, string];
 }
 
 export const STYLE_CATEGORY_LABELS: Record<'all' | StylePresetCategory, string> = {
@@ -28,6 +30,7 @@ export const STYLE_CATEGORY_LABELS: Record<'all' | StylePresetCategory, string> 
   director: '导演',
   mainstream: '主流',
   animation: '动画',
+  genre: '题材',
 };
 
 export const STYLE_PRESETS: StylePreset[] = [
@@ -284,6 +287,182 @@ export const STYLE_PRESETS: StylePreset[] = [
     promptEn: "[subject], modern Chinese theatrical animation style, Chinese mythological elements, dynamic flowing energy effects, rich saturated color palette, traditional cultural symbolism, modern CG rendering, epic scale composition, stylized character design, Nezha or Jiang Ziya inspired, martial arts action choreography, spiritual atmosphere",
     image: "style-presets/chinese-theatrical-animation.webp",
   },
+  {
+    id: 'basic-real',
+    name: '基础写实 (Basic Realism)',
+    nameZh: '基础写实',
+    nameEn: 'Basic Realism',
+    category: 'genre',
+    intro: '最通用的写实底子：自然光、真实皮肤、无滤镜，适合没有强风格要求的现代戏。',
+    promptZh: '[主体], 电影级写实摄影, 自然光照明, 真实皮肤质感与毛孔, 低饱和自然色, 无滤镜, 35mm 镜头, 柔和景深, 生活化质感',
+    promptEn: '[subject], cinematic realistic photography, natural lighting,真实 skin texture and pores, low-saturation natural palette, no filter, 35mm lens, soft depth of field, everyday texture',
+    palette: ["#8a8f98", "#3c4148"],
+  },
+  {
+    id: 'urban-real',
+    name: '都市写实 (Urban Realism)',
+    nameZh: '都市写实',
+    nameEn: 'Urban Realism',
+    category: 'genre',
+    intro: '城市实景、玻璃与霓虹反射，适合都市生活/职场/现实题材。',
+    promptZh: '[主体], 现代都市写实电影风格, 城市自然光与玻璃反射, 冷灰与暖橙对比, 真实皮肤, 生活化街景, 35mm 手持感',
+    promptEn: '[subject], modern urban realistic cinematography, city natural light and glass reflections, cool gray and warm amber contrast, realistic skin, everyday street, 35mm handheld',
+    palette: ["#5b6b7a", "#d08a4a"],
+  },
+  {
+    id: 'urban-romance',
+    name: '都市言情 (Urban Romance)',
+    nameZh: '都市言情',
+    nameEn: 'Urban Romance',
+    category: 'genre',
+    intro: '干净明亮的都市偶像剧质感，柔光、浅景深、精致妆发。',
+    promptZh: '[主体], 都市偶像剧风格, 干净明亮, 柔光美颜, 低对比, 浅景深, 现代公寓与写字楼, 精致妆发',
+    promptEn: '[subject], urban romance drama style, clean and bright, soft beauty lighting, low contrast, shallow depth of field, modern apartment and office, polished hair and makeup',
+    palette: ["#f2c9c0", "#b8877a"],
+  },
+  {
+    id: 'costume-xianxia',
+    name: '古装仙侠 (Costume Xianxia)',
+    nameZh: '古装仙侠',
+    nameEn: 'Costume Xianxia',
+    category: 'genre',
+    intro: '冷月、云雾、青蓝月白，飘逸纱衣与水墨留白。',
+    promptZh: '[主体], 古装仙侠电影风格, 冷月与云雾, 青蓝月白, 飘逸纱衣, 水墨留白, 仙气体积光',
+    promptEn: '[subject], Chinese xianxia costume style, cold moon and mist, cyan and moon white, flowing gauze, ink-wash negative space, ethereal volumetric light',
+    palette: ["#5c7f8a", "#d8e2e6"],
+  },
+  {
+    id: 'republican',
+    name: '民国年代 (Republican Era)',
+    nameZh: '民国年代',
+    nameEn: 'Republican Era',
+    category: 'genre',
+    intro: '暖黄低饱和、旗袍中山装、老上海街景与胶片颗粒。',
+    promptZh: '[主体], 民国年代剧风格, 暖黄低饱和, 旗袍与中山装, 老上海街景, 胶片颗粒, 柔和窗光',
+    promptEn: '[subject], Republican-era Chinese drama style, warm yellow low saturation, qipao and Zhongshan suit, old Shanghai street, film grain, soft window light',
+    palette: ["#a8753e", "#6e4a2a"],
+  },
+  {
+    id: 'campus',
+    name: '青春校园 (Campus Youth)',
+    nameZh: '青春校园',
+    nameEn: 'Campus Youth',
+    category: 'genre',
+    intro: '明亮自然光、清新低饱和、校服教室操场，日系空气感。',
+    promptZh: '[主体], 青春校园剧风格, 明亮自然光, 清新低饱和, 校服教室操场, 日系空气感, 轻微过曝',
+    promptEn: '[subject], campus youth drama style, bright natural light, fresh low saturation, school uniform classroom and playground, Japanese airy feel, slight overexposure',
+    palette: ["#a8c8b8", "#f0e7c8"],
+  },
+  {
+    id: 'sweet-romance',
+    name: '甜宠 (Sweet Romance)',
+    nameZh: '甜宠',
+    nameEn: 'Sweet Romance',
+    category: 'genre',
+    intro: '高明度暖粉调、柔光、近景双人，轻胶片颗粒。',
+    promptZh: '[主体], 甜宠剧风格, 高明度暖粉调, 柔光, 近景双人, 干净背景, 轻胶片颗粒',
+    promptEn: '[subject], sweet romance drama style, high-key warm pink, soft light, close two-shot, clean background, light film grain',
+    palette: ["#f4c2c8", "#e98f9a"],
+  },
+  {
+    id: 'suspense-crime',
+    name: '悬疑犯罪 (Suspense Crime)',
+    nameZh: '悬疑犯罪',
+    nameEn: 'Suspense Crime',
+    category: 'genre',
+    intro: '冷青灰、硬光大面积阴影、雨夜霓虹，低饱和高对比。',
+    promptZh: '[主体], 悬疑犯罪电影风格, 冷青灰, 硬光与大面积阴影, 雨夜霓虹, 低饱和高对比',
+    promptEn: '[subject], suspense crime cinematography, cold cyan gray, hard light and large shadows, rainy neon night, low saturation high contrast',
+    palette: ["#2c3a42", "#0f1418"],
+  },
+  {
+    id: 'family-life',
+    name: '家庭生活 (Family Life)',
+    nameZh: '家庭生活',
+    nameEn: 'Family Life',
+    category: 'genre',
+    intro: '自然窗光、暖木色、真实家居，生活化构图。',
+    promptZh: '[主体], 家庭生活剧风格, 自然窗光, 暖木色, 真实家居, 低饱和, 生活化构图',
+    promptEn: '[subject], family life drama style, natural window light, warm wood tones, real home interior, low saturation, everyday composition',
+    palette: ["#c8a882", "#8a6a4a"],
+  },
+  {
+    id: 'workplace',
+    name: '职场商战 (Workplace)',
+    nameZh: '职场商战',
+    nameEn: 'Workplace',
+    category: 'genre',
+    intro: '冷白办公光、玻璃幕墙、低饱和蓝灰，干净利落。',
+    promptZh: '[主体], 职场商战剧风格, 冷白办公光, 玻璃幕墙, 低饱和蓝灰, 干净利落构图',
+    promptEn: '[subject], workplace business drama style, cool white office light, glass curtain wall, low saturation blue gray, clean sharp composition',
+    palette: ["#7a8a99", "#2f3a45"],
+  },
+  {
+    id: 'war-history',
+    name: '战争历史 (War History)',
+    nameZh: '战争历史',
+    nameEn: 'War History',
+    category: 'genre',
+    intro: '尘土硝烟、去饱和土黄、硬光、手持纪实感、宽银幕。',
+    promptZh: '[主体], 战争历史电影风格, 尘土与硝烟, 去饱和土黄, 硬光, 手持纪实感, 宽银幕',
+    promptEn: '[subject], war history cinematography, dust and smoke, desaturated earth yellow, hard light, handheld documentary feel, widescreen',
+    palette: ["#8a7050", "#3a3028"],
+  },
+  {
+    id: 'sci-fi-apocalypse',
+    name: '科幻末日 (Sci-Fi Apocalypse)',
+    nameZh: '科幻末日',
+    nameEn: 'Sci-Fi Apocalypse',
+    category: 'genre',
+    intro: '冷青与铁锈、硬边光、工业废墟、高对比与体积尘雾。',
+    promptZh: '[主体], 科幻末日风格, 冷青与铁锈, 硬边光, 工业废墟, 高对比, 体积尘雾',
+    promptEn: '[subject], sci-fi apocalypse style, cold cyan and rust, hard edge light, industrial ruins, high contrast, volumetric dust',
+    palette: ["#2f4a52", "#8a4a2a"],
+  },
+  {
+    id: 'hongkong-retro',
+    name: '港风复古 (Hong Kong Retro)',
+    nameZh: '港风复古',
+    nameEn: 'Hong Kong Retro',
+    category: 'genre',
+    intro: '霓虹绿与暖黄、雨夜街巷、胶片颗粒、手持。',
+    promptZh: '[主体], 港风复古电影风格, 霓虹绿与暖黄, 雨夜街巷, 胶片颗粒, 手持',
+    promptEn: '[subject], Hong Kong retro cinematography, neon green and warm yellow, rainy night alley, film grain, handheld',
+    palette: ["#3a6a4a", "#c8a04a"],
+  },
+  {
+    id: 'japanese-fresh',
+    name: '日系清新 (Japanese Fresh)',
+    nameZh: '日系清新',
+    nameEn: 'Japanese Fresh',
+    category: 'genre',
+    intro: '高调柔光、低对比、青绿米白、空气感浅景深。',
+    promptZh: '[主体], 日系清新风格, 高调柔光, 低对比, 青绿米白, 空气感, 浅景深',
+    promptEn: '[subject], Japanese fresh style, high-key soft light, low contrast, sage green and cream, airy, shallow depth of field',
+    palette: ["#c8d8c0", "#f4efe4"],
+  },
+  {
+    id: 'shaw-brothers',
+    name: '邵氏风格 (Shaw Brothers)',
+    nameZh: '邵氏风格',
+    nameEn: 'Shaw Brothers',
+    category: 'genre',
+    intro: '1960–70 年代邵氏片场：高饱和胶片、手绘布景、戏剧化硬光，武侠与功夫片的经典质感。',
+    promptZh: '[主体], 邵氏电影风格, 1960年代香港片场, 高饱和胶片色彩, 手绘布景, 戏剧化硬光, 武侠与功夫片质感, 明显胶片颗粒与轻微褪色',
+    promptEn: '[subject], Shaw Brothers studio style, 1960s Hong Kong soundstage, saturated film colors, painted backdrops, dramatic hard lighting, martial arts film texture, visible film grain and slight fade',
+    palette: ["#b03a2e", "#d4a017"],
+  },
+  {
+    id: 'hk-classic',
+    name: '经典港片 (Classic Hong Kong Cinema)',
+    nameZh: '经典港片',
+    nameEn: 'Classic Hong Kong Cinema',
+    category: 'genre',
+    intro: '80–90 年代香港电影：霓虹夜色、暖黄青绿、手持与慢镜，英雄片/警匪片的胶片质感。',
+    promptZh: '[主体], 80至90年代经典港片风格, 霓虹与夜色, 暖黄与青绿, 手持与慢镜, 胶片颗粒, 英雄片与警匪片质感',
+    promptEn: '[subject], 1980s-90s classic Hong Kong cinema style, neon night, warm amber and teal, handheld and slow motion, film grain, heroic bloodshed and crime film texture',
+    palette: ["#1f6b6b", "#e0a020"],
+  },
 ];
 
 /** 风格 id → 预设 */
@@ -304,7 +483,7 @@ export function styleAssetUrl(path: string): string {
 }
 
 export function stylePresetImageUrl(preset: StylePreset): string {
-  return styleAssetUrl(preset.image);
+  return preset.image ? styleAssetUrl(preset.image) : '';
 }
 
 /**

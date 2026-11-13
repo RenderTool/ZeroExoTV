@@ -35,13 +35,13 @@ export function registerStyleTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "list_style_presets",
     description:
-      "列出全剧风格预设库（23 套：9 导演 / 6 主流 / 8 动画），返回 id / 中文名 / 英文名 / 分类 / 风格片段。" +
+      "列出全剧风格预设库（39 套：9 导演 / 6 主流 / 8 动画 / 16 题材，含都市、基础写实、邵氏、经典港片），返回 id / 中文名 / 英文名 / 分类 / 风格片段。" +
       "风格是全剧设定：先把候选 id 报给用户选，再用 set_global_style 落盘。",
     bits: ["script.read"],
     schema: {},
     handler: async () => ({
       count: STYLE_PRESETS.length,
-      categories: { director: 9, mainstream: 6, animation: 8 },
+      categories: STYLE_PRESETS.reduce<Record<string, number>>((acc, p) => { acc[p.category] = (acc[p.category] ?? 0) + 1; return acc; }, {}),
       presets: summarizePreset(),
     }),
   });
@@ -92,7 +92,7 @@ export function registerStyleTools(server: McpServer, ctx: Ctx): void {
         presetId: preset.id,
         name: preset.nameZh,
         prompt: stylePresetPrompt(preset),
-        image: `style-presets/${preset.id}.webp`,
+        ...(preset.category === "genre" ? {} : { image: `style-presets/${preset.id}.webp` }),
       };
       const stylePrompt = visualStyle.prompt;
       if (args.dryRun) {

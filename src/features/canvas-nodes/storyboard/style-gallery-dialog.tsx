@@ -96,7 +96,7 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
 
         {/* 分类 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 20px 10px', flexWrap: 'wrap' }}>
-          {(['all', 'director', 'mainstream', 'animation'] as const).map((key) => {
+          {(['all', 'director', 'mainstream', 'animation', 'genre'] as const).map((key) => {
             const active = category === key && !favoritesOnly;
             return (
               <button
@@ -155,13 +155,24 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
                   }}
                 >
                   <div style={{ position: 'relative', aspectRatio: '16 / 9', background: 'linear-gradient(135deg,#222,#444)' }}>
-                    <img
-                      src={stylePresetImageUrl(preset)}
-                      alt={preset.name}
-                      loading="lazy"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
-                    />
+                    {preset.image ? (
+                      <img
+                        src={stylePresetImageUrl(preset)}
+                        alt={preset.name}
+                        loading="lazy"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                      />
+                    ) : (
+                      <div style={{
+                        width: '100%', height: '100%', display: 'flex', alignItems: 'flex-end', padding: 10,
+                        background: `linear-gradient(135deg, ${preset.palette?.[0] ?? '#444'}, ${preset.palette?.[1] ?? '#151515'})`,
+                      }}>
+                        <span style={{ fontSize: 17, fontWeight: 700, color: 'rgba(255,255,255,0.92)', textShadow: '0 1px 4px rgba(0,0,0,0.45)' }}>
+                          {preset.nameZh}
+                        </span>
+                      </div>
+                    )}
                     {selected && (
                       <span style={{ position: 'absolute', top: 6, left: 6, width: 18, height: 18, borderRadius: 9, background: accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Check size={12} color="#fff" />
