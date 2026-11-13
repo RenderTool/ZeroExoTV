@@ -144,17 +144,17 @@ function createSegment(number: number, episodeId?: string): WorkbenchShot {
  */
 export function resolveClipStatus(
   status: WorkbenchShot['status'],
-  run: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null } | undefined,
+  run: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null } | undefined,
   shotId: string,
 ): NonNullable<TimelineClipData['status']> {
   if (status === 'pending') return 'idle';
   if (status === 'done' || status === 'failed') return status;
   if (!run) return 'generating';
-  // 只标记「本次运行实际选中的片段」；其他片段即使上次残留 generating/queued，
-  // 也不能在本轮显示排队/生成中（2026-11-10 用户实测批量只选 2 段，后面全亮生成中）。
   const idx = run.segmentShotIds.indexOf(shotId);
   if (idx < 0) return 'idle';
   if (run.phase === 'canceled') return 'cancelled';
+  // 插件已开始推实时帧，但作业状态可能还停在 queued：以帧的段号为准
+  if (run.previewSegmentIndex && idx === run.previewSegmentIndex - 1) return 'generating';
   if (run.phase === 'submitting' || run.phase === 'queued') return 'queued';
   if (run.phase === 'running') {
     return run.currentSegment !== null && idx === run.currentSegment - 1 ? 'generating' : 'queued';
@@ -163,7 +163,7 @@ export function resolveClipStatus(
 }
 
 /** WorkbenchShot → 时间轴 clip（与 workbench-multitrack.tsx byTrack 的转换逐项对齐，同一映射不两套） */
-function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null }): TimelineClipData {
+function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null }): TimelineClipData {
   return {
     id: s.id,
     number: s.number,
@@ -1139,8 +1139,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       phase: comfyRun.phase,
       segmentShotIds: comfyRun.segmentShotIds,
       currentSegment: comfyRun.currentSegment,
+      previewSegmentIndex: comfyRun.preview?.segmentIndex ?? null,
     })),
-    [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment],
+    [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment, comfyRun.preview?.segmentIndex],
   );
 
   const selectedShot: WorkbenchShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0] ?? {
