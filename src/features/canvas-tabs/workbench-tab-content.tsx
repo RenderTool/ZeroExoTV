@@ -1342,6 +1342,31 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   onClick={() => setEpisodeCheckOpen(true)}
                   style={{ fontSize: 12 }}
                 >检查</Button>
+                {activeEpisodeKey && activeEpisodeKey !== UNASSIGNED_EPISODE_KEY && shots.some((x) => !x.episodeId) && (
+                  <Button
+                    size="small"
+                    type="text"
+                    data-director-adopt-unassigned
+                    style={{ fontSize: 12 }}
+                    onClick={() => {
+                      const count = shots.filter((x) => !x.episodeId).length;
+                      Modal.confirm({
+                        centered: true,
+                        title: '归入本集',
+                        content: `把 ${count} 段未分集片段全部归入「${activeEpisodeLabel || '当前集'}」？`,
+                        okText: '归入',
+                        cancelText: '取消',
+                        onOk: () => {
+                          setShots((prev) => prev.map((x) => (x.episodeId ? x : { ...x, episodeId: activeEpisodeKey })));
+                          markDirty();
+                          message.success(`已归入 ${count} 段`);
+                        },
+                      });
+                    }}
+                  >
+                    归入本集
+                  </Button>
+                )}
               </div>
             ) : null,
             tracks: [track],
@@ -1476,6 +1501,35 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             // 分割/合并不接线（undefined）
           }}
           promptPanelOverride={
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+              <div
+                data-director-segment-episode
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flexShrink: 0,
+                  borderBottom: '1px solid rgba(128,128,128,0.2)',
+                }}
+              >
+                <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>本段所属</span>
+                <Select
+                  size="small"
+                  value={selectedShot?.episodeId ?? UNASSIGNED_EPISODE_KEY}
+                  options={[
+                    { value: UNASSIGNED_EPISODE_KEY, label: '未分集' },
+                    ...episodeOptions.filter((o) => !o.disabled),
+                  ]}
+                  onChange={(value: string) => {
+                    if (!selectedShot) return;
+                    updateShot(selectedShot.id, {
+                      episodeId: value === UNASSIGNED_EPISODE_KEY ? undefined : value,
+                    });
+                  }}
+                  disabled={!selectedShot}
+                  style={{ minWidth: 140 }}
+                  popupMatchSelectWidth={false}
+                />
+                <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>可单独改这一段</span>
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>
             <DirectorPromptPanel
               shared={sharedParams}
               onSharedChange={updateSharedParams}
@@ -1507,6 +1561,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               // 2026-11-04 参数区搬家：比例/系数/尺寸/运行整组移到导轨工具行（paramsButton/runButton），
               // 本面板不再渲染参数行；批量唯一入口 = 导轨工具栏 batchEntry（onRunAll 已删除）。
             />
+              </div>
+            </div>
           }
           theme={theme}
           isDark={isDark}

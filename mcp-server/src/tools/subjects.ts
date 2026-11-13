@@ -6,7 +6,10 @@ import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import { isImageReviewed } from "../lib/image-review.js";
 import { buildMinimalSubjectPrompt, buildSubjectProfile } from "../lib/subject-profile.js";
-import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, setSubjectProfile, syncSubjectEpisodes, upsertSubject } from "../store/storyboard.js";
+import { groupSceneEntities } from "../lib/scene-groups.js";
+import { updateVersionedJson } from "../store/fs-node.js";
+import { paths } from "../config.js";
+import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, setSubjectProfile, syncSubjectEpisodes, upsertSubject, type StoryboardContainer } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -332,6 +335,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       note: z.string().optional(),
       cover: z.boolean().optional(),
       allowCrossSubject: z.boolean().optional(),
+      samePersonConfirmed: z.boolean().optional()
+        .describe("角色已有多张图时必填：确认这张脸与已有图是同一个演员"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {
@@ -359,6 +364,13 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
             `主体「${item?.name ?? args.subjectId}」还没有人设/标准提示词，禁止先挂图。`
               + "先按 zeroexo://skills/subjects 1.7 的字段表调 set_subject_profile（角色 16 项 / 场景 / 道具；"
               + "有参考图先 read_asset 按图反推），生成三视图/场景宫格/道具提示词后再挂图。",
+          );
+        }
+        if (item?.kind === "character" && (item.images?.length ?? 0) > 0 && args.samePersonConfirmed !== true) {
+          throw new McpError(
+            "IDENTITY_CONFIRM_REQUIRED",
+            `主体「${item.name}」已经有 ${item.images?.length ?? 0} 张图；挂新图前必须确认这张脸是同一个演员。`
+              + "看图比对脸型/五官/年龄/发型，确认一致后带 samePersonConfirmed:true 重试；不一致说明是两个演员，应建两个主体，绝不能混进同一主体。",
           );
         }
         const prompt = (image.prompt ?? "").trim();
@@ -443,6 +455,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       baseVersion: z.number().int().min(0),
       sourceId: z.string(),
       targetId: z.string(),
+      asState: z.boolean().optional().describe("true=把来源主体并成 target 的一个状态（场景子区域用）"),
+      stateName: z.string().optional().describe("合并成状态时的状态名"),
       userConfirmed: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     },
@@ -455,6 +469,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         sourceId: args.sourceId,
         targetId: args.targetId,
         dryRun: args.dryRun,
+        asState: args.asState,
+        stateName: args.stateName,
       });
       return { written: res.written, merged: res.merged, movedImages: res.movedImages, movedStates: res.movedStates, version: res.after.version };
     },
@@ -499,4 +515,82 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       return { written: res.written, version: res.after.version, ref: res.ref };
     },
   });
+
+  defTool(server, ctx, {
+    name: "consolidate_scenes",
+    description:
+      "场景主体归并：同一地点/建筑下的多个场景主体（宴会厅/办公室/走廊/保安部）合并成一个场景主体，" +
+      "子区域变成它的状态（各自保留提示词与图）。**场景必须一个地点一个主体**；先 dryRun 把分组给用户看，" +
+      "确认后带 userConfirmed:true + storyboard baseVersion 才落盘。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      userConfirmed: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      const sb = await readStoryboard(dataRoot(), args.projectId);
+      if (!sb) throw new McpError("NOT_FOUND", `主体库不存在: ${args.projectId}`);
+      const groups = groupSceneEntities(sb.entities as Array<{ id?: string; name?: string; kind?: string }>);
+      if (args.dryRun) {
+        return {
+          dryRun: true,
+          groups: groups.map((g) => ({
+            key: g.key,
+            target: g.targetName,
+            sources: g.sources.map((x) => x.name),
+          })),
+          sceneCount: sb.entities.filter((e) => e.kind === "scene").length,
+          note: "确认后带 userConfirmed:true + baseVersion 再调用；会把来源并成 target 的状态，不删图/提示词。",
+        };
+      }
+      if (!args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "合并场景主体会改多个主体；先 dryRun 给用户看分组，再带 userConfirmed:true。");
+      }
+      let mergedGroups = 0;
+      let mergedScenes = 0;
+      for (const g of groups) {
+        let fresh = await readStoryboard(dataRoot(), args.projectId);
+        if (!fresh) break;
+        const target = fresh.entities.find((e) => e.id === g.targetId);
+        if (!target) continue;
+        if (target.name !== g.key) {
+          await updateVersionedJson<StoryboardContainer>(paths.storyboard(args.projectId, dataRoot()), {
+            baseVersion: fresh.version,
+            mutate: (s) => {
+              const ent = s.entities.find((e) => e.id === g.targetId);
+              if (ent) ent.name = g.key;
+              const trees = (Array.isArray(s.subjectTree) ? s.subjectTree : []) as Array<{ itemId?: string; name?: string }>;
+              const tr = trees.find((t) => t.itemId === g.targetId);
+              if (tr) tr.name = g.key;
+            },
+          });
+        }
+        let moved = 0;
+        for (const src of g.sources) {
+          fresh = await readStoryboard(dataRoot(), args.projectId);
+          if (!fresh) break;
+          try {
+            await mergeSubjects(dataRoot(), args.projectId, {
+              baseVersion: fresh.version,
+              sourceId: src.id,
+              targetId: g.targetId,
+              asState: true,
+              stateName: src.name,
+            });
+            moved += 1;
+            mergedScenes += 1;
+          } catch { /* 单个失败继续 */ }
+        }
+        if (moved > 0) mergedGroups += 1;
+      }
+      return {
+        mergedGroups,
+        mergedScenes,
+        note: "已把同地点场景并成一个主体；子区域变成状态。请刷新主体库确认。",
+      };
+    },
+  });
+
 }

@@ -372,7 +372,7 @@ export async function deleteSubjectImage(
 export async function mergeSubjects(
   root: string,
   projectId: string,
-  opts: { baseVersion: number; sourceId: string; targetId: string; dryRun?: boolean },
+  opts: { baseVersion: number; sourceId: string; targetId: string; dryRun?: boolean; asState?: boolean; stateName?: string },
 ): Promise<UpdateResult<StoryboardContainer> & { merged: boolean; movedImages: number; movedStates: number }> {
   let movedImages = 0;
   let movedStates = 0;
@@ -406,6 +406,25 @@ export async function mergeSubjects(
         if (sourceTree) {
           for (const st of sourceTree.states) {
             if (st.id === "__base__") {
+              if (opts.asState) {
+                // 场景合并：把来源主体变成 target 的一个状态（子区域/房间），保留它自己的提示词与图
+                const stateName = (opts.stateName ?? source.name).trim() || source.name;
+                const exists = targetTree.states.find((x) => x.state === stateName);
+                if (exists) {
+                  for (const m of st.media) {
+                    if (!exists.media.some((x) => x.key === m.key)) exists.media.push(m);
+                  }
+                } else {
+                  targetTree.states.push({
+                    ...st,
+                    id: `snode-${targetTree.rootId}-${targetTree.states.length}`,
+                    state: stateName,
+                    baseRef: targetTree.rootId,
+                  });
+                  movedStates += 1;
+                }
+                continue;
+              }
               if (targetTree.states[0].media.length === 0 && st.media.length > 0) {
                 targetTree.states[0].media = st.media;
               } else {

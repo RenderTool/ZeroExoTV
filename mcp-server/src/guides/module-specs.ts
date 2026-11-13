@@ -180,7 +180,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     ],
     order: 4,
     stage: 3,
-    mcpTools: ["list_subjects", "upsert_subject", "set_subject_profile", "set_subject_image", "link_subject_to_shot", "list_style_presets", "get_global_style", "set_global_style"],
+    mcpTools: ["list_subjects", "upsert_subject", "set_subject_profile", "set_subject_image", "link_subject_to_shot", "merge_subjects", "consolidate_scenes", "list_style_presets", "get_global_style", "set_global_style"],
     caveats: [
       "前置阶段3 提主体：主体清单（名称/类型/别名/状态/出现集数/身份锚点句/图片来源）+ 缺图清单先给用户确认（gate：清单未确认不得 upsert、不得建状态，不得进阶段4）",
       "强制字段：每个主体必须 set_subject_profile 提交完整字段（角色 16 项 / 场景 / 道具），服务端生成三视图/场景宫格/道具参考图提示词；字段不全返回 SUBJECT_PROFILE_INCOMPLETE",
@@ -189,6 +189,8 @@ export const MODULE_SPECS: ModuleSpec[] = [
       "角色图必须单人、同一张脸；多人合照/模特合集/候选人群像/别的角色图一律不许挂；场景必须空场景，道具必须单品",
       "身份锚点句一经锁定，同场景所有提示词逐字复用；改写 = 视觉漂移",
       "场景只收录 ≥2 场复用或承载关键剧情的；道具只收有剧情推动或象征意义的（通常一部短片 0-5 个）",
+      "场景粒度：一个地点/建筑一个主体，子区域（宴会厅/办公室/保安部/走廊）是状态；提取后先 consolidate_scenes（dryRun→确认）",
+      "角色粒度：一个角色主体只能一个演员；已有图再挂新图必须 samePersonConfirmed:true，脸不一致就建两个主体",
       "link_subject_to_shot 可先 matchByName 拿候选清单（不写盘），再给 subjectId 直写",
       "连上/更新后先 audit_upgrade（只读）按旧流程纰漏报给用户并问是否修复；不要只说版本已更新",
       "说「完成 / 可以出片」前先 ensure_project_ready：自动补主体提示词与本剧简介，再把 repaired/remaining 用大白话告诉用户",
