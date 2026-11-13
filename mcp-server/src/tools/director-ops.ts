@@ -65,6 +65,25 @@ async function uploadShotReference(base: string, storageKey: string): Promise<st
   }
 }
 
+/** 从 ComfyUI 的 /view 下载云端产物（MCP 与云 ComfyUI 不在同一台机器时，不能直接读绝对路径） */
+async function downloadComfyOutput(base: string, outputPath: string): Promise<Buffer | null> {
+  const m = /[\\/]output[\\/](.+)$/i.exec(outputPath ?? "");
+  if (!m) return null;
+  const rel = m[1]!.replace(/\\/g, "/");
+  const slash = rel.lastIndexOf("/");
+  const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
+  const subfolder = slash >= 0 ? rel.slice(0, slash) : "";
+  if (!filename) return null;
+  const qs = new URLSearchParams({ filename, subfolder, type: "output" }).toString();
+  try {
+    const res = await fetch(`${base}/view?${qs}`);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 /** 与前端 director-params.ts:285-293 同口径（17k+5 吸附） */
 function durationToFrames(sec: number): number {
   const f = Math.max(1, Math.round(sec * 24));
@@ -578,7 +597,9 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         let casInfo: { hash: string; ext: string } | undefined;
         if (r.videoPath) {
           try {
-            const buf = await fs.readFile(r.videoPath);
+            // 云 ComfyUI 的绝对路径本机读不到：先试本地，失败再走 /view 下载
+            const buf = await fs.readFile(r.videoPath).catch(() => downloadComfyOutput(base, r.videoPath!));
+            if (!buf) throw new Error(`无法读取视频: ${r.videoPath}`);
             const cas = await uploadToCas(root, {
               projectId: args.projectId,
               filename: path.basename(r.videoPath),
