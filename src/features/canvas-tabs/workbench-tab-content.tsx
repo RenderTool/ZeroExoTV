@@ -487,11 +487,13 @@ export function WorkbenchTabContent(): React.ReactElement | null {
 
   /** 「连续播放」：从当前选中片段起，按轨道顺序播放后续所有有视频的片段 */
   const [sequencePlaying, setSequencePlaying] = useState(false);
+  const [sequenceVideoKey, setSequenceVideoKey] = useState<string | undefined>(undefined);
   const sequenceTimer = useRef<number | null>(null);
   const stopSequence = useCallback(() => {
     if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
     sequenceTimer.current = null;
     setSequencePlaying(false);
+    setSequenceVideoKey(undefined);
   }, []);
   const playSequence = useCallback(() => {
     if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
@@ -503,7 +505,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       while (i < list.length && !list[i]?.media?.storageKey) i += 1;
       if (i >= list.length) { stopSequence(); return; }
       const shot = list[i]!;
-      setActiveShotId(shot.id);
+      // 只换预览视频，不切 activeShot：避免提示词编辑器随片段切换被卸载触发 removeChild
+      setSequenceVideoKey(shot.media!.storageKey);
       setPreviewAutoPlayKey((k) => k + 1);
       sequenceTimer.current = window.setTimeout(() => playAt(i + 1), Math.max(1, Number(shot.duration) || 5) * 1000 + 700);
     };
@@ -1162,11 +1165,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    * 2) /ws 实时帧带 1 基段号，必须映射回 shotId 且等于当前选中的片段才允许显示；
    *    否则用户点选未运行片段时，右侧会错误盖着正在生成的那一帧。
    */
-  const completedVideoKey = selectedShot?.status === 'done'
+  const completedVideoKey = sequenceVideoKey ?? (selectedShot?.status === 'done'
     && selectedShot.clipState === 'completed'
     && selectedShot.media?.storageKey
     ? selectedShot.media.storageKey
-    : undefined;
+    : undefined);
   const previewFrame = comfyRun.preview;
   const previewFrameShotId = previewFrame?.segmentIndex
     ? comfyRun.segmentShotIds[previewFrame.segmentIndex - 1]
@@ -1614,7 +1617,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 ? toggleShotContinuity(shotId)
                 : trackMode === 'batch'
                   ? toggleRunSelection(shotId)
-                  : selectShotAndPlay(shotId),
+                  : (() => { stopSequence(); selectShotAndPlay(shotId); })(),
             onInsertAt: handleInsertAt,
             // 2026-11-05 导演台：不接 onTrim（时长不可拖拽，只来自参数）
             // 单删/批量删统一经 guardDeleteShots 把关：剩最后一个拒绝并轻提示（删不准到 0）
