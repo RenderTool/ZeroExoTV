@@ -142,7 +142,7 @@ export const StoryboardConnectDiffDialog = memo(function StoryboardConnectDiffDi
             loading={asking}
             onClick={askAi}
           >
-            {t('subjectDiff.askAi', '问 AI 协助关联')}
+            {t('subjectDiff.askAi', '问AI')}
           </Button>
           <CancelBtn />
           <OkBtn />

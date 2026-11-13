@@ -200,7 +200,7 @@ export const StoryboardPromptDiff = memo(function StoryboardPromptDiff({
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <Sparkles size={12} />
-          {t('promptDiff.askAI', '问 AI 分析差异')}
+          {t('promptDiff.askAI', '问AI')}
         </button>
       </div>
     </div>

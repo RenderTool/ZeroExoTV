@@ -30,7 +30,7 @@
 import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
 import { buildShotAiBrief } from './shot-ai-brief.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -1129,7 +1129,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                   .catch(() => message.error(t('director.askAiFailed', '复制失败，请手动选择复制')));
               }}
             >
-              <Copy size={10} />
+              <Sparkles size={10} />
               {t('director.askAi', '问AI')}
             </button>
           </div>

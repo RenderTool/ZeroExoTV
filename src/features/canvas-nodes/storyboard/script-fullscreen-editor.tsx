@@ -19,7 +19,7 @@
  */
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, CircleX, FileUp, Eye, EyeOff, ArrowUpDown, GripVertical, Undo2, Redo2, History, ChevronDown } from 'lucide-react';
+import { Sparkles, CircleX, FileUp, Eye, EyeOff, ArrowUpDown, GripVertical, Undo2, Redo2, History, ChevronDown } from 'lucide-react';
 import { App, Button, ConfigProvider, Tooltip, Input, Modal, Dropdown } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -463,18 +463,6 @@ export function ScriptFullscreenEditor({
               />
             </Tooltip>
           ) : null}
-          <Tooltip title={t('scriptEditor.askAi', '问AI：复制本集剧本给 AI 修改')}>
-            <Button
-              type="text"
-              size="small"
-              data-script-ask-ai
-              icon={<Bot size={15} />}
-              onClick={() => void handleAskAi()}
-              style={{ ...toolBtnStyle, color: mutedColor }}
-            >
-              {t('scriptEditor.askAiBtn', '问AI')}
-            </Button>
-          </Tooltip>
           <Tooltip title={effectiveShowLabels ? t('scriptEditor.hideLabels') || '隐藏标签' : t('scriptEditor.showLabels') || '显示标签'}>
             <Button
               type="text"
@@ -540,6 +528,19 @@ export function ScriptFullscreenEditor({
             whiteSpace: 'nowrap', overflow: 'hidden',
           }}
         >
+          <Tooltip title={t('scriptEditor.askAi', '问AI：复制本集剧本给 AI 修改')}>
+            <Button
+              type="text"
+              size="small"
+              data-script-ask-ai
+              icon={<Sparkles size={15} />}
+              onClick={() => void handleAskAi()}
+              style={{ ...toolBtnStyle, color: mutedColor }}
+            >
+              {t('scriptEditor.askAiBtn', '问AI')}
+            </Button>
+          </Tooltip>
+          <span style={{ width: 1, height: 12, background: cardBorder, flexShrink: 0 }} />
           <Tooltip title={t('storyboard.wordCountNoPunct', { count: scriptStats.charsNoPunct })}>
             <span>{t('canvasNodes.wordCount', { count: wordCount })}</span>
           </Tooltip>

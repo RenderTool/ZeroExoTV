@@ -1148,7 +1148,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   // 占位 34×22 不变（交界间隙中心 + 卡片垂直居中），不随卡片 220/180/160 档位变化。
   const continuityArrows = useMemo(() => {
     const items: Array<{ id: string; x: number; fromNo: number; toNo: number; on: boolean }> = [];
-    shots.forEach((s, i) => {
+    visibleShots.forEach((s, i) => {
       // 2026-11-04 链接模式草稿：模式内图标按草稿实时渲染（取消回滚后恢复持久态）
       // 2026-11-05 固定宽度片段卡片：交界 x = 卡片下标 × pitch（随容器 220/180/160）
       if (i > 0) {
@@ -1209,7 +1209,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         })}
       </div>
     );
-  }, [shots, t, continuityOn, toggleContinuityDirect, directorCardPitch, directorCardHeightPx, hoveredArrowId, theme.mode]);
+  }, [visibleShots, t, continuityOn, toggleContinuityDirect, directorCardPitch, directorCardHeightPx, hoveredArrowId, theme.mode]);
 
   // ===== 批量勾选层（2026-11-04 批量复用 dry-run 预检） =====
   // 勾选来源 = 轨道行：批量模式下每个片段左上叠一个勾选块（绝对定位纯视觉，不挤布局），
@@ -1220,7 +1220,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (trackMode !== 'batch') return null;
     const items: Array<{ id: string; x: number; checked: boolean }> = [];
     // 2026-11-05 固定宽度片段卡片：勾选块 x = 卡片下标 × pitch（等宽卡片铺排，随容器 220/180/160）
-    shots.forEach((s, i) => {
+    visibleShots.forEach((s, i) => {
       items.push({ id: s.id, x: i * directorCardPitch, checked: runSelection.has(s.id) });
     });
     const darkRail = theme.mode === 'dark';
@@ -1250,7 +1250,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         ))}
       </div>
     );
-  }, [trackMode, shots, runSelection, toggleRunSelection, t, directorCardPitch, theme.mode]);
+  }, [trackMode, visibleShots, runSelection, toggleRunSelection, t, directorCardPitch, theme.mode]);
 
   // 注入活动轨 clip 内容层的覆盖物：衔接箭头（常显）+ 批量勾选块（仅批量模式）
   const railContentOverlay = useMemo(
