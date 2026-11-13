@@ -124,6 +124,8 @@ export interface DirectorRunState {
   preview: DirectorPreviewFrame | null;
   /** 本次运行是否支持实时帧（direct → true；openai 无 ws → false，UI 标「仅进度」） */
   livePreviewSupported: boolean;
+  /** 本次运行开始时间（用于识别已死但没回包的提交/轮询） */
+  startedAt: number;
 }
 
 const INITIAL_STATE: DirectorRunState = {
@@ -139,6 +141,7 @@ const INITIAL_STATE: DirectorRunState = {
   guidance: {},
   preview: null,
   livePreviewSupported: false,
+  startedAt: 0,
 };
 
 // ===== 刷新续接（2026-11-07 用户反馈：生成中刷新页面不能丢作业） =====
@@ -821,6 +824,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           queueNumber,
           totalCount: segmentShotIds.length,
           segmentShotIds,
+          startedAt: Date.now(),
         });
         for (const shotId of segmentShotIds) cbRef.current.onSegmentState(shotId, 'generating');
         recordLastSeed(runSeed, runArgs.projectId);
@@ -940,6 +944,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       segmentShotIds: saved.segmentShotIds,
       preview: null,
       livePreviewSupported: false, // 刷新后 WS clientId 已失效，不再假装能收实时帧
+      startedAt: saved.at,
     });
     void readDirectorPreview<DirectorPreviewFrame>().then((savedFrame) => {
       if (savedFrame) setState((s) => (s.preview ? s : { ...s, preview: savedFrame }));

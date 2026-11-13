@@ -1154,8 +1154,12 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (visibleShots.length === 0) return;
     const allDone = visibleShots.every((s) =>
       s.status === 'done' && s.clipState === 'completed' && Boolean(s.media?.storageKey));
-    if (allDone) comfyRun.reset();
-  }, [loadState, comfyRun.phase, comfyRun.reset, visibleShots]);
+    // 提交/轮询回包丢失时 startedAt 会一直停在那里；超过 10 分钟且每段都已有成片，
+    // 说明这是死运行态，必须让位给视频，而不是永远显示「取消」。
+    const stale = comfyRun.startedAt > 0 && Date.now() - comfyRun.startedAt > 10 * 60 * 1000;
+    const allHaveVideo = visibleShots.every((s) => Boolean(s.media?.storageKey));
+    if (allDone || (stale && allHaveVideo)) comfyRun.reset();
+  }, [loadState, comfyRun.phase, comfyRun.reset, comfyRun.startedAt, visibleShots]);
 
   const selectedShot: WorkbenchShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0] ?? {
     id: '__empty__',
