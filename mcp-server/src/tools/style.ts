@@ -154,6 +154,7 @@ export function registerStyleTools(server: McpServer, ctx: Ctx): void {
         visualStyle,
         preset: { id: preset.id, name: preset.nameZh, category: preset.category },
         syncedPrompts: synced,
+        restyleHint: "风格改变会影响构图/机位/镜头时长；现有片段提示词建议按新风格重写（set_shot_prompt），不要只追加风格行。",
         scriptVersion: written.after.version,
         storyboardVersion,
       };

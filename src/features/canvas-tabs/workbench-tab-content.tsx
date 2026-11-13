@@ -37,6 +37,7 @@ import {
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
 import { StyleGalleryDialog } from '@/features/canvas-nodes/storyboard/style-gallery-dialog.js';
 import { stylePresetPrompt, type StylePreset } from '@/shared/style-presets.js';
+import { styleShotGuide } from '@/shared/style-shot-guides.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
@@ -611,9 +612,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         ...(sharedParams.params ?? {}),
         stylePrompt: stylePresetPrompt(preset),
         styleName: preset.nameZh,
+        styleGuide: styleShotGuide(preset),
       },
     });
     message.success(`已应用风格：${preset.nameZh}`);
+    message.info('风格会影响构图/机位/镜头时长；现有提示词建议按新风格重写');
   }, [updateSharedParams, sharedParams.params, message]);
 
   // ===== 抽屉「发送到导演台当前片段」宿主监听（2026-11-05 约定） =====
@@ -1396,6 +1399,39 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                       message.success('已清除风格，生成时只遵循片段自己的提示词');
                     }}
                   >清除风格</Button>
+                ) : null}
+                {String(sharedParams.params?.['stylePrompt'] ?? '').trim() ? (
+                  <Button
+                    size="small"
+                    type="text"
+                    data-director-style-rewrite
+                    style={{ fontSize: 12 }}
+                    onClick={() => {
+                      const styleName = String(sharedParams.params?.['styleName'] ?? '当前风格');
+                      const stylePrompt = String(sharedParams.params?.['stylePrompt'] ?? '');
+                      const guide = String(sharedParams.params?.['styleGuide'] ?? '按该风格重写构图/机位/节奏');
+                      const lines = [
+                        '【ZeroExo 风格重写】',
+                        `projectId: ${projectId ?? ''}`,
+                        `风格：${styleName}`,
+                        `风格片段：${stylePrompt}`,
+                        `镜头/节奏：${guide}`,
+                        '请按该风格重写本集每段的 imagePrompt / videoPrompt，并给出建议时长；不要只追加一句风格行。',
+                        '当前集片段：',
+                        ...visibleShots.map((x, i) => `#${i + 1} ${x.duration}s\n画面：${x.imagePrompt ?? ''}\n视频：${x.videoPrompt ?? ''}`),
+                      ];
+                      if (!navigator.clipboard) {
+                        message.warning('复制失败，请手动选择复制');
+                        return;
+                      }
+                      void navigator.clipboard.writeText(lines.join('\n')).then(
+                        () => message.success('已复制风格重写要求，粘给 AI 即可'),
+                        () => message.warning('复制失败，请手动选择复制'),
+                      );
+                    }}
+                  >
+                    重写要求
+                  </Button>
                 ) : null}
               </div>
             ) : null,
