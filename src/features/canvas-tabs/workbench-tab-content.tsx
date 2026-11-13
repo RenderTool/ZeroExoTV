@@ -875,6 +875,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [firstFrameUrls, setFirstFrameUrls] = useState<Record<string, string>>({});
   const comfyRun = useDirectorRun({
     getBridgeConfig: () => getRunConfigFromEndpoint(),
+    // 单段完成要尽快回到卡片/预览，不等到 3 秒轮询
+    pollIntervalMs: 1000,
     callbacks: {
       onSegmentState: (shotId, state) => {
         const shot = shotsRef.current.find((s) => s.id === shotId);
