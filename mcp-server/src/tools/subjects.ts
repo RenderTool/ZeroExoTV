@@ -338,6 +338,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       allowCrossSubject: z.boolean().optional(),
       samePersonConfirmed: z.boolean().optional()
         .describe("角色已有多张图时必填：确认这张脸与已有图是同一个演员"),
+      emptySceneConfirmed: z.boolean().optional()
+        .describe("场景必填：确认这张图是空场景（没有人/动物/苹果等可移动道具）"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {
@@ -367,6 +369,13 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
             `主体「${item?.name ?? args.subjectId}」还没有人设/标准提示词，禁止先挂图。`
               + "先按 zeroexo://skills/subjects 1.7 的字段表调 set_subject_profile（角色 16 项 / 场景 / 道具；"
               + "有参考图先 read_asset 按图反推），生成三视图/场景宫格/道具提示词后再挂图。",
+          );
+        }
+        if (item?.kind === "scene" && args.emptySceneConfirmed !== true) {
+          throw new McpError(
+            "SCENE_EMPTY_CONFIRM_REQUIRED",
+            `场景「${item.name}」必须挂空场景图：画面里不能有人、动物、苹果/杯子/手机等可移动道具。`
+              + "先用 read_asset 看图确认干净，再带 emptySceneConfirmed:true 重试；图里有苹果这类道具就换一张，不要硬挂。",
           );
         }
         if (item?.kind === "character" && (item.images?.length ?? 0) > 0 && args.samePersonConfirmed !== true) {

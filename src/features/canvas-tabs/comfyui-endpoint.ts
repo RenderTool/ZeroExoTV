@@ -27,6 +27,7 @@
 import { create } from 'zustand';
 import { DEFAULT_COMFYUI_BASE_URL, normalizeBaseUrl, probeTcp } from './comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from './comfyui-connection.js';
+import { publishComfyuiEndpoint } from '@/platform/comfyui-endpoint-broadcast.js';
 import type { DirectorBridgeConfig } from './use-director-run.js';
 
 export const COMFYUI_ENDPOINT_STORAGE_KEY = 'zeroexo.comfyuiEndpoint';
@@ -327,18 +328,25 @@ export const useComfyuiEndpointStore = create<ComfyuiEndpointState>()((set, get)
     const changed = address !== get().address;
     set({ address });
     saveComfyuiEndpoint({ address, vramMode: get().vramMode });
-    if (changed) set({ connected: false, backend: null, models: [], machine: null });
+    if (changed) {
+      set({ connected: false, backend: null, models: [], machine: null });
+      void publishComfyuiEndpoint({ address, connected: false });
+    }
   },
   markTested: (raw, backend, models, machine) => {
     const address = normalizeBaseUrl(raw);
     set({ address, connected: true, backend, models, machine: machine ?? null });
     saveComfyuiEndpoint({ address, vramMode: get().vramMode });
+    void publishComfyuiEndpoint({ address, backend, connected: true });
   },
   setVramMode: (mode) => {
     set({ vramMode: mode });
     saveComfyuiEndpoint({ address: get().address, vramMode: mode });
   },
-  disconnect: () => set({ connected: false, backend: null, models: [], machine: null }),
+  disconnect: () => {
+    set({ connected: false, backend: null, models: [], machine: null });
+    void publishComfyuiEndpoint({ address: get().address, connected: false });
+  },
 }));
 
 // ===== 运行配置推导（导演台运行按钮直接调用，不再有渠道选择环节） =====

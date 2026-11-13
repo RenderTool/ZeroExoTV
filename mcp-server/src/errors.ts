@@ -21,6 +21,8 @@ export type McpErrorCode =
   | "IMAGE_PROMPT_REQUIRED"
   /** 角色已有多张图，挂新图前必须确认同一演员（2026-11-13） */
   | "IDENTITY_CONFIRM_REQUIRED"
+  /** 场景图不是空场景（有苹果等可移动道具/人物） */
+  | "SCENE_EMPTY_CONFIRM_REQUIRED"
   /** 主体人设/场景/道具模板字段不全（2026-11-13） */
   | "SUBJECT_PROFILE_INCOMPLETE"
   /** 主体还没写人设模板（基础提示词为空）就想挂图（2026-11-13） */

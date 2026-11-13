@@ -24,6 +24,8 @@ ${STAGES}
 
 【MCP 自身版本（2026-11-11）】工具返回里出现 _mcpOutdated（例如旧版缺少 plan_continuity_edit）时，不要当成普通数据忽略：先调 mcp_update_status 把「缺哪些工具 / 仓库落后多少」告诉用户，用户同意后调 update_mcp_server（userConfirmed:true）自动快进并重新编译，最后提醒用户重启 MCP 服务。不要等用户来问「MCP 更新了吗」。
 
+【ComfyUI 连接状态（2026-11-14）】诊断「ComfyUI 未连接 / 作业 pending」前先调 get_comfyui_status：它读网页广播的地址（云端也走这里），不要假设 127.0.0.1:8188。地址可达但作业 pending，多半是网页没打开当前项目（作业由网页消费）；地址不可达再查云端服务，禁止退回 localhost 猜。
+
 【升级 / 连上后先查漏补缺（2026-11-13 用户要求，硬性）】
 - 每次连上、或用户提到「更新了 / 升级了 MCP」时：先调 get_upgrade_guide 读说明，再调 audit_upgrade({projectId})（只读，不改文件）。
 - 把 findings 按严重度逐条报给用户：旧流程漏了什么 → 现在会导致什么 → 用哪个工具修；然后**问用户是否现在修复**。

@@ -41,6 +41,30 @@ function resolveVideoSize(aspect: string, scaleFactor: number): { width: number;
     height: Math.max(64, round32(Math.sqrt(total / r))),
   };
 }
+/** 把片段第一张项目参考图上传到 ComfyUI input，返回节点可用文件名 */
+async function uploadShotReference(base: string, storageKey: string): Promise<string> {
+  if (!storageKey.startsWith("cas:")) return "";
+  const file = path.join(dataRoot(), "media", "cas", storageKey.slice(4));
+  let buf: Buffer;
+  try {
+    buf = await fs.readFile(file);
+  } catch {
+    return "";
+  }
+  const form = new FormData();
+  form.append("image", new Blob([new Uint8Array(buf)]), path.basename(file));
+  form.append("overwrite", "true");
+  try {
+    const res = await fetch(`${base}/upload/image`, { method: "POST", body: form });
+    if (!res.ok) return "";
+    const body = (await res.json()) as { name?: string; subfolder?: string };
+    if (!body.name) return "";
+    return body.subfolder ? `${body.subfolder}/${body.name}` : body.name;
+  } catch {
+    return "";
+  }
+}
+
 /** 与前端 director-params.ts:285-293 同口径（17k+5 吸附） */
 function durationToFrames(sec: number): number {
   const f = Math.max(1, Math.round(sec * 24));
@@ -350,7 +374,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         }
       })();
 
-      const buildSubmission = (shot: typeof selected[number], overrideGuideId?: string) => {
+      const buildSubmission = async (shot: typeof selected[number], overrideGuideId?: string) => {
         const allIdx = allShots.findIndex((s) => s.id === shot.id);
         const explicit = overrideGuideId ?? shot.guide?.id;
         const segEnabled = shot.continuation ? shot.continuation.enabled === true : continuityOn;
@@ -361,6 +385,10 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           if (prevGuideId) guideId = prevGuideId;
           else usePrev = true;
         }
+        const firstImage = (shot.references ?? []).find((r) => r.kind === "image" && r.storageKey);
+        const referenceImage = firstImage?.storageKey
+          ? await uploadShotReference(base, firstImage.storageKey)
+          : "";
         const params: Record<string, unknown> = {
           prompt: (shot.imagePrompt || shot.videoPrompt || `第 ${allIdx + 1} 段`).toString(),
           negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ""),
@@ -371,7 +399,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           use_prev_guide: usePrev,
           use_low_vram: useLowVram,
           ...(guideId ? { guide_id: guideId } : {}),
-          reference_image: "",
+          reference_image: referenceImage,
         };
         return { shotId: shot.id, clientJobId: `mcp_${args.projectId}_${shot.id}_${Date.now()}`, params };
       };
@@ -407,7 +435,8 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         }
       }
 
-      const submissions = selected.map((shot) => buildSubmission(shot));
+      const submissions: Awaited<ReturnType<typeof buildSubmission>>[] = [];
+      for (const shot of selected) submissions.push(await buildSubmission(shot));
 
       const submit = async (params: Record<string, unknown>, clientJobId: string): Promise<string> => {
         const body = { kind: "reference_video", clientJobId, project: args.projectId, episode, params };
@@ -433,7 +462,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         const jobs: Array<Record<string, unknown>> = [];
         let lastGuideId: string | undefined;
         for (const shot of ordered) {
-          const sub = buildSubmission(shot, lastGuideId);
+          const sub = (await buildSubmission(shot, lastGuideId)) as { params: Record<string, unknown>; clientJobId: string };
           const jobId = await submit(sub.params, sub.clientJobId);
           const terminal = await waitForJobTerminal(jobId, base);
           jobs.push({

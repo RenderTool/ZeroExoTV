@@ -101,7 +101,7 @@ export function buildMinimalSubjectPrompt(
   const desc = (note ?? "").trim() || `${name}（${kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具"}）`;
   if (kind === "scene") {
     return `专业电影级场景参考图。场景：${name}。${desc}
-空场景，画面中不得出现人物、动物、字幕、水印；保持空间结构与材质真实。\n${styleBlock(stylePrompt)}`;
+空场景，画面中不得出现人物、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印；保持空间结构与材质真实。\n${styleBlock(stylePrompt)}`;
   }
   if (kind === "prop") {
     return `专业电影级道具参考图。道具：${name}。${desc}
@@ -152,7 +152,7 @@ ${background}
 /** 场景模板：sheet = 2×2 宫格；single/white-bg = 单张全景（无人物） */
 export function buildScenePrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
   const layout = mode === "sheet"
-    ? `画面布局：4:3，2×2 宫格，四个视角来自同一空间：左上 = 视角1；右上 = 视角2；左下 = 视角3；右下 = 视角4。四格必须是同一地点的连续空间，不得拼成四个不同地方。`
+    ? `画面布局：16:9（2048×1152），2×2 宫格，四个视角来自同一空间：左上 = 视角1；右上 = 视角2；左下 = 视角3；右下 = 视角4。四格必须是同一地点的连续空间，不得拼成四个不同地方。`
     : `画面布局：16:9 单张全景，站在最能看清空间结构的位置拍摄；不要多格拼贴。`;
   return `专业电影级场景参考图（空场景，无人物）。
 ${layout}
@@ -167,7 +167,7 @@ ${layout}
 色调：${v(profile, "色调")}。
 材质与洁净度：${v(profile, "材质与洁净度")}。
 
-硬约束：画面中不得出现人物、动物、字幕、水印、标志、文字；不得改变建筑结构。
+硬约束：画面中不得出现人物、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印、标志、文字；不得改变建筑结构。前景/中景/远景只能写固定不可移动的建筑、家具、植被与结构元素，不写苹果/杯子/手机/书这类可移动小物。
 ${styleBlock(stylePrompt)}`;
 }
 
