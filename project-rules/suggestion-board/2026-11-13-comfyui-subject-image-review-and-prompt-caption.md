@@ -33,6 +33,9 @@
   道具 = 单品参考图。身份锚点句写 `item.note`，提示词写主体树基础状态 `fullPrompt/deltaPrompt`；
   字段不全返回 `SUBJECT_PROFILE_INCOMPLETE` 并列出缺项；有参考图必须 `read_asset` 看过、按图反推字段
   再带 `sourceImage` 提交。
+- **出图形态 `renderMode`**（同日追加）：`sheet`（默认参考图）/ `single`（单张）/ `white-bg`
+  （白底快速图，纯白底 + 接触阴影；道具主图、需要抠像的角色用它）。模型语言按生图技能：
+  Qwen 用中文，Moss/Krea2 翻英文。
 - **`read_asset` 登记看过的图**：返回 MCP image 内容块时按 token 记录 `storageKey`（进程内 1h）。
 - **`set_subject_image` 硬闸门**（真实写入，dryRun 不受限）：
   - 主体还没人设/标准提示词（基础状态 fullPrompt 为空）→ `SUBJECT_PROFILE_REQUIRED`，必须先走强制模板；
@@ -47,7 +50,14 @@
 - **阶段 3 文案**（register.ts / module-specs.ts）同步：清单交付 + 强制字段 + read_asset + 反推 prompt 闸门。
 - **前端定妆模板**（subject-prompt-templates.ts）：角色模板补「三个画面同一张脸、只允许这一个角色，
   禁止第二个人 / 多人合照 / 模特合集」。
-- **版本**：0.2.36。
+- **版本**：0.2.37。
+
+## 六、同日追加：主体卡「画布生成」跳转 + 参数预设
+
+- 点状态卡「画布生成」→ 建 16:9 图片节点（360×203），`data.params` 预设
+  `aspectRatio: '16:9' / resolution: '2k' / size: 2816×1584`，并 `navigateToView('canvas')`
+  自动切到画布、选中并居中该节点（切页签后再 rAF 校正一次，避免隐藏态容器尺寸为 0）。
+- 只建节点挂提示词，不发起 API（沿用既有约定）。
 
 ## 四、影响面
 

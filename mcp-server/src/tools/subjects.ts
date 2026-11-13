@@ -219,6 +219,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       "写主体人设模板（2026-11-13 强制约束）：按 kind 提交必填字段，服务端校验后拼出标准提示词——" +
       "角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 2×2 空场景宫格；道具 = 单品参考图。" +
       "身份锚点句写 item.note，标准提示词写主体树基础状态 fullPrompt/deltaPrompt。字段不全直接拒绝并列出缺项。" +
+      "renderMode 可选：sheet（默认，参考图/定妆）/ single（单张）/ white-bg（白底快速图，道具主图或要抠像的角色）。" +
       "有参考图时必须先 read_asset 看图、按图反推字段，再把 sourceImage 一起传；不要凭想象填。baseVersion = storyboard version。",
     bits: ["subject.write"],
     schema: {
@@ -233,10 +234,12 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       ),
       sourceImage: z.string().optional()
         .describe("参考图的 storageKey；有图时必须先 read_asset 看过，并按图反推上面这些字段"),
+      renderMode: z.enum(["sheet", "single", "white-bg"]).optional()
+        .describe("出图形态：sheet=参考图/定妆（角色三视图 / 场景2×2宫格 / 道具细节图，默认）；single=单张；white-bg=白底快速图（道具/需要抠像的角色，纯白底）"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {
-      const built = buildSubjectProfile(args.kind, args.profile);
+      const built = buildSubjectProfile(args.kind, args.profile, { renderMode: args.renderMode });
       if (!built.built) {
         if (args.dryRun) {
           return { written: false, label: built.label, missing: built.missing };
@@ -268,6 +271,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         rootId: res.rootId,
         anchor: built.built.anchor,
         prompt: built.built.prompt,
+        renderMode: built.built.renderMode,
       };
     },
   });

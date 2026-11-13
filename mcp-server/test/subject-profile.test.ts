@@ -88,4 +88,18 @@ describe("主体强制字段模板（2026-11-13）", () => {
     expect(built!.prompt).toContain(PROP.材质);
     expect(built!.prompt).toContain("无手、无人物");
   });
+
+  it("道具 white-bg：纯白底快速主图（不铺场景/细节拼贴）", () => {
+    const { built } = buildSubjectProfile("prop", PROP, { renderMode: "white-bg" });
+    expect(built!.prompt).toContain("白底快速图");
+    expect(built!.prompt).toContain("纯白(#FFFFFF)");
+    expect(built!.prompt).toContain("不要多格拼贴");
+    expect(built!.renderMode).toBe("white-bg");
+  });
+
+  it("角色 single：单张定妆，不再要求三画面", () => {
+    const { built } = buildSubjectProfile("character", CHARACTER, { renderMode: "single" });
+    expect(built!.prompt).toContain("单人");
+    expect(built!.prompt).not.toContain("画面中固定 3 个画面");
+  });
 });

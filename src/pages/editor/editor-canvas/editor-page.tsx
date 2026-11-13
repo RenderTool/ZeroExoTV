@@ -658,7 +658,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       const viewW = el?.clientWidth ?? 800;
       const viewH = el?.clientHeight ?? 600;
       const k = vp.k > 0 ? vp.k : 1;
-      const size = { width: 320, height: 320 };
+      // 2026-11-13 用户指令：主体「画布生成」建 16:9 节点，参数预设 16:9 · 2K，并跳到画布
+      const size = { width: 360, height: 203 };
       const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       cq.execute(new AddNodeCommand({
         id: nodeId,
@@ -673,11 +674,22 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           prompt: detail.prompt ?? '',
           content: '',
           status: 'idle',
+          params: {
+            aspectRatio: '16:9',
+            resolution: '2k',
+            size: { width: 2816, height: 1584 },
+          },
           ...(detail.storageKey ? { referenceStorageKey: detail.storageKey } : {}),
         },
       } as NodeRecord));
       store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
       store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
+      navigateToView('canvas', { nodeId });
+      // 切页签后再居一次：隐藏态拿到的容器尺寸可能为 0，等画布真正可见再校正
+      requestAnimationFrame(() => {
+        const el2 = containerRef.current;
+        store.focusOnNode?.(nodeId, { width: el2?.clientWidth || viewW, height: el2?.clientHeight || viewH });
+      });
       message.success('已添加到画布');
     });
     const unsubOpen = nodeActionBus.on('canvas:subject:open', (event) => {
