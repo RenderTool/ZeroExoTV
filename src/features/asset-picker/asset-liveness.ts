@@ -29,7 +29,11 @@ export async function filterLiveAssets(assets: Asset[]): Promise<Asset[]> {
     if (kind === 'text' || kind === 'script') return asset;
     if (asset.cas?.hash) {
       const idx = await ensureIndex();
-      return idx.entries[asset.cas.hash] ? asset : null;
+      if (idx.entries[asset.cas.hash]) return asset;
+      // 索引缺项但 CAS 文件实际存在（手工导入/索引未回写）：仍应显示，不能静默隐藏
+      const ext = asset.cas.ext || 'bin';
+      const s = await stat(`media/cas/${asset.cas.hash}.${ext}`).catch(() => null);
+      return s ? asset : null;
     }
     const storageKey = typeof data.storageKey === 'string' ? data.storageKey : '';
     if (storageKey.startsWith('cas:')) {
