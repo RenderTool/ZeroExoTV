@@ -36,8 +36,7 @@ import {
   UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys,
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
 import { StyleGalleryDialog } from '@/features/canvas-nodes/storyboard/style-gallery-dialog.js';
-import { saveGlobalStyle } from '@/features/canvas-nodes/storyboard/global-style.js';
-import type { StylePreset } from '@/shared/style-presets.js';
+import { stylePresetPrompt, type StylePreset } from '@/shared/style-presets.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
@@ -551,17 +550,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   }, [isActive, projectId, defaultEpisodeId, shots, setWorkbenchActiveEpisode, markDirty]);
 
 
-  const handlePickGlobalStyle = useCallback(async (preset: StylePreset) => {
-    if (!projectId) return;
-    try {
-      const res = await saveGlobalStyle(projectId, preset);
-      setVisualStyle(res.visualStyle);
-      message.success(res.synced > 0 ? `已切换全剧风格，${res.synced} 个主体提示词已同步` : '已切换全剧风格');
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '设置全剧风格失败');
-    }
-  }, [projectId, message]);
-
   // 切到没有片段的分集：自动挂一个空片段（导演台永远不出现空白页）
   useEffect(() => {
     if (!isActive || !projectId || !activeEpisodeKey || visibleShots.length > 0) return;
@@ -615,6 +603,18 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     },
     [markDirty],
   );
+
+  const handlePickGlobalStyle = useCallback((preset: StylePreset) => {
+    // 风格是导演台的可变参数：只写 sharedParams，不篡改片段提示词；生成时再拼接
+    updateSharedParams({
+      params: {
+        ...(sharedParams.params ?? {}),
+        stylePrompt: stylePresetPrompt(preset),
+        styleName: preset.nameZh,
+      },
+    });
+    message.success(`已应用风格：${preset.nameZh}`);
+  }, [updateSharedParams, sharedParams.params, message]);
 
   // ===== 抽屉「发送到导演台当前片段」宿主监听（2026-11-05 约定） =====
   // 抽屉（canvas-assets）emit zeroexo:workbench-add-ref；这里对当前选中片段落槽——
@@ -1380,8 +1380,23 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 />
                 <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
                 <Button size="small" type="text" data-director-global-style style={{ fontSize: 12 }} onClick={() => setStyleGalleryOpen(true)}>
-                  全剧风格{visualStyle ? `：${visualStyle.name}` : ''}
+                  全剧风格{String(sharedParams.params?.['styleName'] ?? '') ? `：${String(sharedParams.params?.['styleName'])}` : ''}
                 </Button>
+                {String(sharedParams.params?.['stylePrompt'] ?? '').trim() ? (
+                  <Button
+                    size="small"
+                    type="text"
+                    data-director-style-clear
+                    style={{ fontSize: 12 }}
+                    onClick={() => {
+                      const next = { ...(sharedParams.params ?? {}) };
+                      delete next['stylePrompt'];
+                      delete next['styleName'];
+                      updateSharedParams({ params: next });
+                      message.success('已清除风格，生成时只遵循片段自己的提示词');
+                    }}
+                  >清除风格</Button>
+                ) : null}
               </div>
             ) : null,
             tracks: [track],
@@ -1902,7 +1917,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           open={styleGalleryOpen}
           onClose={() => setStyleGalleryOpen(false)}
           selectedId={visualStyle?.presetId ?? null}
-          onSelect={(preset) => { void handlePickGlobalStyle(preset); }}
+          onSelect={(preset) => handlePickGlobalStyle(preset)}
           theme={theme}
         />
       </div>

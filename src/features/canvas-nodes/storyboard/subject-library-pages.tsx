@@ -696,7 +696,7 @@ function SubjectGridCard({
 function StateGridCard({
   stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, editMode, editPanel,
   onClick, onToggleCover, onDelete, onToggleEdit,
-  onRename, onReplaceMedia, onCanvasGenerate,
+  onRename, onCanvasGenerate,
 }: {
   stateId: string;
   title: string;
@@ -721,7 +721,6 @@ function StateGridCard({
   /** 就地改状态名（基础状态不传 = 不可改，名称即主体名） */
   onRename?: (next: string) => void;
   /** 就地换图：打开媒体来源面板 */
-  onReplaceMedia?: (anchor: HTMLElement) => void;
   /** 画布生成：只建节点并挂提示词，不发起 API */
   onCanvasGenerate?: () => void;
 }): React.ReactElement {
@@ -851,19 +850,6 @@ function StateGridCard({
               opacity: active || editMode ? 1 : 0, transition: 'opacity .2s',
             }}
           >
-            {onReplaceMedia && (
-              <Tooltip title={t('subject.replaceMediaInline', '换图')}>
-                <IconButton
-                  theme={theme}
-                  size="sm"
-                  aria-label={t('subject.replaceMediaInline', '换图')}
-                  data-state-action="replace"
-                  onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
-                >
-                  <ImagePlus size={13} />
-                </IconButton>
-              </Tooltip>
-            )}
             {onCanvasGenerate && (
               <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
                 <IconButton
@@ -919,7 +905,7 @@ function StateGridCard({
  */
 function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
-  onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
+  onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
 }: {
   tree: SubjectTree;
   node: SubjectTreeNode;
@@ -929,6 +915,7 @@ function StateEditPanel({
   /** 全剧视觉风格（只读；风格入口在本剧信息/导演台） */
   visualStyle: ScriptVisualStyle | null;
   onUpdateNode: (patch: Partial<SubjectTreeNode>) => void;
+  onReplaceMedia: (anchor: HTMLElement) => void;
   onRemoveMedia: () => void;
   onRestoreMedia: (ref: SubjectNodeMediaRef) => void;
   onDeleteHistoryMedia: (ref: SubjectNodeMediaRef) => void;
@@ -1026,6 +1013,18 @@ function StateEditPanel({
               data-media-actions
               style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 2 }}
             >
+              <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}>
+                <IconButton
+                  theme={theme}
+                  size="sm"
+                  variant="overlay"
+                  aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}
+                  data-media-action="replace"
+                  onClick={(e) => onReplaceMedia(e.currentTarget)}
+                >
+                  <ImagePlus size={13} />
+                </IconButton>
+              </Tooltip>
               {hasMedia && (
                 <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
                   <IconButton
@@ -2258,7 +2257,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         episodes={episodes}
                         visualStyle={visualStyle}
                         onUpdateNode={(patch) => updateNode(openTree.rootId, node.id, patch)}
-                        onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
+                        onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
+                            onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
                         onRestoreMedia={(ref) => { void restoreMedia(openTree.rootId, node.id, ref); }}
                         onDeleteHistoryMedia={(ref) => deleteHistoryMedia(openTree.rootId, node.id, ref)}
                       />
@@ -2267,7 +2267,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     onClick={() => toggleEdit(node.id)}
                     onDelete={isBase ? undefined : () => handleDeleteState(openTree.rootId, node)}
                     onRename={isBase ? undefined : (next) => updateNode(openTree.rootId, node.id, { state: next })}
-                    onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                     onCanvasGenerate={() => {
                       nodeActionBus.emit('subject:sendStateToCanvas', {
                         nodeId: '',

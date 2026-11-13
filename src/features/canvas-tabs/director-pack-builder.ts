@@ -14,6 +14,7 @@
  */
 
 import JSZip from 'jszip';
+import { applyStylePromptToPrompt } from '@/shared/style-presets.js';
 import {
   DIRECTOR_PRESETS,
   assignAssetSlots,
@@ -184,6 +185,13 @@ export interface BuiltDirectorPack {
   warnings: string[];
 }
 
+/** 导演台风格参数：选了就拼进片段提示词；没选/清空就原样遵循片段自己的提示词 */
+export function withDirectorStyle(prompt: string, shared: { params?: Record<string, unknown> }): string {
+  const style = String(shared.params?.["stylePrompt"] ?? "").trim();
+  if (!style) return prompt;
+  return applyStylePromptToPrompt(prompt, style);
+}
+
 export async function buildDirectorPack(args: BuildPackArgs): Promise<BuiltDirectorPack> {
   const resolveMedia = args.resolveMedia ?? createDefaultRefMediaResolver(args.subjectCoverOf);
   const sharedAssets = args.shared.enabled ? args.shared.assets : [];
@@ -261,7 +269,7 @@ export async function buildDirectorPack(args: BuildPackArgs): Promise<BuiltDirec
     const idx = args.shots.findIndex((s) => s.id === shot.id);
     const cont = globalContinuity && segmentContinuityEnabled(shot, idx);
     const frameCount = durationToFrames(shot.duration);
-    const fullPrompt = (shot.imagePrompt ?? '').trim();
+    const fullPrompt = withDirectorStyle((shot.imagePrompt ?? '').trim(), args.shared);
     segments.push({
       id: `seg_${nn}`,
       start,
