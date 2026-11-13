@@ -205,7 +205,7 @@ beforeEach(() => {
     slotBindings: { script: null, storyboard: null, workbench: null },
   });
   // pps 固定 40（真实 view-prefs store，避免 localStorage 残留影响 left 断言）
-  useViewPrefsStore.setState({ workbench: { pixelsPerSecond: 40 } });
+  useViewPrefsStore.setState({ workbench: { pixelsPerSecond: 40, activeEpisodeByProject: {} } });
 });
 
 // ===== 1. 衔接 = ComfyUI 导演台同款箭头（绿色拼合缝残留 = 0）=====
@@ -388,7 +388,7 @@ describe('衔接视觉 = 链接/断链图标（2026-11-07 用户指令）', () =
   });
 
   it('2026-11-05 固定宽度卡片：卡片/箭头不随 pps 变化（pps=80 几何不变）；刻度尺零渲染（随卡片决策删除）', async () => {
-    useViewPrefsStore.setState({ workbench: { pixelsPerSecond: 80 } });
+    useViewPrefsStore.setState({ workbench: { pixelsPerSecond: 80, activeEpisodeByProject: {} } });
     const { container } = await renderWorkbench();
     const arrow = container.querySelector('[data-continuity-arrow="seg-2"]') as HTMLElement;
     expect(arrow.style.left).toBe('206px');
@@ -423,7 +423,7 @@ describe('导轨白色竖线移除 + 零基线对齐', () => {
   });
 
   it('2026-11-05 固定宽度卡片：pps=80 下几何不变（卡片仍零基线、等宽 220px、间距 6px）', async () => {
-    useViewPrefsStore.setState({ workbench: { pixelsPerSecond: 80 } });
+    useViewPrefsStore.setState({ workbench: { pixelsPerSecond: 80, activeEpisodeByProject: {} } });
     const { container } = await renderWorkbench();
     expect((container.querySelector('[data-clip-id="seg-1"]') as HTMLElement).style.left).toBe('0px');
     expect((container.querySelector('[data-clip-id="seg-2"]') as HTMLElement).style.left).toBe('226px');

@@ -161,7 +161,7 @@ beforeEach(() => {
     scriptEditor: { showLabels: true },
     subjectLibrary: { activeKind: 'all', activeEpisodeByProject: {} },
     subjectPages: { lastByProject: {} },
-    workbench: { pixelsPerSecond: 40 },
+    workbench: { pixelsPerSecond: 40, activeEpisodeByProject: {} },
     canvasTabs: { lastSlotByProject: {}, openCanvasesByProject: {} },
   });
 });

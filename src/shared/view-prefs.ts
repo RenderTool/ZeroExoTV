@@ -69,6 +69,8 @@ export interface SubjectPagesViewPrefs {
 export interface WorkbenchViewPrefs {
   /** 导演台时间线缩放（px/s） */
   pixelsPerSecond: number;
+  /** 2026-11-13 导演台按集切换：projectId → 上次停留的集 id（'__unassigned__' = 未分集） */
+  activeEpisodeByProject: Record<string, string>;
 }
 
 /** 2026-11-05 刷新恢复页签：画布页签按项目记忆最后所在槽位（字面量与 canvas-tab-store 同形，shared 不反向依赖 features） */
@@ -125,7 +127,7 @@ export const DEFAULT_VIEW_PREFS: ViewPrefsSlices = {
   scriptEditor: { showLabels: true },
   subjectLibrary: { activeKind: 'all', activeEpisodeByProject: {} },
   subjectPages: { lastByProject: {} },
-  workbench: { pixelsPerSecond: 40 },
+  workbench: { pixelsPerSecond: 40, activeEpisodeByProject: {} },
   canvasTabs: { lastSlotByProject: {}, openCanvasesByProject: {} },
   hierarchy: { panelWidth: 0 },
   canvasDrawer: { materialScopeByProject: {} },
@@ -192,6 +194,13 @@ function sanitize(raw: unknown): ViewPrefsSlices {
       subjectLastByProject[projectId] = { rootId: v.rootId, stateId };
     }
   }
+  // 导演台按集切换记忆（2026-11-13）：只收非空字符串，脏条目丢弃
+  const workbenchEpisodeByProject: Record<string, string> = {};
+  if (wb.activeEpisodeByProject && typeof wb.activeEpisodeByProject === 'object') {
+    for (const [projectId, value] of Object.entries(wb.activeEpisodeByProject as Record<string, unknown>)) {
+      if (projectId && typeof value === 'string' && value) workbenchEpisodeByProject[projectId] = value;
+    }
+  }
   const lastSlotByProject: Record<string, CanvasTabLastSlot> = {};
   if (ct.lastSlotByProject && typeof ct.lastSlotByProject === 'object') {
     for (const [projectId, slot] of Object.entries(ct.lastSlotByProject as Record<string, unknown>)) {
@@ -226,7 +235,10 @@ function sanitize(raw: unknown): ViewPrefsSlices {
       activeEpisodeByProject: subjectEpisodeByProject(sl.activeEpisodeByProject),
     },
     subjectPages: { lastByProject: subjectLastByProject },
-    workbench: { pixelsPerSecond: positiveNumber(wb.pixelsPerSecond, d.workbench.pixelsPerSecond) },
+    workbench: {
+      pixelsPerSecond: positiveNumber(wb.pixelsPerSecond, d.workbench.pixelsPerSecond),
+      activeEpisodeByProject: workbenchEpisodeByProject,
+    },
     canvasTabs: { lastSlotByProject, openCanvasesByProject },
     hierarchy: { panelWidth: positiveNumber(hp.panelWidth, d.hierarchy.panelWidth) },
     canvasDrawer: { materialScopeByProject: drawerScopeByProject },
@@ -279,6 +291,8 @@ export interface ViewPrefsState extends ViewPrefsSlices {
   /** 2026-11-05 主体库按集筛选记忆（null = 全集） */
   setSubjectActiveEpisode: (projectId: string, episode: number | null) => void;
   setWorkbenchPixelsPerSecond: (next: number) => void;
+  /** 2026-11-13 导演台按集切换记忆（projectId → 集 id；null = 清除） */
+  setWorkbenchActiveEpisode: (projectId: string, episodeId: string | null) => void;
   /** 2026-11-05 刷新恢复页签：记录某项目最后所在页签槽位（projectId 为空忽略） */
   setCanvasTabLastSlot: (projectId: string, slot: CanvasTabLastSlot) => void;
   /** Spec：记录某项目打开中的副本画布 cid 列表 */
@@ -340,7 +354,14 @@ export const useViewPrefsStore = create<ViewPrefsState>()((set, get) => {
     },
     setWorkbenchPixelsPerSecond: (next) => {
       if (!(next > 0)) return;
-      commit({ workbench: { pixelsPerSecond: next } });
+      commit({ workbench: { ...get().workbench, pixelsPerSecond: next } });
+    },
+    setWorkbenchActiveEpisode: (projectId, episodeId) => {
+      if (!projectId) return;
+      const current = { ...get().workbench.activeEpisodeByProject };
+      if (episodeId) current[projectId] = episodeId;
+      else delete current[projectId];
+      commit({ workbench: { ...get().workbench, activeEpisodeByProject: current } });
     },
     setCanvasTabLastSlot: (projectId, slot) => {
       if (!projectId) return;

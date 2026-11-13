@@ -56,6 +56,7 @@ export function registerWorkbenchTools(server: McpServer, ctx: Ctx): void {
       description: z.string().optional(),
       shotType: z.string().optional(),
       duration: z.number().positive().optional(),
+      episodeId: z.string().optional().describe("所属剧集 id；不给 = 未分集"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args) => {
@@ -67,7 +68,7 @@ export function registerWorkbenchTools(server: McpServer, ctx: Ctx): void {
 
   defTool(server, ctx, {
     name: "add_segment",
-    description: "导演台新增片段（id=seg-<ts>-<rand>，duration 默认 5s，status=pending）。baseVersion = workbench version，0=创建。",
+    description: "导演台新增片段（id=seg-<ts>-<rand>，duration 默认 5s，status=pending）。baseVersion = workbench version，0=创建。episodeId 可选：指定则该片段归入该集（同集内从 1 编号），不给 = 未分集。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -75,6 +76,7 @@ export function registerWorkbenchTools(server: McpServer, ctx: Ctx): void {
       description: z.string().min(1),
       shotType: z.string().optional(),
       duration: z.number().positive().optional(),
+      episodeId: z.string().optional().describe("所属剧集 id；不给 = 未分集"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args) => {

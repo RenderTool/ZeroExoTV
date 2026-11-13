@@ -34,7 +34,7 @@ export function registerUpdateTools(server: McpServer, ctx: Ctx): void {
       return {
         ...status,
         nextSteps: status.missing.length > 0 || (status.gitBehind ?? 0) > 0
-          ? ["把缺的工具/落后提交告诉用户", "用户同意后调 update_mcp_server（userConfirmed:true）", "重启 MCP 服务"]
+          ? ["把缺的工具/落后提交告诉用户", "用户同意后调 update_mcp_server（userConfirmed:true）", "重启 MCP 服务", "对当前项目调 audit_upgrade（只读）并按 findings 问用户是否修复"]
           : status.distOutdated
             ? ["重启 MCP 服务（代码已重新编译）"]
             : ["已是最新，无需处理"],
@@ -63,7 +63,14 @@ export function registerUpdateTools(server: McpServer, ctx: Ctx): void {
       }).catch(() => null);
       if (!status) throw new McpError("IO_ERROR", "读取 MCP 版本信息失败");
       const res = await updateMcpServer(status.repoRoot, status.serverEntry);
-      return { ...res, before: { missing: status.missing, gitBehind: status.gitBehind } };
+      return {
+        ...res,
+        before: { missing: status.missing, gitBehind: status.gitBehind },
+        nextSteps: [
+          "重启 MCP 服务（stdio 进程无法热替换已加载代码）",
+          "对当前项目调 audit_upgrade（只读）→ 把旧流程可能留下的纰漏按严重度报给用户 → 问是否现在修复；不要只说版本已更新",
+        ],
+      };
     },
   });
 }

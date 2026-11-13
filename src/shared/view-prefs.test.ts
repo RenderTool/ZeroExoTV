@@ -147,7 +147,7 @@ describe('刷新后偏好恢复（localStorage 往返）', () => {
       scriptEditor: { showLabels: false },
       subjectLibrary: { activeKind: 'character', activeEpisodeByProject: {} },
       subjectPages: { lastByProject: {} },
-      workbench: { pixelsPerSecond: 96 },
+      workbench: { pixelsPerSecond: 96, activeEpisodeByProject: {} },
       canvasTabs: { lastSlotByProject: { 'p-1': 'canvas' as const }, openCanvasesByProject: { 'p-1': ['scabc123'] } },
       hierarchy: { panelWidth: 520 },
       canvasDrawer: { materialScopeByProject: { 'p-1': 'subject' as const } },

@@ -190,7 +190,7 @@ beforeEach(() => {
     scriptEditor: { showLabels: true },
     subjectLibrary: { activeKind: 'all', activeEpisodeByProject: {} },
     subjectPages: { lastByProject: {} },
-    workbench: { pixelsPerSecond: 40 },
+    workbench: { pixelsPerSecond: 40, activeEpisodeByProject: {} },
     canvasTabs: { lastSlotByProject: {}, openCanvasesByProject: {} },
   });
   useCanvasTabStore.setState({
@@ -651,6 +651,16 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     const summary = document.querySelector('[data-prompt-style-summary]');
     expect(summary?.textContent).toContain('王家卫');
     expect(summary?.textContent).toContain('全剧风格');
+  });
+
+  it('主体面板「全剧风格」整行直接打开风格画廊', async () => {
+    renderPages(makeTree());
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-prompt-style-summary]')).toBeTruthy());
+    fireEvent.click(document.querySelector('[data-prompt-style-summary]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-style-gallery]')).toBeTruthy());
+    expect(document.querySelectorAll('[data-style-card]').length).toBeGreaterThan(20);
   });
 
   it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {

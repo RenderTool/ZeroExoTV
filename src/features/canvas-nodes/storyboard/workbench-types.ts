@@ -42,6 +42,11 @@ export interface WorkbenchShot {
   description: string;
   shotType: string;
   duration: number;
+  /**
+   * 所属剧集 id（2026-11-13）：导演台按集切换的唯一依据。
+   * 缺省 = 未分集（本功能上线前的存量数据）；界面单列「未分集」桶，不冒充某一集。
+   */
+  episodeId?: string;
   imagePrompt?: string;
   videoPrompt?: string;
   /** 生成状态（cancelled = 运行被用户取消；interrupted = 上次异常退出残留自愈降级，2026-11-05） */

@@ -69,6 +69,8 @@ export interface WorkbenchMultiTrackProps {
   onFocusTrack: (trackId: string) => void;
   /** 完整宿主时间轴 props */
   timeline: StoryboardTimelineProps;
+  /** 导轨工具栏左侧附加节点（2026-11-13 导演台分集下拉） */
+  railExtra?: React.ReactNode;
   /** 跨轨拖放回调: (fromTrackId, toTrackId, insertIndex, shotId) */
   onMoveShotBetweenTracks?: (fromTrackId: string, toTrackId: string, insertIndex: number, shotId: string) => void;
   /**
@@ -383,6 +385,7 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
   onFocusTrack,
   timeline,
   onMoveShotBetweenTracks,
+  railExtra,
   contentOverlay,
   selectMode,
   continuityEntry,
@@ -807,6 +810,7 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
           2026-11-04 第五条：selectMode 不再整行替换——完成/取消+已选计数注入入口按钮之后，
           与 添加/链接/删除/批量 同一视区同一行；本行 flexShrink:0 固定在轨道区顶部，滚动片段区不消失 */}
       <div data-rail-toolbar style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', ...(zeroBaseRail ? {} : { borderBottom: `1px solid ${C.border}` }), overflowX: 'auto', scrollbarWidth: 'none', containerType: 'inline-size', containerName: 'railToolbar' } as React.CSSProperties}>
+        {railExtra ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>{railExtra}</div> : null}
         {/* 左侧: 编辑工具（2026-11-04 第二条A/B：添加/链接/删除/批量 四键共用 RailIconButton；
             第七条B：图标+文字，容器变窄横向滚动、不换行、不退化纯 icon） */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}>

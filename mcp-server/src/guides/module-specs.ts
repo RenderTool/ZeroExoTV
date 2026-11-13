@@ -39,6 +39,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     name: "提主体",
     action:
       "从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源）→ 逐主体给用户一张表 + 缺图清单（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用）→ 确认后 upsert_subject → set_subject_profile 按强制字段表生成三视图/场景/道具标准提示词；" +
+      "全剧风格先 list_style_presets 让用户选一套 → set_global_style（dryRun→用户确认→userConfirmed+baseVersion），所有主体提示词继承这一套；" +
       "挂图必须先 read_asset 亲眼看、把画面反推成 prompt，再 set_subject_image（没看过/没 prompt 会被拒）；多人合照/模特合集/别的角色图不许挂",
     gate: "主体清单经用户确认才建主体/状态、才进阶段4——清单未确认不得 upsert、不得挂图",
   },
@@ -101,7 +102,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     mcpTools: [
       "list_projects", "get_project", "open_project", "create_project",
       // 画布是项目的一等挂载物（Spec v2 / 征集#184）：1 号主画布 + N 份副本均属本项目
-      "list_canvases", "get_canvas", "patch_canvas_nodes",
+      "list_canvases", "get_canvas", "patch_canvas_nodes", "audit_upgrade", "get_upgrade_guide",
     ],
     caveats: [
       "前置阶段1 收料：项目名必须用户给出（gate：项目名与剧本原文齐备才进阶段2）",
@@ -179,7 +180,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     ],
     order: 4,
     stage: 3,
-    mcpTools: ["list_subjects", "upsert_subject", "set_subject_profile", "set_subject_image", "link_subject_to_shot"],
+    mcpTools: ["list_subjects", "upsert_subject", "set_subject_profile", "set_subject_image", "link_subject_to_shot", "list_style_presets", "get_global_style", "set_global_style"],
     caveats: [
       "前置阶段3 提主体：主体清单（名称/类型/别名/状态/出现集数/身份锚点句/图片来源）+ 缺图清单先给用户确认（gate：清单未确认不得 upsert、不得建状态，不得进阶段4）",
       "强制字段：每个主体必须 set_subject_profile 提交完整字段（角色 16 项 / 场景 / 道具），服务端生成三视图/场景宫格/道具参考图提示词；字段不全返回 SUBJECT_PROFILE_INCOMPLETE",
@@ -189,6 +190,8 @@ export const MODULE_SPECS: ModuleSpec[] = [
       "身份锚点句一经锁定，同场景所有提示词逐字复用；改写 = 视觉漂移",
       "场景只收录 ≥2 场复用或承载关键剧情的；道具只收有剧情推动或象征意义的（通常一部短片 0-5 个）",
       "link_subject_to_shot 可先 matchByName 拿候选清单（不写盘），再给 subjectId 直写",
+      "连上/更新后先 audit_upgrade（只读）按旧流程纰漏报给用户并问是否修复；不要只说版本已更新",
+      "全剧风格是项目级单值（script.meta.visualStyle）：list_style_presets 23 套 → 用户选 id → set_global_style（dryRun→确认→userConfirmed+baseVersion）；会改写所有主体提示词的风格块，单主体不覆盖",
     ],
   },
   {

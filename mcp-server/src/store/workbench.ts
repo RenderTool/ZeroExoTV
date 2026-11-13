@@ -27,6 +27,8 @@ export interface WorkbenchShot {
   description: string;
   shotType: string;
   duration: number;
+  /** 2026-11-13 导演台按集切换：片段所属集 id；缺省 = 未分集 */
+  episodeId?: string;
   imagePrompt: string;
   videoPrompt: string;
   status: "pending" | "generating" | "done" | "failed" | "cancelled" | "interrupted";
@@ -266,14 +268,20 @@ function nextSlotNo(refs: WorkbenchShotReference[], kind: WorkbenchShotReference
 export function addSegments(
   root: string,
   projectId: string,
-  opts: WbOpts & { drafts: SegmentDraft[] },
+  opts: WbOpts & { drafts: SegmentDraft[]; episodeId?: string },
 ) {
   return updateWorkbench(root, projectId, {
     ...opts,
     mutate: (wb) => {
-      const base = wb.shots.reduce((m, s) => Math.max(m, s.number), 0);
+      const sameEpisode = opts.episodeId
+        ? wb.shots.filter((s) => s.episodeId === opts.episodeId)
+        : wb.shots.filter((s) => !s.episodeId);
+      const base = sameEpisode.reduce((m, s) => Math.max(m, s.number), 0);
       opts.drafts.forEach((d, i) => {
-        wb.shots.push(makeSegment(base + i + 1, d.description, { duration: d.duration }));
+        wb.shots.push(makeSegment(base + i + 1, d.description, {
+          duration: d.duration,
+          ...(opts.episodeId ? { episodeId: opts.episodeId } : {}),
+        }));
       });
     },
   });
@@ -282,16 +290,20 @@ export function addSegments(
 export function addSegment(
   root: string,
   projectId: string,
-  opts: WbOpts & { description: string; shotType?: string; duration?: number },
+  opts: WbOpts & { description: string; shotType?: string; duration?: number; episodeId?: string },
 ) {
   let created!: WorkbenchShot;
   const promise = updateWorkbench(root, projectId, {
     ...opts,
     mutate: (wb) => {
-      const n = wb.shots.reduce((m, s) => Math.max(m, s.number), 0) + 1;
+      const sameEpisode = opts.episodeId
+        ? wb.shots.filter((s) => s.episodeId === opts.episodeId)
+        : wb.shots.filter((s) => !s.episodeId);
+      const n = sameEpisode.reduce((m, s) => Math.max(m, s.number), 0) + 1;
       created = makeSegment(n, opts.description, {
         shotType: opts.shotType ?? "",
         duration: opts.duration ?? 5,
+        ...(opts.episodeId ? { episodeId: opts.episodeId } : {}),
       });
       wb.shots.push(created);
     },

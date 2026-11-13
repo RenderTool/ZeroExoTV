@@ -34,6 +34,8 @@ import { registerCanvasTools } from "./tools/canvases.js";
 import { registerImageJobTools } from "./tools/image-jobs.js";
 import { registerPlanTools } from "./tools/plan.js";
 import { registerDirectorOpsTools } from "./tools/director-ops.js";
+import { registerStyleTools } from "./tools/style.js";
+import { registerUpgradeTools } from "./tools/upgrade.js";
 
 /**
  * 连接即概览：把「当前数据状态」拼进 initialize 的 instructions。
@@ -80,6 +82,8 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerImageJobTools(server, ctx);
   registerPlanTools(server, ctx);
   registerDirectorOpsTools(server, ctx);
+  registerStyleTools(server, ctx);
+  registerUpgradeTools(server, ctx);
   return server;
 }
 

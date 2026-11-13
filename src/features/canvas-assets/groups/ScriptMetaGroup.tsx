@@ -13,10 +13,8 @@ import {
   readScript, watchScript, writeScript, ScriptConflictError,
   type ScriptEntity, type ScriptMeta, type ScriptVisualStyle,
 } from '@/entities/script-store.js';
-import { readStoryboardContainer, updateStoryboardContainer } from '@/entities/slot-containers.js';
-import {
-  applyStylePromptToPrompt, styleAssetUrl, stylePresetPrompt,
-} from '@/shared/style-presets.js';
+import { rewriteSubjectPrompts } from '@/features/canvas-nodes/storyboard/global-style.js';
+import { styleAssetUrl, stylePresetPrompt } from '@/shared/style-presets.js';
 import { StyleGalleryDialog } from '@/features/canvas-nodes/storyboard/style-gallery-dialog.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 
@@ -99,27 +97,7 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
       setEntity(next);
       setTitleDraft(next.title);
       // 全剧风格 = 唯一风格来源：把现有主体/状态提示词的风格块一起重写（空提示词不动）
-      let synced = 0;
-      if (visualStyle?.prompt) {
-        try {
-          const sb = await readStoryboardContainer(projectId);
-          const trees = Array.isArray(sb?.subjectTree)
-            ? (sb.subjectTree as Array<{ states?: Array<Record<string, unknown>> }>)
-            : [];
-          const nextTrees = trees.map((tr) => ({
-            ...tr,
-            states: (tr.states ?? []).map((st) => {
-              const prompt = String(st.fullPrompt ?? st.deltaPrompt ?? '');
-              if (!prompt.trim()) return st;
-              const applied = applyStylePromptToPrompt(prompt, visualStyle.prompt);
-              if (applied === prompt) return st;
-              synced += 1;
-              return { ...st, fullPrompt: applied, deltaPrompt: applied };
-            }),
-          }));
-          if (synced > 0) await updateStoryboardContainer(projectId, { subjectTree: nextTrees });
-        } catch { /* 提示词同步失败不阻断本剧信息保存 */ }
-      }
+      const synced = visualStyle?.prompt ? await rewriteSubjectPrompts(projectId, visualStyle.prompt) : 0;
       message.success(synced > 0
         ? t('episodeList.metaSavedWithStyle', '本剧信息已保存，{{n}} 个主体提示词已同步全剧风格', { n: synced })
         : t('episodeList.metaSaved', '本剧信息已保存'));

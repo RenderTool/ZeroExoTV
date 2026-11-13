@@ -26,12 +26,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Checkbox, Modal } from 'antd';
+import { App, Button, Checkbox, Modal, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { History, Link2, Link2Off, Star, Trash2 } from 'lucide-react';
+import { History, Link2, Link2Off, ListVideo, Star, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import {
+  UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys, pickInitialEpisodeKey,
+} from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
@@ -68,7 +71,7 @@ import type { TimelineClipData } from '@/features/canvas-nodes/storyboard/timeli
 import { DIRECTOR_ARROW_SIZE, DIRECTOR_CARD_GAP, DIRECTOR_CARD_WIDTH_BASE, TRACK_CLIP_TOP, directorArrowTone, directorCardHeight } from '@/features/canvas-nodes/storyboard/timeline-constants.js';
 import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
-import { readScript, watchScript } from '@/entities/script-store.js';
+import { readScript, watchScript, displayEpisodeTitle } from '@/entities/script-store.js';
 import type {
   WorkbenchNodeData,
   WorkbenchShot,
@@ -113,7 +116,7 @@ function toRunShot(s: WorkbenchShot): RunShotLike {
 }
 
 /** 新建空片段（占位态：显示提示词输入器；默认 5 秒，与容器默认片段一致——2026-11-04 约定） */
-function createSegment(number: number): WorkbenchShot {
+function createSegment(number: number, episodeId?: string): WorkbenchShot {
   return {
     id: `seg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     number,
@@ -126,6 +129,7 @@ function createSegment(number: number): WorkbenchShot {
     clipState: 'placeholder',
     references: [],
     paramValues: {},
+    ...(episodeId ? { episodeId } : {}),
   };
 }
 
@@ -235,7 +239,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    * 主体列表按「出现集数」排序（命中本集/未标注前、其它集后 +「标注为第 N 集」小字）。
    * activeEpisodeId 取不到 = null → 不重排不加标签（与主体库 StoryboardSubjectTree 同口径）。
    */
-  const [episodeContext, setEpisodeContext] = useState<{ activeEpisodeId: string | null; numberById: Record<string, number> }>({ activeEpisodeId: null, numberById: {} });
+  const [episodeContext, setEpisodeContext] = useState<{
+    activeEpisodeId: string | null;
+    numberById: Record<string, number>;
+    episodes: Array<{ id: string; number: number; title?: string }>;
+  }>({ activeEpisodeId: null, numberById: {}, episodes: [] });
   /** dry-run 预检弹层：片段表 + pack 摘要 + 本次运行断开的衔接列表（执行按钮保留 dry-run 语义，不发起真实生成） */
 
   /** 片段选择面板（2026-11-07 统一生成入口：点"生成"弹出，默认勾选当前段，可全选/按需勾选） */
@@ -416,23 +424,70 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   useEffect(() => {
     const pid = isActive ? projectId : null;
     if (!pid) {
-      setEpisodeContext({ activeEpisodeId: null, numberById: {} });
+      setEpisodeContext({ activeEpisodeId: null, numberById: {}, episodes: [] });
       return;
     }
     let cancelled = false;
-    const apply = (e: { episodes?: Array<{ id?: string; number: number }>; activeEpisodeId?: string } | null) => {
+    const apply = (e: { episodes?: Array<{ id?: string; number: number; title?: string }>; activeEpisodeId?: string } | null) => {
       if (cancelled) return;
       const numberById: Record<string, number> = {};
+      const episodes: Array<{ id: string; number: number; title?: string }> = [];
       for (const ep of e?.episodes ?? []) {
-        if (typeof ep.id === 'string' && typeof ep.number === 'number') numberById[ep.id] = ep.number;
+        if (typeof ep.id !== 'string' || typeof ep.number !== 'number') continue;
+        numberById[ep.id] = ep.number;
+        episodes.push({ id: ep.id, number: ep.number, title: ep.title });
       }
       const active = typeof e?.activeEpisodeId === 'string' ? e.activeEpisodeId : null;
-      setEpisodeContext({ activeEpisodeId: active && numberById[active] != null ? active : null, numberById });
+      setEpisodeContext({ activeEpisodeId: active && numberById[active] != null ? active : null, numberById, episodes });
     };
     void readScript(pid).then(apply);
     const un = watchScript(pid, apply);
     return () => { cancelled = true; un(); };
   }, [isActive, projectId]);
+
+  // 2026-11-13 导演台按集切换：episodeId 分组 → 当前集可见片段；未分集单列一桶
+  const workbenchEpisodeByProject = useViewPrefsStore((s) => s.workbench.activeEpisodeByProject);
+  const setWorkbenchActiveEpisode = useViewPrefsStore((s) => s.setWorkbenchActiveEpisode);
+  const episodeGroups = useMemo(() => groupShotsByEpisode(shots), [shots]);
+  const scriptEpisodeIds = useMemo(() => episodeContext.episodes.map((e) => e.id), [episodeContext.episodes]);
+  const episodeKeys = useMemo(
+    () => orderEpisodeKeys(episodeGroups, scriptEpisodeIds),
+    [episodeGroups, scriptEpisodeIds],
+  );
+  /** 用户手动选过的集（优先）；失效时回落到记忆/剧本当前集/第一个有片段的集 */
+  const [episodeOverride, setEpisodeOverride] = useState<string | null>(null);
+  const activeEpisodeKey = useMemo(() => {
+    if (episodeKeys.length === 0) return null;
+    const remembered = projectId ? workbenchEpisodeByProject[projectId] : undefined;
+    const candidate = episodeOverride ?? remembered ?? null;
+    if (candidate) {
+      const valid = candidate === UNASSIGNED_EPISODE_KEY
+        ? Boolean(episodeGroups[candidate]?.length)
+        : episodeKeys.includes(candidate);
+      if (valid) return candidate;
+    }
+    return pickInitialEpisodeKey(episodeGroups, scriptEpisodeIds, {
+      scriptActiveId: episodeContext.activeEpisodeId,
+    });
+  }, [episodeKeys, episodeGroups, scriptEpisodeIds, episodeContext.activeEpisodeId, episodeOverride, projectId, workbenchEpisodeByProject]);
+  const visibleShots = useMemo(
+    () => (activeEpisodeKey ? (episodeGroups[activeEpisodeKey] ?? []) : shots),
+    [activeEpisodeKey, episodeGroups, shots],
+  );
+  const episodeOptions = useMemo(() => episodeKeys.map((key) => {
+    const count = episodeGroups[key]?.length ?? 0;
+    if (key === UNASSIGNED_EPISODE_KEY) return { value: key, label: `未分集（${count} 段）` };
+    const ep = episodeContext.episodes.find((e) => e.id === key);
+    const label = ep ? displayEpisodeTitle(ep.title, ep.number) : '已删除的集';
+    return { value: key, label: `${label}（${count} 段）` };
+  }), [episodeKeys, episodeGroups, episodeContext.episodes]);
+
+  const handleEpisodeChange = useCallback((key: string) => {
+    setEpisodeOverride(key);
+    if (projectId) setWorkbenchActiveEpisode(projectId, key);
+    const first = episodeGroups[key]?.[0];
+    if (first) setActiveShotId(first.id);
+  }, [projectId, setWorkbenchActiveEpisode, episodeGroups]);
 
   // 编辑防抖写回容器（shots + 单轨镜像 + 总时长；版本 +1 由写 API 保证）
   const persist = useCallback(() => {
@@ -587,7 +642,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const handleInsertAt = useCallback(
     (afterShotId: string | null, insert?: { index?: number }) => {
       const prev = shotsRef.current;
-      const seg = createSegment(prev.length + 1);
+      const seg = createSegment(prev.length + 1, activeEpisodeKey && activeEpisodeKey !== UNASSIGNED_EPISODE_KEY ? activeEpisodeKey : undefined);
       const at = insert?.index ?? (afterShotId ? prev.findIndex((s) => s.id === afterShotId) + 1 : prev.length);
       const idx = Math.max(0, Math.min(prev.length, at));
       const next = [...prev.slice(0, idx), seg, ...prev.slice(idx)].map((s, i) => ({ ...s, number: i + 1 }));
@@ -595,7 +650,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       setActiveShotId(seg.id);
       markDirty();
     },
-    [markDirty],
+    [markDirty, activeEpisodeKey],
   );
 
   /** 交换两个片段的位置（2026-11-10）：数组互换 + 重新编号；选中片段不丢 */
@@ -994,16 +1049,16 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   // 必须与 tracks/data 由同一份实体 shots 派生，否则活动轨渲染 0 个片段
   // 2026-11-05 六态徽标：透传 comfyRun 运行态（排队/已取消派生 + 运行中未轮到=排队）
   const timelineClips = useMemo<TimelineClipData[]>(
-    () => shots.map((s) => toTimelineClip(s, firstFrameUrls, {
+    () => visibleShots.map((s) => toTimelineClip(s, firstFrameUrls, {
       phase: comfyRun.phase,
       segmentShotIds: comfyRun.segmentShotIds,
       currentSegment: comfyRun.currentSegment,
     })),
-    [shots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment],
+    [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment],
   );
 
-  const selectedShot = shots.find((s) => s.id === activeShotId) ?? shots[0];
-  const selectedShotIndex = selectedShot ? shots.findIndex((s) => s.id === selectedShot.id) : 0;
+  const selectedShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0];
+  const selectedShotIndex = selectedShot ? visibleShots.findIndex((s) => s.id === selectedShot.id) : 0;
 
   /**
    * 2026-11-07 修复（运行中点选「没运行到的片段」串帧 + 假播放器进度条）：
@@ -1259,6 +1314,21 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             })(),
           }}
           multitrackProps={{
+            railExtra: episodeKeys.length > 0 ? (
+              <div data-director-episode-switcher style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <ListVideo size={14} color={theme.toolbar.textMuted} />
+                <Select
+                  size="small"
+                  data-director-episode
+                  value={activeEpisodeKey ?? undefined}
+                  options={episodeOptions}
+                  onChange={(key: string) => handleEpisodeChange(key)}
+                  style={{ width: 150 }}
+                  popupMatchSelectWidth={false}
+                />
+                <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
+              </div>
+            ) : null,
             tracks: [track],
             data,
             focusedTrackId: track.id,
@@ -1396,21 +1466,21 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               onSharedChange={updateSharedParams}
               shot={selectedShot}
               shotIndex={selectedShotIndex}
-              totalShots={shots.length}
+              totalShots={visibleShots.length}
               // 2026-11-06 标题区镜头跳转胶囊：与导轨/预览共用 activeShotId 单一受控源，
               // 面板内不自建序号状态（受控组件复用铁律）
-              onPrevShot={() => setActiveShotId(shots[Math.max(0, selectedShotIndex - 1)]!.id)}
-              onNextShot={() => setActiveShotId(shots[Math.min(shots.length - 1, selectedShotIndex + 1)]!.id)}
+              onPrevShot={() => setActiveShotId(visibleShots[Math.max(0, selectedShotIndex - 1)]!.id)}
+              onNextShot={() => setActiveShotId(visibleShots[Math.min(visibleShots.length - 1, selectedShotIndex + 1)]!.id)}
               // 2026-11-10：下拉直达任意镜头 + 与其它镜头交换位置（大量片段时不用一路拖）
               onJumpShot={(i) => {
-                const target = shots[Math.max(0, Math.min(shots.length - 1, i))];
+                const target = visibleShots[Math.max(0, Math.min(visibleShots.length - 1, i))];
                 if (target) setActiveShotId(target.id);
               }}
               onSwapShot={(i) => {
-                const target = shots[i];
+                const target = visibleShots[i];
                 if (target && target.id !== selectedShot.id) swapShots(selectedShot.id, target.id);
               }}
-              shotLabels={shots.map((s) => `${s.duration}s`)}
+              shotLabels={visibleShots.map((s) => `${s.duration}s`)}
               onShotChange={(patch) => updateShot(selectedShot.id, patch)}
               theme={theme}
               isDark={isDark}

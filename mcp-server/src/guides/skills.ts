@@ -143,6 +143,16 @@ const SUBJECTS = `# 技能：主体库（subjects）
 - 模型语言：Qwen 直接用生成的中文提示词；Moss / Krea2 按 \`zeroexo://skills/image-prompts\` 翻成英文再投喂。
 - 提示词由服务端生成，**Agent 不要再手写三视图/场景/道具模板**；返回的 \`prompt\` 就是页面「提示词」的内容。
 
+## 1.8 全剧风格（项目级单值，主体继承）
+
+- 风格不是每个主体各写一套：\`script.meta.visualStyle\` 存一套快照（presetId / name / prompt / image），
+  所有主体/状态提示词继承；单主体不覆盖。
+- 工具：\`list_style_presets\`（23 套：9 导演 / 6 主流 / 8 动画）→ 把候选 id 与名称报给用户选 →
+  \`get_global_style\` 看现状 → \`set_global_style({ presetId, baseVersion, dryRun, userConfirmed })\`。
+- \`set_global_style\` 会删所有主体提示词里的「风格 / 灯光 / 色彩 / 质感」旧行，末尾追加一行
+  「风格：<该套片段>」；空提示词不动，人设 / 版式 / 硬约束不动。**必须先把 presetId 与影响报用户确认再写**。
+- 页面入口：本剧信息「全剧风格」、主体状态面板「全剧风格」整行（点开同一个画廊）。
+
 ## 2. 身份锚点句（外观锁）
 
 一句话封装：性别年龄 + 面部特征 + 发型 + 体型 + 服装 + 标志物。

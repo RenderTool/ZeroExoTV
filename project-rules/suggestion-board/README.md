@@ -33,5 +33,8 @@
 | S-24 | 2026-11-12 | MCP 防跨主体共用图（audit cross_subject_image + set_subject_image 闸门）；主体编辑面板集数区间压缩美化 | 独立热修 | 🟢 merged | [2026-11-12-comfyui-cross-subject-image-guard.md](2026-11-12-comfyui-cross-subject-image-guard.md) |
 | S-25 | 2026-11-13 | 主体环节硬约束：强制字段模板（角色三视图/场景宫格/道具单品）+ read_asset 先看图 + 反推提示词才许 set_subject_image；主体清单与缺图清单写死 | 独立热修 | 🟢 merged | [2026-11-13-comfyui-subject-image-review-and-prompt-caption.md](2026-11-13-comfyui-subject-image-review-and-prompt-caption.md) |
 | S-26 | 2026-11-13 | 全剧风格画廊：23 套电影美学（uisdc 提示词 + 配图）可视化面板；本剧信息选一次，所有主体提示词继承 | 独立热修 | 🟢 merged | [2026-11-13-comfyui-global-style-gallery.md](2026-11-13-comfyui-global-style-gallery.md) |
+| S-27 | 2026-11-13 | 主体面板「全剧风格」整行直达画廊；MCP 增 list/get/set_global_style（读写权 + 组织规范） | 独立热修 | 🟢 merged | [2026-11-13-style-gallery-direct-and-mcp.md](2026-11-13-style-gallery-direct-and-mcp.md) |
+| S-28 | 2026-11-13 | 导演台分集下拉：片段 episodeId、未分集单列、MCP split/add_segment 带集 | 独立热修 | 🟢 merged | [2026-11-13-director-episode-switch.md](2026-11-13-director-episode-switch.md) |
+| S-29 | 2026-11-13 | MCP 升级后主动查漏补缺：audit_upgrade / get_upgrade_guide + 询问修复 | 独立热修 | 🟢 merged | [2026-11-13-mcp-upgrade-audit.md](2026-11-13-mcp-upgrade-audit.md) |
 
-状态：open 0 / merged 26。
+状态：open 0 / merged 29。

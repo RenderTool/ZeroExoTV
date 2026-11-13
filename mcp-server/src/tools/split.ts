@@ -42,13 +42,14 @@ export function registerSplitTools(server: McpServer, ctx: Ctx): void {
       const res = await addSegments(dataRoot(), args.projectId, {
         baseVersion: args.baseVersion,
         drafts,
+        episodeId: ep.id,
         dryRun: false,
       });
       return {
         written: true,
         workbenchVersion: res.after.version,
         addedCount: drafts.length,
-        shots: res.after.shots.map((s) => ({ id: s.id, number: s.number, description: s.description })),
+        shots: res.after.shots.map((s) => ({ id: s.id, number: s.number, episodeId: s.episodeId, description: s.description })),
       };
     },
   });
