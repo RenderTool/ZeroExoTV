@@ -11,16 +11,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Collapse, Input, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Circle, Cpu, Download, FolderOpen } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { pickRoot, rootName, currentDataRootPath, switchDataRoot } from '@/platform/fs.js';
-import { McpSettingsDialog } from '@/features/mcp-settings/mcp-settings-dialog.js';
+import { buildBootstrapCommand, detectBootstrapPlatform } from '@/features/mcp-settings/mcp-bootstrap.js';
+import {
+  buildStdioConfig,
+  ensureIdeToken,
+  loadServerInfo,
+  mcpServerMissingTools,
+  type ServerInfo,
+} from '@/features/mcp-settings/mcp-client.js';
 import {
   testEndpointConnection,
   useComfyuiEndpointStore,
 } from '@/features/canvas-tabs/comfyui-endpoint.js';
-import { ComfyuiConnectButton } from '@/features/canvas-tabs/comfyui-connect-button.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
@@ -105,6 +111,9 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [address, setAddress] = useState(endpoint.address || DEFAULT_COMFYUI);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [mcpToken, setMcpToken] = useState<string | null>(null);
+  const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
 
   const pluginZipUrl = `${import.meta.env.BASE_URL}downloads/ComfyUI_ZeroExoNodes.zip`;
 
@@ -113,7 +122,31 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     setRoot(rootName() ?? null);
     setRootPathInput(currentDataRootPath() ?? '');
     setAddress(endpoint.address || DEFAULT_COMFYUI);
+    void (async () => {
+      try {
+        const info = await loadServerInfo();
+        setServerInfo(info);
+        setMcpStaleTools(mcpServerMissingTools(info));
+        if (info) setMcpToken(await ensureIdeToken());
+      } catch {
+        setServerInfo(null);
+      }
+    })();
   }, [open, endpoint.address]);
+
+  // 首装机器：用户跑完安装命令后 MCP 才写 server-info，这里自动识别，不用刷新
+  useEffect(() => {
+    if (!open || serverInfo) return;
+    const timer = window.setInterval(() => {
+      void loadServerInfo().then(async (info) => {
+        if (!info) return;
+        setServerInfo(info);
+        setMcpStaleTools(mcpServerMissingTools(info));
+        setMcpToken(await ensureIdeToken().catch(() => null));
+      }).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [open, serverInfo]);
 
   const chooseRoot = useCallback(async () => {
     try {
@@ -150,6 +183,26 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
       message.error(err instanceof Error ? err.message : t('onboarding.rootSwitchFailed', '切换目录失败'));
     }
   }, [rootPathInput, message, t]);
+
+  const mcpConfig = serverInfo && mcpToken
+    ? buildStdioConfig({ serverEntry: serverInfo.serverEntry, dataRoot: serverInfo.dataRoot }, mcpToken)
+    : '';
+  const copyText = useCallback(async (text: string, label: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success(`${label}已复制`);
+    } catch {
+      message.error(t('onboarding.copyFailed', '复制失败，请手动选择复制'));
+    }
+  }, [message, t]);
+  const copyBootstrap = useCallback(() => {
+    const command = buildBootstrapCommand({
+      platform: detectBootstrapPlatform(),
+      downloadUrl: `${window.location.origin}${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}downloads/zeroexo-mcp-server.tgz`,
+    });
+    void copyText(command, t('onboarding.installCommand', '安装命令'));
+  }, [copyText, t]);
 
   const testComfy = useCallback(async () => {
     setTesting(true);
@@ -231,12 +284,60 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
           ) : null}
         </StepCard>
 
-        {/* 2 MCP：直接复用唯一 MCP 设置面板（首屏配置 + 高级密钥已收在组件内部） */}
-        <StepCard index={2} title={t('onboarding.stepMcp', '接入 MCP（给 Agent IDE）')} done={false} theme={theme}>
+        {/* 2 MCP：默认只给一个复制按钮；完整配置/密钥收进高级选项 */}
+        <StepCard index={2} title={t('onboarding.stepMcp', '接入 MCP（给 Agent IDE）')} done={Boolean(serverInfo)} theme={theme}>
           <span style={hintStyle(theme)}>
-            {t('onboarding.stepMcpHint', '复制配置，粘到 Agent IDE 的 MCP 设置里。')}
+            {serverInfo
+              ? t('onboarding.stepMcpHint', '复制配置，粘到 Agent IDE 的 MCP 设置里。')
+              : t('onboarding.stepMcpFirstRun', '先复制安装命令，在终端跑一次；成功后这里会自动识别。')}
           </span>
-          <McpSettingsDialog embedded />
+          <div>
+            <Button
+              size="small"
+              type="primary"
+              icon={<Copy size={13} />}
+              onClick={() => {
+                if (serverInfo) void copyText(mcpConfig, t('onboarding.copyMcp', 'MCP 配置'));
+                else copyBootstrap();
+              }}
+            >
+              {serverInfo
+                ? t('onboarding.copyMcp', '复制 MCP 配置')
+                : t('onboarding.copyBootstrap', '复制安装命令')}
+            </Button>
+          </div>
+          {mcpStaleTools.length > 0 ? (
+            <span style={{ fontSize: 12, color: '#d97706' }}>
+              检测到 MCP 服务是旧版本（缺 {mcpStaleTools.length} 个工具）：重启 IDE 里的 MCP 服务后再生效。
+            </span>
+          ) : null}
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'advanced-mcp',
+              label: <span style={{ fontSize: 12 }}>{t('onboarding.advancedKeys', '高级选项（密钥 / 完整配置）')}</span>,
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <textarea
+                    readOnly
+                    value={mcpConfig || t('onboarding.mcpNotReady', 'MCP 未就绪，暂无可复制配置')}
+                    style={{
+                      width: '100%', minHeight: 92, resize: 'vertical', boxSizing: 'border-box',
+                      fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5,
+                      color: theme.toolbar.text, background: theme.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
+                      border: `1px solid ${theme.toolbar.border}`, borderRadius: 8, padding: 8,
+                    }}
+                  />
+                  <div>
+                    <Button size="small" disabled={!mcpConfig} onClick={() => void copyText(mcpConfig, t('onboarding.copyMcp', 'MCP 配置'))}>
+                      {t('onboarding.copyMcp', '复制 MCP 配置')}
+                    </Button>
+                  </div>
+                </div>
+              ),
+            }]}
+          />
         </StepCard>
 
         {/* 3 ComfyUI */}
@@ -267,7 +368,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             <Button size="small" icon={<Cpu size={13} />} loading={testing} onClick={() => void testComfy()}>
               {t('onboarding.testComfy', '测试连接')}
             </Button>
-            <ComfyuiConnectButton inline />
           </div>
           {testResult ? (
             <span style={{ fontSize: 12, color: comfyDone ? '#16a34a' : '#dc2626' }}>{testResult}</span>

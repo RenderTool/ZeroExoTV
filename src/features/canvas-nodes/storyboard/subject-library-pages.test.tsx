@@ -1113,7 +1113,9 @@ describe('状态页直接出图 + 参考素材（2026-11-13 P0）', () => {
 
     expect(document.querySelector('[data-subject-ref-add]')).toBeTruthy();
     expect(document.querySelector('[data-subject-gen-footer]')).toBeTruthy();
-    expect(document.querySelector('[data-subject-send-canvas]')).toBeTruthy();
+    // 画布编辑只在卡片顶行出现一次，底栏不再重复「发送到画布」
+    expect(document.querySelector('[data-subject-send-canvas]')).toBeNull();
+    expect(document.querySelector('[data-state-action="canvas-generate"]')).toBeTruthy();
     expect(document.querySelector('[data-subject-baseref]')).toBeTruthy();
     // 画布底栏同款：StyledSelect 模型 + 参数摘要弹层；提示词框已在页面里，底栏不再重复提示词库
     expect(document.querySelector('[data-subject-gen-footer]')?.textContent).toContain('QwenImage2.1');
@@ -1121,9 +1123,6 @@ describe('状态页直接出图 + 参考素材（2026-11-13 P0）', () => {
     const generate = document.querySelector('[data-subject-gen-footer] button[aria-label="生成"]') as HTMLButtonElement | null;
     expect(generate).toBeTruthy();
     expect(generate?.disabled).toBe(true);
-    // 生成永远是最后一步：发送到画布在生成按钮之前
-    const send = document.querySelector('[data-subject-gen-footer] [data-subject-send-canvas]') as HTMLElement;
-    expect(send.compareDocumentPosition(generate as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('基础状态没有「引用基础状态」开关（自己就是基准）', async () => {

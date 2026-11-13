@@ -9,10 +9,12 @@ import { describe, expect, it } from 'vitest';
 const read = (p: string): string => readFileSync(resolve(process.cwd(), p), 'utf8');
 
 describe('首次启动 MCP 状态', () => {
-  it('onboarding：MCP 直接复用唯一 MCP 设置面板（首屏配置 + 高级密钥都在同一处）', () => {
+  it('onboarding：无 server-info 时只给一个复制安装命令按钮，并自动轮询识别', () => {
     const src = read('src/features/onboarding/onboarding-guide.tsx');
-    expect(src).toContain('<McpSettingsDialog embedded />');
-    expect(src).toContain('stepMcp');
+    expect(src).toContain('stepMcpFirstRun');
+    expect(src).toContain('copyBootstrap');
+    expect(src).toContain('buildBootstrapCommand');
+    expect(src).toContain('window.setInterval');
     expect(src).not.toContain('MCP 服务信息还没有生成');
   });
 

@@ -1131,12 +1131,12 @@ function StateGridCard({
 /**
  * 状态出图底栏 = 画布提示词底栏同一套按钮/弹层框架（2026-11-13 用户纠正）：
  * StyledSelect 模型 + 参数摘要弹层（LocalQwen/Krea/Moss 表单）+ 字数 + 圆形生成按钮。
- * 主体页已有可见提示词框，底栏不再重复「提示词库」；「发送到画布」放在生成按钮之前，
- * 生成按钮必须永远是这一行最后一个动作。
+ * 主体页已有可见提示词框，底栏不再重复「提示词库」；「画布编辑」只在卡片顶行出现一次，
+ * 底栏不再重复「发送到画布」；生成按钮必须永远是这一行最后一个动作。
  */
 function SubjectGenFooter({
   jobKey, theme, model, prompt, paramValues, referenceKey, leading,
-  onModelChange, onParamsChange, onStart, onCancel, onSendToCanvas,
+  onModelChange, onParamsChange, onStart, onCancel,
 }: {
   jobKey: string;
   theme: ThemeConfig;
@@ -1150,9 +1150,7 @@ function SubjectGenFooter({
   onParamsChange: (patch: Record<string, unknown>) => void;
   onStart: () => void;
   onCancel: () => void;
-  onSendToCanvas: () => void;
 }): React.ReactElement {
-  const { t } = useTranslation();
   const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
   const running = runtime?.state === 'running' || runtime?.state === 'queued';
   return (
@@ -1174,11 +1172,6 @@ function SubjectGenFooter({
             onAction={running ? onCancel : onStart}
             onConfigChange={(_nodeId, patch) => onModelChange(String(patch.model ?? ''))}
             onParamValuesChange={onParamsChange}
-            trailing={(
-              <Button size="small" type="text" data-subject-send-canvas onClick={onSendToCanvas}>
-                {t('subject.sendToCanvas', '发送到画布')}
-              </Button>
-            )}
           />
         </ThemeProvider>
       </div>
@@ -1195,7 +1188,7 @@ function SubjectGenFooter({
 function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
   onRestoreMedia, onDeleteHistoryMedia,
-  jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onSendToCanvas, onRenameSubject,
+  jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onRenameSubject,
 }: {
   tree: SubjectTree;
   node: SubjectTreeNode;
@@ -1214,8 +1207,6 @@ function StateEditPanel({
   /** 参考素材：打开统一选择页（画布 / 资产 / 主体） */
   onAddReference: (anchor: HTMLElement) => void;
   onRemoveReference: () => void;
-  /** 发送到画布继续做长链修改（只挂提示词与参考图，不发起生成） */
-  onSendToCanvas: () => void;
   /** 主体名：统一放在参考素材上方（2026-11-13 用户指令） */
   onRenameSubject: (next: string) => void;
 }): React.ReactElement {
@@ -1599,7 +1590,6 @@ function StateEditPanel({
           }}
           onStart={onStartGenerate}
           onCancel={onCancelGenerate}
-          onSendToCanvas={onSendToCanvas}
         />
         {node.genJob?.state === 'error' && node.genJob.error && (
           <div data-subject-gen-error style={{ ...hintStyle, color: theme.toolbar.danger }}>
@@ -2734,17 +2724,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         onAddReference={(anchor) => setRefPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                         onRemoveReference={() => setNodeReference(openTree.rootId, node.id, null)}
                         onRenameSubject={(next) => renameTree(openTree.rootId, next)}
-                        onSendToCanvas={() => {
-                          const latestTree = treesRef.current.find((tr) => tr.rootId === openTree.rootId) ?? openTree;
-                          const latestNode = latestTree.states.find((n) => n.id === node.id) ?? node;
-                          nodeActionBus.emit('subject:sendStateToCanvas', {
-                            nodeId: '',
-                            name: isBase ? latestTree.name : (latestNode.state?.trim() || latestTree.name),
-                            prompt: latestNode.fullPrompt || latestNode.deltaPrompt || '',
-                            storageKey: first?.key,
-                            referenceStorageKey: resolveSubjectGenParams(latestNode).referenceKeys[0],
-                          });
-                        }}
                       />
                     ) : undefined}
                     onToggleCover={() => toggleCover(openTree, node.id)}
@@ -2761,6 +2740,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         name: isBase ? openTree.name : (node.state?.trim() || openTree.name),
                         prompt: node.fullPrompt || node.deltaPrompt || '',
                         storageKey: first?.key,
+                        referenceStorageKey: resolveSubjectGenParams(node).referenceKeys[0],
                       });
                     }}
                   />
