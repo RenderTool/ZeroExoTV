@@ -506,7 +506,8 @@ page container (height: 100%, flex column, overflow: hidden)
 
 ### 使用指引 / 服务（唯一页面，2026-11-13 用户拍板）
 - **只有一个页面**：顶栏「服务」与主页底部「使用指引」打开的是同一个 `OnboardingGuide`；不再保留带 Tab 的第二个「服务」弹窗。
-- 页面固定三块：① 存储目录；② 接入 MCP（默认只有一句说明 + 一个「复制安装命令 / 复制 MCP 配置」按钮，完整 JSON、token、密钥收进默认收起的「高级选项」）；③ 连接 ComfyUI（下载插件 ZIP + 解压到 `custom_nodes` + 地址/测试连接 + 支持的模型列表）。**禁止把完整 MCP 设置面板直接嵌进指引**，否则又变成复杂页面。
+- 页面固定三块：① 存储目录；② 接入 MCP（默认只有一句说明 + 一个「复制安装命令 / 复制 MCP 配置」按钮，完整 JSON、token、密钥收进默认收起的「高级选项」）；③ 连接 ComfyUI（下载插件 ZIP + 解压到 `custom_nodes` + **一个**地址输入/测试 + 模型四件套选择 + 机器档位推荐表）。**禁止把完整 MCP 设置面板直接嵌进指引**，否则又变成复杂页面。
+- ComfyUI 模型四件套（视频主模型 / 视频 VAE / 音频 VAE / 文本编码器）必须给**可改选的下拉**，选项来自当前 ComfyUI 的 `/zeroexo/h3/models`；推荐项只加「推荐」后缀，不得替用户锁死。**推荐表只讲用户能理解的「能不能做」**（图片 / 视频 / 短片段 / 2K），禁止在界面堆 INT8、NVFP4、offload、bf16 这类量化术语。
 - 文案只讲「下载放哪 / 填什么」，禁止把内部说明、口语化提示写进界面；密钥、token、绝对路径一律收进「高级选项」。
 - 关掉后写 `zeroexo:onboarding.seen`，不再自动弹；主页底部入口可随时重新打开。
 - 指引只做入口与状态展示：存储走浏览器目录授权，MCP 复用设置页的 `McpSettingsDialog`/`buildStdioConfig`，ComfyUI 连接复用 `testEndpointConnection` + 同一个 endpoint store，禁止另起一套配置。

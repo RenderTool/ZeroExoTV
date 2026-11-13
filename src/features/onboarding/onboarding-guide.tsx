@@ -9,7 +9,7 @@
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { App, Button, Collapse, Input, Modal, Tag } from 'antd';
+import { App, Button, Collapse, Input, Modal, Select, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -27,23 +27,19 @@ import {
   testEndpointConnection,
   useComfyuiEndpointStore,
 } from '@/features/canvas-tabs/comfyui-endpoint.js';
+import { fetchBridgeModels } from '@/features/canvas-tabs/comfyui-bridge-client.js';
+import { pickDefaultModels, useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connection.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
 const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
 
-/** 机器档位 → 模型推荐（本地 / 云端）。8GB 本地只建议图片；H3 按量化档位选。 */
+/** 机器档位 → 推荐用法（只讲能不能做，不讲量化术语） */
 const MODEL_RECOMMENDATIONS: Array<{ vram: string; local: string; cloud: string }> = [
-  { vram: '8 GB', local: '图片：QwenImage2.1（GGUF Q4）/ Krea2 / MossImage。视频不推荐本地跑 H3。', cloud: 'H3 INT8 / 云端 2K' },
-  { vram: '12–16 GB', local: '图片全量；H3：pruned INT8 + NVFP4 文本编码器 + offload，0.4MP 短片段（建议 32GB 内存）。', cloud: 'H3 INT8' },
-  { vram: '24 GB', local: 'H3：pruned INT8 扩散 + 文本编码器选 int8_convrot / nvfp4_awq（编码后卸载）；禁止选 bf16 文本编码器。', cloud: 'H3 INT8 / 2K' },
-  { vram: '32 GB+', local: 'H3：pruned INT8，Blackwell 可用 NVFP4；全画布 768p。', cloud: '2K 托管' },
-];
-const MODELS: Array<{ name: string; note: string }> = [
-  { name: 'QwenImage2.1', note: '图片 / 图生图' },
-  { name: 'Krea2', note: '图片' },
-  { name: 'MossImage', note: '图片' },
-  { name: 'H3ZeroExo', note: '视频' },
+  { vram: '8 GB', local: '只做图片：QwenImage2.1 / Krea2 / MossImage。视频用云端。', cloud: 'H3 云端' },
+  { vram: '12–16 GB', local: '图片都能用；视频只做短片段、低分辨率。', cloud: 'H3 云端' },
+  { vram: '24 GB', local: '图片都能用；视频可做完整片段，模型选带「推荐」的。', cloud: 'H3 云端 / 2K' },
+  { vram: '32 GB+', local: '视频可做完整片段；本地仍然出不了 2K。', cloud: '2K' },
 ];
 
 export function isOnboardingDone(): boolean {
@@ -120,6 +116,11 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [mcpToken, setMcpToken] = useState<string | null>(null);
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const models = useComfyuiConnectionStore((s) => s.models);
+  const availableModels = useComfyuiConnectionStore((s) => s.availableModels);
+  const setModel = useComfyuiConnectionStore((s) => s.setModel);
+  const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
 
   const pluginZipUrl = `${import.meta.env.BASE_URL}downloads/ComfyUI_ZeroExoNodes.zip`;
 
@@ -210,6 +211,27 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     void copyText(command, t('onboarding.installCommand', '安装命令'));
   }, [copyText, t]);
 
+  const loadModels = useCallback(async (addr: string) => {
+    setRefreshingModels(true);
+    try {
+      const list = await fetchBridgeModels(addr);
+      const current = useComfyuiConnectionStore.getState().models;
+      const defaults = pickDefaultModels(list, current);
+      setConnectedModels(true, list);
+      (['unet', 'videoVae', 'audioVae', 'clip'] as const).forEach((slot) => {
+        if (defaults[slot]) setModel(slot, defaults[slot]);
+      });
+    } catch {
+      setConnectedModels(true);
+    } finally {
+      setRefreshingModels(false);
+    }
+  }, [setConnectedModels, setModel]);
+
+  useEffect(() => {
+    if (open && endpoint.connected && endpoint.address) void loadModels(endpoint.address);
+  }, [open, endpoint.connected, endpoint.address, loadModels]);
+
   const testComfy = useCallback(async () => {
     setTesting(true);
     setTestResult(null);
@@ -223,6 +245,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             ? t('onboarding.backendDirect', '直连桥接')
             : t('onboarding.backendOpenAI', 'OpenAI 兼容口');
         setTestResult(`${t('onboarding.comfyOk', '已连接')}：${backendLabel}`);
+        void loadModels(address);
       } else {
         setTestResult(res.message);
       }
@@ -231,10 +254,26 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     } finally {
       setTesting(false);
     }
-  }, [address, t]);
+  }, [address, t, loadModels]);
 
   const comfyDone = endpoint.connected;
   const advanceRoot = currentDataRootPath();
+
+  /** 模型四件套：只给当前 ComfyUI 实际返回的文件名，推荐项加后缀，用户仍可自由改选 */
+  const modelSlots: Array<{ slot: 'unet' | 'videoVae' | 'audioVae' | 'clip'; label: string; list: string[] }> = [
+    { slot: 'unet', label: t('onboarding.modelUnet', '视频主模型'), list: availableModels.unet },
+    { slot: 'videoVae', label: t('onboarding.modelVideoVae', '视频 VAE'), list: availableModels.vae },
+    { slot: 'audioVae', label: t('onboarding.modelAudioVae', '音频 VAE'), list: availableModels.vae },
+    { slot: 'clip', label: t('onboarding.modelClip', '文本编码器'), list: availableModels.clip },
+  ];
+  const modelOptionLabel = (slot: string, name: string): string => {
+    if (slot === 'unet' && name.includes('minimax_h3_hybrid_fl2va_ref2va_b15-49-int8')) return `${name}（推荐）`;
+    if (slot === 'videoVae' && name === 'minimax_h3_video_vae_fp16.safetensors') return `${name}（推荐）`;
+    if (slot === 'audioVae' && name === 'minimax_h3_audio_vae_fp32.safetensors') return `${name}（推荐）`;
+    if (slot === 'clip' && name === 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors') return `${name}（推荐）`;
+    if (slot === 'clip' && name === 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors') return `${name}（新显卡推荐）`;
+    return name;
+  };
 
   return (
     <Modal
@@ -378,16 +417,41 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
           {testResult ? (
             <span style={{ fontSize: 12, color: comfyDone ? '#16a34a' : '#dc2626' }}>{testResult}</span>
           ) : null}
-          <div data-onboarding-models style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ ...hintStyle(theme), flexShrink: 0 }}>{t('onboarding.models', '支持的模型')}</span>
-            {MODELS.map((m) => (
-              <Tag key={m.name} style={{ marginInlineEnd: 0 }} title={m.note}>
-                {m.name}
-                <span style={{ opacity: 0.6, marginLeft: 4 }}>{m.note}</span>
-              </Tag>
+          {/* 模型四件套：推荐归推荐，选择权留给用户；列表来自当前 ComfyUI */}
+          <div data-onboarding-model-picker style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{t('onboarding.modelPickTitle', '模型选择')}</span>
+              <Button
+                type="link"
+                size="small"
+                loading={refreshingModels}
+                onClick={() => void loadModels(address)}
+                style={{ padding: 0, fontSize: 11, height: 'auto' }}
+              >
+                {t('onboarding.modelRefresh', '刷新列表')}
+              </Button>
+            </div>
+            {modelSlots.map(({ slot, label, list }) => (
+              <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 76, flexShrink: 0, fontSize: 11, color: theme.toolbar.textMuted }}>{label}</span>
+                <Select
+                  size="small"
+                  data-onboarding-model={slot}
+                  value={models[slot] || undefined}
+                  placeholder={list.length ? t('onboarding.modelPick', '选择模型') : t('onboarding.modelEmpty', '连接后读取列表')}
+                  options={list.map((name) => ({ value: name, label: modelOptionLabel(slot, name) }))}
+                  onChange={(value: string) => setModel(slot, value)}
+                  showSearch
+                  optionFilterProp="label"
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+              </div>
             ))}
+            <span style={hintStyle(theme)}>
+              {t('onboarding.modelPickHint', '推荐只是标注，可以自由改选；不确定就用带「推荐」的那一项。')}
+            </span>
           </div>
-          {/* 机器档位 → 模型推荐（本地 / 云端）：8GB 只建议图片，H3 按量化档位选 */}
+          {/* 机器档位 → 推荐用法（只讲能不能做，不讲量化术语） */}
           <div data-model-recommendations style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ fontSize: 12, fontWeight: 600 }}>{t('onboarding.modelGuide', '机器配置推荐')}</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, lineHeight: 1.5 }}>
@@ -409,7 +473,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               </tbody>
             </table>
             <span style={hintStyle(theme)}>
-              {t('onboarding.modelGuideHint', 'H3 官方推荐：pruned INT8 扩散（约 21GB）+ NVFP4 文本编码器（14.6GB）；bf16 文本编码器是 32B 满精度（约 65GB），24GB 卡不要选。BF16 全量 66GB 非消费级，本地任何卡都出不了 2K。8GB 机器优先做图片，视频走云端 INT8。')}
+              {t('onboarding.modelGuideHint', '不知道怎么选就选带「推荐」的那一项，其他版本不用管。8GB 机器先做图片，视频走云端。')}
             </span>
           </div>
         </StepCard>
