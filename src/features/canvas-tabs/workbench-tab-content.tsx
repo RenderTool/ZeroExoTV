@@ -168,7 +168,9 @@ function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string>
     id: s.id,
     number: s.number,
     duration: s.duration,
-    status: resolveClipStatus(s.status, run, s.id),
+    status: s.clipState === 'completed' && s.media?.storageKey
+      ? 'done'
+      : resolveClipStatus(s.status, run, s.id),
     // 生成完成段的缩略：会话内 objectURL（主线程截帧产物）优先，回落持久化 firstFrameKey
     thumbnailUrl: firstFrameUrls?.[s.id] ?? s.firstFrameKey,
     videoKey: s.clipState === 'completed' && s.media?.storageKey ? s.media.storageKey : undefined,
@@ -1177,9 +1179,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    * 2) /ws 实时帧带 1 基段号，必须映射回 shotId 且等于当前选中的片段才允许显示；
    *    否则用户点选未运行片段时，右侧会错误盖着正在生成的那一帧。
    */
-  const completedVideoKey = sequenceVideoKey ?? (selectedShot?.status === 'done'
+  const completedVideoKey = sequenceVideoKey ?? (selectedShot?.media?.storageKey
     && selectedShot.clipState === 'completed'
-    && selectedShot.media?.storageKey
     ? selectedShot.media.storageKey
     : undefined);
   const previewFrame = comfyRun.preview;
