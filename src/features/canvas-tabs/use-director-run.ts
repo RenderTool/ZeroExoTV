@@ -335,6 +335,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     setState((s) => ({ ...s, ...p }));
   }, []);
 
+  /** 每次手动运行自增：旧任务的在途轮询/回调看到 token 变了就作废，不能覆盖新任务 */
+  const runToken = useRef(0);
+
   /** 段完成：下载（按传输模式）→ 落库（video + 首帧 + guide）→ 回调宿主 */
   const processDoneSegment = useCallback(
     async (
@@ -439,6 +442,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
 
   /** zeroexo 模式轮询：逐段查 /zeroexo/v1/jobs/{id}，每段 success 立即下载落库 */
   const pollZeroexoTick = useCallback(async () => {
+    const token = runToken.current;
     const job = activeJob.current;
     const cfg = cfgRef.current();
     if (!job || !cfg || cfg.mode !== 'zeroexo' || canceled.current) return;
@@ -464,6 +468,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         continue;
       }
       if (canceled.current) return;
+      if (token !== runToken.current) return;
       if (status.state === 'success') {
         doneCount += 1;
         if (!doneIndexes.current.has(segIndex)) {
@@ -479,6 +484,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         if (currentSegment === null) currentSegment = segIndex;
       }
     }
+    if (token !== runToken.current) return;
     patch({ doneCount, currentSegment });
     if (taskIdRef.current) {
       useTaskQueueStore.getState().update(taskIdRef.current, {
@@ -508,6 +514,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
   }, [patch, processDoneSegment, stopPolling, stopPreview, markInterrupted]);
 
   const pollTick = useCallback(async () => {
+    const token = runToken.current;
     const job = activeJob.current;
     const cfg = cfgRef.current();
     if (!job || !cfg || canceled.current) return;
@@ -541,6 +548,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     }
     statusFailures.current = 0;
     if (canceled.current) return; // 取消发生在 await 期间：丢弃本次结果，别把 phase 改回 running
+    if (token !== runToken.current) return; // 已被新的手动运行接管
     const segs = status.segments ?? [];
     // 完成段（不等全部跑完，逐段落库）
     for (const seg of segs) {
@@ -582,6 +590,8 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
 
   const startRun = useCallback(
     async (runArgs: StartRunArgs): Promise<boolean> => {
+      // 手动运行优先：旧任务在途轮询拿到的回调全部作废
+      runToken.current += 1;
       const resolved = cfgRef.current();
       if (!resolved) {
         patch({ phase: 'error', error: '尚未连接 ComfyUI：请点右上角「ComfyUI」填一个地址并测试连接' });
@@ -841,6 +851,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
   );
 
   const cancel = useCallback(async () => {
+    runToken.current += 1;
     const job = activeJob.current;
     const cfg = cfgRef.current();
     if (!job || !cfg || canceled.current) return;
@@ -887,6 +898,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
   }, [stopPolling, stopPreview]);
 
   const reset = useCallback(() => {
+    runToken.current += 1;
     stopPolling();
     stopPreview();
     canceled.current = false;
