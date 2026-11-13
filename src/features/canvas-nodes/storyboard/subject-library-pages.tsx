@@ -32,7 +32,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { App as AntdApp, Button, Checkbox, Dropdown, Input, InputNumber, Popover, Select, Switch, Tooltip } from 'antd';
+import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Select, Switch, Tooltip } from 'antd';
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
@@ -62,11 +62,14 @@ import {
 } from '@/shared/components/masonry-grid.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { KREA2_MODEL_KEY, KREA2_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, MOSS_MODEL_KEY, MOSS_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { ThemeProvider } from '@zeroexo/plugin-theme';
+import { DockFooterBar } from '@/features/tools-dock/dock-footer-bar.js';
+import { resolveMossSize } from '@/pages/editor/editor-canvas/interactions/local-moss-image.js';
+import { resolveKrea2Size } from '@/pages/editor/editor-canvas/interactions/local-krea2-image.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
 import { readScript, watchScript, displayEpisodeTitle, type ScriptVisualStyle } from '@/entities/script-store.js';
 import { applyStylePromptToPrompt } from '@/shared/style-presets.js';
-import { clampQwenSize } from '@/features/canvas-tabs/qwen-limits.js';
 import {
   NAVIGATE_FOCUS_SUBJECT_EVENT,
   takePendingNavigateFocus,
@@ -100,6 +103,7 @@ import {
 } from './subject-state-media';
 import { SubjectMediaSourcePanel } from './subject-media-source-panel';
 import { AssetSlotPicker, type AssetSlotPick } from '@/shared/components/asset-slot-picker.js';
+import { ReferenceSlotBar } from '@/shared/components/reference-slot-bar.js';
 import {
   SUBJECT_GEN_RATIOS,
   cancelSubjectGeneration,
@@ -129,6 +133,26 @@ import {
 } from './subject-page-nav';
 
 const BASE_BALL = '基础状态';
+
+/** 状态出图模型 = 画布图片节点同一套（底栏 StyledSelect 的选项） */
+const SUBJECT_MODEL_OPTIONS = [
+  { value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL, iconKey: 'zeroexo' },
+  { value: MOSS_MODEL_KEY, label: MOSS_MODEL_LABEL, iconKey: 'zeroexo' },
+  { value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL, iconKey: 'zeroexo' },
+];
+
+/** 宽高 → 最接近的标准比例（画布参数弹层只回传宽高，这里补回比例语义） */
+function aspectFromSize(width: number, height: number): string {
+  const ratio = width / height;
+  let best = '16:9';
+  let bestDiff = Number.POSITIVE_INFINITY;
+  for (const key of SUBJECT_GEN_RATIOS) {
+    const [w = 1, h = 1] = key.split(':').map(Number);
+    const diff = Math.abs(Math.log(ratio / (w / h)));
+    if (diff < bestDiff) { bestDiff = diff; best = key; }
+  }
+  return best;
+}
 
 /** 页边距：整页 clamp 16–24；抽屉内 20（2026-11-05 用户指令：与素材分段同一 inset，不再 16） */
 const PAGE_PAD = 'clamp(16px, 3vw, 24px)';
@@ -411,6 +435,34 @@ function kindLabelOf(kind: ProductionItemKind | undefined | null, t: ReturnType<
   return t(`entity.${kind}`, KIND_LABEL_FALLBACK[kind]);
 }
 
+/** 单行文本草稿：失焦/回车才写盘（主体名/状态名共用同一纪律，避免逐字落盘） */
+function DraftTextField({ value, onCommit, placeholder, ariaLabel, dataField }: {
+  value: string;
+  onCommit: (next: string) => void;
+  placeholder?: string;
+  ariaLabel: string;
+  dataField?: string;
+}): React.ReactElement {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = (): void => {
+    const next = draft.trim();
+    if (next && next !== value) onCommit(next);
+  };
+  return (
+    <Input
+      size="small"
+      data-field={dataField}
+      aria-label={ariaLabel}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onPressEnter={commit}
+    />
+  );
+}
+
 /** 提示词草稿框：同样只在失焦时写盘 */
 function DraftPromptField({ value, onCommit, placeholder }: {
   value: string;
@@ -442,38 +494,7 @@ function DraftPromptField({ value, onCommit, placeholder }: {
 }
 
 
-/** 数字草稿输入：只在失焦/回车写盘（步数/种子不必每敲一位就落盘） */
-function DraftNumber({ value, min, max, onCommit, ariaLabel, width = 92 }: {
-  value: number;
-  min: number;
-  max: number;
-  onCommit: (next: number) => void;
-  ariaLabel: string;
-  width?: number;
-}): React.ReactElement {
-  const [draft, setDraft] = useState<number | null>(value);
-  useEffect(() => { setDraft(value); }, [value]);
-  const commit = (): void => {
-    if (draft === null || !Number.isFinite(draft)) return;
-    const next = Math.max(min, Math.min(max, Math.round(draft)));
-    if (next !== value) onCommit(next);
-  };
-  return (
-    <InputNumber
-      size="small"
-      aria-label={ariaLabel}
-      min={min}
-      max={max}
-      step={1}
-      precision={0}
-      value={draft}
-      onChange={(v) => setDraft(typeof v === 'number' && Number.isFinite(v) ? v : null)}
-      onBlur={commit}
-      onPressEnter={commit}
-      style={{ width }}
-    />
-  );
-}
+/** 编辑面板媒体区上的生成预览（运行中才出现；只订阅任务，不拖整页重渲染） */
 
 function KindTabs({
   theme, activeKind, total, counts, onChange,
@@ -763,40 +784,7 @@ function StateJobCoverOverlay({ jobKey, persistedJob, theme }: {
   );
 }
 
-/** 生成按钮：运行中显示进度 + 取消；空闲/失败/成功后回到「生成」 */
-function StateJobButton({ jobKey, disabled, onStart, onCancel }: {
-  jobKey: string;
-  disabled?: boolean;
-  onStart: () => void;
-  onCancel: () => void;
-}): React.ReactElement {
-  const { t } = useTranslation();
-  const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
-  const runningNow = runtime?.state === 'running' || runtime?.state === 'queued';
-  if (runningNow) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <Button size="small" disabled data-subject-generating>
-          {t('subject.generating', '生成中')} {Math.round(runtime?.progress ?? 0)}%
-        </Button>
-        <Button size="small" type="text" danger data-subject-generate-cancel onClick={onCancel}>
-          {t('common.cancel', '取消')}
-        </Button>
-      </div>
-    );
-  }
-  return (
-    <Button
-      size="small"
-      type="primary"
-      data-subject-generate
-      disabled={disabled}
-      onClick={onStart}
-    >
-      {t('subject.generate', '生成')}
-    </Button>
-  );
-}
+/** 编辑面板媒体区上的生成预览（运行中才出现；只订阅任务，不拖整页重渲染） */
 
 /** 编辑面板媒体区上的生成预览（运行中才出现；只订阅任务，不拖整页重渲染） */
 function StateJobMediaOverlay({ jobKey }: { jobKey: string }): React.ReactElement | null {
@@ -1033,11 +1021,16 @@ function StateGridCard({
               </div>
               <Button
                 size="small"
-                type="text"
+                type="default"
                 data-state-action="collapse"
                 icon={<ChevronUp size={13} />}
                 onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
-                style={{ flexShrink: 0, color: theme.toolbar.accent }}
+                style={{
+                  flexShrink: 0, fontWeight: 600,
+                  color: theme.toolbar.accent,
+                  borderColor: theme.toolbar.accent,
+                  background: `${theme.toolbar.accent}1f`,
+                }}
               >
                 {t('subject.closeEdit', '收起编辑')}
               </Button>
@@ -1074,6 +1067,60 @@ function StateGridCard({
 }
 
 /**
+ * 状态出图底栏 = 画布提示词底栏同一套按钮/弹层框架（2026-11-13 用户纠正）：
+ * StyledSelect 模型 + 参数摘要弹层（LocalQwen/Krea/Moss 表单）+ 提示词库 + 字数 + 圆形生成按钮。
+ * 不再在页面里平铺一排 antd Select/InputNumber。
+ */
+function SubjectGenFooter({
+  jobKey, theme, model, prompt, paramValues, referenceKey,
+  onModelChange, onParamsChange, onPromptPreset, onStart, onCancel, onSendToCanvas,
+}: {
+  jobKey: string;
+  theme: ThemeConfig;
+  model: string;
+  prompt: string;
+  paramValues: Record<string, unknown>;
+  referenceKey: string;
+  onModelChange: (model: string) => void;
+  onParamsChange: (patch: Record<string, unknown>) => void;
+  onPromptPreset: (body: string) => void;
+  onStart: () => void;
+  onCancel: () => void;
+  onSendToCanvas: () => void;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
+  const running = runtime?.state === 'running' || runtime?.state === 'queued';
+  return (
+    <div data-subject-gen-footer style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* 弹层/StyledSelect 依赖 ThemeProvider，这里用当前模式的同一套 token 包一层 */}
+        <ThemeProvider mode={theme.mode}>
+          <DockFooterBar
+            nodeId={jobKey}
+            mode="image"
+            model={model}
+            modelOptions={SUBJECT_MODEL_OPTIONS}
+            paramValues={paramValues}
+            hasImageReference={Boolean(referenceKey)}
+            isRunning={running}
+            hasText={Boolean(prompt.trim())}
+            textLength={prompt.length}
+            onAction={running ? onCancel : onStart}
+            onConfigChange={(_nodeId, patch) => onModelChange(String(patch.model ?? ''))}
+            onParamValuesChange={onParamsChange}
+            onPromptPreset={onPromptPreset}
+          />
+        </ThemeProvider>
+      </div>
+      <Button size="small" type="text" data-subject-send-canvas onClick={onSendToCanvas}>
+        {t('subject.sendToCanvas', '发送到画布')}
+      </Button>
+    </div>
+  );
+}
+
+/**
  * 卡片内编辑面板（2026-11-12 最终形态）：
  * 不再跳第三个整页，点状态卡的「编辑」按钮就在卡片下方展开本区。
  * 原状态编辑页的状态名 / 提示词 / 出现集数 / 媒体与历史图全部收在这里。
@@ -1082,7 +1129,7 @@ function StateGridCard({
 function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
   onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
-  jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onSendToCanvas,
+  jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onSendToCanvas, onRenameSubject,
 }: {
   tree: SubjectTree;
   node: SubjectTreeNode;
@@ -1105,6 +1152,8 @@ function StateEditPanel({
   onRemoveReference: () => void;
   /** 发送到画布继续做长链修改（只挂提示词与参考图，不发起生成） */
   onSendToCanvas: () => void;
+  /** 主体名：统一放在参考素材上方（2026-11-13 用户指令） */
+  onRenameSubject: (next: string) => void;
 }): React.ReactElement {
   const { t } = useTranslation();
   const { message: antdMessage } = AntdApp.useApp();
@@ -1116,6 +1165,23 @@ function StateEditPanel({
   const genParams = resolveSubjectGenParams(node);
   const model = node.imageModel ?? LOCAL_IMAGE_MODEL_KEY;
   const referenceKey = genParams.referenceKeys[0] ?? '';
+  /** 画布参数弹层的数据形状（Qwen=宽高/1K·2K，Moss/Krea=比例+百万像素） */
+  const footerParamValues: Record<string, unknown> = model === MOSS_MODEL_KEY
+    ? { aspect: genParams.aspect, megapixels: genParams.megapixels, steps: genParams.steps, cfg: genParams.cfg, seed: genParams.seed, sizeMode: 'custom' }
+    : model === KREA2_MODEL_KEY
+      ? { aspect: genParams.aspect, megapixels: genParams.megapixels, steps: genParams.steps, cfg: genParams.cfg, seed: genParams.seed, eta: 0.55, sizeMode: 'custom' }
+      : {
+        width: genParams.width,
+        height: genParams.height,
+        steps: genParams.steps,
+        cfg: genParams.cfg,
+        denoise: genParams.denoise,
+        use_llm_enhance: genParams.useLlmEnhance,
+        transparent_background: genParams.transparent,
+        seed: genParams.seed,
+        // 有参考图时输出跟随参考图尺寸（Qwen latent 要求）
+        sizeMode: referenceKey ? 'source' : 'custom',
+      };
   /** 参数一次写全，刷新后保留（不做「只存改过的键」的隐式合并） */
   const commitGenParams = (patch: Partial<typeof genParams>): void => {
     const next = { ...genParams, ...patch };
@@ -1125,8 +1191,12 @@ function StateEditPanel({
         quality: next.quality,
         width: next.width,
         height: next.height,
+        megapixels: next.megapixels,
         steps: next.steps,
         cfg: next.cfg,
+        denoise: next.denoise,
+        useLlmEnhance: next.useLlmEnhance,
+        transparent: next.transparent,
         seed: next.seed,
         useBaseRef: next.useBaseRef,
         referenceKeys: next.referenceKeys,
@@ -1180,55 +1250,52 @@ function StateEditPanel({
       }}
     >
       <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-        {/* 参考素材（2026-11-13 用户指令：状态页顶部也要有参考输入区 + 统一选择页） */}
-        <div data-form-section="reference" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ ...labelStyle, marginBottom: 0 }}>{t('subject.referenceMaterial', '参考素材')}</div>
-            <span style={hintStyle}>{t('subject.referenceHint', '可不加；加一张参考图后按图生成')}</span>
-            {referenceKey && model !== LOCAL_IMAGE_MODEL_KEY && (
-              <span data-subject-ref-model-hint style={{ ...hintStyle, color: '#f59e0b' }}>
-                {t('subject.genBaseRefQwenOnly', '仅 Qwen 支持参考图')}
-              </span>
-            )}
+        {/* 主体名统一放在参考素材上方（2026-11-13 用户指令） */}
+        <div data-subject-name-row style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ ...labelStyle, marginBottom: 0, flexShrink: 0 }}>{t('subject.subjectNameLabel', '主体名')}</span>
+          <div style={{ width: 220, maxWidth: '100%' }}>
+            <DraftTextField
+              value={tree.name}
+              dataField="subject-name"
+              ariaLabel={t('subject.subjectNameLabel', '主体名')}
+              onCommit={onRenameSubject}
+            />
           </div>
-          {referenceKey ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ position: 'relative', width: 72, height: 72, borderRadius: 8, overflow: 'hidden', border: `1px solid ${theme.toolbar.border}` }}>
-                <SubjectMediaThumb storageKey={referenceKey} kind="image" dark={isDark} fill fit="cover" />
-                <button
-                  type="button"
-                  data-subject-ref-remove
-                  aria-label={t('subject.referenceRemove', '移除参考素材')}
-                  onClick={onRemoveReference}
-                  style={{
-                    position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: 8, padding: 0,
-                    border: 'none', background: 'rgba(0,0,0,0.62)', color: '#fff', cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <Trash2 size={9} />
-                </button>
-              </div>
-              <Button size="small" type="text" data-subject-ref-change onClick={(e) => onAddReference(e.currentTarget)}>
-                {t('subject.referenceChange', '更换参考')}
-              </Button>
+        </div>
+        {/* 参考素材：与导演台 / 画布同一套插槽 UI（48px 加号 + 缩略图 + 兼容徽标），不再自造大按钮 */}
+        <div data-form-section="reference" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div data-subject-ref-add>
+            <ReferenceSlotBar
+              theme={theme}
+              items={referenceKey
+                ? [{
+                  id: referenceKey,
+                  storageKey: referenceKey,
+                  title: t('subject.referenceMaterial', '参考素材'),
+                  // 画布多一层模型支持判断：非 Qwen 的参考图不生效，直接红叉提示
+                  compatible: model === LOCAL_IMAGE_MODEL_KEY,
+                }]
+                : []}
+              onAdd={onAddReference}
+              addTitle={t('subject.referenceAdd', '添加参考素材（画布 / 资产 / 主体）')}
+              onRemove={onRemoveReference}
+              hint={t('subject.referenceSlotHint', '点 + 从画布 / 资产 / 主体选一张')}
+            />
+          </div>
+          {!isBase && (
+            <div data-subject-baseref-field style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Switch
+                size="small"
+                data-subject-baseref
+                checked={genParams.useBaseRef}
+                disabled={model !== LOCAL_IMAGE_MODEL_KEY}
+                onChange={(checked) => commitGenParams({ useBaseRef: checked })}
+              />
+              <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{t('subject.genUseBaseRef', '引用基础状态')}</span>
+              {model !== LOCAL_IMAGE_MODEL_KEY && (
+                <span data-subject-baseref-hint style={hintStyle}>{t('subject.genBaseRefQwenOnly', '仅 Qwen 支持参考图')}</span>
+              )}
             </div>
-          ) : (
-            <button
-              type="button"
-              data-subject-ref-add
-              onClick={(e) => onAddReference(e.currentTarget)}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                width: '100%', height: 56, borderRadius: 8, boxSizing: 'border-box',
-                border: `1.5px dashed ${isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}`,
-                background: 'transparent', color: theme.toolbar.textMuted,
-                fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
-              }}
-            >
-              <ImagePlus size={15} />
-              {t('subject.referenceAdd', '添加参考素材（画布 / 资产 / 主体）')}
-            </button>
           )}
         </div>
 
@@ -1406,21 +1473,6 @@ function StateEditPanel({
               </Popover>
             )}
           </div>
-          <div data-subject-model-field>
-            <div style={labelStyle}>{t('subject.imageModel', '生图模型')}</div>
-            <Select
-              size="small"
-              data-subject-model
-              value={node.imageModel ?? LOCAL_IMAGE_MODEL_KEY}
-              options={[
-                { value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL },
-                { value: MOSS_MODEL_KEY, label: MOSS_MODEL_LABEL },
-                { value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL },
-              ]}
-              onChange={(value: string) => onUpdateNode({ imageModel: value })}
-              style={{ width: '100%' }}
-            />
-          </div>
           <div data-subject-template-field>
             <div style={labelStyle}>{t('subject.promptTemplate', '提示词模板')}</div>
             <Select
@@ -1437,140 +1489,69 @@ function StateEditPanel({
             />
           </div>
         </div>
-        {/* 第二行：出图参数（比例 / 尺寸 / 步数 / 种子 / 引用基础状态 / 生成） */}
-        <div
-          data-subject-gen-row
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: 12,
-            alignItems: 'end',
+        {/* 出图底栏 = 画布提示词底栏同一套（模型 / 参数弹层 / 提示词库 / 生成） */}
+        <SubjectGenFooter
+          jobKey={jobKey}
+          theme={theme}
+          model={model}
+          prompt={promptValue}
+          paramValues={footerParamValues}
+          referenceKey={referenceKey}
+          onModelChange={(next) => {
+            if (next && next !== model) onUpdateNode({ imageModel: next });
           }}
-        >
-          <div data-subject-aspect-field>
-            <div style={labelStyle}>{t('subject.genAspect', '生成比例')}</div>
-            <Select
-              size="small"
-              data-subject-aspect
-              value={genParams.aspect}
-              options={SUBJECT_GEN_RATIOS.map((r) => ({ value: r, label: r }))}
-              onChange={(value: string) => {
-                const size = subjectGenSize(value, genParams.quality === '1k' ? '1k' : '2k');
-                commitGenParams({ aspect: value, width: size.width, height: size.height });
-              }}
-              style={{ width: '100%' }}
-            />
-          </div>
-          <div data-subject-size-field>
-            <div style={labelStyle}>{t('subject.genSize', '尺寸')}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Select
-                size="small"
-                data-subject-size
-                value={genParams.quality}
-                options={[
-                  { value: '1k', label: '1K' },
-                  { value: '2k', label: '2K' },
-                  { value: 'custom', label: t('subject.genSizeCustom', '自定义') },
-                ]}
-                onChange={(value: '1k' | '2k' | 'custom') => {
-                  if (value === 'custom') { commitGenParams({ quality: 'custom' }); return; }
-                  const size = subjectGenSize(genParams.aspect, value);
-                  commitGenParams({ quality: value, width: size.width, height: size.height });
-                }}
-                style={{ width: 82, flexShrink: 0 }}
-              />
-              {genParams.quality === 'custom' && (
-                <>
-                  <DraftNumber
-                    value={genParams.width}
-                    min={64}
-                    max={2048}
-                    ariaLabel={t('subject.genWidth', '宽')}
-                    width={72}
-                    onCommit={(next) => {
-                      const size = clampQwenSize(next, genParams.height);
-                      commitGenParams({ width: size.width, height: size.height });
-                    }}
-                  />
-                  <span style={{ fontSize: 11, opacity: 0.6 }}>×</span>
-                  <DraftNumber
-                    value={genParams.height}
-                    min={64}
-                    max={2048}
-                    ariaLabel={t('subject.genHeight', '高')}
-                    width={72}
-                    onCommit={(next) => {
-                      const size = clampQwenSize(genParams.width, next);
-                      commitGenParams({ width: size.width, height: size.height });
-                    }}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-          <div data-subject-steps-field>
-            <div style={labelStyle}>{t('subject.genSteps', '步数')}</div>
-            <DraftNumber
-              value={genParams.steps}
-              min={1}
-              max={100}
-              ariaLabel={t('subject.genSteps', '步数')}
-              onCommit={(next) => commitGenParams({ steps: next })}
-            />
-          </div>
-          <div data-subject-seed-field>
-            <div style={labelStyle}>{t('subject.genSeed', '种子')}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <DraftNumber
-                value={genParams.seed}
-                min={-1}
-                max={0x7fffffff}
-                ariaLabel={t('subject.genSeed', '种子')}
-                width={96}
-                onCommit={(next) => commitGenParams({ seed: next })}
-              />
-              <Button
-                size="small"
-                type="text"
-                data-subject-seed-random
-                disabled={genParams.seed === -1}
-                onClick={() => commitGenParams({ seed: -1 })}
-                style={{ fontSize: 11, padding: '0 4px' }}
-              >
-                {t('subject.genSeedRandom', '随机')}
-              </Button>
-            </div>
-          </div>
-          {!isBase && (
-            <div data-subject-baseref-field>
-              <div style={labelStyle}>{t('subject.genUseBaseRef', '引用基础状态')}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Switch
-                  size="small"
-                  data-subject-baseref
-                  checked={genParams.useBaseRef}
-                  disabled={model !== LOCAL_IMAGE_MODEL_KEY}
-                  onChange={(checked) => commitGenParams({ useBaseRef: checked })}
-                />
-                {model !== LOCAL_IMAGE_MODEL_KEY && (
-                  <span data-subject-baseref-hint style={hintStyle}>{t('subject.genBaseRefQwenOnly', '仅 Qwen 支持参考图')}</span>
-                )}
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', gap: 6 }}>
-            <Button size="small" type="text" data-subject-send-canvas onClick={onSendToCanvas}>
-              {t('subject.sendToCanvas', '发送到画布')}
-            </Button>
-            <StateJobButton
-              jobKey={jobKey}
-              disabled={!promptValue.trim()}
-              onStart={onStartGenerate}
-              onCancel={onCancelGenerate}
-            />
-          </div>
-        </div>
+          onParamsChange={(patch) => {
+            const next: Partial<typeof genParams> = {};
+            if (typeof patch.steps === 'number') next.steps = Math.max(1, Math.min(100, Math.round(patch.steps)));
+            if (typeof patch.cfg === 'number') next.cfg = Math.max(0, Math.min(20, patch.cfg));
+            if (typeof patch.denoise === 'number') next.denoise = Math.max(0, Math.min(1, patch.denoise));
+            if (typeof patch.use_llm_enhance === 'boolean') next.useLlmEnhance = patch.use_llm_enhance;
+            if (typeof patch.transparent_background === 'boolean') next.transparent = patch.transparent_background;
+            if (typeof patch.seed === 'number') next.seed = Math.round(patch.seed);
+            if (typeof patch.width === 'number' && typeof patch.height === 'number') {
+              const width = Math.max(64, Math.min(2048, Math.round(patch.width / 32) * 32));
+              const height = Math.max(64, Math.min(2048, Math.round(patch.height / 32) * 32));
+              const aspect = aspectFromSize(width, height);
+              const size2 = subjectGenSize(aspect, '2k');
+              const size1 = subjectGenSize(aspect, '1k');
+              next.width = width;
+              next.height = height;
+              next.aspect = aspect;
+              next.quality = width === size2.width && height === size2.height
+                ? '2k'
+                : width === size1.width && height === size1.height ? '1k' : 'custom';
+            }
+            if (typeof patch.megapixels === 'number') {
+              const megapixels = Math.max(0.5, Math.min(8, patch.megapixels));
+              const aspect = typeof patch.aspect === 'string' ? patch.aspect : genParams.aspect;
+              const size = model === KREA2_MODEL_KEY
+                ? resolveKrea2Size(aspect, megapixels)
+                : resolveMossSize(aspect, megapixels);
+              next.aspect = aspect;
+              next.megapixels = megapixels;
+              next.width = size.width;
+              next.height = size.height;
+              next.quality = 'custom';
+            }
+            if (typeof patch.aspect === 'string' && patch.megapixels === undefined && model !== LOCAL_IMAGE_MODEL_KEY) {
+              const size = model === KREA2_MODEL_KEY
+                ? resolveKrea2Size(patch.aspect, genParams.megapixels)
+                : resolveMossSize(patch.aspect, genParams.megapixels);
+              next.aspect = patch.aspect;
+              next.width = size.width;
+              next.height = size.height;
+              next.quality = 'custom';
+            }
+            if (Object.keys(next).length > 0) commitGenParams(next);
+          }}
+          onPromptPreset={(body) => {
+            const applied = visualStyle?.prompt ? applyStylePromptToPrompt(body, visualStyle.prompt) : body;
+            onUpdateNode({ fullPrompt: applied, deltaPrompt: applied });
+          }}
+          onStart={onStartGenerate}
+          onCancel={onCancelGenerate}
+          onSendToCanvas={onSendToCanvas}
+        />
         {node.genJob?.state === 'error' && node.genJob.error && (
           <div data-subject-gen-error style={{ ...hintStyle, color: theme.toolbar.danger }}>
             {node.genJob.error}
@@ -2054,7 +2035,10 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     const p = resolveSubjectGenParams(node);
     const genParams: SubjectGenParams = {
       aspect: p.aspect, quality: p.quality, width: p.width, height: p.height,
-      steps: p.steps, cfg: p.cfg, seed: p.seed, useBaseRef: p.useBaseRef,
+      megapixels: p.megapixels,
+      steps: p.steps, cfg: p.cfg, denoise: p.denoise,
+      useLlmEnhance: p.useLlmEnhance, transparent: p.transparent,
+      seed: p.seed, useBaseRef: p.useBaseRef,
       referenceKeys: storageKey ? [storageKey] : [],
     };
     updateNode(rootId, nodeId, { genParams });
@@ -2603,17 +2587,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           theme={theme}
           maxWidth={maxWidthFor(STATE_MAX_WIDTH)}
           pad={pagePad}
-          actions={(
-            <Button
-              size="small"
-              type="primary"
-              icon={<Plus size={14} />}
-              data-add-state
-              onClick={addState}
-            >
-              {t('subject.addState', '添加状态')}
-            </Button>
-          )}
         >
           <SubjectBreadcrumb
             theme={theme}
@@ -2622,19 +2595,20 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             onSubject={goSubject}
             onBack={openState ? goSubject : goLibrary}
           />
-          {/* 主体名在本页改，状态名与其余字段都在卡片内编辑 */}
-          <Input
-            size="small"
-            data-field="subject-name"
-            aria-label={t('subject.subjectNameLabel', '主体名')}
-            value={openTree.name}
-            onChange={(e) => renameTree(openTree.rootId, e.target.value)}
-            style={{ width: 160, flexShrink: 0 }}
-          />
           <span data-state-count={stateCount} style={{ fontSize: 12, color: theme.toolbar.textMuted, flexShrink: 0 }}>
             {stateCountText}
           </span>
         </SubjectPageHeader>
+        {/* 「添加新状态」保持原来的整宽虚线格，不改成页头主按钮 */}
+        <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
+          <AddTile
+            label={t('subject.addState', '添加新状态')}
+            icon={<Plus size={16} />}
+            onClick={addState}
+            theme={theme}
+            dataAttr={{ 'data-add-state': '' }}
+          />
+        </div>
         <div style={scrollStyle}>
           <div style={{ ...stateFrame.content, paddingTop: 12 }}>
             {/* 2026-11-08：基础状态是 states[0]，与其余状态共用同一张卡组件、同一个 map */}
@@ -2687,6 +2661,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         }}
                         onAddReference={(anchor) => setRefPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                         onRemoveReference={() => setNodeReference(openTree.rootId, node.id, null)}
+                        onRenameSubject={(next) => renameTree(openTree.rootId, next)}
                         onSendToCanvas={() => {
                           const latestTree = treesRef.current.find((tr) => tr.rootId === openTree.rootId) ?? openTree;
                           const latestNode = latestTree.states.find((n) => n.id === node.id) ?? node;

@@ -135,16 +135,14 @@ afterEach(() => {
 });
 
 describe('抽屉历史入口', () => {
-  it('DRAWER_TAB_DEFS 含 history 页签（与层级/素材同一套切换），且剧本页签已移除', () => {
+  it('独立 history 页签已移除（画布产物进「画布」/ 导演台产物进「导演台」），剧本页签也不存在', () => {
     const keys = DRAWER_TAB_DEFS.map((d) => d.key);
-    expect(keys).toContain('history');
+    expect(keys).not.toContain('history');
     expect(keys).toContain('canvasStructure');
     expect(keys).toContain('material');
     // 2026-11-05 用户指令（征集 #174）：抽屉不再重复「剧本」入口，
     // 剧本正文唯一入口 = 顶部固定槽位页签（一个项目 = 1 剧本）。
     expect(keys).not.toContain('script');
-    const historyDef = DRAWER_TAB_DEFS.find((d) => d.key === 'history');
-    expect(historyDef?.labelKey).toBe('assetLibrary.filterHistory');
   });
 
   it('CanvasAssetsPanel 源码：ScriptGroup 入口彻底下线（无组件、无渲染分支）', () => {
@@ -155,14 +153,15 @@ describe('抽屉历史入口', () => {
 });
 
 describe('真实抽屉渲染链结构断言（无浏览器）', () => {
-  it('CanvasAssetsPanel 源码：页签由 DRAWER_TAB_DEFS 派生且渲染分支含 HistoryGroup', () => {
+  it('CanvasAssetsPanel 不再挂独立历史；导演台类目由 MaterialGroup 锁来源渲染 HistoryGroup', () => {
     const src = readSrc('src/features/canvas-assets/CanvasAssetsPanel.tsx');
-    // 页签数组真实来源 = DRAWER_TAB_DEFS（不是另一份内联副本）
     expect(src).toContain('DRAWER_TAB_DEFS.map');
-    // 「历史」分支真实接到 HistoryGroup 组件
-    expect(src).toContain("activeGroup === 'history'");
-    expect(src).toContain('<HistoryGroup');
-    expect(src).toContain("from './groups/HistoryGroup.js'");
+    expect(src).not.toContain("activeGroup === 'history'");
+    expect(src).not.toContain('<HistoryGroup');
+    const material = readSrc('src/features/canvas-assets/groups/MaterialGroup.tsx');
+    expect(material).toContain('forcedSource="director"');
+    expect(material).toContain('<HistoryGroup');
+    expect(material).toContain("materialScopeTab === 'director'");
   });
 
   it('真实渲染链：editor-page → HierarchyPanelSidebar → CanvasAssetsPanel', () => {

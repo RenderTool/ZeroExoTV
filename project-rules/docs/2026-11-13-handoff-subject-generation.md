@@ -72,13 +72,13 @@
 
 ### P3：素材类目收尾
 
-- 画布类目 = 画布素材 + 画布历史（含已从画布移除的产物）；删独立「历史」分组。
-- 导演台类目 = 导演台历史，仅视频；隐藏图片/音频/文本 chips。
+- 画布类目 = 画布素材 + 画布生成产物（生成即落「画布」）；独立「历史」入口已删除。
+- 导演台类目 = 导演台生成产物，直接展示（仅视频）；不再出现「从画布生成 / 从导演台」子页签。
 - 主体类目保持主体自己的分类。
 
 ## 5. 约束与坑
 
-- **版本**：每次 push 前 `pnpm version:bump`；一次 push 一个版本；当前 0.2.63。
+- **版本**：每次 push 前 `pnpm version:bump`；一次 push 一个版本；当前 0.2.66。
 - **构建**：Windows 下 `pnpm build` 的 esbuild 临时文件删除会 `Access is denied`；先设
   `$env:TEMP='D:\AICode\zeroexo\zeroexo-comfyui\.tmpbuild'; $env:TMP=$env:TEMP`，构建后删目录。
   `.tmpbuild` 已加 `.gitignore`。

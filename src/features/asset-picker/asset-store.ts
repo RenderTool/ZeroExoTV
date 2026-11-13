@@ -153,7 +153,7 @@ export function filterAssetsByScope(
   const pid = ctx.projectId;
   return list.filter((a) => {
     if ((a.scope ?? 'library') === 'library') return true;
-    return a.projectId === pid && !isGeneratedAsset(a);
+    return a.projectId === pid;
   });
 }
 
@@ -167,10 +167,10 @@ function resolveScope(input: CreateAssetInput): { scope: AssetScope; projectId?:
 }
 
 /**
- * 严格归属过滤（资产库「公共资产 / 本项目」胶囊 Tab 口径，2026-11-04 约定）：
+ * 严格归属过滤（资产库「全局 / 画布」胶囊 Tab 口径，2026-11-13 修订）：
  * 单段内不混排两种作用域——
- * - scopeTab='project' 且有项目上下文：只出当前 projectId 的**用户资产**（导入/手动存入），
- *   API 生成产物只在历史；公共库不以引用态混入
+ * - scopeTab='project' 且有项目上下文：只出当前 projectId 的项目资产；**画布生成产物也算项目资产**
+ *   （2026-11-13 用户指令：画布生成直接落到「画布」，不再只活在独立历史分组里）
  * - 其余（library 页签 / 无项目上下文兜底）：只出公共库资产（限白名单四类）
  */
 export function filterAssetsStrictScope(
@@ -179,7 +179,7 @@ export function filterAssetsStrictScope(
 ): Asset[] {
   if (ctx.scopeTab === 'project' && ctx.projectId != null) {
     const pid = ctx.projectId;
-    return list.filter((a) => (a.scope ?? 'library') === 'project' && a.projectId === pid && !isGeneratedAsset(a));
+    return list.filter((a) => (a.scope ?? 'library') === 'project' && a.projectId === pid);
   }
   return list.filter((a) => (a.scope ?? 'library') === 'library' && isLibraryAllowedKind(a.kind));
 }
@@ -197,7 +197,7 @@ export function countAssetsByScope(list: Asset[], projectId: string | null): Ass
     const scope = a.scope ?? 'library';
     if (scope === 'library') {
       if (isLibraryAllowedKind(a.kind)) library++;
-    } else if (projectId != null && a.projectId === projectId && !isGeneratedAsset(a)) {
+    } else if (projectId != null && a.projectId === projectId) {
       project++;
     }
   }

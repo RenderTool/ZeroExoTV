@@ -1138,7 +1138,7 @@
     "saveFailed": "保存に失敗しました",
     "scopeTagLibrary": "グローバル",
     "scopeCapsuleLibrary": "グローバル",
-    "scopeCapsuleProject": "本プロジェクト",
+    "scopeCapsuleProject": "キャンバス",
     "deletedOne": "「{{name}}」を削除しました",
     "deletedMany": "{{count}} 件のアセットを削除しました",
     "refsInvalidated": "、{{count}} 件の参照が無効になりました",

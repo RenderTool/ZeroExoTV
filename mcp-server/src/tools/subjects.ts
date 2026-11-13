@@ -9,7 +9,8 @@ import { buildMinimalSubjectPrompt, buildSubjectProfile } from "../lib/subject-p
 import { groupSceneEntities } from "../lib/scene-groups.js";
 import { updateVersionedJson } from "../store/fs-node.js";
 import { paths } from "../config.js";
-import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, setSubjectProfile, syncSubjectEpisodes, upsertSubject, type StoryboardContainer } from "../store/storyboard.js";
+import { auditSubjects, deleteSubject, deleteSubjectImage, importSubjectFromProject, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, setSubjectProfile, syncSubjectEpisodes, upsertSubject, type StoryboardContainer } from "../store/storyboard.js";
+import { assertCasAssetInProject } from "../store/cas.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -341,6 +342,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     },
     handler: async (args, token) => {
       const { projectId, baseVersion, dryRun, allowCrossSubject, ...image } = args;
+      // 跨项目资产硬门槛：只认本项目 / 公共库已引用的 CAS 素材；别的项目的图必须先导入
+      await assertCasAssetInProject(dataRoot(), projectId, args.storageKey);
       if (!dryRun) {
         if (!isImageReviewed(token.id, args.storageKey)) {
           throw new McpError(
@@ -389,6 +392,49 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         subjectId: res.subject.id,
         imageCount: res.subject.images.length,
         coverKey: res.subject.coverKey,
+      };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "import_subject_from_project",
+    description:
+      "把另一个项目的主体**完整导入本项目**（新 itemId/rootId/状态 id；状态图重新挂本项目 CAS ref，同内容不复制文件；集数清空后由 sync_subject_episodes 按名字重关联）。" +
+      "跨项目引用纪律：禁止直接拿别的项目的 storageKey / 主体 id 在本项目里用；需要复用必须先调本工具导成本项目主体。" +
+      "当前项目已有同名主体会拒绝——请传 name 明确改名，或先 merge_subjects。写类：先 dryRun 看 imagesCopied/skippedKeys，再 userConfirmed:true。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string().describe("目标（当前）项目 id"),
+      sourceProjectId: z.string().describe("来源项目 id；不能与 projectId 相同"),
+      subjectId: z.string().describe("来源项目里的主体 item id"),
+      name: z.string().optional().describe("导入后的主体名；缺省沿用源名；同名冲突时必须显式改名"),
+      baseVersion: z.number().int().min(0),
+      dryRun: z.boolean().optional(),
+      userConfirmed: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.userConfirmed) {
+        throw new McpError("CONFIRM_REQUIRED", "导入跨项目主体必须 userConfirmed:true（先 dryRun 看会复制多少状态图）");
+      }
+      const res = await importSubjectFromProject(dataRoot(), args.projectId, {
+        sourceProjectId: args.sourceProjectId,
+        subjectId: args.subjectId,
+        name: args.name,
+        baseVersion: args.baseVersion,
+        dryRun: args.dryRun,
+      });
+      return {
+        written: res.written,
+        version: res.version,
+        subjectId: res.subject.id,
+        rootId: res.rootId,
+        name: res.subject.name,
+        imagesCopied: res.imagesCopied,
+        skippedKeys: res.skippedKeys,
+        episodeIdsCleared: res.episodeIdsCleared,
+        next: res.written
+          ? "导入完成。集数关联已清空，按需调 sync_subject_episodes(dryRun→userConfirmed) 重挂本剧集数。"
+          : "dryRun 通过后再带 userConfirmed:true 真实导入。",
       };
     },
   });

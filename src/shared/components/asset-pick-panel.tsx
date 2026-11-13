@@ -23,7 +23,7 @@ import { ChevronDown, Film, Image as ImageIcon, Music, Plus, User, Waypoints, X,
 import type { DirectorAssetRef } from '@/entities/director-params.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import { nonBaseStates, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { nonBaseStates, SUBJECT_BASE_STATE_ID, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 
 /** 素材面板条目拖拽 MIME：拖到已占用的插槽格 = 就地替换该槽内容（槽号不变） */
@@ -317,11 +317,61 @@ export function AssetPickPanel({
     return eps.includes(active) ? 0 : 1;
   }, [episodeContext]);
 
+  /**
+   * 主体 ↔ 树严格绑定（2026-11-13 跨项目串台修复）：
+   * 状态列表只认**当前项目容器里、绑定到当前主体 itemId 的树**；`ProductionItem.images`
+   * 是历史兼容字段，可能混进别的项目/旧版本的状态图，不能拿来当状态列表。
+   * 无 itemId 的老树只在「同名主体唯一 + 同名树唯一」时按名字绑定，绝不按名字抢别的树。
+   */
+  const treeByItemId = useMemo(() => {
+    const map = new Map<string, SubjectTree>();
+    for (const item of subjects) {
+      const exact = subjectTrees.find((tr) => tr.itemId === item.id);
+      if (exact) { map.set(item.id, exact); continue; }
+      const sameItems = subjects.filter((s) => s.name === item.name);
+      const sameTrees = subjectTrees.filter((tr) => !tr.itemId && tr.name === item.name);
+      if (sameItems.length === 1 && sameTrees.length === 1) map.set(item.id, sameTrees[0]!);
+    }
+    return map;
+  }, [subjects, subjectTrees]);
+
+  /** 树的状态媒体才是状态图唯一来源（基础状态也列；没有树才退回 item.images 老数据） */
+  const subjectsScoped = useMemo<ProductionItem[]>(() => subjects.map((item) => {
+    const tree = treeByItemId.get(item.id);
+    if (!tree) return item;
+    const images: ProductionItemImage[] = (tree.states ?? []).flatMap((st) => (st.media ?? [])
+      .filter((m) => m.type === 'image')
+      .map((m) => ({
+        storageKey: m.key,
+        tags: [],
+        stateTag: st.id === SUBJECT_BASE_STATE_ID
+          ? (st.state || t('subject.baseState', '基础状态'))
+          : (st.state || t('director.subjectStateFallback', '剧照')),
+        prompt: m.prompt,
+      })));
+    const coverValid = Boolean(item.coverKey && images.some((i) => i.storageKey === item.coverKey));
+    return {
+      ...item,
+      images,
+      coverKey: coverValid ? item.coverKey : (images[0]?.storageKey ?? null),
+    };
+  }), [subjects, treeByItemId, t]);
+
+  /**
+   * 只有绑定到当前主体的树才参战（孤儿树/别的项目同 ID 树都不列）。
+   * 例外：调用方只给了树、没给主体条目（老数据/纯树场景）时，树来自当前项目容器，照常列出。
+   */
+  const boundTrees = useMemo(() => {
+    if (subjects.length === 0) return subjectTrees;
+    const set = new Set(treeByItemId.values());
+    return subjectTrees.filter((tr) => set.has(tr));
+  }, [subjects.length, subjectTrees, treeByItemId]);
+
   /** 主体页签：按 kind 分组（角色/场景/道具；无内容不渲染）；组内按相关性排序 */
   const subjectGroups = useMemo(() => {
     const g: Array<{ name: string; items: ProductionItem[] }> = [];
     for (const kind of ['character', 'scene', 'prop'] as const) {
-      const items = subjects.filter((s) => s.kind === kind);
+      const items = subjectsScoped.filter((s) => s.kind === kind);
       if (items.length > 0) {
         const sorted = items
           .map((s, i) => ({ s, i, r: subjectEpisodeRank(s) }))
@@ -331,7 +381,7 @@ export function AssetPickPanel({
       }
     }
     return g;
-  }, [subjects, subjectEpisodeRank]);
+  }, [subjectsScoped, subjectEpisodeRank]);
 
   /** 主体扁平化行：父行 +（展开时）状态图子行/无图提示行；搜索命中子状态图自动展开父组 */
   const subjRows = useMemo(() => {
@@ -362,7 +412,7 @@ export function AssetPickPanel({
    */
   const stateGroups = useMemo(() => {
     const out: Array<{ tree: SubjectTree; rows: Array<{ stateId: string; stateName: string; media: SubjectNodeMediaRef | null }> }> = [];
-    for (const tree of subjectTrees) {
+    for (const tree of boundTrees) {
       const treeHit = tree.name.toLowerCase().includes(query);
       const rows = nonBaseStates(tree)
         .filter((st) => !query || treeHit || (st.state ?? '').toLowerCase().includes(query))
@@ -375,7 +425,7 @@ export function AssetPickPanel({
       if (rows.length > 0) out.push({ tree, rows });
     }
     return out;
-  }, [subjectTrees, query, t, kindAllowed]);
+  }, [boundTrees, query, t, kindAllowed]);
 
   const toggleSubject = useCallback((id: string) => {
     setExpandedSubjects((prev) => {

@@ -242,27 +242,6 @@ export const DockReferencesSection = memo(function DockReferencesSection({
           ))}
           {otherNodes.map(renderThumb)}
         </>
-      ) : onOpenPicker && incomingNodes.length === 0 && !textOnly ? (
-        /* 空参考区 = 一整块可点击入口（与图 2 一致）：点开统一资产选择页，而不是系统文件框 */
-        <button
-          type="button"
-          data-ref-picker-open
-          onClick={(e) => handleAddReference(e.currentTarget)}
-          style={{
-            width: '100%', height: 56, borderRadius: 10, boxSizing: 'border-box',
-            border: `1.5px dashed ${navBorder}`, background: 'transparent',
-            color: theme.toolbar.textMuted ?? '', cursor: 'pointer', fontFamily: 'inherit',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            fontSize: 12, transition: 'background 0.12s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          <Upload size={15} />
-          {mode === 'video-edit' || mode === 'video-extend'
-            ? t('nodeDock.editRefHint', '编辑/延长模式:上传参考视频,并描述要修改或延伸的画面')
-            : t('nodeDock.refHint', '拖入节点连入参考,或点击上传素材')}
-        </button>
       ) : (
         <>
           <button type="button" onClick={(e) => handleAddReference(e.currentTarget)} style={{ width: 48, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }} title={textOnly ? t('nodeDock.uploadRefText', '上传文本素材(图片/视频转剧本链路暂未开放)') : t('nodeDock.uploadRef', '上传参考素材(支持图片/视频/文本)')}
@@ -274,7 +253,7 @@ export const DockReferencesSection = memo(function DockReferencesSection({
         </>
       )}
       <input ref={fileInputRef} type="file" accept={accept} style={{ display: 'none' }} onChange={handleFileInputChange} />
-      {incomingNodes.length === 0 && !(onOpenPicker && !textOnly) && (
+      {incomingNodes.length === 0 && (
         <span style={{ fontSize: 11, color: theme.toolbar.textMuted ?? '', flexShrink: 0 }}>
           {isFirstLast
             ? t('nodeDock.firstLastHint', '首尾帧模式:按顺序填入首帧/尾帧,最多 2 张图片')

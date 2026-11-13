@@ -20,6 +20,7 @@ vi.mock('@/shared/hooks/use-media-object-url.js', () => ({ useMediaObjectUrl: me
 vi.mock('@/shared/hooks/use-auth-image.js', () => ({ useAuthResourceUrl: authUrlMock }));
 vi.mock('@/services/backend-upload.js', () => ({ isBackendKey: vi.fn(() => false) }));
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: () => undefined },
   useTranslation: () => ({ t: (k: string, d?: any) => (typeof d === 'string' ? d : k) }),
 }));
 // 卡片封面解析：本用例只关心点击入口，封面给空串走可读占位

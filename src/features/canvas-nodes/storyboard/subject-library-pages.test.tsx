@@ -12,6 +12,8 @@ import { createElement } from 'react';
 import { App as AntdApp } from 'antd';
 
 vi.mock('react-i18next', () => ({
+  // DockFooterBar 静态链路会加载 i18n/config；给 mock 补一个可被 `.use()` 的插件占位
+  initReactI18next: { type: '3rdParty', init: () => undefined },
   useTranslation: () => ({
     t: (key: string, fallback?: string | Record<string, unknown>, options?: Record<string, unknown>) => {
       const opts = (typeof fallback === 'object' ? fallback : options) as Record<string, unknown> | undefined;
@@ -507,16 +509,17 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(card.querySelector('[data-state-ready]')).toBeTruthy();
   });
 
-  it('「添加状态」= 页头同一行的标准按钮（不再单独占一条虚线行）', async () => {
+  it('「添加状态」= 原来的整宽虚线格（不改页头主按钮样式）', async () => {
     renderPages(makeTree());
     await openSubjectPage();
 
-    // 单一入口：页头右侧按钮（2026-11-13 用户指令：主体页收敛到一行）
     expect(document.querySelectorAll('[data-add-state]').length).toBe(1);
     const add = document.querySelector('[data-add-state]') as HTMLElement;
     expect(add.tagName).toBe('BUTTON');
-    expect(add.className).toContain('ant-btn');
-    expect(add.textContent).toContain('添加状态');
+    expect(add.className).not.toContain('ant-btn');
+    expect(add.style.width).toBe('100%');
+    expect(add.style.border).toContain('dashed');
+    expect(add.textContent).toContain('添加新状态');
     // 旧形态零残留
     expect(document.querySelector('[data-add-state-cover]')).toBeNull();
     expect(document.querySelector('[data-add-state-header]')).toBeNull();
@@ -1064,11 +1067,10 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
     const onChangeTree = vi.fn();
     renderPages(makeTree(), PID, onChangeTree);
     await openSubjectPage();
-    // 主体名在主体页单独编辑
-    expect((document.querySelector('[data-field="subject-name"]') as HTMLInputElement).value).toBe('东海龙王');
-
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+    // 主体名移到编辑面板参考素材上方（2026-11-13 用户指令）
+    expect((document.querySelector('[data-field="subject-name"]') as HTMLInputElement).value).toBe('东海龙王');
     // 2026-11-13：基础状态名移到卡片最上方，编辑态是可直接修改的输入框（不再重复一行只读文本）
     expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王');
     expect(document.querySelector('[data-field="name"]')).toBeNull();
@@ -1103,20 +1105,23 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
 });
 
 describe('状态页直接出图 + 参考素材（2026-11-13 P0）', () => {
-  it('编辑态顶部有参考素材入口；底部有比例/尺寸/步数/种子/引用基础状态 + 生成/发送到画布', async () => {
+  it('编辑态顶部有参考素材入口；底部复用画布提示词底栏（模型/参数弹层/提示词/生成）', async () => {
     renderPages(makeTree());
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
 
     expect(document.querySelector('[data-subject-ref-add]')).toBeTruthy();
-    expect(document.querySelector('[data-subject-generate]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-gen-footer]')).toBeTruthy();
     expect(document.querySelector('[data-subject-send-canvas]')).toBeTruthy();
-    expect(document.querySelector('[data-subject-aspect]')).toBeTruthy();
-    expect(document.querySelector('[data-subject-size]')).toBeTruthy();
     expect(document.querySelector('[data-subject-baseref]')).toBeTruthy();
+    // 画布底栏同款：StyledSelect 模型 + 参数摘要弹层 + 提示词库
+    expect(document.querySelector('[data-subject-gen-footer]')?.textContent).toContain('QwenImage2.1');
+    expect(document.querySelector('[data-subject-gen-footer]')?.textContent).toContain('提示词');
     // 提示词为空时生成按钮禁用（不发起空任务）
-    expect((document.querySelector('[data-subject-generate]') as HTMLButtonElement).disabled).toBe(true);
+    const generate = document.querySelector('[data-subject-gen-footer] button[aria-label="生成"]') as HTMLButtonElement | null;
+    expect(generate).toBeTruthy();
+    expect(generate?.disabled).toBe(true);
   });
 
   it('基础状态没有「引用基础状态」开关（自己就是基准）', async () => {

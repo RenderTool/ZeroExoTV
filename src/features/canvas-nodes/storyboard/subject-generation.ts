@@ -49,8 +49,12 @@ export interface ResolvedSubjectGenParams {
   quality: SubjectGenQuality;
   width: number;
   height: number;
+  megapixels: number;
   steps: number;
   cfg: number;
+  denoise: number;
+  useLlmEnhance: boolean;
+  transparent: boolean;
   seed: number;
   useBaseRef: boolean;
   referenceKeys: string[];
@@ -93,8 +97,12 @@ export function resolveSubjectGenParams(
     quality,
     width: size.width,
     height: size.height,
+    megapixels: p.megapixels ?? Math.round(((size.width * size.height) / (1024 * 1024)) * 100) / 100,
     steps: p.steps ?? defaults.steps,
     cfg: p.cfg ?? defaults.cfg,
+    denoise: p.denoise ?? 1,
+    useLlmEnhance: p.useLlmEnhance === true,
+    transparent: p.transparent === true,
     seed: p.seed ?? -1,
     useBaseRef: isBase ? false : (p.useBaseRef ?? true),
     referenceKeys: Array.isArray(p.referenceKeys) ? p.referenceKeys.filter(Boolean) : [],
@@ -292,7 +300,7 @@ async function runJob(key: string, input: RunInput): Promise<void> {
           steps: params.steps,
           cfg: params.cfg,
           seed: params.seed,
-          megapixels: (params.width * params.height) / (1024 * 1024),
+          megapixels: params.megapixels,
         },
         onPreview, onProgress, onJobSubmitted,
         resume: input.resume,
@@ -306,7 +314,7 @@ async function runJob(key: string, input: RunInput): Promise<void> {
           steps: params.steps,
           cfg: params.cfg,
           seed: params.seed,
-          megapixels: (params.width * params.height) / (1024 * 1024),
+          megapixels: params.megapixels,
         },
         onPreview, onProgress, onJobSubmitted,
         resume: input.resume,
@@ -328,6 +336,9 @@ async function runJob(key: string, input: RunInput): Promise<void> {
           height: params.height,
           steps: params.steps,
           cfg: params.cfg,
+          denoise: params.denoise,
+          use_llm_enhance: params.useLlmEnhance,
+          transparent_background: params.transparent,
           seed: params.seed,
           // 有参考图时输出必须与输入同尺寸（Qwen latent 要求），否则走用户选的尺寸
           sizeMode: source ? 'source' : 'custom',

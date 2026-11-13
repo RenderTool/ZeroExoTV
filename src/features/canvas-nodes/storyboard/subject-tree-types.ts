@@ -133,8 +133,16 @@ export interface SubjectGenParams {
   quality?: '1k' | '2k' | 'custom';
   width?: number;
   height?: number;
+  /** Moss/Krea2 的百万像素档位（1MP = 1024×1024）；Qwen 不用 */
+  megapixels?: number;
   steps?: number;
   cfg?: number;
+  /** Qwen 图生图的修改幅度（0..1，画布参数弹层同款） */
+  denoise?: number;
+  /** Qwen 优化提示词开关（画布参数弹层同款） */
+  useLlmEnhance?: boolean;
+  /** Qwen 透明背景（PNG Alpha） */
+  transparent?: boolean;
   /** -1 = 随机 */
   seed?: number;
   /** 派生状态是否把基础状态图当参考（仅 Qwen 支持参考图） */

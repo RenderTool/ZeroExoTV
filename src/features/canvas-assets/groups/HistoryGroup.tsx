@@ -502,19 +502,22 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
 
   return (
     <>
-      {/* 第一层：来源 Tab —— 与抽屉素材「全局 / 本项目」同款胶囊（含数量徽标） */}
-      <div style={{ padding: '8px 20px 0', flexShrink: 0 }} data-history-source-bar>
-        <CapsuleTabs
-          value={historySource}
-          onChange={(key) => setHistorySource(key as HistorySource)}
-          segments={[
-            { key: 'canvas', label: t('assetLibrary.historySourceCanvas', { defaultValue: '从画布生成' }), count: sourceCounts.canvas.total },
-            { key: 'director', label: t('assetLibrary.historySourceDirector', { defaultValue: '从导演台' }), count: sourceCounts.director.total },
-          ]}
-          theme={theme}
-          testId="history-source-tabs"
-        />
-      </div>
+      {/* 第一层：来源 Tab —— 仅独立历史入口需要；
+          被「导演台」类目锁死来源时直接展示导演台视频，不再出现「从画布生成 / 从导演台」子页签 */}
+      {!forcedSource && (
+        <div style={{ padding: '8px 20px 0', flexShrink: 0 }} data-history-source-bar>
+          <CapsuleTabs
+            value={historySource}
+            onChange={(key) => setHistorySource(key as HistorySource)}
+            segments={[
+              { key: 'canvas', label: t('assetLibrary.historySourceCanvas', { defaultValue: '从画布生成' }), count: sourceCounts.canvas.total },
+              { key: 'director', label: t('assetLibrary.historySourceDirector', { defaultValue: '从导演台' }), count: sourceCounts.director.total },
+            ]}
+            theme={theme}
+            testId="history-source-tabs"
+          />
+        </div>
+      )}
 
       <ToolbarRow style={{ paddingTop: 6 }}>
         {/* 导演台只产出视频，不给图片/视频分类（2026-11-08 用户指令） */}

@@ -6,9 +6,12 @@
  */
 
 import crypto from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { McpError } from "../errors.js";
 import { paths } from "../config.js";
 import { readJsonIfExists, updateVersionedJson, type UpdateResult } from "./fs-node.js";
+import { parseCasStorageKey, readCasIndex, uploadToCas } from "./cas.js";
 
 export type SubjectKind = "character" | "scene" | "prop" | "candidate";
 
@@ -154,6 +157,7 @@ interface TreeStateLike {
   fullPrompt?: string;
   recognitionTerms?: string[];
   media: Array<{ key: string; type: string; prompt?: string }>;
+  mediaHistory?: unknown[];
   source?: string;
   baseRef?: string;
   appearEpisodes?: number[];
@@ -243,6 +247,173 @@ function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
   }
   state.media = [{ key: input.storageKey, type: "image", prompt: input.prompt }];
   if (input.prompt) state.fullPrompt = input.prompt;
+}
+
+export interface ImportSubjectResult {
+  written: boolean;
+  version: number;
+  subject: ProductionItem;
+  rootId: string;
+  imagesCopied: number;
+  skippedKeys: string[];
+  /** 集数关联是项目内 id，导入时清空（由 sync_subject_episodes 按名字重新关联） */
+  episodeIdsCleared: boolean;
+}
+
+/**
+ * 把另一个项目的主体完整导入本项目（2026-11-13 跨项目引用纪律）：
+ * - 新 itemId / rootId / 状态 id，绝不与源项目共享身份；
+ * - 状态图按 CAS 字节重新为本项目注册 ref（同 hash 不复制第二份文件）；
+ * - 集数 id 不跨项目沿用，清空后按名字重新关联；
+ * - 当前项目已有同名主体 → 拒绝（由调用方显式改名或合并，禁止悄悄生成第二个同名主体）。
+ */
+export async function importSubjectFromProject(
+  root: string,
+  targetProjectId: string,
+  opts: {
+    sourceProjectId: string;
+    subjectId: string;
+    name?: string;
+    baseVersion: number;
+    dryRun?: boolean;
+  },
+): Promise<ImportSubjectResult> {
+  if (!opts.sourceProjectId || opts.sourceProjectId === targetProjectId) {
+    throw new McpError("INVALID_PROJECT", "源项目 id 不能为空，也不能与当前项目相同");
+  }
+  const src = await readStoryboard(root, opts.sourceProjectId);
+  if (!src) throw new McpError("NOT_FOUND", `源项目主体库不存在: ${opts.sourceProjectId}`);
+  const srcItem = src.entities.find((e) => e.id === opts.subjectId);
+  if (!srcItem) throw new McpError("NOT_FOUND", `源项目没有该主体: ${opts.subjectId}`);
+  const name = (opts.name ?? "").trim() || srcItem.name;
+  const target = await readStoryboard(root, targetProjectId);
+  if (target?.entities.some((e) => e.name === name)) {
+    throw new McpError(
+      "SUBJECT_EXISTS",
+      `当前项目已有同名主体「${name}」。请换一个 name（例如「${name}（导入）」）再导入，`
+        + "或先 merge_subjects 合并；不要为了省事直接跨项目引用。",
+    );
+  }
+
+  const srcTrees = (Array.isArray(src.subjectTree) ? src.subjectTree : []) as TreeLike[];
+  const srcTree = srcTrees.find((t) => t.itemId === srcItem.id)
+    ?? (() => {
+      const same = srcTrees.filter((t) => !t.itemId && t.name === srcItem.name);
+      return same.length === 1 ? same[0] : undefined;
+    })();
+  const srcStates: TreeStateLike[] = srcTree?.states?.length
+    ? srcTree.states
+    : [{
+      id: "__base__", state: "", type: "image", step: 1, deriveFrom: null,
+      deltaPrompt: "", fullPrompt: srcItem.note ?? "", recognitionTerms: [],
+      media: srcItem.images.map((img) => ({ key: img.storageKey, type: "image", prompt: img.prompt })),
+      source: "user", baseRef: "", appearEpisodes: [],
+    }];
+
+  const newId = `item-${crypto.randomBytes(6).toString("hex")}`;
+  const newRootId = `subj-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+  const newStates: TreeStateLike[] = srcStates.map((st, i) => ({
+    ...st,
+    id: st.id === "__base__" ? "__base__" : `snode-${newRootId}-${i}`,
+    baseRef: newRootId,
+    media: [],
+    mediaHistory: [],
+  }));
+
+  const skipped = new Set<string>();
+  let imagesCopied = 0;
+  if (!opts.dryRun) {
+    const index = await readCasIndex(root);
+    for (let i = 0; i < srcStates.length; i += 1) {
+      const srcState = srcStates[i]!;
+      for (const media of srcState.media ?? []) {
+        const key = media?.key ?? "";
+        if (!key) continue;
+        const parsed = parseCasStorageKey(key);
+        const entry = parsed ? index.entries[parsed.hash] : undefined;
+        if (!parsed || !entry) { skipped.add(key); continue; }
+        try {
+          const bytes = await fs.readFile(path.join(root, entry.path));
+          await uploadToCas(root, {
+            projectId: targetProjectId,
+            filename: `${parsed.hash}.${entry.ext}`,
+            dataBase64: bytes.toString("base64"),
+            mime: entry.mime,
+            refId: `subject-state:${newRootId}/${newStates[i]!.id}`,
+            toLibrary: false,
+          });
+          newStates[i]!.media.push({ ...media, key });
+          imagesCopied += 1;
+        } catch {
+          skipped.add(key);
+        }
+      }
+    }
+  }
+
+  const images = newStates.flatMap((st) => st.media
+    .filter((m) => m.type === "image")
+    .map((m) => ({
+      storageKey: m.key,
+      stateTag: st.id === "__base__" ? (st.state || "定妆") : st.state,
+      prompt: m.prompt,
+      tags: [],
+    })));
+  const copiedKeys = new Set(images.map((i) => i.storageKey));
+  const sourceCover = srcTree?.coverKey ?? srcItem.coverKey ?? null;
+  const coverKey = sourceCover && copiedKeys.has(sourceCover) ? sourceCover : (images[0]?.storageKey ?? null);
+
+  const subject: ProductionItem = {
+    id: newId,
+    name,
+    kind: srcItem.kind,
+    aliases: srcItem.aliases ?? [],
+    consistency: srcItem.consistency,
+    note: srcItem.note,
+    episodeIds: [],
+    images,
+    coverKey,
+  };
+
+  if (opts.dryRun) {
+    return {
+      written: false,
+      version: target?.version ?? 0,
+      subject,
+      rootId: newRootId,
+      imagesCopied: 0,
+      skippedKeys: [...skipped],
+      episodeIdsCleared: (srcItem.episodeIds ?? []).length > 0,
+    };
+  }
+
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(targetProjectId, root), {
+    baseVersion: opts.baseVersion,
+    createIfMissing: () => emptyStoryboard(),
+    mutate: (s) => {
+      s.entities.push(subject);
+      const trees = (Array.isArray(s.subjectTree) ? s.subjectTree : []) as TreeLike[];
+      trees.push({
+        rootId: newRootId,
+        itemId: newId,
+        name,
+        kind: srcItem.kind,
+        aliases: srcItem.aliases ?? [],
+        states: newStates,
+        coverKey,
+      });
+      s.subjectTree = trees;
+    },
+  });
+  return {
+    written: true,
+    version: res.after.version,
+    subject,
+    rootId: newRootId,
+    imagesCopied,
+    skippedKeys: [...skipped],
+    episodeIdsCleared: (srcItem.episodeIds ?? []).length > 0,
+  };
 }
 
 /**

@@ -1,20 +1,20 @@
 /**
  * canvas-assets/tab-defs - 抽屉分组页签定义 + 模块挂载规则（纯数据，无组件依赖，导出供结构断言/单测）
  *
- * 2026-11-06 用户指令（两件事，本条为准）：
- * 1. **按钮顺序**：资产 → 历史 → 层级 → 画布（资产置顶、历史其次、画布专属分组垫底）；
+ * 2026-11-13 用户指令（资产路径简化）：删除独立「历史」分组——
+ * 画布生成产物直接进素材「画布」，导演台生成产物直接进「导演台」；
+ * 不再保留第三套历史入口，也不在导演台类目下再分「从画布生成 / 从导演台」。
+ *
+ * 2026-11-06 用户指令（本条仍有效）：
+ * 1. **按钮顺序**：资产 → 层级 → 画布（资产置顶、画布专属分组垫底）；
  * 2. **加载时机**：层级与画布是**画布模块专属**——顶部页签不在画布（剧本/主体库/导演台）时，
  *    这两个按钮与内容都不挂载到抽屉 sidebar，避免用户在这些模块里误选画布层级与子画布；
- *    每个模块按自己的激活状态独立挂载（画布 = 全部分组，其余模块 = 资产 / 历史）。
- *
- * 2026-11-04 加回「历史」分组（本地重建版，groups/HistoryGroup）
- * 2026-11-05 用户指令（征集 #174）：「剧本」页签与内容从抽屉移除。
+ *    每个模块按自己的激活状态独立挂载。
  */
 
 /** 抽屉分组页签定义（数组顺序 = sidebar 按钮顺序） */
 export const DRAWER_TAB_DEFS = [
   { key: 'material', labelKey: 'assetLibrary.filterMaterial' },
-  { key: 'history', labelKey: 'assetLibrary.filterHistory' },
   // 画布相关合并为一个入口：层级 / 子画布在组内用 Tab 切换
   { key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab' },
   // 2026-11-07 用户指令：剧本页的「本剧信息」放进资产抽屉，作为独立分组（整部剧一句话概述 + 标签）
@@ -29,11 +29,11 @@ export type DrawerModule = 'canvas' | 'script' | 'storyboard' | 'workbench';
 
 /** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在 */
 export const DRAWER_MODULE_GROUPS: Record<DrawerModule, readonly DrawerGroup[]> = {
-  canvas: ['material', 'history', 'canvasStructure'],
+  canvas: ['material', 'canvasStructure'],
   // 剧本 / 导演台：本剧信息是这两个阶段共用的项目级信息，只在这两个模块挂载
-  script: ['material', 'history', 'scriptMeta'],
-  storyboard: ['material', 'history'],
-  workbench: ['material', 'history', 'scriptMeta'],
+  script: ['material', 'scriptMeta'],
+  storyboard: ['material'],
+  workbench: ['material', 'scriptMeta'],
 };
 
 /**

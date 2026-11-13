@@ -12,7 +12,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { History, Layers, FileText } from 'lucide-react';
+import { Layers, FileText } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { GroupPlugin } from '@zeroexo/plugin-group';
@@ -21,7 +21,6 @@ import { useCanvasAssetsPanel } from './store.js';
 import type { DrawerGroup } from './tab-defs.js';
 import { SidebarNav, type GroupTabItem } from './components/common.js';
 import { MaterialGroup } from './groups/MaterialGroup.js';
-import { HistoryGroup } from './groups/HistoryGroup.js';
 import { CanvasStructureGroup } from './groups/CanvasStructureGroup.js';
 import { ScriptMetaGroup } from './groups/ScriptMetaGroup.js';
 import { SidebarAnimatedIcon } from '@/features/app-sidebar/sidebar-animated-icon.js';
@@ -45,7 +44,6 @@ export { DRAWER_TAB_DEFS } from './tab-defs.js';
 import { DRAWER_TAB_DEFS, resolveDrawerModule } from './tab-defs.js';
 
 const TAB_ICONS: Record<(typeof DRAWER_TAB_DEFS)[number]['key'], { icon: React.ReactNode; activeIcon?: React.ReactNode }> = {
-  history: { icon: <History size={18} /> },
   // 素材分组两态图标：激活 PackageOpen / 未激活 Package（仅视觉切换，不收起抽屉）
   material: {
     icon: <SidebarAnimatedIcon type="assets" size={18} active={false} hovered={false} mode="inline" />,
@@ -63,16 +61,12 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
   const store = useCanvasAssetsPanel({ onSendToCanvas, module: resolveDrawerModule(activeTabKey) });
 
-  // 2026-08-31 约定：资产抽屉图标统一 18px（sidebar 按钮 / 卡片图标 / 播放按钮一致）
-  // 2026-11-04 文案修正：层级/图层面板显示名改回「层级」（推翻 2026-11-02「更名画布」——层级树不是画布）
-  // 2026-11-04「历史」加回（本地重建版，groups/HistoryGroup）：数据源=本项目 API 生成产物
-  // （data.origin='generation' 唯一判据），取代原云端版「项目资产（产出历史）」分组
-  // （zeroexo-platform，GET /api/ai/generations，本地不接）；手动上传资产不进历史
+  // 2026-11-13 用户指令：删除独立「历史」入口——画布生成进「画布」、导演台生成进「导演台」。
   // 2026-11-05 用户指令（征集 #174）：「剧本」页签与剧本分组组件从抽屉全删（只留顶部「剧本」页签）
-  // 2026-11-06 用户指令：顺序 = 资产 → 历史 → 层级 → 画布；非画布模块只留前两个
+  // 2026-11-06 用户指令：顺序 = 资产 → 层级 → 画布；非画布模块只留资产（+本剧信息）
   const tabItems: GroupTabItem[] = DRAWER_TAB_DEFS.map((d) => ({
     key: d.key,
-    label: t(d.labelKey, { defaultValue: d.key === 'history' ? '历史' : undefined }),
+    label: t(d.labelKey),
     ...TAB_ICONS[d.key],
   })).filter((item) => store.visibleGroups.includes(item.key as DrawerGroup));
 
@@ -83,13 +77,6 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
         {store.activeGroup === 'material' ? (
           <MaterialGroup store={store} theme={theme} />
-        ) : store.activeGroup === 'history' ? (
-          <HistoryGroup
-            store={store}
-            theme={theme}
-            graphStore={hierarchy?.store}
-            onFocusNode={hierarchy?.onFocusNode}
-          />
         ) : store.activeGroup === 'canvasStructure' ? (
           // 层级 / 子画布合并为一个「画布」入口，组内 Tab 切换
           <CanvasStructureGroup store={store} theme={theme} hierarchy={hierarchy} />

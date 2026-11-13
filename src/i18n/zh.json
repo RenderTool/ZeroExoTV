@@ -1169,7 +1169,7 @@
     "saveFailed": "保存失败",
     "scopeTagLibrary": "全局",
     "scopeCapsuleLibrary": "全局",
-    "scopeCapsuleProject": "本项目",
+    "scopeCapsuleProject": "画布",
     "deletedOne": "已删除「{{name}}」",
     "deletedMany": "已删除 {{count}} 个素材",
     "refsInvalidated": "，有 {{count}} 处引用已失效",

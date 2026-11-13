@@ -1158,7 +1158,7 @@
     "saveFailed": "Failed to save",
     "scopeTagLibrary": "Global",
     "scopeCapsuleLibrary": "Global",
-    "scopeCapsuleProject": "This Project",
+    "scopeCapsuleProject": "Canvas",
     "deletedOne": "Deleted \"{{name}}\"",
     "deletedMany": "Deleted {{count}} assets",
     "refsInvalidated": ", {{count}} reference(s) invalidated",

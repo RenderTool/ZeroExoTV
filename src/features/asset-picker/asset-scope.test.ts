@@ -322,7 +322,7 @@ describe('filterAssetsStrictScope 胶囊 Tab 严格口径（单段不混排）',
     expect(out.every((a) => a.scope === 'project' && a.projectId === 'c1')).toBe(true);
   });
 
-  it('API 生成产物只属于历史，不混进本项目资产（本项目只放导入/手动存入）', () => {
+  it('画布生成产物直接落在「画布」段（不再只活在独立历史）', () => {
     const list = [
       { ...legacyAsset('manual', '手动导入'), scope: 'project', projectId: 'c1' },
       {
@@ -330,8 +330,9 @@ describe('filterAssetsStrictScope 胶囊 Tab 严格口径（单段不混排）',
         data: { kind: 'video', origin: 'generation', storageKey: 'video:assets/c1/videos/a.mp4' },
       },
     ] as unknown as Asset[];
-    expect(filterAssetsStrictScope(list, { scopeTab: 'project', projectId: 'c1' }).map((a) => a.id)).toEqual(['manual']);
-    expect(countAssetsByScope(list, 'c1').project).toBe(1);
+    expect(filterAssetsStrictScope(list, { scopeTab: 'project', projectId: 'c1' }).map((a) => a.id).sort())
+      .toEqual(['gen', 'manual']);
+    expect(countAssetsByScope(list, 'c1').project).toBe(2);
   });
 
   it('公共段：只出公共库资产（四类白名单），项目资产与业务 kind 均不出现', () => {

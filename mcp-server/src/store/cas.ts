@@ -9,6 +9,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { paths } from "../config.js";
+import { McpError } from "../errors.js";
 import { appendAssetRecord, assetTitleFromFilename } from "./asset-library.js";
 import { readJsonIfExists, updateUnversionedJson } from "./fs-node.js";
 
@@ -138,6 +139,50 @@ export async function uploadToCas(
     refCount: after.entries[hash]?.refCount ?? 1,
     assetId,
   };
+}
+
+/** storageKey → CAS hash/ext（非 CAS 键返回 null；用于项目归属校验与跨项目导入） */
+export function parseCasStorageKey(storageKey: string): { hash: string; ext: string } | null {
+  const m = /^cas:([a-f0-9]{8,})(?:\.([a-z0-9]+))?$/i.exec(storageKey.trim());
+  if (!m?.[1]) return null;
+  return { hash: m[1].toLowerCase(), ext: (m[2] ?? "png").toLowerCase() };
+}
+
+/**
+ * 这张 CAS 图/视频/音频被哪些项目引用。
+ * 空数组 = 索引里没有该 hash（孤儿/未知）；调用方据此决定是允许还是提示先上传。
+ */
+export async function casStorageKeyProjectIds(root: string, storageKey: string): Promise<string[]> {
+  const parsed = parseCasStorageKey(storageKey);
+  if (!parsed) return [];
+  const index = await readCasIndex(root);
+  const entry = index.entries[parsed.hash];
+  if (!entry) return [];
+  return [...new Set(entry.refs.map((r) => r.projectId))];
+}
+
+/**
+ * 主体图的项目归属硬门槛（2026-11-13 跨项目串台事故）：
+ * 只允许「本项目」或「公共库(library)」已引用的 CAS 资产直接挂到本项目主体。
+ * 仅被别的项目引用的图必须导入本项目（import_subject_from_project / upload_asset）后再用。
+ */
+export async function assertCasAssetInProject(
+  root: string,
+  projectId: string,
+  storageKey: string,
+): Promise<{ hash: string; ext: string; projectIds: string[] }> {
+  const parsed = parseCasStorageKey(storageKey);
+  if (!parsed) return { hash: "", ext: "", projectIds: [] }; // 非 CAS 老键：交给旧链路校验
+  const projectIds = await casStorageKeyProjectIds(root, storageKey);
+  if (projectIds.length > 0 && !projectIds.includes(projectId) && !projectIds.includes("library")) {
+    throw new McpError(
+      "CROSS_PROJECT_ASSET",
+      `素材 ${storageKey} 只属于项目 ${projectIds.join("、")}，不属于当前项目 ${projectId}。`
+        + "禁止跨项目直接引用：先用 import_subject_from_project 把该主体导成本项目主体，"
+        + "或 upload_asset / import_media_to_cas 到本项目后再挂图。",
+    );
+  }
+  return { ...parsed, projectIds };
 }
 
 /** scope=project：refs 含本项目条目；scope=library：全局去重视图（每个 hash 一条）。 */

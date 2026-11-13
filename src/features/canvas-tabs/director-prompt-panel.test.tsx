@@ -1474,6 +1474,33 @@ describe('主体状态素材候选（@ 面板，2026-11-05）', () => {
     expect(promptPatch?.imagePrompt).toContain('@Picture1 ');
   });
 
+  it('主体状态图只认绑定到本主体的树；item.images 里的跨项目残留状态不得出现（2026-11-13 串台修复）', () => {
+    const polluted = {
+      ...SUBJECTS[0]!,
+      // 历史残留：18 张「另一个项目同名主体」的状态图
+      images: Array.from({ length: 18 }, (_, i) => ({
+        storageKey: `foreign-${i}`,
+        prompt: '', note: '', tags: [], stateTag: `假状态${i + 1}`,
+      })),
+      coverKey: 'foreign-0',
+    } as unknown as ProductionItem;
+    const { container } = renderPanel({
+      subjects: [polluted],
+      subjectTrees: SUBJECT_TREES,
+      onShotChange: () => {},
+    });
+    const panel = openPanel(container);
+    fireEvent.click(panel.querySelector('[data-asset-panel-tab="subject"]') as Element);
+    // 状态子行只来自树（受伤是唯一图片态），一个假状态都不能出现
+    fireEvent.click(panel.querySelector('[data-subject-chevron="sub-1"]') as Element);
+    expect(panel.querySelector('[data-subject-state-row="sk-injured"]')).toBeTruthy();
+    expect(panel.querySelectorAll('[data-subject-state-row^="foreign-"]').length).toBe(0);
+    expect(panel.textContent).not.toContain('假状态');
+    // 行尾计数与详情「状态图」都按树算，不再拿 item.images.length
+    expect(panel.textContent).toContain('1 图');
+    expect(panel.querySelector('[data-subject-detail-image="foreign-0"]')).toBeNull();
+  });
+
   it('图片槽位已达上限 → 拒绝插入（无 references 写入、无超位引用）', () => {
     const fullRefs = Array.from({ length: 9 }, (_, i) => ({
       id: `f${i}`, kind: 'image' as const, title: `图${i}`, url: `data:image/png;base64,${i}`, storageKey: `kf${i}`,
