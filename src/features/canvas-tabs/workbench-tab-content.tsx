@@ -843,6 +843,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     getBridgeConfig: () => getRunConfigFromEndpoint(),
     callbacks: {
       onSegmentState: (shotId, state) => {
+        const shot = shotsRef.current.find((s) => s.id === shotId);
+        // 已完成/已有成片的片段，取消旧任务不能把它改回 cancelled（否则视频入口消失）
+        if (state === 'cancelled' && (shot?.status === 'done' || shot?.media?.storageKey)) return;
         updateShot(shotId, { status: state });
         // 发起生成任务时自动存一份版本快照（2026-11-07：版本=任务记录，而非编辑记录）
         if (state === 'generating' && projectId) {
