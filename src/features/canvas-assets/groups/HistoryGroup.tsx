@@ -394,17 +394,19 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   );
 }
 
-export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
+export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSource }: {
   store: CanvasAssetsPanelStore;
   theme: ThemeConfig;
   /** 画布 graph store（定位节点用；缺省时定位按钮点击给出提示） */
   graphStore?: ReactGraphStore;
   onFocusNode?: (nodeId: string) => void;
+  /** 锁定来源（导演台类目只显示导演台历史） */
+  forcedSource?: HistorySource;
 }): React.ReactElement {
   const { t } = useTranslation();
   const { message: antdMessage, modal: antdModal } = App.useApp();
   /** 第一层：来源 Tab（从画布生成 / 从导演台） */
-  const [historySource, setHistorySourceState] = useState<HistorySource>(readInitialHistorySource);
+  const [historySource, setHistorySourceState] = useState<HistorySource>(() => forcedSource ?? readInitialHistorySource());
   /** 第二层：类型 chips（图片 / 视频） */
   const [historyKind, setHistoryKind] = useState<HistoryKind>('image');
   const [page, setPage] = useState(1);
@@ -426,7 +428,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode }: {
     [store.allAssets, projectId],
   );
   // 2026-11-08：导演台只产出视频，不需要类型分类 → 直接给「全部」；画布保留「全部/图片/视频」
-  const effectiveKind: HistoryKind = historySource === 'director' ? 'all' : historyKind;
+  const effectiveKind: HistoryKind = forcedSource === 'director' || historySource === 'director' ? 'all' : historyKind;
   const items = useMemo(
     () => filterHistoryAssets(store.allAssets, projectId, effectiveKind, historySource),
     [store.allAssets, projectId, effectiveKind, historySource],

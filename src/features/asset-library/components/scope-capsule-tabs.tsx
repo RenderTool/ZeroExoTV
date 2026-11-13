@@ -14,7 +14,7 @@ import type { AssetScope } from '@/features/asset-picker/index.js';
 import { CapsuleTabs, type CapsuleSegment } from './capsule-tabs.js';
 
 /** 胶囊分段键：用户两作用域 + 主体（抽屉内）+ 开源库（只读，排最后） */
-export type ScopeCapsuleTab = AssetScope | 'subject';
+export type ScopeCapsuleTab = AssetScope | 'subject' | 'director';
 
 export interface ScopeCapsuleTabsProps {
   /** 当前激活段 */
@@ -23,8 +23,12 @@ export interface ScopeCapsuleTabsProps {
   onChange: (tab: ScopeCapsuleTab) => void;
   /** 公共资产实时数量（library 作用域 + 四类白名单口径） */
   libraryCount: number;
-  /** 本项目实时数量；null = 无项目上下文 → 「本项目」段置灰 */
+  /** 画布实时数量；null = 无项目上下文 → 「画布」段置灰 */
   projectCount: number | null;
+  /** 是否显示导演台段 */
+  showDirector?: boolean;
+  /** 导演台产出数量（仅视频历史） */
+  directorCount?: number | null;
   /**
    * 开源库条目总数；undefined = 未启用开源库 → 不渲染第三段（场外调用方零改动）。
    * openlib 为只读展示作用域，与公共/本项目用户数据互不混排。
@@ -46,6 +50,8 @@ export function ScopeCapsuleTabs({
   onChange,
   libraryCount,
   projectCount,
+  showDirector,
+  directorCount,
   showSubject,
   subjectCount,
   theme,
@@ -56,12 +62,15 @@ export function ScopeCapsuleTabs({
     { key: 'library', label: t('assetLibrary.scopeCapsuleLibrary', '全局'), count: libraryCount, disabled: false },
     {
       key: 'project',
-      label: t('assetLibrary.scopeCapsuleProject', '本项目'),
+      label: t('assetLibrary.scopeCapsuleProject', '画布'),
       count: projectCount,
       disabled: projectCount === null,
       disabledHint: t('assetLibrary.scopeCapsuleProjectDisabled', '进入项目后可用'),
     },
   ];
+  if (showDirector) {
+    segments.push({ key: 'director', label: t('assetLibrary.scopeCapsuleDirector', '导演台'), count: directorCount ?? null, disabled: false });
+  }
   // 分段顺序（2026-11-06 用户指令：「开源库应该放 Tab 的最后」）：
   // 全局 / 本项目 / 主体 / 开源库——开源库是只读外部资源，排到末尾不与用户数据段夹在一起。
   if (showSubject) {

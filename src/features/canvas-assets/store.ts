@@ -31,7 +31,7 @@ import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-res
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { isAuthorized } from '@/platform/fs.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
-import { countHistoryByKind, libraryCasHashes } from './history-utils.js';
+import { countHistoryByKind, countHistoryBySourceAndKind, libraryCasHashes } from './history-utils.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -53,7 +53,7 @@ export type { DrawerGroup } from './tab-defs.js';
  * openlib / subject 不参与资产存储口径（filterAssetsStrictScope/countAssetsByScope/resolveUploadScope
  * 均只接受 AssetScope），store 层对两者显式旁路，确保不与用户数据混排。
  */
-export type MaterialScopeTab = AssetScope | 'subject';
+export type MaterialScopeTab = AssetScope | 'subject' | 'director';
 
 export interface SendToCanvasItem {
   type: 'asset' | 'script';
@@ -209,7 +209,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
    *  openlib 段为只读开源库展示作用域、subject 段为主体库页面：两者恒为空数组，
    *  条目分别由 OpenLibGroup / SubjectGroup 独立渲染，不与用户数据混排 */
   const filteredAssets = useMemo(() => {
-    if (materialScopeTab === 'subject') return [];
+    if (materialScopeTab === 'subject' || materialScopeTab === 'director') return [];
     const canvasId = getCurrentCanvasId();
     let result = (Array.isArray(assets) ? assets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
@@ -230,7 +230,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
     // openlib/subject 段不是用户素材（独立渲染），分类计数直接归零
-    if (materialScopeTab === 'subject') {
+    if (materialScopeTab === 'subject' || materialScopeTab === 'director') {
       return { all: 0, image: 0, video: 0, audio: 0, text: 0 };
     }
     const scoped = filterAssetsStrictScope(base, {
@@ -249,6 +249,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   }, [assets, materialScopeTab, search]);
 
   /** 胶囊徽标计数（素材分组口径：排除剧本/实体/plan 后按作用域统计） */
+  const directorCount = useMemo(() => countHistoryBySourceAndKind(assets, getCurrentCanvasId()).director.total, [assets]);
   const materialScopeCounts = useMemo(() => {
     const base = (Array.isArray(assets) ? assets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
@@ -526,6 +527,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     materialScopeTab,
     setMaterialScopeTab,
     materialScopeCounts,
+    directorCount,
     materialKindCounts,
     // 素材批量操作（与资产库页面多选同形）
     assetMultiSelect,

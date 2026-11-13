@@ -25,6 +25,7 @@ import type { Asset } from '@/features/asset-picker/index.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
 import { sendAssetToWorkbench } from '../send-to-workbench.js';
 import { SubjectGroup } from './SubjectGroup.js';
+import { HistoryGroup } from './HistoryGroup.js';
 import { useSubjectTotalCount } from '@/features/canvas-nodes/storyboard/use-storyboard-subject-data.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
@@ -185,6 +186,8 @@ export function MaterialGroup({ store, theme }: {
         projectCount={store.materialScopeCounts.project}
         showSubject
         subjectCount={subjectCount}
+        showDirector
+        directorCount={store.directorCount}
         theme={theme}
       />
     </div>
@@ -196,6 +199,15 @@ export function MaterialGroup({ store, theme }: {
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         {capsuleBar}
         <SubjectGroup theme={theme} />
+      </div>
+    );
+  }
+
+  if (store.materialScopeTab === 'director') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {capsuleBar}
+        <HistoryGroup store={store} theme={theme} forcedSource="director" />
       </div>
     );
   }
