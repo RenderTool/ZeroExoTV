@@ -56,4 +56,5 @@ __pycache__/
 
 tools/*.png
 
-# esbuild temp (Windows).tmpbuild/
+# esbuild temp (Windows)
+.tmpbuild/
