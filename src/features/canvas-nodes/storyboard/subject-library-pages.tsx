@@ -820,6 +820,7 @@ function StateGridCard({
   onClick, onToggleCover, onDelete, onToggleEdit,
   onRename, onCanvasGenerate, jobKey, persistedJob,
   onReplaceMedia, onRemoveMedia, hasMedia,
+  onSwapMedia,
 }: {
   stateId: string;
   title: string;
@@ -854,6 +855,8 @@ function StateGridCard({
   onReplaceMedia?: (anchor: HTMLElement) => void;
   onRemoveMedia?: () => void;
   hasMedia?: boolean;
+  /** 把另一状态的图片拖到本卡时交换首图 */
+  onSwapMedia?: (sourceStateId: string) => void;
 }): React.ReactElement {
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
@@ -951,6 +954,27 @@ function StateGridCard({
       role="button"
       tabIndex={0}
       aria-label={title}
+      title={hasMedia ? t('subject.dragToSwap', '拖动到另一个状态，可交换两张图片') : undefined}
+      draggable={Boolean(hasMedia)}
+      onDragStart={(e) => {
+        if (!hasMedia) return;
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-zeroexo-subject-state', stateId);
+      }}
+      onDragOver={(e) => {
+        if (!hasMedia) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+      }}
+      onDrop={(e) => {
+        if (!hasMedia) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const source = e.dataTransfer.getData('application/x-zeroexo-subject-state');
+        if (source && source !== stateId) onSwapMedia?.(source);
+      }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return;
         if (onToggleEdit) onToggleEdit(); else onClick();
@@ -2279,6 +2303,29 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }
   }, [projectId, commitTrees, antdMessage, t]);
 
+  /** 拖拽交换：两个状态各自的首图互换，其他媒体/历史不动；封面 key 跟着图走 */
+  const swapMedia = useCallback((rootId: string, sourceStateId: string, targetStateId: string) => {
+    if (sourceStateId === targetStateId) return;
+    const tree = treesRef.current.find((tr) => tr.rootId === rootId);
+    if (!tree) return;
+    const source = (tree.states ?? []).find((n) => n.id === sourceStateId);
+    const target = (tree.states ?? []).find((n) => n.id === targetStateId);
+    if (!source || !target) return;
+    const sourceFirst = (source.media ?? [])[0];
+    const targetFirst = (target.media ?? [])[0];
+    if (!sourceFirst?.key || !targetFirst?.key) return;
+    const next = treesRef.current.map((tr) => tr.rootId !== rootId ? tr : {
+      ...tr,
+      states: (tr.states ?? []).map((n) => {
+        if (n.id === sourceStateId) return { ...n, media: [targetFirst, ...(n.media ?? []).slice(1)] };
+        if (n.id === targetStateId) return { ...n, media: [sourceFirst, ...(n.media ?? []).slice(1)] };
+        return n;
+      }),
+    });
+    commitTrees(next);
+    antdMessage.success(t('subject.mediaSwapped', '已交换两个状态的图片'));
+  }, [commitTrees, antdMessage, t]);
+
   /** 从状态媒体历史恢复一张旧图（只换引用，不复制文件） */
   const restoreMedia = useCallback(async (rootId: string, stateId: string, ref: SubjectNodeMediaRef) => {
     try {
@@ -2694,6 +2741,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     hasMedia={Boolean(first?.key)}
                     onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                     onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
+                    onSwapMedia={(sourceStateId) => swapMedia(openTree.rootId, sourceStateId, node.id)}
                     editPanel={openState?.stateId === node.id && openNode ? (
                       <StateEditPanel
                         tree={openTree}

@@ -2490,6 +2490,8 @@
     "untitled": "Untitled Subject",
     "backToParent": "Back",
     "stateCount": "{{n}} states",
+    "dragToSwap": "Drag onto another state to swap images",
+    "mediaSwapped": "Swapped images between states",
     "generatePrompt": "Generate Prompt",
     "detail": "Detail",
     "nameLabel": "Name",

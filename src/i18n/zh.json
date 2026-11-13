@@ -2501,6 +2501,8 @@
     "untitled": "未命名主体",
     "backToParent": "返回上一级",
     "stateCount": "{{n}} 状态",
+    "dragToSwap": "拖动到另一个状态，可交换两张图片",
+    "mediaSwapped": "已交换两个状态的图片",
     "generatePrompt": "生成提示词",
     "detail": "详情",
     "nameLabel": "名称",
