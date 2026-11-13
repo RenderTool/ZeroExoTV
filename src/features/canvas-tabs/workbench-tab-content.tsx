@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Checkbox, Modal, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { History, Link2, Link2Off, Palette, Star, Trash2 } from 'lucide-react';
+import { History, Link2, Link2Off, Palette, Star, Trash2, Play, Square } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
@@ -484,6 +484,35 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     () => (activeEpisodeKey ? (episodeGroups[activeEpisodeKey] ?? []) : shots),
     [activeEpisodeKey, episodeGroups, shots],
   );
+
+  /** 「连续播放」：从当前选中片段起，按轨道顺序播放后续所有有视频的片段 */
+  const [sequencePlaying, setSequencePlaying] = useState(false);
+  const sequenceTimer = useRef<number | null>(null);
+  const stopSequence = useCallback(() => {
+    if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
+    sequenceTimer.current = null;
+    setSequencePlaying(false);
+  }, []);
+  const playSequence = useCallback(() => {
+    if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
+    sequenceTimer.current = null;
+    const list = visibleShots;
+    const startIdx = Math.max(0, list.findIndex((s) => s.id === activeShotId));
+    const playAt = (from: number): void => {
+      let i = from;
+      while (i < list.length && !list[i]?.media?.storageKey) i += 1;
+      if (i >= list.length) { stopSequence(); return; }
+      const shot = list[i]!;
+      setActiveShotId(shot.id);
+      setPreviewAutoPlayKey((k) => k + 1);
+      sequenceTimer.current = window.setTimeout(() => playAt(i + 1), Math.max(1, Number(shot.duration) || 5) * 1000 + 120);
+    };
+    setSequencePlaying(true);
+    playAt(startIdx);
+  }, [visibleShots, activeShotId, stopSequence]);
+  useEffect(() => () => {
+    if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
+  }, []);
   const episodeOptions = useMemo(() => episodeKeys.map((key) => {
     const count = episodeGroups[key]?.length ?? 0;
     const ep = episodeContext.episodes.find((e) => e.id === key);
@@ -1525,6 +1554,15 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             ),
             runButton: (
               <>
+                <Button
+                  size="small"
+                  icon={sequencePlaying ? <Square size={12} /> : <Play size={12} />}
+                  onClick={sequencePlaying ? stopSequence : playSequence}
+                  disabled={!visibleShots.some((s) => Boolean(s.media?.storageKey))}
+                  aria-label={sequencePlaying ? t('director.sequenceStop', '停止连播') : t('director.sequencePlay', '连续播放')}
+                >
+                  {sequencePlaying ? t('director.sequenceStop', '停止连播') : t('director.sequencePlay', '连续播放')}
+                </Button>
                 {/* 2026-11-05 真实运行：运行中显示「取消」（POST /zeroexo/h3/cancel），
                     完成态显示摘要一行（排队位置 / 第 N 段 / 成功 N/M / 已保留 N 段） */}
                 {runPhaseActive && (
