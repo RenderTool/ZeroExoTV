@@ -413,9 +413,49 @@ export function ScriptFullscreenEditor({
     <ConfigProvider theme={{ token: { zIndexPopupBase: 40000 } }}>
     <div style={overlayStyle(theme, embedded)}>
       {/* ===== 顶部 header ===== */}
-      <div style={headerStyle(cardBorder, theme, embedded)}>
-        {/* 左侧：工具按钮 */}
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <div data-module-toolbar="script" style={headerStyle(cardBorder, theme, embedded)}>
+        {/* 左侧：集数 + 主动作 + 通用编辑操作 */}
+        <div data-toolbar-zone="left" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 1, height: 20, background: cardBorder, margin: '0 4px', flexShrink: 0 }} />
+          {/* 2026-11-07 用户指令：标题处支持下拉切换集数（不用再去右侧列表点） */}
+          <Dropdown
+            trigger={['click']}
+            placement="bottomLeft"
+            menu={{
+              items: normalizedEpisodes.map((ep) => ({
+                key: ep.id,
+                label: (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <span>{displayEpisodeTitle(ep.title, ep.number)}</span>
+                    <span style={{ fontSize: 10, opacity: 0.6 }}>{t('episodeList.pageCount', { count: ep.pageCount ?? 0 })}</span>
+                  </span>
+                ),
+              })),
+              selectedKeys: [activeEpisodeId],
+              onClick: ({ key }) => { if (key !== activeEpisodeId) onActiveEpisodeChange(key); },
+            }}
+          >
+            <button
+              type="button"
+              data-script-episode-switch
+              aria-label={t('storyboard.switchEpisode', '切换集数')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 320,
+                padding: '2px 4px', marginLeft: -4, border: 'none', borderRadius: 6,
+                background: 'transparent', color: textColor, cursor: 'pointer', fontFamily: 'inherit',
+                fontWeight: 600, fontSize: 14, lineHeight: 1.4,
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {activeEpisode ? displayEpisodeTitle(activeEpisode.title, activeEpisode.number) : t('storyboard.untitled')}
+              </span>
+              <ChevronDown size={13} style={{ opacity: 0.6, flexShrink: 0 }} />
+            </button>
+          </Dropdown>
+          <div style={{ width: 1, height: 20, background: cardBorder, margin: '0 4px', flexShrink: 0 }} />
           <Tooltip title={t('scriptEditor.importScript') || '导入'}>
             <Button
               type="text"
@@ -463,6 +503,18 @@ export function ScriptFullscreenEditor({
               />
             </Tooltip>
           ) : null}
+        </div>
+
+        {/* 右侧：视图 / 问AI / 统计（固定顺序） */}
+        <div
+          data-toolbar-zone="right"
+          data-script-stats
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
+            flex: 1, minWidth: 0, gap: 12, fontSize: 11, color: mutedColor,
+            whiteSpace: 'nowrap', overflow: 'hidden',
+          }}
+        >
           <Tooltip title={effectiveShowLabels ? t('scriptEditor.hideLabels') || '隐藏标签' : t('scriptEditor.showLabels') || '显示标签'}>
             <Button
               type="text"
@@ -478,56 +530,6 @@ export function ScriptFullscreenEditor({
               {effectiveShowLabels ? t('storyboard.hideLabels') : t('storyboard.showLabels')}
             </Button>
           </Tooltip>
-          <div style={{ width: 1, height: 20, background: cardBorder, margin: '0 4px', flexShrink: 0 }} />
-          {/* 2026-11-07 用户指令：标题处支持下拉切换集数（不用再去右侧列表点） */}
-          <Dropdown
-            trigger={['click']}
-            placement="bottomLeft"
-            menu={{
-              items: normalizedEpisodes.map((ep) => ({
-                key: ep.id,
-                label: (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                    <span>{displayEpisodeTitle(ep.title, ep.number)}</span>
-                    <span style={{ fontSize: 10, opacity: 0.6 }}>{t('episodeList.pageCount', { count: ep.pageCount ?? 0 })}</span>
-                  </span>
-                ),
-              })),
-              selectedKeys: [activeEpisodeId],
-              onClick: ({ key }) => { if (key !== activeEpisodeId) onActiveEpisodeChange(key); },
-            }}
-          >
-            <button
-              type="button"
-              data-script-episode-switch
-              aria-label={t('storyboard.switchEpisode', '切换集数')}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 320,
-                padding: '2px 4px', marginLeft: -4, border: 'none', borderRadius: 6,
-                background: 'transparent', color: textColor, cursor: 'pointer', fontFamily: 'inherit',
-                fontWeight: 600, fontSize: 14, lineHeight: 1.4,
-                transition: 'background 0.12s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {activeEpisode ? displayEpisodeTitle(activeEpisode.title, activeEpisode.number) : t('storyboard.untitled')}
-              </span>
-              <ChevronDown size={13} style={{ opacity: 0.6, flexShrink: 0 }} />
-            </button>
-          </Dropdown>
-        </div>
-
-        {/* 右侧：统计信息（2026-11-04 右对齐；跳转按钮已移入剧集列表标题行） */}
-        <div
-          data-script-stats
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
-            flex: 1, minWidth: 0, gap: 12, fontSize: 11, color: mutedColor,
-            whiteSpace: 'nowrap', overflow: 'hidden',
-          }}
-        >
           <Tooltip title={t('scriptEditor.askAi', '问AI：复制本集剧本给 AI 修改')}>
             <Button
               type="text"
