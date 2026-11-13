@@ -1197,8 +1197,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     ? selectedShot.media.storageKey
     : undefined);
   const previewFrame = comfyRun.preview;
-  const previewFrameShotId = previewFrame?.segmentIndex
-    ? comfyRun.segmentShotIds[previewFrame.segmentIndex - 1]
+  // 一作业一段时，插件每次内部的 segment_index 都是 1；必须优先用本次运行的段号，
+  // 否则所有批量的实时帧都会被压到第 1 段。
+  const previewSegment = comfyRun.currentSegment ?? previewFrame?.segmentIndex;
+  const previewFrameShotId = previewSegment
+    ? comfyRun.segmentShotIds[previewSegment - 1]
     : undefined;
   const canShowLiveFrame = !completedVideoKey
     && !!previewFrame?.image
