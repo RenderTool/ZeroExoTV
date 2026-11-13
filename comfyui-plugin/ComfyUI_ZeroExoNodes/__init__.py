@@ -638,6 +638,14 @@ async def _video_queue_worker() -> None:
             while job.get("state") in ("queued", "running"):
                 await asyncio.sleep(1)
                 refresh_job(job)
+            # 每段作业之间真正释放显存：ComfyUI 默认会缓存模型，必须显式 unload；
+            # 原版单节点多段是在 executor 内部清理，这里拆成多作业后在队列边界补上。
+            if _truthy(job.get("params", {}).get("clear_vram_between_segments")):
+                try:
+                    from .engine.vram_cleanup import cleanup_segment_vram
+                    cleanup_segment_vram(enabled=True, unload_models=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[ZeroExo] segment VRAM cleanup failed: {e}", flush=True)
     finally:
         VIDEO_QUEUE_WORKER = None
 
