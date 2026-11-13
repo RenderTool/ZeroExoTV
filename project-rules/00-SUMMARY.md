@@ -30,6 +30,7 @@
 | [docs/handoff-2026-11-05.md](docs/handoff-2026-11-05.md) | 未完成项与反复修复失败 Bug 交接 |
 | [docs/entities-redesign-2026-11-04.md](docs/entities-redesign-2026-11-04.md) | 三页签取证 + 实体层 schema |
 | [docs/mcp-server-design.md](docs/mcp-server-design.md) | MCP Server 设计 |
+| [docs/2026-11-13-drama-skills-gap-audit.md](docs/2026-11-13-drama-skills-gap-audit.md) | drama-skills 对照查漏补缺：镜头卡 / 场次站位 / 起始帧 / 图片八段式 / 审片清单（已落地部分） |
 
 ## 四、规格与技术契约（2026-11-06 全部迁入本库）
 

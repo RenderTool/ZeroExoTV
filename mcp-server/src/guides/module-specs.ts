@@ -46,7 +46,9 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     stage: 4,
     name: "拆分镜",
     action:
-      "必须等用户明确说「可以拆」之后，才 split_script_to_shots 进导演台并生成提示词（先 dryRun 出草案→用户确认切分→confirm 落盘），再 set_shot_prompt 补景别、时长（默认 5s）与双轨提示词",
+      "必须等用户明确说「可以拆」之后，才 split_script_to_shots 进导演台并生成提示词（先 dryRun 出草案→用户确认切分→confirm 落盘），" +
+      "再按 zeroexo://skills/shots-prompts 的「镜头卡」逐段重设 description（职责/来源场次/起点→唯一动作→终点/景别机位运镜/声音/视觉依据）与时长，" +
+      "set_shot_prompt 补双轨提示词；草案不等于分镜，不得直接出片",
     gate: "用户没说拆不动手——剧本未入库不得拆分镜；草案未确认不得 confirm",
   },
   {

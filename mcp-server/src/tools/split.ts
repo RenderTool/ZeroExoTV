@@ -12,7 +12,8 @@ export function registerSplitTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "split_script_to_shots",
     description:
-      "把剧集剧本按场景切分成导演台片段草案（number/description/duration 默认 5s）。dryRun:true 返回草案清单供确认；confirm:true 携带 workbench 的 baseVersion 落盘。",
+      "把剧集剧本按场景切分成导演台片段草案（number/description/duration 默认 5s）。dryRun:true 返回草案清单供确认；confirm:true 携带 workbench 的 baseVersion 落盘。" +
+      "草案只是骨架：落盘后必须按 zeroexo://skills/shots-prompts 的「镜头卡」重设 description（职责 / 来源场次 / 起点→唯一动作→终点 / 景别机位运镜 / 声音 / 视觉依据）与时长，不得直接出片。",
     bits: ["split.write", "script.read"],
     schema: {
       projectId: z.string(),
