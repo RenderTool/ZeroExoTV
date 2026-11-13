@@ -23,7 +23,7 @@ import {
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { NodeRecord } from '@zeroexo/core';
-import { resolveNodeSize } from '@zeroexo/core';
+import { resolveNodeSize, isVisibleNode } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { DockReferencesSection, getReferenceConfigByMode, type VideoReferenceBounds } from './dock-references-section.js';
 import { DockFooterBar } from './dock-footer-bar.js';
@@ -624,8 +624,20 @@ export function NodeGenerateDock({
   const canvasMentionRefs: ReferenceItem[] = useMemo(() => {
     const graph = store.getGraph();
     const incomingIds = new Set(incomingNodes.map((n) => n.id));
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const hiddenByAncestor = (n: NodeRecord): boolean => {
+      let cur: NodeRecord | undefined = n;
+      while (cur) {
+        if (cur.hidden) return true;
+        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+      }
+      return false;
+    };
     return graph.nodes
-      .filter((n) => n.type === 'image' && !incomingIds.has(n.id))
+      .filter((n) => n.type === 'image'
+        && !incomingIds.has(n.id)
+        && isVisibleNode(n)
+        && !hiddenByAncestor(n))
       .map((n) => {
         const d = (n.data ?? {}) as Record<string, unknown>;
         return {
