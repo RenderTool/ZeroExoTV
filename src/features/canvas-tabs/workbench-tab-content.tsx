@@ -1139,10 +1139,10 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const previewFrameShotId = previewFrame?.segmentIndex
     ? comfyRun.segmentShotIds[previewFrame.segmentIndex - 1]
     : undefined;
-  const canShowLiveFrame = (comfyRun.phase === 'running' || comfyRun.phase === 'queued')
+  const canShowLiveFrame = !completedVideoKey
     && !!previewFrame?.image
     && !!selectedShot
-    && (previewFrameShotId ?? runningShotId) === selectedShot.id;
+    && (previewFrameShotId ?? runningShotId ?? selectedShot.id) === selectedShot.id;
 
   // 2026-11-05 固定宽度卡片（220px 基准修订）：WorkbenchMultiTrack 实测导轨容器宽度后回传最终
   // 卡片宽（220/180/160 降级；初始 = 基准 220）。覆盖层（箭头/勾选块/引导缩略）与卡片同 pitch 铺排。

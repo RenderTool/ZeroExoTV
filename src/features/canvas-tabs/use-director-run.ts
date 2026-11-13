@@ -505,8 +505,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     if (failure || (doneCount >= entries.length && entries.length > 0)) {
       stopPolling();
       stopPreview();
-      clearPreviewFrame();
-      setState((s) => ({ ...s, preview: null }));
+      // 保留最后一帧：刷新后仍要能看到预览图
       activeJob.current = null;
       clearResumableRun();
       zeroexoJobs.current = new Map();
@@ -580,9 +579,8 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     }
     if (status.state === 'success' || status.state === 'error' || status.state === 'canceled') {
       stopPolling();
-      stopPreview(); // 结束即清实时帧，预览区切回成品/占位
-      clearPreviewFrame();
-      setState((s) => ({ ...s, preview: null }));
+      stopPreview();
+      // 保留最后一帧：刷新后预览图不消失
       activeJob.current = null;
       clearResumableRun();
     }
@@ -620,6 +618,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       }
       stopPolling();
       stopPreview();
+      clearPreviewFrame(); // 新任务从空白预览开始；旧图不能冒充本次进度
       // 种子：-1/空 = 随机；随机后记录实际种子，面板可查看/复用
       const runSeed = resolveSeed(runArgs.shared.params?.['seed']);
       const sharedForRun = { ...runArgs.shared, params: { ...(runArgs.shared.params ?? {}), seed: runSeed } };
@@ -909,6 +908,14 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     guidanceRequested.current = new Set();
     setState(INITIAL_STATE);
   }, [stopPolling, stopPreview]);
+
+  // 刷新后恢复最后一帧（即使本次运行已经结束；预览图不该随刷新消失）
+  useEffect(() => {
+    const savedFrame = readPreviewFrame();
+    if (savedFrame) {
+      setState((s) => (s.preview ? s : { ...s, preview: savedFrame, livePreviewSupported: false }));
+    }
+  }, []);
 
   // 刷新续接：mount 时若 sessionStorage 里有进行中的作业，恢复 activeJob 并继续轮询
   // （作业在 ComfyUI 侧不受页面刷新影响；这里只恢复前端跟踪，不重新提交）
