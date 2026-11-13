@@ -34,7 +34,10 @@ export type McpErrorCode =
   /** 跨项目直接引用素材（必须 import_subject_from_project / 上传到本项目） */
   | "CROSS_PROJECT_ASSET"
   /** 复用已存在的 jobId（会命中旧 status 的 done 条目并跳过生成） */
-  | "JOB_ID_CONFLICT";
+  | "JOB_ID_CONFLICT"
+  | "GIT_FAILED"
+  | "VERIFY_FAILED"
+  | "GITHUB_FAILED";
 
 export class McpError extends Error {
   constructor(
