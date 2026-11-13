@@ -263,18 +263,18 @@ describe('两级导航与面包屑', () => {
     await waitFor(() => expect(document.querySelector('[data-subject-page="list"]')).toBeTruthy());
   });
 
-  it('添加状态后主体页计数即时更新（1 → 2）', async () => {
+  it('添加状态后主体页计数即时更新（含基础状态：2 → 3）', async () => {
     const tree = makeTree();
     renderPages(tree);
     fireEvent.click(document.querySelector('[data-subject-card="item-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
-    expect(document.querySelector('[data-state-count]')?.textContent).toContain('1 状态');
+    expect(document.querySelector('[data-state-count]')?.textContent).toContain('2 状态');
 
     fireEvent.click(document.querySelector('[data-add-state]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-subject-crumb="subject"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy());
-    expect(document.querySelector('[data-state-count]')?.textContent).toContain('2 状态');
+    expect(document.querySelector('[data-state-count]')?.textContent).toContain('3 状态');
   });
 
   it('返回不丢草稿：状态页改提示词 → 回主体页 → 再进状态页仍在', async () => {

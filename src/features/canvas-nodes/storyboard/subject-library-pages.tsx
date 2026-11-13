@@ -32,11 +32,11 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Select, Switch, Tooltip } from 'antd';
+import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Switch, Tooltip } from 'antd';
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
-  Shapes, Square, Star, Trash2, Undo2, UserRound, Wand2,
+  Shapes, Square, Star, Trash2, Undo2, UserRound, Wand2, ImageOff,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -84,12 +84,10 @@ import {
   findTreeForItem,
   firstCoverMediaKeyOfState,
   nextStateStep,
-  nonBaseStates,
   subjectCoverCandidates,
   type SubjectNodeMediaRef,
   type SubjectTreeNode,
   type SubjectTree,
-  type SubjectTemplateType,
   type SubjectGenJob,
   type SubjectGenParams,
 } from './subject-tree-types';
@@ -930,14 +928,14 @@ function StateGridCard({
           data-state-action="delete"
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
         >
-          {t('subject.deleteState', '删除状态')}
+          {t('subject.deleteThisState', '删除此状态')}
         </Button>
       ) : (
-        <Tooltip title={t('subject.deleteState', '删除状态')}>
+        <Tooltip title={t('subject.deleteThisState', '删除此状态')}>
           <IconButton
             theme={theme}
             size="sm"
-            aria-label={t('subject.deleteState', '删除状态')}
+            aria-label={t('subject.deleteThisState', '删除此状态')}
             data-state-action="delete"
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
           >
@@ -1083,23 +1081,23 @@ function StateGridCard({
                     size="small"
                     type="text"
                     icon={<ImagePlus size={13} />}
-                    aria-label={hasMedia ? t('subject.replaceMedia', '换图') : t('subject.uploadMedia', '上传图片')}
+                    aria-label={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
                     data-media-action="replace"
                     onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
                   >
-                    {hasMedia ? t('subject.replaceMedia', '换图') : t('subject.uploadMedia', '上传图片')}
+                    {hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
                   </Button>
                 )}
                 {hasMedia && onRemoveMedia && (
                   <Button
                     size="small"
                     type="text"
-                    icon={<Trash2 size={13} />}
-                    aria-label={t('subject.deleteMedia', '删除媒体')}
+                    icon={<ImageOff size={13} />}
+                    aria-label={t('subject.removeMedia', '移除素材')}
                     data-media-action="remove"
                     onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
                   >
-                    {t('subject.deleteMedia', '删除媒体')}
+                    {t('subject.removeMedia', '移除素材')}
                   </Button>
                 )}
                 {actionButtons}
@@ -1526,19 +1524,6 @@ function StateEditPanel({
                   </Button>
                 </Popover>
               )}
-              <Select
-                size="small"
-                variant="borderless"
-                data-subject-template
-                value={node.templateType ?? (tree.kind === 'scene' ? 'environment_panorama' : tree.kind === 'prop' ? 'prop_detail' : 'character_lineup')}
-                options={tree.kind === 'scene'
-                  ? [{ value: 'environment_panorama', label: '场景全景' }]
-                  : tree.kind === 'prop'
-                    ? [{ value: 'prop_detail', label: '道具细节' }]
-                    : [{ value: 'character_lineup', label: '角色三视图' }, { value: 'creature_reference', label: '生物参考图' }]}
-                onChange={(value: string) => onUpdateNode({ templateType: value as SubjectTemplateType })}
-                style={{ width: 112, fontSize: 12 }}
-              />
             </>
           )}
           onModelChange={(next) => {
@@ -2247,6 +2232,14 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       : t('subject.coverSet', { name: label, defaultValue: `已把「${label}」设为封面` }));
   }, [itemOfTree, coverKeyOfTree, onUpdateItem, antdMessage, t]);
 
+  /** 同一状态换图/恢复时，若旧图正是条目手动封面，封面跟着新图走（等价替换资产） */
+  const syncCoverAfterMediaReplace = useCallback((rootId: string, oldKey: string | null | undefined, newKey: string | null) => {
+    if (!oldKey) return;
+    const tree = treesRef.current.find((tr) => tr.rootId === rootId);
+    const item = tree ? itemOfTree(tree) : null;
+    if (item?.coverKey === oldKey) onUpdateItem?.(item.id, { coverKey: newKey });
+  }, [itemOfTree, onUpdateItem]);
+
   // ===== 媒体来源面板（状态编辑页接收位） =====
   const [panel, setPanel] = useState<{ rootId: string; stateId: string; anchorEl?: HTMLElement | null } | null>(null);
   /** 参考素材选择页（与画布/导演台同一实现，只收图片） */
@@ -2260,24 +2253,26 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   const pickMedia = useCallback(async (asset: SubjectStateMediaAsset | null) => {
     if (!panel) return;
     try {
-      const { trees: linked } = await linkSubjectStateMedia({
+      const { trees: linked, replaced } = await linkSubjectStateMedia({
         trees: treesRef.current, projectId: projectId ?? undefined,
         rootId: panel.rootId, stateId: panel.stateId, asset,
       });
+      syncCoverAfterMediaReplace(panel.rootId, replaced?.key, asset?.storageKey ?? null);
       commitTrees(linked);
     } catch (err) {
       antdMessage.error(err instanceof Error ? err.message : t('subjectCreate.saveFailed', '保存失败'));
     }
     setPanel(null);
-  }, [panel, projectId, commitTrees, antdMessage, t]);
+  }, [panel, projectId, commitTrees, antdMessage, t, syncCoverAfterMediaReplace]);
 
   /** 危险操作：直接清空该槽位（不依赖来源面板是否打开，避免面板未开时早退） */
   const removeMedia = useCallback(async (rootId: string, stateId: string) => {
     try {
-      const { trees: linked } = await linkSubjectStateMedia({
+      const { trees: linked, replaced } = await linkSubjectStateMedia({
         trees: treesRef.current, projectId: projectId ?? undefined,
         rootId, stateId, asset: null,
       });
+      syncCoverAfterMediaReplace(rootId, replaced?.key, null);
       commitTrees(linked);
     } catch (err) {
       antdMessage.error(err instanceof Error ? err.message : t('subjectCreate.saveFailed', '保存失败'));
@@ -2287,11 +2282,12 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   /** 从状态媒体历史恢复一张旧图（只换引用，不复制文件） */
   const restoreMedia = useCallback(async (rootId: string, stateId: string, ref: SubjectNodeMediaRef) => {
     try {
-      const { trees: linked } = await linkSubjectStateMedia({
+      const { trees: linked, replaced } = await linkSubjectStateMedia({
         trees: treesRef.current, projectId: projectId ?? undefined,
         rootId, stateId,
         asset: { storageKey: ref.key, kind: ref.type, origin: ref.origin },
       });
+      syncCoverAfterMediaReplace(rootId, replaced?.key, ref.key);
       commitTrees(linked);
       antdMessage.success(t('subject.mediaRestored', '已恢复历史媒体'));
     } catch (err) {
@@ -2633,8 +2629,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       const k = stateMediaKey(openTree, stateId);
       return Boolean(k) && k === coverKey;
     };
-    // 计数只算迭代状态（基础状态是 states[0]，不计入「N 状态」）
-    const stateCount = nonBaseStates(openTree).length;
+    // 计数含基础状态（基础状态也是一张可见的状态卡；只有一个主体时不能显示 0 状态）
+    const stateCount = openTree.states.length;
     const stateCountText = t('subject.stateCount', { n: stateCount, defaultValue: `${stateCount} 状态` });
     const stateFrame = frame(STATE_MAX_WIDTH);
     /** 点卡 / 点「编辑」= 展开或收起这张卡自己的编辑面板；不切页面 */

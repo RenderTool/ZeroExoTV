@@ -190,8 +190,8 @@ describe('运行配置推导（导演台运行按钮直接用这个地址）', (
       connected: true,
       availableModels: {
         unet: ['minimax_h3_v1.safetensors'],
-        vae: ['video_vae.safetensors', 'audio_vae.safetensors'],
-        clip: ['minimax_h3_clip.safetensors'],
+        vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+        clip: ['qwen3vl_32b_minimax_h3_bf16.safetensors'],
       },
       models: { unet: '', videoVae: '', audioVae: '', clip: '' },
     });
@@ -201,9 +201,9 @@ describe('运行配置推导（导演台运行按钮直接用这个地址）', (
       expect(cfg.baseUrl).toBe(LOCAL);
       expect(cfg.models).toMatchObject({
         unet: 'minimax_h3_v1.safetensors',
-        videoVae: 'video_vae.safetensors',
-        audioVae: 'audio_vae.safetensors',
-        clip: 'minimax_h3_clip.safetensors',
+        videoVae: 'minimax_h3_video_vae_fp16.safetensors',
+        audioVae: 'minimax_h3_audio_vae_fp32.safetensors',
+        clip: 'qwen3vl_32b_minimax_h3_bf16.safetensors',
         clipType: 'minimax',
       });
     }

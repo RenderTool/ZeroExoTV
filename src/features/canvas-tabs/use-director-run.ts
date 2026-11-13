@@ -432,7 +432,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         statusFailures.current += 1;
         // 404 = 作业已不存在（ComfyUI 重启/队列被清）；连续 3 次 = 后端长时间不可用
         if (/404|not found|不存在/i.test(msg) || statusFailures.current >= 3) {
-          markInterrupted(msg);
+          markInterrupted(/404|not found|不存在/i.test(msg)
+            ? 'ComfyUI 已重启或作业已被清理，请重新运行'
+            : msg);
           return;
         }
         cbRef.current.onNotice('warning', `第 ${segIndex} 段状态查询失败：${msg}，将继续重试`);
@@ -485,22 +487,29 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     const job = activeJob.current;
     const cfg = cfgRef.current();
     if (!job || !cfg || canceled.current) return;
-    if (cfg.mode === 'zeroexo') {
+    if (job.mode === 'zeroexo') {
       await pollZeroexoTick();
       return;
     }
     let status;
     try {
-      status =
-        cfg.mode === 'openai'
-          ? await fetchProtocolVideoStatus(cfg.channel, job.jobId, job.segmentShotIds.length)
-          : await fetchBridgeStatus(cfg.baseUrl, job.jobId, cfg.token);
+      if (job.mode === 'openai' && cfg.mode === 'openai') {
+        status = await fetchProtocolVideoStatus(cfg.channel, job.jobId, job.segmentShotIds.length);
+      } else if (job.mode === 'direct' && cfg.mode === 'direct') {
+        status = await fetchBridgeStatus(cfg.baseUrl, job.jobId, cfg.token);
+      } else {
+        // 运行中连接模式被改掉：不再拿另一套协议去查旧作业
+        markInterrupted('连接配置已变更，请重新运行');
+        return;
+      }
     } catch (err) {
       // 网络抖动：连续失败/404 才判定中断；偶发一次继续轮询
       const msg = err instanceof Error ? err.message : String(err);
       statusFailures.current += 1;
       if (/404|not found|不存在/i.test(msg) || statusFailures.current >= 3) {
-        markInterrupted(msg);
+        markInterrupted(/404|not found|不存在/i.test(msg)
+          ? 'ComfyUI 已重启或作业已被清理，请重新运行'
+          : msg);
         return;
       }
       cbRef.current.onNotice('warning', `状态查询失败：${msg}，将继续重试`);
@@ -700,7 +709,8 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           }
           zeroexoJobs.current = new Map(submitted.map((j, i) => [i + 1, j]));
           segmentShotIds = selected.map((s) => s.id);
-          jobId = submitted.map((j) => j.jobId).join(',');
+          // activeJob.jobId 只做元数据展示；绝不能把多段 id 拼成逗号串（轮询会变成 Unknown jobId: A,B）
+          jobId = submitted[0]?.jobId ?? '';
         } else if (cfg.mode === 'openai') {
           // 主路径：OpenAI 兼容协议（媒体内联 dataURL，无 zip 上传环节；参数映射唯一表 director-protocol-map）
           const started = await startProtocolDirectorRun(cfg.channel, {

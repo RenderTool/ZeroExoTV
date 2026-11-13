@@ -15,6 +15,19 @@ import type { ProductionItemImage } from './production-manager-types';
 const img = (storageKey: string): { storageKey: string; tags: string[] } => ({ storageKey, tags: [] });
 
 describe('resolveSubjectCover 封面回落链', () => {
+  it('主体树已有图时以树为准：条目 images 里的旧封面不得继续占用默认封面', () => {
+    const item = { coverKey: 'k-old', images: [img('k-old')] as ProductionItemImage[] };
+    // 树里只剩一张新图 → 旧 coverKey 不在候选里，应回落到这张新图
+    expect(resolveSubjectCover(item, ['k-new'])).toEqual({ key: 'k-new', source: 'default' });
+    // 树里明确把新图设为封面 → 手动封面生效
+    expect(resolveSubjectCover({ ...item, coverKey: 'k-new' }, ['k-new'])).toEqual({ key: 'k-new', source: 'manual' });
+  });
+
+  it('树里没有图时才回落到条目 images', () => {
+    const item = { coverKey: 'k-old', images: [img('k-old')] as ProductionItemImage[] };
+    expect(resolveSubjectCover(item, [])).toEqual({ key: 'k-old', source: 'manual' });
+  });
+
   it('无手动封面 → 取第一个状态图（实体原始顺序）', () => {
     const item = { coverKey: null, images: [img('k1'), img('k2'), img('k3')] as ProductionItemImage[] };
     expect(resolveSubjectCover(item)).toEqual({ key: 'k1', source: 'default' });

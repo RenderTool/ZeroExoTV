@@ -99,9 +99,13 @@ export function resolveSubjectCover(
   extraKeys?: readonly (string | null | undefined)[],
 ): SubjectCoverResolution {
   const imageKeys = (item?.images ?? []).map((img) => img?.storageKey).filter((k): k is string => Boolean(k));
+  // 有主体树候选时以树为准：条目 images 是老数据，可能还留着旧封面；
+  // 继续把旧图排前面会导致「树里已经换了唯一一张图，封面还是旧版」。
+  const treeKeys = (extraKeys ?? []).filter((k): k is string => Boolean(k));
+  const sourceKeys = treeKeys.length > 0 ? treeKeys : imageKeys;
   const candidates: string[] = [];
-  for (const k of [...imageKeys, ...(extraKeys ?? [])]) {
-    if (k && !candidates.includes(k)) candidates.push(k);
+  for (const k of sourceKeys) {
+    if (!candidates.includes(k)) candidates.push(k);
   }
   if (candidates.length === 0) return { key: null, source: 'none' };
   const manual = item?.coverKey ?? null;

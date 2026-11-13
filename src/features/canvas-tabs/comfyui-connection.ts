@@ -115,7 +115,9 @@ export function pickDefaultModels(
    */
   const pick = (list: string[], patterns: RegExp[], currentVal: string): string => {
     const compatible = (name: string): boolean => patterns.some((p) => p.test(name));
-    if (currentVal && list.includes(currentVal) && compatible(currentVal)) return currentVal;
+    // 用户手动输入/选过的兼容版本优先保留（云端列表可能拉取失败，或用户用了第三方量化命名）；
+    // 不兼容的旧值（例如 LTX/Wan VAE）才会被替换。
+    if (currentVal && compatible(currentVal)) return currentVal;
     return list.find(compatible) ?? '';
   };
   return {
