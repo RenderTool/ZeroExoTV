@@ -33,6 +33,13 @@ export interface DirectorAssetRef {
    * 缺省 = 按数组顺序取该类型最小空号（与历史行为逐号一致）。
    */
   slotNo?: number;
+  /** 主体来源：替换主体图后按 rootId/state 重新解析当前图，不锁死旧 storageKey */
+  origin?: {
+    kind: 'subject-base' | 'subject-state';
+    rootId: string;
+    state?: string;
+    mediaKey?: string;
+  };
 }
 
 /**

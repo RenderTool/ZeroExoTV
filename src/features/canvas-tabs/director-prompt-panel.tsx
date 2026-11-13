@@ -102,6 +102,9 @@ function shotRefToDirectorRef(r: WorkbenchShotReference): DirectorAssetRef | nul
   return {
     id: r.id, kind: r.kind, title: r.title, storageKey: r.storageKey, url: r.url,
     originScope: extra.originScope, slotNo: r.slotNo,
+    origin: r.origin && (r.origin.kind === 'subject-base' || r.origin.kind === 'subject-state') && (r.origin.rootId || r.origin.nodeId)
+      ? { kind: r.origin.kind, rootId: r.origin.rootId ?? r.origin.nodeId ?? '', state: r.origin.state, mediaKey: r.origin.mediaKey }
+      : undefined,
   };
 }
 
@@ -139,7 +142,34 @@ function subjectToRef(item: ProductionItem): DirectorAssetRef {
 export function resolveRefVisual(
   ref: DirectorAssetRef,
   subjects?: ProductionItem[],
+  subjectTrees?: SubjectTree[],
 ): { url?: string; storageKey?: string; subject?: ProductionItem } {
+  // 主体来源：按 origin 回查当前树/状态，主体换图后自动用新图
+  const origin = ref.origin;
+  if (origin) {
+    const tree = subjectTrees?.find((t) => t.rootId === origin.rootId || t.itemId === origin.rootId);
+    if (tree) {
+      const state = origin.kind === 'subject-base'
+        ? tree.states[0]
+        : tree.states.find((st) => st.state === origin.state);
+      const media = state?.media?.find((m) => m.type !== 'audio') ?? state?.media?.[0];
+      if (media?.key) return { storageKey: media.key };
+    }
+  }
+  // 旧引用没有 origin：按 id/title 找到同一主体状态，取当前图
+  if (ref.id.startsWith('subject:')) {
+    const parts = ref.id.split(':');
+    const itemId = parts[1];
+    const oldKey = parts.slice(2).join(':');
+    const tree = subjectTrees?.find((t) => t.itemId === itemId || t.rootId === itemId);
+    if (tree) {
+      const state = tree.states.find((st) => st.media?.some((m) => m.key === oldKey))
+        ?? tree.states.find((st) => st.state && ref.title?.endsWith(st.state))
+        ?? (ref.title?.endsWith('基础状态') ? tree.states[0] : undefined);
+      const media = state?.media?.find((m) => m.type !== 'audio') ?? state?.media?.[0];
+      if (media?.key) return { storageKey: media.key };
+    }
+  }
   const subjectId = parseBareSubjectRef(ref.id);
   if (subjectId) {
     const subject = subjects?.find((s) => s.id === subjectId);
@@ -311,15 +341,16 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     if (!entry) return undefined;
     const ref = segmentAssets.find((a) => a.id === entry.assetId);
     if (!ref) return undefined;
-    const visual = resolveRefVisual(ref, subjects);
+    const visual = resolveRefVisual(ref, subjects, subjectTrees);
     return { label, title: ref.title ?? ref.id, kind: ref.kind, url: visual.url, storageKey: visual.storageKey };
-  }, [slotInfo, segmentAssets, subjects]);
+  }, [slotInfo, segmentAssets, subjects, subjectTrees]);
 
   const persistRef = useCallback((ref: DirectorAssetRef) => {
     const shotRef: WorkbenchShotReference = {
       id: ref.id, kind: ref.kind, title: ref.title, storageKey: ref.storageKey, url: ref.url,
     };
     (shotRef as WorkbenchShotReference & { originScope?: string }).originScope = ref.originScope;
+    shotRef.origin = ref.origin;
     shotRef.slotNo = ref.slotNo;
     onShotChange({ references: [...(shot.references ?? []), shotRef] });
   }, [shot.references, onShotChange]);
@@ -486,7 +517,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     const slot = slotInfo.byAssetId[a.id];
     const Icon = KIND_ICON[a.kind];
     // `subject:<id>` 整主体占槽走封面回落链（补图后自动解析）；无图主体 = 占位格（图标+名称+槽号）
-    const visual = resolveRefVisual(a, subjects);
+    const visual = resolveRefVisual(a, subjects, subjectTrees);
     const guide = a.kind === 'video' ? guideMetaOfRef(a) : undefined;
     return (
       <span
