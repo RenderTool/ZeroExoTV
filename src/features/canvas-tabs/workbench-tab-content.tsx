@@ -28,13 +28,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Checkbox, Modal, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { History, Link2, Link2Off, ListVideo, Star, Trash2 } from 'lucide-react';
+import { History, Link2, Link2Off, ListChecks, ListVideo, Star, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import {
   UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys, pickInitialEpisodeKey,
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
+import { buildEpisodeCheck } from '@/features/canvas-nodes/storyboard/workbench-episode-check.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
@@ -450,20 +451,23 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const setWorkbenchActiveEpisode = useViewPrefsStore((s) => s.setWorkbenchActiveEpisode);
   const episodeGroups = useMemo(() => groupShotsByEpisode(shots), [shots]);
   const scriptEpisodeIds = useMemo(() => episodeContext.episodes.map((e) => e.id), [episodeContext.episodes]);
-  const episodeKeys = useMemo(
-    () => orderEpisodeKeys(episodeGroups, scriptEpisodeIds),
-    [episodeGroups, scriptEpisodeIds],
-  );
+  const episodeKeys = useMemo(() => {
+    // 剧本里的集全部列出（空集置灰，方便看出还差哪几集）；再补剧本已删但仍有片段的集
+    const result = [...scriptEpisodeIds];
+    for (const key of orderEpisodeKeys(episodeGroups, scriptEpisodeIds)) {
+      if (!result.includes(key)) result.push(key);
+    }
+    return result;
+  }, [episodeGroups, scriptEpisodeIds]);
   /** 用户手动选过的集（优先）；失效时回落到记忆/剧本当前集/第一个有片段的集 */
   const [episodeOverride, setEpisodeOverride] = useState<string | null>(null);
+  const [episodeCheckOpen, setEpisodeCheckOpen] = useState(false);
   const activeEpisodeKey = useMemo(() => {
     if (episodeKeys.length === 0) return null;
     const remembered = projectId ? workbenchEpisodeByProject[projectId] : undefined;
     const candidate = episodeOverride ?? remembered ?? null;
     if (candidate) {
-      const valid = candidate === UNASSIGNED_EPISODE_KEY
-        ? Boolean(episodeGroups[candidate]?.length)
-        : episodeKeys.includes(candidate);
+      const valid = Boolean(episodeGroups[candidate]?.length);
       if (valid) return candidate;
     }
     return pickInitialEpisodeKey(episodeGroups, scriptEpisodeIds, {
@@ -479,8 +483,10 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (key === UNASSIGNED_EPISODE_KEY) return { value: key, label: `未分集（${count} 段）` };
     const ep = episodeContext.episodes.find((e) => e.id === key);
     const label = ep ? displayEpisodeTitle(ep.title, ep.number) : '已删除的集';
-    return { value: key, label: `${label}（${count} 段）` };
+    return { value: key, label: `${label}（${count} 段）`, disabled: count === 0 };
   }), [episodeKeys, episodeGroups, episodeContext.episodes]);
+  const episodeCheck = useMemo(() => buildEpisodeCheck(visibleShots), [visibleShots]);
+  const activeEpisodeLabel = episodeOptions.find((o) => o.value === activeEpisodeKey)?.label ?? '';
 
   const handleEpisodeChange = useCallback((key: string) => {
     setEpisodeOverride(key);
@@ -1314,7 +1320,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             })(),
           }}
           multitrackProps={{
-            railExtra: episodeKeys.length > 0 ? (
+            railExtra: (scriptEpisodeIds.length > 0 || episodeKeys.length > 1) ? (
               <div data-director-episode-switcher style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <ListVideo size={14} color={theme.toolbar.textMuted} />
                 <Select
@@ -1327,6 +1333,15 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   popupMatchSelectWidth={false}
                 />
                 <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
+                <Button
+                  size="small"
+                  type="text"
+                  data-episode-check
+                  title="检查本集还差什么"
+                  icon={<ListChecks size={14} />}
+                  onClick={() => setEpisodeCheckOpen(true)}
+                  style={{ fontSize: 12 }}
+                >检查</Button>
               </div>
             ) : null,
             tracks: [track],
@@ -1842,6 +1857,54 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               </div>
             </div>
           )}
+        </Modal>
+        <Modal
+          open={episodeCheckOpen}
+          onCancel={() => setEpisodeCheckOpen(false)}
+          footer={null}
+          centered
+          width={460}
+          title={<span data-episode-check-title>本集检查</span>}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
+              {activeEpisodeLabel || '当前集'} · {episodeCheck.shotCount} 段 · 预计 {Math.floor(episodeCheck.durationSec / 60)}:
+              {String(Math.round(episodeCheck.durationSec % 60)).padStart(2, '0')}
+            </div>
+            {episodeCheck.ready ? (
+              <div data-episode-check-ok style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(82,196,26,0.10)', color: '#52c41a', fontSize: 13 }}>
+                本集检查通过，可以出片。
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {episodeCheck.issues.map((issue) => (
+                  <div
+                    key={issue.key}
+                    data-episode-check-issue={issue.key}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8,
+                      border: '1px solid rgba(128,128,128,0.25)',
+                    }}
+                  >
+                    <span style={{ flex: 1, fontSize: 13, color: theme.toolbar.text }}>{issue.label}</span>
+                    <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>{issue.count} 段</span>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setActiveShotId(issue.shotIds[0] ?? null);
+                        setEpisodeCheckOpen(false);
+                      }}
+                    >
+                      定位
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: theme.toolbar.textMuted, lineHeight: 1.6 }}>
+              只检查这一集有没有漏，不会改你的内容；点「定位」跳到第一段有问题的片段。
+            </div>
+          </div>
         </Modal>
       </div>
     </CanvasTabContentBoundary>
