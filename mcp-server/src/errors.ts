@@ -30,7 +30,9 @@ export type McpErrorCode =
   /** 来源/目标项目参数非法（空、或同项目） */
   | "INVALID_PROJECT"
   /** 跨项目直接引用素材（必须 import_subject_from_project / 上传到本项目） */
-  | "CROSS_PROJECT_ASSET";
+  | "CROSS_PROJECT_ASSET"
+  /** 复用已存在的 jobId（会命中旧 status 的 done 条目并跳过生成） */
+  | "JOB_ID_CONFLICT";
 
 export class McpError extends Error {
   constructor(

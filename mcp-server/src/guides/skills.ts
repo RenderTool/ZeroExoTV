@@ -505,6 +505,8 @@ Krea 2 吃**自然语言 + 明确视觉选择**，越像给摄影师/美术指�
 ## 5. 投递与验收
 
 1. 逐条确认：模型、比例、百万像素/尺寸、步数、种子、张数。
+   - **同一批 seed 必须互不相同**：要多张不同结果用 \`seed:-1\`，或逐张给不同 seed；同一个 seed + 同一 prompt/参数在 ComfyUI 会命中缓存，编辑时会返回同一张图（看起来像原图）。
+   - **每次批量必须新的 jobId**；复用 jobId 会命中旧 status 的 done 条目并跳过生成。
 2. \`generate_canvas_images({ projectId, requests:[{model, prompt, aspect, megapixels, steps, seed, title}] })\`。
 3. \`get_canvas_image_job({ projectId, jobId })\` 轮询；state=done 后把 nodeId/storageKey 报给用户，让他在画布上核对。
 4. pending 超过 30 秒：先确认网页是否打开同一项目（作业只在当前项目被消费）。

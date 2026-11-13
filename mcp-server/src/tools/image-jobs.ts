@@ -47,7 +47,25 @@ export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
     const projectDir = path.join(root, "projects", projectId);
     const exists = await fs.stat(projectDir).then(() => true).catch(() => false);
     if (!exists) throw new McpError("NOT_FOUND", `项目不存在: ${projectId}`);
+    // 同一批不能复用同一个显式 seed：ComfyUI 会命中缓存/输出同一张图（编辑时看起来像原图）
+    const seeds = requests
+      .map((r) => (r as { seed?: unknown }).seed)
+      .filter((s): s is number => typeof s === "number" && Number.isInteger(s) && s >= 0);
+    if (new Set(seeds).size !== seeds.length) {
+      throw new McpError(
+        "VALIDATION",
+        "同一批 requests 不能复用同一个 seed：需要多张不同结果时用 seed:-1（随机）或给每张不同 seed；同一个 seed 只用于复现同一张图",
+      );
+    }
     const jobId = jobIdArg?.trim() || `zxjob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    // 复用 jobId 会命中旧 status 里的 done 条目，网页直接跳过生成 → 看起来永远返回旧图/原图
+    if (jobIdArg?.trim()) {
+      const jobExists = await fs.stat(jobPath(root, jobId)).then(() => true).catch(() => false);
+      const statusExists = await fs.stat(statusPath(root, jobId)).then(() => true).catch(() => false);
+      if (jobExists || statusExists) {
+        throw new McpError("JOB_ID_CONFLICT", `jobId 已存在（作业或状态未清理）: ${jobId}；每次批量必须用新的 jobId`);
+      }
+    }
     const payload = {
       schemaVersion: 1,
       jobId,
@@ -70,7 +88,8 @@ export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
     description:
       "在**当前打开的画布**上批量生成/改图：写作业到共享目录，网页画布在线时自动在画布上**新建下游节点**、调用 ComfyUI 生成并把结果写进实时画布与历史（不是只进资产库）。" +
       "纯文生图 model=moss/krea2/qwen；**改图传 sourceStorageKey 或 sourceNodeId**（走 Qwen 图片编辑）。绝不覆盖原图/原节点。" +
-      "每张图可独立指定 prompt、比例、百万像素、步数、种子。投递后用 get_canvas_image_job 轮询。",
+      "每张图可独立指定 prompt、比例、百万像素、步数、种子。投递后用 get_canvas_image_job 轮询。" +
+      "**同一批 requests 的 seed 必须互不相同**（要多张不同结果用 seed:-1 或每张不同 seed）；**jobId 不得复用**，否则会命中旧状态直接返回旧图/原图。",
     bits: ["project.write"],
     schema: {
       projectId: z.string(),
