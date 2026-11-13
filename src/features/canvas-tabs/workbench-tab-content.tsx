@@ -1569,15 +1569,24 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             ),
             runButton: (
               <>
-                <Button
-                  size="small"
-                  icon={sequencePlaying ? <Square size={12} /> : <Play size={12} />}
-                  onClick={sequencePlaying ? stopSequence : playSequence}
+                <button
+                  type="button"
                   disabled={!visibleShots.some((s) => Boolean(s.media?.storageKey))}
+                  onClick={sequencePlaying ? stopSequence : playSequence}
                   aria-label={sequencePlaying ? t('director.sequenceStop', '停止连播') : t('director.sequencePlay', '连续播放')}
+                  title={sequencePlaying ? t('director.sequenceStop', '停止连播') : t('director.sequencePlay', '从当前片段开始，按顺序播放后续所有视频')}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4, height: 25, padding: '0 8px',
+                    borderRadius: 5, fontSize: 11, flexShrink: 0, whiteSpace: 'nowrap',
+                    cursor: visibleShots.some((s) => Boolean(s.media?.storageKey)) ? 'pointer' : 'not-allowed',
+                    border: 0, outline: 'none', boxShadow: 'none', background: 'transparent',
+                    color: sequencePlaying ? theme.toolbar.accent : theme.toolbar.text,
+                    opacity: visibleShots.some((s) => Boolean(s.media?.storageKey)) ? 1 : 0.45,
+                  }}
                 >
-                  {sequencePlaying ? t('director.sequenceStop', '停止连播') : t('director.sequencePlay', '连续播放')}
-                </Button>
+                  {sequencePlaying ? <Square size={12} /> : <Play size={12} />}
+                  {sequencePlaying ? t('director.sequenceStopShort', '停止') : t('director.sequencePlayShort', '连播')}
+                </button>
                 {/* 2026-11-05 真实运行：运行中显示「取消」（POST /zeroexo/h3/cancel），
                     完成态显示摘要一行（排队位置 / 第 N 段 / 成功 N/M / 已保留 N 段） */}
                 {runPhaseActive && (
