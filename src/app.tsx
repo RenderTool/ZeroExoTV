@@ -52,6 +52,7 @@ import { applySavedDataRoot } from '@/platform/fs.js';
 import { publishMcpRequiredManifest } from '@/platform/mcp-manifest.js';
 import { purgeOrphanMedia } from '@/entities/orphan-media.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
+import { useComfyuiAutoConnect } from '@/features/canvas-tabs/comfyui-auto-connect.js';
 import { TaskQueueDock } from '@/features/task-center/task-queue-dock.js';
 
 type Route =
@@ -120,6 +121,8 @@ function resolveInitialRoute(): Route {
 }
 
 export function App(): React.ReactElement {
+  // 刷新页面后自动拿已保存地址探测一次 ComfyUI（不再要求用户每次重连）
+  useComfyuiAutoConnect();
   const { isAuthenticated, logout } = useAuth();
   const isMobile = useIsMobile();
   const [route, setRoute] = useState<Route>(() => resolveInitialRoute());
