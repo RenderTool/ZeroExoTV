@@ -175,6 +175,25 @@ export async function mergeEpisodeIntoPrev(
   return { ...res, mergedInto };
 }
 
+export async function deleteEpisode(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; episodeId: string; dryRun?: boolean },
+): Promise<UpdateResult<ScriptEntity>> {
+  return updateVersionedJson<ScriptEntity>(paths.script(projectId, root), {
+    baseVersion: opts.baseVersion,
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      const idx = s.episodes.findIndex((e) => e.id === opts.episodeId);
+      if (idx < 0) throw new McpError("NOT_FOUND", `episode 不存在: ${opts.episodeId}`);
+      if (s.episodes.length <= 1) throw new McpError("VALIDATION", "至少保留一集；不能删除最后一集");
+      s.episodes.splice(idx, 1);
+      s.episodes.forEach((e, i) => { e.number = i + 1; });
+      if (s.activeEpisodeId === opts.episodeId) s.activeEpisodeId = s.episodes[Math.max(0, idx - 1)]!.id;
+    },
+  });
+}
+
 // ===== 剧集正文块级编辑（局部修改，不要求调用方回传整篇 HTML） =====
 
 /** 可编辑的剧本块类型（编辑器只认这六种 + 手动分页） */

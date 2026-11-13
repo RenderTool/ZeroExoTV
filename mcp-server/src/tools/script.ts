@@ -5,9 +5,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import {
-  createEpisode, importScript, listScriptBlocks, mergeEpisodeIntoPrev, patchEpisodeBlocks,
+  createEpisode, deleteEpisode, importScript, listScriptBlocks, mergeEpisodeIntoPrev, patchEpisodeBlocks,
   readScript, setEpisodeMeta, setScriptMeta, updateEpisode, SCRIPT_BLOCK_KINDS,
 } from "../store/script.js";
+import { mutateWorkbench, readWorkbench } from "../store/workbench.js";
 import { normalizeScript } from "../lib/script-normalize.js";
 import { analyzeSource } from "../lib/preflight.js";
 import { defTool, diffSummary, guardDryRunConfirm, guardForeignSource, guardUserConfirmed, type Ctx } from "./_register.js";
@@ -211,6 +212,47 @@ export function registerScriptTools(server: McpServer, ctx: Ctx): void {
         version: args.dryRun ? (res.before?.version ?? 0) : res.after.version,
         nextVersion: res.after.version,
         mergedInto: res.mergedInto,
+        episodes: res.after.episodes.map((e) => ({ id: e.id, number: e.number, title: e.title })),
+      };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "delete_episode",
+    description:
+      "删除整集：剧本集删除、其余集编号重排 1..N，同时删除导演台里 episodeId 属于该集的片段。不会重建/复制片段。baseVersion = script.json version；confirm:true 必填。",
+    bits: ["script.write", "workbench.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      episodeId: z.string(),
+      confirm: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.confirm) throw new McpError("CONFIRM_REQUIRED", "删除整集必须带 confirm:true");
+      const res = await deleteEpisode(dataRoot(), args.projectId, args);
+      let removedShots = 0;
+      if (!args.dryRun) {
+        const wb = await readWorkbench(dataRoot(), args.projectId).catch(() => null);
+        const ids = wb?.shots.filter((s) => s.episodeId === args.episodeId).map((s) => s.id) ?? [];
+        if (wb && ids.length > 0) {
+          const wbRes = await mutateWorkbench(dataRoot(), args.projectId, {
+            baseVersion: wb.version,
+            mutate: (next) => { next.shots = next.shots.filter((s) => !ids.includes(s.id)); },
+          });
+          removedShots = ids.length;
+          return {
+            written: true, version: res.after.version, workbenchVersion: wbRes.after.version,
+            removedShots,
+            episodes: res.after.episodes.map((e) => ({ id: e.id, number: e.number, title: e.title })),
+          };
+        }
+      }
+      return {
+        written: res.written,
+        version: args.dryRun ? (res.before?.version ?? 0) : res.after.version,
+        removedShots,
         episodes: res.after.episodes.map((e) => ({ id: e.id, number: e.number, title: e.title })),
       };
     },

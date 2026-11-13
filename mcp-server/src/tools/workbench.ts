@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { DIRECTOR_PRESET_IDS } from "../store/director-params.js";
-import { addSegment, readWorkbench, setSharedParams, setShotPrompt } from "../store/workbench.js";
+import { addSegment, mutateWorkbench, readWorkbench, setSharedParams, setShotPrompt } from "../store/workbench.js";
 import { McpError } from "../errors.js";
 import { defTool, type Ctx } from "./_register.js";
 
@@ -82,6 +82,71 @@ export function registerWorkbenchTools(server: McpServer, ctx: Ctx): void {
     handler: async (args) => {
       const res = await addSegment(dataRoot(), args.projectId, args);
       return { written: res.written, version: res.after.version, segment: res.segment };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "move_segments",
+    description: "把已有片段移动到目标集（不重建、不复制）：可指定 beforeShotId 插到该片段之前，否则追加到目标集末尾。同集内自动重新编号。baseVersion = workbench version。",
+    bits: ["workbench.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      shotIds: z.array(z.string()).min(1),
+      toEpisodeId: z.string().describe("目标剧集 id；空字符串 = 未分集"),
+      beforeShotId: z.string().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      const res = await mutateWorkbench(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        dryRun: args.dryRun,
+        mutate: (wb) => {
+          const moved = wb.shots.filter((s) => args.shotIds.includes(s.id));
+          if (moved.length !== args.shotIds.length) throw new McpError("NOT_FOUND", "有片段 id 不存在");
+          const rest = wb.shots.filter((s) => !args.shotIds.includes(s.id));
+          for (const s of moved) s.episodeId = args.toEpisodeId || undefined;
+          const before = args.beforeShotId ? rest.findIndex((s) => s.id === args.beforeShotId) : -1;
+          const insertAt = before >= 0
+            ? before
+            : (() => {
+                const same = rest.filter((s) => (s.episodeId ?? "") === (args.toEpisodeId || "")).pop();
+                return same ? rest.indexOf(same) + 1 : rest.length;
+              })();
+          rest.splice(insertAt, 0, ...moved);
+          wb.shots = rest;
+        },
+      });
+      return {
+        written: res.written, version: res.after.version,
+        moved: res.after.shots.filter((s) => args.shotIds.includes(s.id)).map((s) => ({ id: s.id, number: s.number, episodeId: s.episodeId })),
+      };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "delete_segments",
+    description: "从导演台删除指定片段（按 id，不会重建/复制），同时移除主轨 clips 并重新编号。baseVersion = workbench version；confirm:true 必填防误删。",
+    bits: ["workbench.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      shotIds: z.array(z.string()).min(1),
+      confirm: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      if (!args.dryRun && !args.confirm) throw new McpError("CONFIRM_REQUIRED", "删除片段必须带 confirm:true");
+      const res = await mutateWorkbench(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        dryRun: args.dryRun,
+        mutate: (wb) => {
+          const before = wb.shots.length;
+          wb.shots = wb.shots.filter((s) => !args.shotIds.includes(s.id));
+          if (wb.shots.length === before) throw new McpError("NOT_FOUND", "没有匹配的片段");
+        },
+      });
+      return { written: res.written, version: res.after.version, remaining: res.after.shots.length };
     },
   });
 }
