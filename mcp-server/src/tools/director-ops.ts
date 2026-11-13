@@ -389,7 +389,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
 
   defTool(server, ctx, {
     name: "run_generation",
-    description: "经 MCP 直接向 ComfyUI 插件提交导演台生成作业。selectedIds 省略=全部片段；按时间线解析引导（显式槽 > 前一段 media.guide > use_prev_guide）。开启延续法时：必须有 plan_continuity_edit 计划、按时间线连续选段、严格串行（上一段 success 拿到 guide 才提交下一段），否则直接拒绝。低资源测试用 steps/scaleFactor 调小。",
+    description: "已停用：MCP 不再直接提交 GPU 作业。导演台运行请用 request_director_run 投递给网页，由网页执行并落库。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -404,13 +404,18 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       const root = dataRoot();
       const wb = await readWorkbench(root, args.projectId);
       if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
-      const allShots = wb.shots as unknown as Array<{ id: string; duration: number; imagePrompt?: string; videoPrompt?: string; negativePrompt?: string; guide?: { id?: string }; media?: { guide?: { id?: string } }; continuation?: { enabled: boolean }; references?: Array<{ kind?: string; storageKey?: string }>; paramValues?: Record<string, unknown> | null }>;
+      // 硬闸门：MCP 直接提交会和网页运行态/预览/落库分叉，网页必须是唯一执行入口
+      throw new McpError(
+        "VALIDATION",
+        "run_generation 已停用：请用 request_director_run 投递请求，由打开同一项目的网页执行。",
+      );
+      const allShots = wb!.shots as unknown as Array<{ id: string; duration: number; imagePrompt?: string; videoPrompt?: string; negativePrompt?: string; guide?: { id?: string }; media?: { guide?: { id?: string } }; continuation?: { enabled: boolean }; references?: Array<{ kind?: string; storageKey?: string }>; paramValues?: Record<string, unknown> | null }>;
       const selected = args.selectedIds?.length
         ? allShots.filter((s) => args.selectedIds!.includes(s.id))
         : allShots;
       if (selected.length === 0) throw new McpError("NOT_FOUND", "没有匹配的片段");
 
-      const shared = (wb as unknown as { sharedParams?: { params?: Record<string, unknown> } }).sharedParams;
+      const shared = (wb! as unknown as { sharedParams?: { params?: Record<string, unknown> } }).sharedParams;
       const p = shared?.params ?? {};
       const aspect = String(p.aspect ?? "16:9");
       const { width, height } = resolveVideoSize(aspect, clampScale(p.scaleFactor ?? 1));
