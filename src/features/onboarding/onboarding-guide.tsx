@@ -36,7 +36,7 @@ const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
 const MODEL_RECOMMENDATIONS: Array<{ vram: string; local: string; cloud: string }> = [
   { vram: '8 GB', local: '图片：QwenImage2.1（GGUF Q4）/ Krea2 / MossImage。视频不推荐本地跑 H3。', cloud: 'H3 INT8 / 云端 2K' },
   { vram: '12–16 GB', local: '图片全量；H3：pruned INT8 + NVFP4 文本编码器 + offload，0.4MP 短片段（建议 32GB 内存）。', cloud: 'H3 INT8' },
-  { vram: '24 GB', local: 'H3：pruned INT8 常驻（约 21GB）+ 文本编码器编码后卸载；图片全量。', cloud: 'H3 INT8 / 2K' },
+  { vram: '24 GB', local: 'H3：pruned INT8 扩散 + 文本编码器选 int8_convrot / nvfp4_awq（编码后卸载）；禁止选 bf16 文本编码器。', cloud: 'H3 INT8 / 2K' },
   { vram: '32 GB+', local: 'H3：pruned INT8，Blackwell 可用 NVFP4；全画布 768p。', cloud: '2K 托管' },
 ];
 const MODELS: Array<{ name: string; note: string }> = [
@@ -409,7 +409,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               </tbody>
             </table>
             <span style={hintStyle(theme)}>
-              {t('onboarding.modelGuideHint', 'H3 官方推荐：pruned INT8 扩散（约 21GB）+ NVFP4 文本编码器（14.6GB）；BF16 66GB 非消费级，本地任何卡都出不了 2K。8GB 机器优先做图片，视频走云端 INT8。')}
+              {t('onboarding.modelGuideHint', 'H3 官方推荐：pruned INT8 扩散（约 21GB）+ NVFP4 文本编码器（14.6GB）；bf16 文本编码器是 32B 满精度（约 65GB），24GB 卡不要选。BF16 全量 66GB 非消费级，本地任何卡都出不了 2K。8GB 机器优先做图片，视频走云端 INT8。')}
             </span>
           </div>
         </StepCard>
