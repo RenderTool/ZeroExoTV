@@ -60,11 +60,26 @@ export interface ScriptEpisode {
  * 本剧信息（整个剧本/剧集的一句话概述 + 推荐标签）。
  * 2026-11-07 用户澄清：信息卡是「本剧」级，不是「本集」级。
  */
+/**
+ * 全剧视觉风格（2026-11-13）：从风格画廊选一套，所有主体提示词继承。
+ * 存快照（id/name/prompt/image），预设库以后增删不影响老项目。
+ */
+export interface ScriptVisualStyle {
+  presetId: string;
+  name: string;
+  /** 风格片段（已去掉 [主体], 前缀） */
+  prompt: string;
+  /** 缩略图（public 相对路径） */
+  image?: string;
+}
+
 export interface ScriptMeta {
   /** 一句话概述（整部剧/这一季） */
   logline?: string;
   /** 推荐标签 */
   tags?: string[];
+  /** 全剧视觉风格：所有主体提示词继承，单主体不覆盖 */
+  visualStyle?: ScriptVisualStyle;
 }
 
 export interface ScriptEntity {

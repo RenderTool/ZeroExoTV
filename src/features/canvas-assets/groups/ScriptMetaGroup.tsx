@@ -11,9 +11,23 @@ import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
   readScript, watchScript, writeScript, ScriptConflictError,
-  type ScriptEntity, type ScriptMeta,
+  type ScriptEntity, type ScriptMeta, type ScriptVisualStyle,
 } from '@/entities/script-store.js';
+import { readStoryboardContainer, updateStoryboardContainer } from '@/entities/slot-containers.js';
+import {
+  applyStylePromptToPrompt, styleAssetUrl, stylePresetPrompt,
+} from '@/shared/style-presets.js';
+import { StyleGalleryDialog } from '@/features/canvas-nodes/storyboard/style-gallery-dialog.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+
+/** meta → 草稿（不把 undefined 塞进 UI） */
+function draftOf(meta?: ScriptMeta): ScriptMeta {
+  return {
+    logline: meta?.logline ?? '',
+    tags: [...(meta?.tags ?? [])],
+    visualStyle: meta?.visualStyle,
+  };
+}
 
 export interface ScriptMetaGroupProps {
   theme: ThemeConfig;
@@ -30,6 +44,7 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
   /** 剧名（可编辑；空值保存时回落原标题，不把剧本名写空） */
   const [titleDraft, setTitleDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const entityRef = useRef<ScriptEntity | null>(null);
   entityRef.current = entity;
   /** 用户有未保存编辑时，外部推送（编辑器自动保存等）不得覆盖草稿 */
@@ -43,7 +58,7 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
     void readScript(projectId).then((found) => {
       if (cancelled) return;
       setEntity(found);
-      setDraft({ logline: found?.meta?.logline ?? '', tags: [...(found?.meta?.tags ?? [])] });
+      setDraft(draftOf(found?.meta));
       setTitleDraft(found?.title ?? '');
       setLoading(false);
     }).catch(() => { if (!cancelled) { setEntity(null); setLoading(false); } });
@@ -52,7 +67,7 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
       setEntity(fresh);
       // 有未保存编辑时只更新实体（拿最新 baseVersion），不覆盖草稿
       if (dirtyRef.current) return;
-      setDraft({ logline: fresh.meta?.logline ?? '', tags: [...(fresh.meta?.tags ?? [])] });
+      setDraft(draftOf(fresh.meta));
       setTitleDraft(fresh.title ?? '');
     });
     return () => { cancelled = true; unwatch(); };
@@ -60,7 +75,7 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
 
   const resetDraft = useCallback(() => {
     const base = entityRef.current;
-    setDraft({ logline: base?.meta?.logline ?? '', tags: [...(base?.meta?.tags ?? [])] });
+    setDraft(draftOf(base?.meta));
     setTitleDraft(base?.title ?? '');
   }, []);
 
@@ -68,6 +83,9 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
     const base = entityRef.current;
     if (!projectId || !base) return;
     setSaving(true);
+    const visualStyle: ScriptVisualStyle | undefined = draft.visualStyle?.presetId
+      ? draft.visualStyle
+      : undefined;
     try {
       const next = await writeScript(projectId, {
         baseVersion: base.version,
@@ -75,18 +93,43 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
         meta: {
           logline: draft.logline?.trim() || undefined,
           tags: (draft.tags ?? []).map((x) => x.trim()).filter(Boolean),
+          ...(visualStyle ? { visualStyle } : {}),
         },
       });
       setEntity(next);
       setTitleDraft(next.title);
-      message.success(t('episodeList.metaSaved', '本剧信息已保存'));
+      // 全剧风格 = 唯一风格来源：把现有主体/状态提示词的风格块一起重写（空提示词不动）
+      let synced = 0;
+      if (visualStyle?.prompt) {
+        try {
+          const sb = await readStoryboardContainer(projectId);
+          const trees = Array.isArray(sb?.subjectTree)
+            ? (sb.subjectTree as Array<{ states?: Array<Record<string, unknown>> }>)
+            : [];
+          const nextTrees = trees.map((tr) => ({
+            ...tr,
+            states: (tr.states ?? []).map((st) => {
+              const prompt = String(st.fullPrompt ?? st.deltaPrompt ?? '');
+              if (!prompt.trim()) return st;
+              const applied = applyStylePromptToPrompt(prompt, visualStyle.prompt);
+              if (applied === prompt) return st;
+              synced += 1;
+              return { ...st, fullPrompt: applied, deltaPrompt: applied };
+            }),
+          }));
+          if (synced > 0) await updateStoryboardContainer(projectId, { subjectTree: nextTrees });
+        } catch { /* 提示词同步失败不阻断本剧信息保存 */ }
+      }
+      message.success(synced > 0
+        ? t('episodeList.metaSavedWithStyle', '本剧信息已保存，{{n}} 个主体提示词已同步全剧风格', { n: synced })
+        : t('episodeList.metaSaved', '本剧信息已保存'));
     } catch (err) {
       if (err instanceof ScriptConflictError) {
         message.warning(t('canvasTab.scriptConflict', '剧本已被外部修改，已重新载入最新版本'));
         const fresh = await readScript(projectId).catch(() => null);
         if (fresh) {
           setEntity(fresh);
-          setDraft({ logline: fresh.meta?.logline ?? '', tags: [...(fresh.meta?.tags ?? [])] });
+          setDraft(draftOf(fresh.meta));
           setTitleDraft(fresh.title ?? '');
         }
       } else {
@@ -159,6 +202,36 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
               style={{ width: '100%' }}
             />
           </label>
+          {/* 全剧风格（2026-11-13）：从风格画廊选一套，所有主体提示词继承 */}
+          <div data-script-meta-visual-style style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontSize: 11, color: textMuted }}>{t('episodeList.metaVisualStyle', '全剧风格（所有主体继承）')}</span>
+              <Button size="small" data-style-gallery-open onClick={() => setGalleryOpen(true)}>
+                {t('styleGallery.pickButton', '选择风格')}
+              </Button>
+            </div>
+            {draft.visualStyle?.presetId ? (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                {draft.visualStyle.image ? (
+                  <img
+                    src={styleAssetUrl(draft.visualStyle.image)}
+                    alt={draft.visualStyle.name}
+                    style={{ width: 104, aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 8, flexShrink: 0, background: '#222' }}
+                  />
+                ) : null}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: text }}>{draft.visualStyle.name}</div>
+                  <div style={{ fontSize: 11, lineHeight: 1.6, color: textMuted, marginTop: 2 }}>
+                    {draft.visualStyle.prompt}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: textMuted }}>
+                {t('styleGallery.emptySelected', '未选择：主体提示词沿用旧模板，建议先选一套全剧风格')}
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button size="small" onClick={resetDraft}>{t('common.reset', '重置默认')}</Button>
             <Button size="small" type="primary" data-script-meta-save loading={saving} onClick={() => void handleSave()}>
@@ -167,6 +240,21 @@ export function ScriptMetaGroup({ theme }: ScriptMetaGroupProps): React.ReactEle
           </div>
         </div>
       )}
+      <StyleGalleryDialog
+        open={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        selectedId={draft.visualStyle?.presetId ?? null}
+        onSelect={(preset) => setDraft((d) => ({
+          ...d,
+          visualStyle: {
+            presetId: preset.id,
+            name: preset.nameZh,
+            prompt: stylePresetPrompt(preset),
+            image: preset.image,
+          },
+        }))}
+        theme={theme}
+      />
     </div>
   );
 }

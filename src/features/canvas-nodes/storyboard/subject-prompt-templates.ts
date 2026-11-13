@@ -15,8 +15,20 @@ function descSlot(desc: string, placeholder: string): string {
   return desc ? desc : placeholder;
 }
 
+/** 全剧风格块：选中了画廊预设 → 一行风格片段；未选 → 旧 4 行默认（仅兜底） */
+function styleBlock(stylePrompt?: string): string {
+  const custom = (stylePrompt ?? '').trim();
+  if (custom) return `风格：${custom}`;
+  return [
+    '风格：写实电影定妆照',
+    '灯光：自然柔光为主，侧光塑形',
+    '色彩：现代自然色调，低饱和',
+    '质感：写实电影质感，真实皮肤与布料纹理',
+  ].join('\n');
+}
+
 /** 模板A：人形角色 定妆参考图（正面特写 + 正背全身，画面数量固定） */
-function characterFrontBack(desc: string): string {
+function characterFrontBack(desc: string, stylePrompt?: string): string {
   return `专业电影级角色定妆参考图（正面特写 + 正背全身）。
 画面布局：16:9 横向宽银幕构图。画面中固定 3 个画面，数量不得增减：① 左侧 1 个正面大头特写；② 右侧 1 个正面全身；③ 右侧 1 个背面全身。禁止侧面视图、其它机位、第四个人物、多角度拼版。
 
@@ -29,10 +41,7 @@ function characterFrontBack(desc: string): string {
 
 右侧全身：只有正面全身与背面全身这 2 个视图；身高对齐，底部平齐，真实演员试装照风格；服装 高级电影戏服质感，真实布料纹理、自然褶皱、缝线细节、哑光材质。
 
-风格：写实电影定妆照。
-灯光：自然柔光为主，侧光塑形。
-色彩：现代自然色调，低饱和。
-质感：写实电影质感，真实皮肤与布料纹理。
+${styleBlock(stylePrompt)}
 
 背景与排版：纯净中性灰(#C8C8C8)无缝背景纸，无任何道具；极简无衬线字体标注 FRONT 正面 | BACK 背面。
 
@@ -97,18 +106,18 @@ function propDetail(desc: string): string {
  */
 export function buildBaseStatePrompt(
   kind: ProductionItemKind,
-  opts: { roleDesc?: string; name?: string } = {},
+  opts: { roleDesc?: string; name?: string; stylePrompt?: string } = {},
 ): string {
   const desc = (opts.roleDesc ?? '').trim() || (opts.name ?? '').trim();
   switch (kind) {
     case 'character':
-      return characterFrontBack(desc);
+      return characterFrontBack(desc, opts.stylePrompt);
     case 'prop':
       return propDetail(desc);
     case 'scene':
       return environmentPanorama(desc);
     default:
-      return characterFrontBack(desc);
+      return characterFrontBack(desc, opts.stylePrompt);
   }
 }
 

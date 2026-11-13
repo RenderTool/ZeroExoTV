@@ -33,11 +33,21 @@ export interface Episode {
   meta?: EpisodeMeta;
 }
 
+export interface ScriptVisualStyle {
+  presetId: string;
+  name: string;
+  /** 风格片段（已去掉 [主体], 前缀） */
+  prompt: string;
+  image?: string;
+}
+
 export interface ScriptMeta {
   /** 整部剧的一句话概述 */
   logline?: string;
   /** 推荐标签 */
   tags?: string[];
+  /** 全剧视觉风格（2026-11-13）：所有主体提示词继承 */
+  visualStyle?: ScriptVisualStyle;
 }
 
 export interface ScriptEntity {

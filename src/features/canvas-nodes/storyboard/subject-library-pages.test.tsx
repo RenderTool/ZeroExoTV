@@ -33,6 +33,7 @@ const scriptMock = vi.hoisted(() => ({
     { id: 'ep-1', number: 1, title: '第一集' },
     { id: 'ep-2', number: 2, title: '第二集' },
   ] as Array<{ id: string; number: number; title: string }>,
+  meta: null as null | { visualStyle?: { presetId: string; name: string; prompt: string } },
 }));
 vi.mock('@/platform/fs', () => ({
   readJson: async (p: string) => (memfs.has(p) ? (memfs.get(p) as never) : null),
@@ -58,7 +59,7 @@ vi.mock('@/entities/cas-store.js', () => ({
   releaseCas: async () => {},
 }));
 vi.mock('@/entities/script-store.js', () => ({
-  readScript: async () => ({ episodes: scriptMock.episodes }),
+  readScript: async () => ({ episodes: scriptMock.episodes, meta: scriptMock.meta ?? undefined }),
   watchScript: () => () => {},
   displayEpisodeTitle: (title: string | undefined, n: number) => title || `第${n}集`,
 }));
@@ -180,6 +181,7 @@ beforeEach(() => {
     { id: 'ep-1', number: 1, title: '第一集' },
     { id: 'ep-2', number: 2, title: '第二集' },
   ];
+  scriptMock.meta = null;
   // 清掉上一条用例残留的 subject 页面 history marker / pending 聚焦请求，避免跨用例恢复层级
   window.history.replaceState(null, '');
   takePendingNavigateFocus();
@@ -639,21 +641,16 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(screen.getByText('已选 3 集')).toBeTruthy();
   });
 
-  it('提示词风格表单：灯光下拉直接改写提示词行（旧「按剧本…定」被替换）', async () => {
-    const tree = makeTree();
-    const st = tree.states.find((s) => s.id === 'state-1')!;
-    st.fullPrompt = '角色描述：古装女侠\n灯光：按剧本时代与场景定（自然主义柔光为主）\n色彩：按剧本时代/题材定调';
-    renderPages(tree);
+  it('提示词区只显示全剧风格（不再每个状态各配一套下拉）', async () => {
+    scriptMock.meta = { visualStyle: { presetId: 'wong-kar-wai', name: '王家卫', prompt: '王家卫电影风格, 高饱和情绪化色彩' } };
+    renderPages(makeTree());
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
-    fireEvent.mouseDown(document.querySelector('[data-prompt-style="light"] .ant-select') as Element);
-    await waitFor(() => expect(document.querySelector('.ant-select-item-option[title="戏剧化主光"]')).toBeTruthy());
-    fireEvent.click(document.querySelector('.ant-select-item-option[title="戏剧化主光"]') as Element);
-    await waitFor(() => expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value)
-      .toContain('灯光：戏剧化主光，明暗对比清晰'));
-    expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value)
-      .not.toContain('按剧本时代与场景定');
+    expect(document.querySelector('[data-prompt-style-form]')).toBeNull();
+    const summary = document.querySelector('[data-prompt-style-summary]');
+    expect(summary?.textContent).toContain('王家卫');
+    expect(summary?.textContent).toContain('全剧风格');
   });
 
   it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {

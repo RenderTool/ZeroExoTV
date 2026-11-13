@@ -76,8 +76,20 @@ export function buildSubjectAnchor(kind: SubjectKindInput, profile: SubjectProfi
     + `${v(profile, "脸型")}；${v(profile, "发型")}；${v(profile, "身材")}（头身比 ${v(profile, "头身比")}）`;
 }
 
+/** 全剧风格块：有全剧预设 → 一行风格片段；没有 → 具体默认（不再写「按剧本…定」） */
+function styleBlock(stylePrompt?: string): string {
+  const custom = (stylePrompt ?? "").trim();
+  if (custom) return `风格：${custom}`;
+  return [
+    "风格：写实电影定妆照",
+    "灯光：自然柔光为主，侧光塑形",
+    "色彩：现代自然色调，低饱和",
+    "质感：写实电影质感，真实皮肤与布料纹理",
+  ].join("\n");
+}
+
 /** 角色模板：sheet = 三视图；single/white-bg = 单张定妆照（白底用于快速抠图） */
-export function buildCharacterPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet"): string {
+export function buildCharacterPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
   const earring = v(profile, "耳饰");
   const person = `人设：${v(profile, "时代基底")}，${v(profile, "国家朝代")}，${v(profile, "物种")}，${v(profile, "族裔")}，${v(profile, "类型基底")}，${v(profile, "年龄")}岁。
 显著特征：${v(profile, "显著特征")}。
@@ -87,8 +99,8 @@ export function buildCharacterPrompt(profile: SubjectProfile, mode: SubjectRende
 性格：${v(profile, "性格")}。
 服装（${v(profile, "变装")}）：上身着装 ${v(profile, "上身着装")}；下身着装 ${v(profile, "下身着装")}；鞋子 ${v(profile, "鞋子")}。`;
   const common = `体态：自然放松站姿（非 T-pose / A-pose），重心微移，手臂自然下垂，杜绝僵硬模型感。
-镜头与质感：85mm 人像镜头，浅景深；极致写实皮肤与骨相，真实布料纹理、自然褶皱、缝线细节、哑光材质；电影级布光，按剧本时代与场景定。
-色彩：按剧本时代/题材定调（古装暖黄、民国低饱和、现代自然、科幻冷青等），不要硬套年代滤镜。`;
+镜头与质感：85mm 人像镜头，浅景深；极致写实皮肤与骨相，真实布料纹理、自然褶皱、缝线细节、哑光材质；电影级布光。
+${styleBlock(stylePrompt)}`;
   const whiteBg = mode === "white-bg";
   const background = whiteBg
     ? "背景与排版：纯白(#FFFFFF)无缝背景，无任何道具、无文字水印；人物完整抠像边缘清晰，柔和接触阴影。"
@@ -115,7 +127,7 @@ ${background}
 }
 
 /** 场景模板：sheet = 2×2 宫格；single/white-bg = 单张全景（无人物） */
-export function buildScenePrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet"): string {
+export function buildScenePrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
   const layout = mode === "sheet"
     ? `画面布局：4:3，2×2 宫格，四个视角来自同一空间：左上 = 视角1；右上 = 视角2；左下 = 视角3；右下 = 视角4。四格必须是同一地点的连续空间，不得拼成四个不同地方。`
     : `画面布局：16:9 单张全景，站在最能看清空间结构的位置拍摄；不要多格拼贴。`;
@@ -132,11 +144,12 @@ ${layout}
 色调：${v(profile, "色调")}。
 材质与洁净度：${v(profile, "材质与洁净度")}。
 
-硬约束：画面中不得出现人物、动物、字幕、水印、标志、文字；不得改变建筑结构。`;
+硬约束：画面中不得出现人物、动物、字幕、水印、标志、文字；不得改变建筑结构。
+${styleBlock(stylePrompt)}`;
 }
 
 /** 道具模板：sheet = 单品+细节；single = 单张；white-bg = 白底快速图（电商主图） */
-export function buildPropPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet"): string {
+export function buildPropPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
   const layout = mode === "sheet"
     ? `画面布局：单品居中、完整入画；右侧/下方允许 1 个细节特写（材质/边缘/工艺），不增加其它物品。`
     : mode === "white-bg"
@@ -152,7 +165,8 @@ ${layout}
 磨损：${v(profile, "磨损") || "无明显污损"}。
 背景：${bg}。
 
-硬约束：无手、无人物、无文字水印；不得出现同款第二件；材质与做旧程度必须与描述一致。`;
+硬约束：无手、无人物、无文字水印；不得出现同款第二件；材质与做旧程度必须与描述一致。
+${styleBlock(stylePrompt)}`;
 }
 
 export interface BuiltSubjectProfile {
@@ -169,14 +183,14 @@ export interface BuiltSubjectProfile {
 export function buildSubjectProfile(
   kind: SubjectKindInput,
   profile: SubjectProfile,
-  opts: { renderMode?: SubjectRenderMode } = {},
+  opts: { renderMode?: SubjectRenderMode; stylePrompt?: string } = {},
 ): { missing: string[]; built: BuiltSubjectProfile | null; label: string } {
   const k = normKind(kind);
   const missing = missingProfileFields(k, profile);
   if (missing.length > 0) return { missing, built: null, label: LABEL[k] };
   const mode: SubjectRenderMode = opts.renderMode ?? "sheet";
-  const prompt = k === "scene" ? buildScenePrompt(profile, mode)
-    : k === "prop" ? buildPropPrompt(profile, mode)
-      : buildCharacterPrompt(profile, mode);
+  const prompt = k === "scene" ? buildScenePrompt(profile, mode, opts.stylePrompt)
+    : k === "prop" ? buildPropPrompt(profile, mode, opts.stylePrompt)
+      : buildCharacterPrompt(profile, mode, opts.stylePrompt);
   return { missing: [], built: { kind: k, anchor: buildSubjectAnchor(k, profile), prompt, renderMode: mode }, label: LABEL[k] };
 }

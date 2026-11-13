@@ -32,5 +32,6 @@
 | S-23 | 2026-11-12 | 取消状态详情页：两级整页 + 卡片内编辑面板（提示词文本块 / 集数下拉按钮），清开发者文案 | 独立热修 | 🟢 merged | [2026-11-12-comfyui-drop-state-detail-page.md](2026-11-12-comfyui-drop-state-detail-page.md) |
 | S-24 | 2026-11-12 | MCP 防跨主体共用图（audit cross_subject_image + set_subject_image 闸门）；主体编辑面板集数区间压缩美化 | 独立热修 | 🟢 merged | [2026-11-12-comfyui-cross-subject-image-guard.md](2026-11-12-comfyui-cross-subject-image-guard.md) |
 | S-25 | 2026-11-13 | 主体环节硬约束：强制字段模板（角色三视图/场景宫格/道具单品）+ read_asset 先看图 + 反推提示词才许 set_subject_image；主体清单与缺图清单写死 | 独立热修 | 🟢 merged | [2026-11-13-comfyui-subject-image-review-and-prompt-caption.md](2026-11-13-comfyui-subject-image-review-and-prompt-caption.md) |
+| S-26 | 2026-11-13 | 全剧风格画廊：23 套电影美学（uisdc 提示词 + 配图）可视化面板；本剧信息选一次，所有主体提示词继承 | 独立热修 | 🟢 merged | [2026-11-13-comfyui-global-style-gallery.md](2026-11-13-comfyui-global-style-gallery.md) |
 
-状态：open 0 / merged 25。
+状态：open 0 / merged 26。

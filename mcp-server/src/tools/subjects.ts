@@ -239,7 +239,11 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {
-      const built = buildSubjectProfile(args.kind, args.profile, { renderMode: args.renderMode });
+      const script = await readScript(dataRoot(), args.projectId).catch(() => null);
+      const built = buildSubjectProfile(args.kind, args.profile, {
+        renderMode: args.renderMode,
+        stylePrompt: script?.meta?.visualStyle?.prompt,
+      });
       if (!built.built) {
         if (args.dryRun) {
           return { written: false, label: built.label, missing: built.missing };
