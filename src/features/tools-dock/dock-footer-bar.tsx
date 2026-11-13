@@ -6,6 +6,7 @@
  */
 
 import { memo, useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { LoaderCircle, Lock, Sparkles } from 'lucide-react';
@@ -38,6 +39,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   mentionRequired,
   dropUp = false,
   hideModelSelect = false,
+  trailing,
 }: {
   nodeId: string;
   mode: GenerationMode;
@@ -56,6 +58,8 @@ export const DockFooterBar = memo(function DockFooterBar({
   onPromptPreset?: (body: string) => void;
   onConstraintsReady?: (constraints?: ChannelConstraints) => void;
   mentionRequired?: boolean;
+  /** 生成按钮之前的业务动作（如主体「发送到画布」），保证生成永远在最后 */
+  trailing?: ReactNode;
   /** Plan#74 Phase B：agent-proxy 模式（script/storyboard）隐藏模型选择——LLM 统一在 Agent 侧设置，避免上下文割裂 */
   hideModelSelect?: boolean;
 }) {
@@ -131,6 +135,7 @@ export const DockFooterBar = memo(function DockFooterBar({
           {textLength} 字
         </span>
       </div>
+      {trailing}
       {isRunning && !interruptible ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 36, padding: '0 12px', borderRadius: 18, flexShrink: 0, background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`, color: theme.toolbar.textMuted ?? '', fontSize: 12, fontWeight: 500, userSelect: 'none' }}
           title={t('nodeDock.lockedGenerating', '媒体生成提交后不可取消,请稍候')}>

@@ -9,9 +9,10 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { Button, Slider } from 'antd';
+import { Button } from 'antd';
 import { Brush, Eraser, Palette, Pipette, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { ViewToolsBar } from './view-tools-bar.js';
+import { BrushEditorLayout, BrushModeButtons, BrushSizeControl } from './brush-editor-ui.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { loadImage, readImageMeta } from '../utils/image-meta.js';
 import type { ImageMeta } from '../types.js';
@@ -56,10 +57,18 @@ export function PaintDialog({
   const [saving, setSaving] = useState(false);
   const [hasPaint, setHasPaint] = useState(false);
   const [undoCount, setUndoCount] = useState(0);
-  /** 画布缩放（与蒙版弹窗同一套 10%–800% / 1.25 步进 / 适应窗口重置） */
-  const [zoom, setZoom] = useState(1);
+  /** 画布视图（与蒙版弹窗同一套：10%–800% / 1.25 步进 / 指针锚点 / 手型平移） */
+  const [view, setView] = useState<{ zoom: number; pan: { x: number; y: number } }>({ zoom: 1, pan: { x: 0, y: 0 } });
+  const zoom = view.zoom;
+  const [panMode, setPanMode] = useState(false);
+  const panDragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const clampZoom = (z: number): number => Math.min(8, Math.max(0.1, z));
-  const zoomBy = (factor: number): void => setZoom((z) => clampZoom(z * factor));
+  const zoomBy = (factor: number): void => setView((prev) => ({ ...prev, zoom: clampZoom(prev.zoom * factor) }));
+  const resetView = (): void => {
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+    setPanMode(false);
+    panDragRef.current = null;
+  };
   const [cursor, setCursor] = useState<{ x: number; y: number; scale: number } | null>(null);
 
   useEffect(() => {
@@ -69,7 +78,8 @@ export function PaintDialog({
     setBrushSize(DEFAULT_BRUSH_SIZE);
     setHasPaint(false);
     setCursor(null);
-    setZoom(1);
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+    setPanMode(false);
     undoRef.current = [];
     let cancelled = false;
     readImageMeta(dataUrl)
@@ -85,14 +95,27 @@ export function PaintDialog({
     ctx?.clearRect(0, 0, canvas.width, canvas.height);
   }, [image]);
 
-  // Ctrl/⌘ + 滚轮缩放画布（2026-11-12 用户要求）；普通滚轮保持滚动
+  // 滚轮缩放（与蒙版弹窗同一规则）：无需 Ctrl/⌘，指针所在位置滚动即缩放
   useEffect(() => {
     const el = stageRef.current;
     if (!el || !open) return;
     const onWheel = (event: WheelEvent): void => {
-      if (!(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
-      setZoom((z) => Math.min(4, Math.max(1, Math.round((z + (event.deltaY < 0 ? 0.25 : -0.25)) * 100) / 100)));
+      const rect = el.getBoundingClientRect();
+      const cx = event.clientX - rect.left - rect.width / 2;
+      const cy = event.clientY - rect.top - rect.height / 2;
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setView((prev) => {
+        const zoom = clampZoom(prev.zoom * factor);
+        const ratio = zoom / prev.zoom;
+        return {
+          zoom,
+          pan: {
+            x: prev.pan.x + (cx - prev.pan.x) * (1 - ratio),
+            y: prev.pan.y + (cy - prev.pan.y) * (1 - ratio),
+          },
+        };
+      });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -167,6 +190,15 @@ export function PaintDialog({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (panMode) {
+      panDragRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        panX: view.pan.x,
+        panY: view.pan.y,
+      };
+      return;
+    }
     const canvas = event.currentTarget;
     const p = pointOf(canvas, event.clientX, event.clientY);
     if (tool === 'picker') {
@@ -179,6 +211,19 @@ export function PaintDialog({
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    if (panMode) {
+      const drag = panDragRef.current;
+      if (drag) {
+        setView((prev) => ({
+          ...prev,
+          pan: {
+            x: drag.panX + (event.clientX - drag.x),
+            y: drag.panY + (event.clientY - drag.y),
+          },
+        }));
+      }
+      return;
+    }
     const canvas = event.currentTarget;
     const stage = stageRef.current;
     if (stage && image?.width) {
@@ -196,6 +241,7 @@ export function PaintDialog({
   };
 
   const onPointerUp = (): void => {
+    panDragRef.current = null;
     drawingRef.current = { active: false, last: null };
   };
 
@@ -238,39 +284,38 @@ export function PaintDialog({
     }
   };
 
-  const toolBtnStyle = (active: boolean): React.CSSProperties => ({
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-    border: `1px solid ${active ? theme.toolbar.accent : 'transparent'}`,
-    background: active ? `${theme.toolbar.accent}22` : theme.toolbar.editorSurface,
-    color: active ? theme.toolbar.accent : theme.toolbar.textMuted,
-    padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
-    fontWeight: active ? 600 : 400, transition: 'all 0.15s',
-  });
-
   const stage = (
     <div
       ref={stageRef}
       data-paint-stage
-      style={{ position: 'relative', width: inline ? '100%' : undefined, height: inline ? '100%' : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', touchAction: 'none', overflow: 'auto' }}
+      style={{ position: 'relative', width: inline ? '100%' : undefined, height: inline ? '100%' : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', touchAction: 'none', overflow: 'hidden', cursor: panMode ? 'grab' : 'default' }}
     >
-      <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', zoom }}>
-        <img src={dataUrl} alt="" draggable={false} style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : '68vh', maxWidth: '100%' }} />
-        {image ? (
-          <canvas
-            ref={paintCanvasRef}
-            width={image.width}
-            height={image.height}
-            data-paint-canvas
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: tool === 'picker' ? 'crosshair' : 'none', touchAction: 'none' }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-            onPointerLeave={() => { if (!drawingRef.current.active) setCursor(null); }}
-          />
-        ) : null}
+      <div
+        style={{
+          transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})`,
+          transformOrigin: 'center center',
+          willChange: 'transform',
+        }}
+      >
+        <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
+          <img src={dataUrl} alt="" draggable={false} style={{ display: 'block', maxHeight: inline ? 'calc(100vh - 230px)' : '68vh', maxWidth: '100%' }} />
+          {image ? (
+            <canvas
+              ref={paintCanvasRef}
+              width={image.width}
+              height={image.height}
+              data-paint-canvas
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: panMode ? 'grab' : tool === 'picker' ? 'crosshair' : 'none', touchAction: 'none' }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              onPointerLeave={() => { if (!drawingRef.current.active) setCursor(null); }}
+            />
+          ) : null}
+        </div>
       </div>
-      {cursor && tool !== 'picker' ? (
+      {cursor && !panMode && tool !== 'picker' ? (
         <div
           data-paint-cursor
           style={{
@@ -292,9 +337,16 @@ export function PaintDialog({
         zoom={zoom}
         onZoomIn={() => zoomBy(1.25)}
         onZoomOut={() => zoomBy(1 / 1.25)}
-        onReset={() => setZoom(1)}
+        onReset={resetView}
         theme={theme}
         prefix="paint"
+        panMode={panMode}
+        onTogglePan={() => {
+          setPanMode((v) => {
+            if (!v) { setCursor(null); }
+            return !v;
+          });
+        }}
       />
     </div>
   );
@@ -305,18 +357,18 @@ export function PaintDialog({
         {image ? `${image.width} × ${image.height} px` : '读取中'}
       </div>
 
-      {/* 工具：画笔 / 橡皮 / 吸色器 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-        <button type="button" data-paint-tool="brush" onClick={() => setTool('brush')} style={toolBtnStyle(tool === 'brush')}>
-          <Brush size={13} /> 画笔
-        </button>
-        <button type="button" data-paint-tool="eraser" onClick={() => setTool('eraser')} style={toolBtnStyle(tool === 'eraser')}>
-          <Eraser size={13} /> 擦除
-        </button>
-        <button type="button" data-paint-tool="picker" onClick={() => setTool('picker')} style={toolBtnStyle(tool === 'picker')} title="点击图上取色">
-          <Pipette size={13} /> 吸色
-        </button>
-      </div>
+      {/* 工具：画笔 / 橡皮 / 吸色器（与蒙版弹窗同一套按钮） */}
+      <BrushModeButtons
+        theme={theme}
+        value={tool}
+        dataPrefix="paint"
+        options={[
+          { value: 'brush', label: '画笔', icon: <Brush size={13} /> },
+          { value: 'eraser', label: '擦除', icon: <Eraser size={13} /> },
+          { value: 'picker', label: '吸色', icon: <Pipette size={13} /> },
+        ]}
+        onChange={(v) => setTool(v as typeof tool)}
+      />
 
       {/* 颜色：原生取色器 + 十六进制展示 */}
       <div>
@@ -347,14 +399,8 @@ export function PaintDialog({
         </div>
       </div>
 
-      {/* 笔刷大小 */}
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 4 }}>
-          <span>笔刷大小</span>
-          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
-        </div>
-        <Slider min={2} max={160} step={1} value={brushSize} onChange={(v) => setBrushSize(v)} />
-      </div>
+      {/* 笔刷大小 + 预览（与蒙版弹窗同一套） */}
+      <BrushSizeControl theme={theme} value={brushSize} onChange={setBrushSize} min={2} max={160} step={1} />
 
       <div style={{ display: 'flex', gap: 8 }}>
         <Button size="small" icon={<RotateCcw size={13} />} onClick={undo} disabled={undoCount === 0}>撤销</Button>
@@ -373,14 +419,6 @@ export function PaintDialog({
   if (!open) return null;
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 16 }}>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 20, overflow: 'auto' }}>
-        {stage}
-      </div>
-      <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, background: theme.toolbar.editorSurface, borderRadius: 12, padding: 16, overflowY: 'auto' }}>
-        {toolsPanel}
-        <div style={{ marginTop: 'auto' }}>{actions}</div>
-      </div>
-    </div>
+    <BrushEditorLayout stage={stage} tools={toolsPanel} actions={actions} theme={theme} />
   );
 }

@@ -121,7 +121,12 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(viewTools).toContain('data-${prefix}-view-tools');
     expect(viewTools).toContain('Hand');
     expect(viewTools).toContain('ZoomIn');
-    expect(mask).toContain('data-brush-preview');
+    // 涂抹/局部共用同一套笔刷 UI 与左右结构
+    expect(mask).toContain('<BrushEditorLayout');
+    expect(mask).toContain('<BrushSizeControl');
+    const brushUi = read('packages/plugins/image-editor/src/dialogs/brush-editor-ui.tsx');
+    expect(brushUi).toContain('data-brush-preview');
+    expect(brushUi).toContain('BrushEditorLayout');
     expect(mask).toContain("addEventListener('wheel'");
     expect(mask).toContain('setPointerCapture');
   });

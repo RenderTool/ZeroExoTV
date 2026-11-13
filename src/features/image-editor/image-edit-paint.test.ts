@@ -16,7 +16,7 @@ describe('手动涂抹编辑器', () => {
   it('有可涂抹画布、原生取色器与吸色器', () => {
     expect(dialog).toContain('data-paint-canvas');
     expect(dialog).toContain('type="color"');
-    expect(dialog).toContain('data-paint-tool="picker"');
+    expect(dialog).toContain("value: 'picker'");
     expect(dialog).toContain('Pipette');
   });
 
@@ -28,7 +28,7 @@ describe('手动涂抹编辑器', () => {
   });
 
   it('有笔刷大小、撤销、清空与保存到画布', () => {
-    expect(dialog).toContain('Slider');
+    expect(dialog).toContain('BrushSizeControl');
     expect(dialog).toContain('撤销');
     expect(dialog).toContain('清空');
     expect(dialog).toContain('保存到画布');

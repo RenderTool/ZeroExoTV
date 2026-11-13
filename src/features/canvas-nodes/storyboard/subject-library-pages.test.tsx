@@ -1069,8 +1069,8 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    // 主体名移到编辑面板参考素材上方（2026-11-13 用户指令）
-    expect((document.querySelector('[data-field="subject-name"]') as HTMLInputElement).value).toBe('东海龙王');
+    // 基础状态名 = 主体名：只保留卡片顶行这一处输入，面板里不再重复「主体名」
+    expect(document.querySelector('[data-field="subject-name"]')).toBeNull();
     // 2026-11-13：基础状态名移到卡片最上方，编辑态是可直接修改的输入框（不再重复一行只读文本）
     expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王');
     expect(document.querySelector('[data-field="name"]')).toBeNull();
@@ -1115,13 +1115,15 @@ describe('状态页直接出图 + 参考素材（2026-11-13 P0）', () => {
     expect(document.querySelector('[data-subject-gen-footer]')).toBeTruthy();
     expect(document.querySelector('[data-subject-send-canvas]')).toBeTruthy();
     expect(document.querySelector('[data-subject-baseref]')).toBeTruthy();
-    // 画布底栏同款：StyledSelect 模型 + 参数摘要弹层 + 提示词库
+    // 画布底栏同款：StyledSelect 模型 + 参数摘要弹层；提示词框已在页面里，底栏不再重复提示词库
     expect(document.querySelector('[data-subject-gen-footer]')?.textContent).toContain('QwenImage2.1');
-    expect(document.querySelector('[data-subject-gen-footer]')?.textContent).toContain('提示词');
     // 提示词为空时生成按钮禁用（不发起空任务）
     const generate = document.querySelector('[data-subject-gen-footer] button[aria-label="生成"]') as HTMLButtonElement | null;
     expect(generate).toBeTruthy();
     expect(generate?.disabled).toBe(true);
+    // 生成永远是最后一步：发送到画布在生成按钮之前
+    const send = document.querySelector('[data-subject-gen-footer] [data-subject-send-canvas]') as HTMLElement;
+    expect(send.compareDocumentPosition(generate as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('基础状态没有「引用基础状态」开关（自己就是基准）', async () => {

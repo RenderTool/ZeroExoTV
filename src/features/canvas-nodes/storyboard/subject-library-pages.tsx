@@ -36,7 +36,7 @@ import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Select, Swi
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
-  Shapes, Square, Star, Trash2, UserRound, Wand2,
+  Shapes, Square, Star, Trash2, Undo2, UserRound, Wand2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -872,7 +872,17 @@ function StateGridCard({
   };
   const actionButtons = (
     <>
-      {onCanvasGenerate && (
+      {onCanvasGenerate && (editMode ? (
+        <Button
+          size="small"
+          type="text"
+          icon={<Wand2 size={13} />}
+          data-state-action="canvas-generate"
+          onClick={(e) => { e.stopPropagation(); onCanvasGenerate(); }}
+        >
+          {t('subject.canvasGenerate', '画布生成')}
+        </Button>
+      ) : (
         <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
           <IconButton
             theme={theme}
@@ -884,21 +894,45 @@ function StateGridCard({
             <Wand2 size={13} />
           </IconButton>
         </Tooltip>
-      )}
-      <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
-        <IconButton
-          theme={theme}
-          size="sm"
-          aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
+      ))}
+      {editMode ? (
+        <Button
+          size="small"
+          type="text"
+          icon={<Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />}
           data-state-action="cover"
           data-cover-active={isCover ? '1' : undefined}
           style={isCover ? { color: theme.toolbar.accent } : undefined}
           onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
         >
-          <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
-        </IconButton>
-      </Tooltip>
-      {onDelete && (
+          {isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
+        </Button>
+      ) : (
+        <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
+          <IconButton
+            theme={theme}
+            size="sm"
+            aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
+            data-state-action="cover"
+            data-cover-active={isCover ? '1' : undefined}
+            style={isCover ? { color: theme.toolbar.accent } : undefined}
+            onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
+          >
+            <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
+          </IconButton>
+        </Tooltip>
+      )}
+      {onDelete && (editMode ? (
+        <Button
+          size="small"
+          type="text"
+          icon={<Trash2 size={13} />}
+          data-state-action="delete"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        >
+          {t('subject.deleteState', '删除状态')}
+        </Button>
+      ) : (
         <Tooltip title={t('subject.deleteState', '删除状态')}>
           <IconButton
             theme={theme}
@@ -910,7 +944,7 @@ function StateGridCard({
             <Trash2 size={13} />
           </IconButton>
         </Tooltip>
-      )}
+      ))}
     </>
   );
   return (
@@ -1045,30 +1079,28 @@ function StateGridCard({
                 style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}
               >
                 {onReplaceMedia && (
-                  <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片')}>
-                    <IconButton
-                      theme={theme}
-                      size="sm"
-                      aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片')}
-                      data-media-action="replace"
-                      onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
-                    >
-                      <ImagePlus size={13} />
-                    </IconButton>
-                  </Tooltip>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<ImagePlus size={13} />}
+                    aria-label={hasMedia ? t('subject.replaceMedia', '换图') : t('subject.uploadMedia', '上传图片')}
+                    data-media-action="replace"
+                    onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
+                  >
+                    {hasMedia ? t('subject.replaceMedia', '换图') : t('subject.uploadMedia', '上传图片')}
+                  </Button>
                 )}
                 {hasMedia && onRemoveMedia && (
-                  <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
-                    <IconButton
-                      theme={theme}
-                      size="sm"
-                      aria-label={t('subject.deleteMedia', '删除媒体')}
-                      data-media-action="remove"
-                      onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
-                    >
-                      <Trash2 size={13} />
-                    </IconButton>
-                  </Tooltip>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<Trash2 size={13} />}
+                    aria-label={t('subject.deleteMedia', '删除媒体')}
+                    data-media-action="remove"
+                    onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
+                  >
+                    {t('subject.deleteMedia', '删除媒体')}
+                  </Button>
                 )}
                 {actionButtons}
                 <Button
@@ -1079,9 +1111,9 @@ function StateGridCard({
                   onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
                   style={{
                     flexShrink: 0, fontWeight: 600,
-                    color: theme.toolbar.accent,
-                    borderColor: theme.toolbar.accent,
-                    background: `${theme.toolbar.accent}1f`,
+                    color: theme.toolbar.text,
+                    borderColor: theme.toolbar.border,
+                    background: theme.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
                   }}
                 >
                   {t('subject.closeEdit', '收起编辑')}
@@ -1098,12 +1130,13 @@ function StateGridCard({
 
 /**
  * 状态出图底栏 = 画布提示词底栏同一套按钮/弹层框架（2026-11-13 用户纠正）：
- * StyledSelect 模型 + 参数摘要弹层（LocalQwen/Krea/Moss 表单）+ 提示词库 + 字数 + 圆形生成按钮。
- * 不再在页面里平铺一排 antd Select/InputNumber。
+ * StyledSelect 模型 + 参数摘要弹层（LocalQwen/Krea/Moss 表单）+ 字数 + 圆形生成按钮。
+ * 主体页已有可见提示词框，底栏不再重复「提示词库」；「发送到画布」放在生成按钮之前，
+ * 生成按钮必须永远是这一行最后一个动作。
  */
 function SubjectGenFooter({
   jobKey, theme, model, prompt, paramValues, referenceKey, leading,
-  onModelChange, onParamsChange, onPromptPreset, onStart, onCancel, onSendToCanvas,
+  onModelChange, onParamsChange, onStart, onCancel, onSendToCanvas,
 }: {
   jobKey: string;
   theme: ThemeConfig;
@@ -1115,7 +1148,6 @@ function SubjectGenFooter({
   leading?: React.ReactNode;
   onModelChange: (model: string) => void;
   onParamsChange: (patch: Record<string, unknown>) => void;
-  onPromptPreset: (body: string) => void;
   onStart: () => void;
   onCancel: () => void;
   onSendToCanvas: () => void;
@@ -1142,13 +1174,14 @@ function SubjectGenFooter({
             onAction={running ? onCancel : onStart}
             onConfigChange={(_nodeId, patch) => onModelChange(String(patch.model ?? ''))}
             onParamValuesChange={onParamsChange}
-            onPromptPreset={onPromptPreset}
+            trailing={(
+              <Button size="small" type="text" data-subject-send-canvas onClick={onSendToCanvas}>
+                {t('subject.sendToCanvas', '发送到画布')}
+              </Button>
+            )}
           />
         </ThemeProvider>
       </div>
-      <Button size="small" type="text" data-subject-send-canvas onClick={onSendToCanvas}>
-        {t('subject.sendToCanvas', '发送到画布')}
-      </Button>
     </div>
   );
 }
@@ -1191,6 +1224,30 @@ function StateEditPanel({
   const slotMedia = slotMediaOf(tree, node.id);
   const slotKind = slotMediaKind(slotMedia);
   const promptValue = node.fullPrompt || node.deltaPrompt || '';
+  /** 提示词本地撤销栈：每次提交/覆盖前压入上一版，最多 20 版（2026-11-13 用户要求） */
+  const promptHistoryRef = useRef<string[]>([]);
+  const [promptUndoCount, setPromptUndoCount] = useState(0);
+  useEffect(() => {
+    promptHistoryRef.current = [];
+    setPromptUndoCount(0);
+  }, [node.id]);
+  const commitPrompt = (next: string): void => {
+    const applied = visualStyle?.prompt
+      ? applyStylePromptToPrompt(next, visualStyle.prompt)
+      : next;
+    if (applied !== promptValue) {
+      promptHistoryRef.current.push(promptValue);
+      if (promptHistoryRef.current.length > 20) promptHistoryRef.current.shift();
+      setPromptUndoCount(promptHistoryRef.current.length);
+    }
+    onUpdateNode({ fullPrompt: applied, deltaPrompt: applied });
+  };
+  const undoTemplateOverwrite = (): void => {
+    const prev = promptHistoryRef.current.pop();
+    if (prev === undefined) return;
+    setPromptUndoCount(promptHistoryRef.current.length);
+    onUpdateNode({ fullPrompt: prev, deltaPrompt: prev });
+  };
   const isBase = node.id === SUBJECT_BASE_STATE_ID;
   const genParams = resolveSubjectGenParams(node);
   const model = node.imageModel ?? LOCAL_IMAGE_MODEL_KEY;
@@ -1280,18 +1337,20 @@ function StateEditPanel({
       }}
     >
       <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-        {/* 主体名统一放在参考素材上方（2026-11-13 用户指令） */}
-        <div data-subject-name-row style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ ...labelStyle, marginBottom: 0, flexShrink: 0 }}>{t('subject.subjectNameLabel', '主体名')}</span>
-          <div style={{ width: 220, maxWidth: '100%' }}>
-            <DraftTextField
-              value={tree.name}
-              dataField="subject-name"
-              ariaLabel={t('subject.subjectNameLabel', '主体名')}
-              onCommit={onRenameSubject}
-            />
+        {/* 基础状态名 = 主体名：卡片顶行已可直接改，面板里不再重复一遍「主体名」 */}
+        {!isBase && (
+          <div data-subject-name-row style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ ...labelStyle, marginBottom: 0, flexShrink: 0 }}>{t('subject.subjectNameLabel', '主体名')}</span>
+            <div style={{ width: 220, maxWidth: '100%' }}>
+              <DraftTextField
+                value={tree.name}
+                dataField="subject-name"
+                ariaLabel={t('subject.subjectNameLabel', '主体名')}
+                onCommit={onRenameSubject}
+              />
+            </div>
           </div>
-        </div>
+        )}
         {/* 参考素材：与导演台 / 画布同一套插槽 UI（48px 加号 + 缩略图 + 兼容徽标），不再自造大按钮 */}
         <div data-form-section="reference" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div data-subject-ref-add>
@@ -1398,24 +1457,36 @@ function StateEditPanel({
               <div style={labelStyle} title={t('subject.stateRemarkHint', '该状态的生成提示词')}>
                 {t('subject.statePromptLabel', '提示词')}
               </div>
-              <Button
-                size="small"
-                type="text"
-                data-copy-base-prompt
-                disabled={!promptValue.trim()}
-                onClick={() => {
-                  if (!navigator.clipboard) {
-                    antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
-                    return;
-                  }
-                  void navigator.clipboard.writeText(promptValue).then(
-                    () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
-                    () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
-                  );
-                }}
-              >
-                {t('subject.copyPrompt', '复制')}
-              </Button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Button
+                  size="small"
+                  type="text"
+                  data-undo-subject-prompt
+                  icon={<Undo2 size={13} />}
+                  disabled={promptUndoCount === 0}
+                  onClick={undoTemplateOverwrite}
+                >
+                  {t('subject.undoPrompt', '撤销')}
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  data-copy-base-prompt
+                  disabled={!promptValue.trim()}
+                  onClick={() => {
+                    if (!navigator.clipboard) {
+                      antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制'));
+                      return;
+                    }
+                    void navigator.clipboard.writeText(promptValue).then(
+                      () => antdMessage.success(t('subject.promptCopied', '已复制提示词')),
+                      () => antdMessage.warning(t('subject.copyFailed', '复制失败，请手动选择复制')),
+                    );
+                  }}
+                >
+                  {t('subject.copyPrompt', '复制')}
+                </Button>
+              </div>
             </div>
             <DraftPromptField
               key={node.id}
@@ -1423,10 +1494,7 @@ function StateEditPanel({
               placeholder={t('subject.statePromptPlaceholder', '描述这个状态的外形、服装、动作，或与其它状态的差异…')}
               onCommit={(next) => {
                 // 全剧风格是唯一风格来源：提交时把提示词的风格块对齐到全剧预设
-                const applied = visualStyle?.prompt
-                  ? applyStylePromptToPrompt(next, visualStyle.prompt)
-                  : next;
-                onUpdateNode({ fullPrompt: applied, deltaPrompt: applied });
+                commitPrompt(next);
               }}
             />
           </div>
@@ -1528,10 +1596,6 @@ function StateEditPanel({
               next.quality = 'custom';
             }
             if (Object.keys(next).length > 0) commitGenParams(next);
-          }}
-          onPromptPreset={(body) => {
-            const applied = visualStyle?.prompt ? applyStylePromptToPrompt(body, visualStyle.prompt) : body;
-            onUpdateNode({ fullPrompt: applied, deltaPrompt: applied });
           }}
           onStart={onStartGenerate}
           onCancel={onCancelGenerate}

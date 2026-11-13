@@ -10,9 +10,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { Modal, Button, Slider, Input } from 'antd';
+import { Modal, Button, Input } from 'antd';
 import { Brush, Eraser, RotateCcw, Sparkles } from 'lucide-react';
 import { ViewToolsBar } from './view-tools-bar.js';
+import { BrushEditorLayout, BrushModeButtons, BrushSizeControl } from './brush-editor-ui.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { readImageMeta } from '../utils/image-meta.js';
 import type { MaskEditPayload, ImageMeta } from '../types.js';
@@ -244,22 +245,6 @@ export function MaskEditDialog({
     onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas) });
   };
 
-  const modeBtnStyle = (active: boolean): React.CSSProperties => ({
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    border: `1px solid ${active ? theme.toolbar.accent : 'transparent'}`,
-    background: active ? `${theme.toolbar.accent}22` : theme.toolbar.editorSurface,
-    color: active ? theme.toolbar.accent : theme.toolbar.textMuted,
-    padding: '8px 12px',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: active ? 600 : 400,
-    transition: 'all 0.15s',
-  });
-
   const actions = (
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
       <Button icon={<RotateCcw size={13} />} onClick={resetMask}>重置</Button>
@@ -379,51 +364,17 @@ export function MaskEditDialog({
       </div>
 
       {/* 画笔/橡皮擦切换 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <button type="button" onClick={() => setMode('paint')} style={modeBtnStyle(mode === 'paint')}>
-          <Brush size={13} /> 画笔
-        </button>
-        <button type="button" onClick={() => setMode('erase')} style={modeBtnStyle(mode === 'erase')}>
-          <Eraser size={13} /> 擦除
-        </button>
-      </div>
+      <BrushModeButtons
+        theme={theme}
+        value={mode}
+        options={[
+          { value: 'paint', label: '画笔', icon: <Brush size={13} /> },
+          { value: 'erase', label: '擦除', icon: <Eraser size={13} /> },
+        ]}
+        onChange={(v) => setMode(v as 'paint' | 'erase')}
+      />
 
-      {/* 笔刷大小 */}
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 4 }}>
-          <span>笔刷大小</span>
-          <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
-        </div>
-        <Slider min={8} max={160} step={2} value={brushSize} onChange={(v) => setBrushSize(v)} />
-        {/* 笔刷预览：以 200 源像素窗口为参照等比缩放，直观看到实际笔刷相对大小 */}
-        <div
-          data-brush-preview
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, padding: '8px 10px',
-            borderRadius: 8, background: theme.toolbar.editorSurface,
-          }}
-        >
-          <div style={{
-            width: 64, height: 64, borderRadius: 8, flexShrink: 0,
-            background: 'rgba(0,0,0,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <div style={{
-              width: Math.max(4, Math.min(56, (brushSize / 200) * 64)),
-              height: Math.max(4, Math.min(56, (brushSize / 200) * 64)),
-              borderRadius: '50%',
-              border: '1.5px solid rgba(255,255,255,0.95)',
-              boxShadow: '0 0 0 1px rgba(0,0,0,0.45)',
-            }} />
-          </div>
-          <div style={{ fontSize: 11, lineHeight: 1.6, color: theme.toolbar.textMuted }}>
-            <div>笔刷预览</div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text, fontVariantNumeric: 'tabular-nums' }}>
-              {brushSize} px
-            </div>
-            <div>参照 200 源像素窗口</div>
-          </div>
-        </div>
-      </div>
+      <BrushSizeControl theme={theme} value={brushSize} onChange={setBrushSize} min={8} max={160} step={2} />
 
       {/* 修改要求 */}
       <div>
@@ -446,29 +397,12 @@ export function MaskEditDialog({
   );
 
   const content = (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) 300px', gap: 20 }}>
-      <div style={{ display: 'flex', minHeight: 360, alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: theme.toolbar.editorSurface, padding: 12 }}>
-        {stage}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minHeight: 360 }}>{toolsPanel}</div>
-    </div>
+    <BrushEditorLayout stage={stage} tools={toolsPanel} actions={actions} theme={theme} />
   );
 
   if (!open) return null;
 
-  if (inline) {
-    return (
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 16 }}>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 20, overflow: 'auto' }}>
-          {stage}
-        </div>
-        <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, background: theme.toolbar.editorSurface, borderRadius: 12, padding: 16, overflowY: 'auto' }}>
-          {toolsPanel}
-          <div style={{ marginTop: 'auto' }}>{actions}</div>
-        </div>
-      </div>
-    );
-  }
+  if (inline) return content;
 
   return (
     <Modal
