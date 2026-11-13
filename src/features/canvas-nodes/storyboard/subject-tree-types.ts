@@ -170,6 +170,8 @@ export interface SubjectTreeNode {
   appearEpisodes?: number[];
   /** 仅基础状态：定妆模板类型（后端 LLM 契约字段，从旧 baseState 迁来） */
   templateType?: SubjectTemplateType;
+  /** 2026-11-13：这个状态出图用的模型（与画布图片节点同一套 key；空 = Qwen） */
+  imageModel?: string;
   /** 仅基础状态：模板选择理由（后端 LLM 契约字段，从旧 baseState 迁来） */
   templateReason?: string;
 }

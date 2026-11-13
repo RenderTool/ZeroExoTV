@@ -32,7 +32,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
+import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Select, Tooltip } from 'antd';
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
@@ -61,6 +61,7 @@ import {
 import {
 } from '@/shared/components/masonry-grid.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import { KREA2_MODEL_KEY, KREA2_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, MOSS_MODEL_KEY, MOSS_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
 import { readScript, watchScript, displayEpisodeTitle, type ScriptVisualStyle } from '@/entities/script-store.js';
@@ -84,6 +85,7 @@ import {
   type SubjectNodeMediaRef,
   type SubjectTreeNode,
   type SubjectTree,
+  type SubjectTemplateType,
 } from './subject-tree-types';
 import { buildBaseStatePrompt } from './subject-prompt-templates';
 import {
@@ -917,7 +919,7 @@ function StateGridCard({
  */
 function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
-  onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
+  onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
 }: {
   tree: SubjectTree;
   node: SubjectTreeNode;
@@ -927,7 +929,6 @@ function StateEditPanel({
   /** 全剧视觉风格（只读；风格入口在本剧信息/导演台） */
   visualStyle: ScriptVisualStyle | null;
   onUpdateNode: (patch: Partial<SubjectTreeNode>) => void;
-  onReplaceMedia: (anchor: HTMLElement) => void;
   onRemoveMedia: () => void;
   onRestoreMedia: (ref: SubjectNodeMediaRef) => void;
   onDeleteHistoryMedia: (ref: SubjectNodeMediaRef) => void;
@@ -986,14 +987,33 @@ function StateEditPanel({
         background: isDark ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.025)',
       }}
     >
-      <section data-form-section="basic" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 24, minWidth: 0 }}>
+      <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+        {/* 状态名放最上面（2026-11-13 用户指令） */}          {/* 状态名 */}
+          <div>
+            <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
+            {isBase ? (
+              <div data-base-state-name style={{ ...hintStyle, fontSize: 13, fontWeight: 600, color: theme.toolbar.text, padding: '4px 0' }}>
+                {tree.name}
+              </div>
+            ) : (
+              <DraftStateName
+                key={node.id}
+                value={stateName}
+                ariaLabel={t('subject.stateNameLabel', '状态名')}
+                placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
+                onCommit={(next) => onUpdateNode({ state: next })}
+              />
+            )}
+          </div>
+
+
         {/* 媒体工具：小预览 + 右上角换图 / 删除媒体 + 历史图恢复 */}
         <div
           data-form-section="media"
           data-media-slot
-          style={{ flex: '0 1 220px', minWidth: 180, maxWidth: 260, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}
+          style={{ width: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}
         >
-          <CardShell theme={theme} style={{ width: '100%', height: 132, position: 'relative' }}>
+          <CardShell theme={theme} style={{ width: '100%', height: 300, position: 'relative' }}>
             <SubjectMediaThumb
               storageKey={slotMedia?.key}
               kind={slotKind}
@@ -1006,18 +1026,6 @@ function StateEditPanel({
               data-media-actions
               style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 2 }}
             >
-              <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}>
-                <IconButton
-                  theme={theme}
-                  size="sm"
-                  variant="overlay"
-                  aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}
-                  data-media-action="replace"
-                  onClick={(e) => onReplaceMedia(e.currentTarget)}
-                >
-                  <ImagePlus size={13} />
-                </IconButton>
-              </Tooltip>
               {hasMedia && (
                 <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
                   <IconButton
@@ -1080,25 +1088,7 @@ function StateEditPanel({
         </div>
 
         {/* 右列：状态名 / 提示词 / 出现集数（整宽编辑区，2026-11-12 用户指令） */}
-        <div style={{ flex: '1 1 320px', minWidth: 280, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* 状态名 */}
-          <div>
-            <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
-            {isBase ? (
-              <div data-base-state-name style={{ ...hintStyle, fontSize: 13, fontWeight: 600, color: theme.toolbar.text, padding: '4px 0' }}>
-                {tree.name}
-              </div>
-            ) : (
-              <DraftStateName
-                key={node.id}
-                value={stateName}
-                ariaLabel={t('subject.stateNameLabel', '状态名')}
-                placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
-                onCommit={(next) => onUpdateNode({ state: next })}
-              />
-            )}
-          </div>
-
+        <div style={{ width: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* 提示词：卡片内编辑文本块 */}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -1138,6 +1128,19 @@ function StateEditPanel({
             />
           </div>
 
+        </div>
+        {/* 最下面一行：集数 / 生图模型 / 提示词模板（模型与画布同一套 key） */}
+        <div
+          data-subject-params-row
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+            gap: 12,
+            alignItems: 'end',
+            paddingTop: 12,
+            borderTop: '1px solid rgba(128,128,128,0.18)',
+          }}
+        >
           {/* 出现集数：一个按钮 → 点击展开下拉列表编辑 */}
           <div data-episodes-field>
             <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
@@ -1164,6 +1167,36 @@ function StateEditPanel({
                 </Button>
               </Popover>
             )}
+          </div>
+          <div data-subject-model-field>
+            <div style={labelStyle}>{t('subject.imageModel', '生图模型')}</div>
+            <Select
+              size="small"
+              data-subject-model
+              value={node.imageModel ?? LOCAL_IMAGE_MODEL_KEY}
+              options={[
+                { value: LOCAL_IMAGE_MODEL_KEY, label: LOCAL_IMAGE_MODEL_LABEL },
+                { value: MOSS_MODEL_KEY, label: MOSS_MODEL_LABEL },
+                { value: KREA2_MODEL_KEY, label: KREA2_MODEL_LABEL },
+              ]}
+              onChange={(value: string) => onUpdateNode({ imageModel: value })}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div data-subject-template-field>
+            <div style={labelStyle}>{t('subject.promptTemplate', '提示词模板')}</div>
+            <Select
+              size="small"
+              data-subject-template
+              value={node.templateType ?? (tree.kind === 'scene' ? 'environment_panorama' : tree.kind === 'prop' ? 'prop_detail' : 'character_lineup')}
+              options={tree.kind === 'scene'
+                ? [{ value: 'environment_panorama', label: '场景全景' }]
+                : tree.kind === 'prop'
+                  ? [{ value: 'prop_detail', label: '道具细节' }]
+                  : [{ value: 'character_lineup', label: '角色三视图' }, { value: 'creature_reference', label: '生物参考图' }]}
+              onChange={(value: string) => onUpdateNode({ templateType: value as SubjectTemplateType })}
+              style={{ width: '100%' }}
+            />
           </div>
         </div>
       </section>
@@ -2225,7 +2258,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         episodes={episodes}
                         visualStyle={visualStyle}
                         onUpdateNode={(patch) => updateNode(openTree.rootId, node.id, patch)}
-                        onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                         onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
                         onRestoreMedia={(ref) => { void restoreMedia(openTree.rootId, node.id, ref); }}
                         onDeleteHistoryMedia={(ref) => deleteHistoryMedia(openTree.rootId, node.id, ref)}
