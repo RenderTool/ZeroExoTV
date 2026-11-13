@@ -35,6 +35,7 @@
   再带 `sourceImage` 提交。
 - **`read_asset` 登记看过的图**：返回 MCP image 内容块时按 token 记录 `storageKey`（进程内 1h）。
 - **`set_subject_image` 硬闸门**（真实写入，dryRun 不受限）：
+  - 主体还没人设/标准提示词（基础状态 fullPrompt 为空）→ `SUBJECT_PROFILE_REQUIRED`，必须先走强制模板；
   - 没命中 `read_asset` 登记 → `IMAGE_REVIEW_REQUIRED`，提示先看图；
   - `prompt` 少于 12 字 → `IMAGE_PROMPT_REQUIRED`：必须把画面反推成提示词再挂。
 - **生产技能（zeroexo://skills/subjects）新增**：
@@ -46,7 +47,7 @@
 - **阶段 3 文案**（register.ts / module-specs.ts）同步：清单交付 + 强制字段 + read_asset + 反推 prompt 闸门。
 - **前端定妆模板**（subject-prompt-templates.ts）：角色模板补「三个画面同一张脸、只允许这一个角色，
   禁止第二个人 / 多人合照 / 模特合集」。
-- **版本**：0.2.35。
+- **版本**：0.2.36。
 
 ## 四、影响面
 

@@ -20,7 +20,9 @@ export type McpErrorCode =
   /** 挂主体图没带「从图反推的提示词」 */
   | "IMAGE_PROMPT_REQUIRED"
   /** 主体人设/场景/道具模板字段不全（2026-11-13） */
-  | "SUBJECT_PROFILE_INCOMPLETE";
+  | "SUBJECT_PROFILE_INCOMPLETE"
+  /** 主体还没写人设模板（基础提示词为空）就想挂图（2026-11-13） */
+  | "SUBJECT_PROFILE_REQUIRED";
 
 export class McpError extends Error {
   constructor(

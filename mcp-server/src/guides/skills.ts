@@ -216,8 +216,10 @@ const SUBJECTS = `# 技能：主体库（subjects）
 
 事故：Agent 只拿到 storageKey 就直接挂图，把六人模特合集挂成「唐启明」的封面——图里根本不是一个人。
 
-- **挂主体图之前必须 \`read_asset\` 真正打开这张图**（返回 MCP image 内容块，多模态模型能看到）。
+- **挂主体图之前必须先 \`read_asset\` 真正打开这张图**（返回 MCP image 内容块，多模态模型能看到）。
   \`set_subject_image\` 只认本次会话里读过的图，没读过直接 \`IMAGE_REVIEW_REQUIRED\`；看不到图就停下问用户，不许猜。
+- **挂图前主体必须已经有人设/标准提示词**（先 \`set_subject_profile\`）；基础提示词为空直接
+  \`SUBJECT_PROFILE_REQUIRED\`——没写人设就挂图 = 瞎配图。
 - **看完必须把画面反推成 \`prompt\` 再挂**（工具会拒空 prompt）：几个人、是否同一张脸、年龄性别、
   脸型五官、发型、体型、服装材质、姿态、景别、光位、背景、色调、质感。反推的是「这张图里实际有什么」，
   不是「我希望它是什么」。
@@ -237,7 +239,7 @@ const SUBJECTS = `# 技能：主体库（subjects）
 3. \`upload_asset({ filename, dataBase64, mime, refId:"subject-state:<subjectId>/<state>" })\` → 拿 \`storageKey\`。
    **默认只落 CAS，不建素材记录**：主体图属于主体库，进素材页就会变成「一张图两处显示」。只有要给片段当素材用的图才加 \`toLibrary:true\`。
 4. \`set_subject_image({ subjectId, storageKey, stateTag, prompt: 反推提示词, cover:true })\` ——
-   必须先 \`read_asset\` 看过这张图；\`prompt\` 是这张图反推出来的真实画面描述（不是愿望），不带 prompt 会被拒；第一张设为封面。
+   主体必须先 \`set_subject_profile\`（没写人设会被拒）；必须先 \`read_asset\` 看过这张图；\`prompt\` 是这张图反推出来的真实画面描述（不是愿望），不带 prompt 会被拒；第一张设为封面。
 5. 关联片段：\`link_subject_to_shot({ shotId, subjectId, state })\` —— 写进片段 references，页面上才看得到缩略图；同一片段最多 9 张参考图。
 
 > 只建主体不挂图 = 页面上是个空壳；只挂图不 link = 生成本段时用不上；把主体图也塞进素材库 = 同一张图两处出现。三步都要走，素材库那一步不要走。`;
