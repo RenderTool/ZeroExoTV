@@ -143,6 +143,8 @@ const INITIAL_STATE: DirectorRunState = {
 // ===== 刷新续接（2026-11-07 用户反馈：生成中刷新页面不能丢作业） =====
 // 进行中的作业写 sessionStorage；刷新后 mount 自动恢复 activeJob 并继续轮询（作业本身在 ComfyUI 侧不受影响）。
 const RUN_RESUME_KEY = 'zeroexo.directorRun.active';
+/** 刷新后恢复最后一帧实时预览（WS 连接会断，但已收到的帧不该一起消失） */
+const RUN_PREVIEW_KEY = 'zeroexo.directorRun.preview';
 
 interface ResumedRun {
   mode: 'openai' | 'direct' | 'zeroexo';
@@ -171,6 +173,25 @@ function readResumableRun(): ResumedRun | null {
   } catch {
     return null;
   }
+}
+
+function savePreviewFrame(frame: DirectorPreviewFrame): void {
+  try {
+    window.sessionStorage.setItem(RUN_PREVIEW_KEY, JSON.stringify(frame));
+  } catch { /* 帧过大/隐私模式：忽略 */ }
+}
+
+function readPreviewFrame(): DirectorPreviewFrame | null {
+  try {
+    const raw = window.sessionStorage.getItem(RUN_PREVIEW_KEY);
+    return raw ? (JSON.parse(raw) as DirectorPreviewFrame) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPreviewFrame(): void {
+  try { window.sessionStorage.removeItem(RUN_PREVIEW_KEY); } catch { /* ignore */ }
 }
 
 // ===== 主线程截帧（串行队列：同一时刻只解码一个视频） =====
@@ -407,9 +428,11 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     cbRef.current.onNotice('error', `任务已中断：${reason}（可重新运行）`);
     stopPolling();
     stopPreview();
+    clearPreviewFrame();
     activeJob.current = null;
     zeroexoJobs.current = new Map();
     clearResumableRun();
+    clearPreviewFrame();
     if (taskIdRef.current) useTaskQueueStore.getState().finish(taskIdRef.current, 'error', reason);
     setState((s) => ({ ...s, phase: 'error', error: `任务已中断：${reason}`, preview: null }));
   }, [stopPolling, stopPreview]);
@@ -476,6 +499,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     if (failure || (doneCount >= entries.length && entries.length > 0)) {
       stopPolling();
       stopPreview();
+      clearPreviewFrame();
       setState((s) => ({ ...s, preview: null }));
       activeJob.current = null;
       clearResumableRun();
@@ -549,6 +573,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     if (status.state === 'success' || status.state === 'error' || status.state === 'canceled') {
       stopPolling();
       stopPreview(); // 结束即清实时帧，预览区切回成品/占位
+      clearPreviewFrame();
       setState((s) => ({ ...s, preview: null }));
       activeJob.current = null;
       clearResumableRun();
@@ -649,14 +674,15 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           // 实时预览：v1 作业同样支持 clientId → /ws minimax_director_preview
           const previewClientId = createPreviewClientId();
           const socket = new DirectorPreviewSocket(cfg.baseUrl, previewClientId, {
-            onFrame: (frame) => setState((st) => ({
-              ...st,
-              preview: {
+            onFrame: (frame) => setState((st) => {
+              // 2026-11-07：换段时旧帧不得滞留；progress-only 帧仅同段才沿用上一张图
+              const next = {
                 ...frame,
-                // 2026-11-07：换段时旧帧不得滞留；progress-only 帧仅同段才沿用上一张图
                 image: frame.image ?? (frame.segmentIndex === st.preview?.segmentIndex ? st.preview?.image ?? null : null),
-              },
-            })),
+              };
+              savePreviewFrame(next);
+              return { ...st, preview: next };
+            }),
           });
           socket.connect();
           previewSocket.current = socket;
@@ -752,14 +778,12 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           const socket = new DirectorPreviewSocket(cfg.baseUrl, previewClientId, {
             onFrame: (frame) => setState((s) => {
               if (s.phase !== 'running' && s.phase !== 'queued') return s;
-              return {
-                ...s,
-                preview: {
-                  ...frame,
-                  // 2026-11-07：换段时旧帧不得滞留；progress-only 帧仅同段才沿用上一张图
-                  image: frame.image ?? (frame.segmentIndex === s.preview?.segmentIndex ? s.preview?.image ?? null : null),
-                },
+              const next = {
+                ...frame,
+                image: frame.image ?? (frame.segmentIndex === s.preview?.segmentIndex ? s.preview?.image ?? null : null),
               };
+              savePreviewFrame(next);
+              return { ...s, preview: next };
             }),
           });
           socket.connect();
@@ -803,6 +827,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
         return true;
       } catch (err) {
         stopPreview();
+        clearPreviewFrame();
         const raw = err instanceof Error ? err.message : String(err);
         const base = cfg.mode === 'openai' ? cfg.channel.baseURL : cfg.baseUrl;
         const message = /Failed to fetch|NetworkError|Load failed/i.test(raw)
@@ -829,6 +854,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     });
     stopPolling();
     stopPreview();
+    clearPreviewFrame();
     activeJob.current = null;
     zeroexoJobs.current = new Map();
     clearResumableRun();
@@ -898,6 +924,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       jobId: saved.jobId ?? null,
       totalCount: saved.segmentShotIds.length,
       segmentShotIds: saved.segmentShotIds,
+      preview: readPreviewFrame(),
       livePreviewSupported: false, // 刷新后 WS clientId 已失效，不再假装能收实时帧
     });
     pollTimer.current = window.setInterval(() => void pollTick(), pollMs);

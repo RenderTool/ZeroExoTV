@@ -399,7 +399,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           use_prev_guide: usePrev,
           use_low_vram: useLowVram,
           ...(guideId ? { guide_id: guideId } : {}),
-          reference_image: referenceImage,
+          ...(referenceImage ? { reference_images: referenceImage, reference_image: referenceImage } : {}),
         };
         return { shotId: shot.id, clientJobId: `mcp_${args.projectId}_${shot.id}_${Date.now()}`, params };
       };
