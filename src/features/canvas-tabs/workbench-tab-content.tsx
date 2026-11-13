@@ -1410,7 +1410,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 }
                 return undefined;
               }
-              if (selectedShot.status === 'done') return `${selectedShot.duration}s`;
+              if (selectedShot.status === 'done') return `${Math.round(selectedShot.duration)}s`;
               return undefined;
             })(),
             /* 2026-11-05 实时预览：直连 /ws 帧按 ≤10fps 刷新在占位卡上（badge 带步进/段号）；
@@ -1494,7 +1494,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                         `镜头/节奏：${guide}`,
                         '请按该风格重写本集每段的 imagePrompt / videoPrompt，并给出建议时长；不要只追加一句风格行。',
                         '当前集片段：',
-                        ...visibleShots.map((x, i) => `#${i + 1} ${x.duration}s\n画面：${x.imagePrompt ?? ''}\n视频：${x.videoPrompt ?? ''}`),
+                        ...visibleShots.map((x, i) => `#${i + 1} ${Math.round(x.duration)}s\n画面：${x.imagePrompt ?? ''}\n视频：${x.videoPrompt ?? ''}`),
                       ];
                       if (!navigator.clipboard) {
                         message.warning('复制失败，请手动选择复制');
@@ -1680,7 +1680,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 const target = visibleShots[i];
                 if (target && target.id !== selectedShot.id) swapShots(selectedShot.id, target.id);
               }}
-              shotLabels={visibleShots.map((s) => `${s.duration}s`)}
+              shotLabels={visibleShots.map((s) => `${Math.round(s.duration)}s`)}
               onShotChange={(patch) => updateShot(selectedShot.id, patch)}
               theme={theme}
               isDark={isDark}

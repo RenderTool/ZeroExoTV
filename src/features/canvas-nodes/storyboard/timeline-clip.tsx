@@ -243,9 +243,10 @@ export const TimelineClip = memo(function TimelineClip({
   const badgeTone = directorBadgeTone(clip.data.status, isDark);
   const badgeStatus = clip.data.status ?? 'idle';
   const durationChip = pad2(clip.data.duration);
+  const displaySeconds = Math.round(clip.data.duration);
   const labelText = t('storyboard.clipLabel', {
     n: pad2(clip.data.number),
-    s: clip.data.duration,
+    s: displaySeconds,
     defaultValue: '片段 {{n}} · {{s}}s',
   });
   const emptyText = t('storyboard.clipNoFrame', { defaultValue: '暂无首帧' });
@@ -540,7 +541,7 @@ export const TimelineClip = memo(function TimelineClip({
               {clip.data.quality.score}
             </span>
           )}
-          <b style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{clip.data.duration}s</b>
+          <b style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{displaySeconds}s</b>
         </>
       )}
       {/* §8.5 rework 角标（橙=待修改 / 蓝=修改中；done 不显角标，靠绿状态色） */}
