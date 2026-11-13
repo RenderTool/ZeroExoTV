@@ -857,8 +857,8 @@ export function NodeGenerateDock({
     // 画布上的图片可 @，但只有真的 @ 到才作为输入源（不连线不自动塞）
     const mentionedCanvas = canvasMentionRefs.filter((r) => text.includes(`@${r.name}`));
     onGenerate(nodeId, mode, text, [...nonStacked, ...mentionedCanvas, ...mentionedStacked]);
-    setPrompt('');
-    promptRef.current = '';
+    // 2026-11-13 用户要求：点生成后提示词必须留在面板里，不能瞬间清空消失。
+    // 提示词由节点数据持有；这里只发起任务，不清输入框。
   }, [isRunning, onGenerate, nodeId, mode, references, canvasMentionRefs]);
 
   const handleAction = useCallback(() => {
