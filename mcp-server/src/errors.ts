@@ -18,7 +18,9 @@ export type McpErrorCode =
   /** 挂主体图前没读过这张图（2026-11-13：禁瞎配图） */
   | "IMAGE_REVIEW_REQUIRED"
   /** 挂主体图没带「从图反推的提示词」 */
-  | "IMAGE_PROMPT_REQUIRED";
+  | "IMAGE_PROMPT_REQUIRED"
+  /** 主体人设/场景/道具模板字段不全（2026-11-13） */
+  | "SUBJECT_PROFILE_INCOMPLETE";
 
 export class McpError extends Error {
   constructor(

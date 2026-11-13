@@ -112,6 +112,34 @@ const SUBJECTS = `# 技能：主体库（subjects）
 5. 图到位 → \`read_asset\` 看 → 反推 \`prompt\` → \`upload_asset\` → \`set_subject_image\`（必须带反推 prompt）；
 6. 每个主体写完 \`audit_subjects\`，把 no_image / cross_subject_image / duplicateImage 原样报给用户。
 
+## 1.7 强制字段模板（2026-11-13）：有图按图反推，没图按剧本补全
+
+建完主体后必须调 \`set_subject_profile({ subjectId, kind, profile, sourceImage? })\`：
+服务端会校验字段、拼出标准提示词（角色 = 三视图；场景 = 2×2 空场景；道具 = 单品参考图），
+并把身份锚点句写进主体备注。**字段不全会直接拒绝并列出缺项；不许留空、不许凭想象。**
+
+**角色（character）profile**
+
+| 字段 | 写什么 |
+|---|---|
+| 时代基底 / 国家朝代 | 架空古代 / 民国 / 现代 / 科幻…；具体王朝或地域 |
+| 物种 / 族裔 / 类型基底 | 人类 / 妖 / 机械…；东亚…；古风英气女侠 / 现代职场… |
+| 显著特征 | 一眼能认出的点（斜飞入鬓的长眉、极高挺直鼻梁…） |
+| 脸型 / 发型 / 耳饰 | 轮廓、五官、发色发长、发饰；耳饰可空 |
+| 身材 / 头身比 / 年龄 | 身高体型、比例（7.9）、岁数 |
+| 性格 | 两三个词 + 一句行为倾向 |
+| 变装 / 上身着装 / 下身着装 / 鞋子 | 这套状态叫什么；衣料、颜色、纹样、护具、靴子逐项写 |
+
+**场景（scene）profile**：时代基底 / 地点 / 建筑风格 / 空间结构 / 地面 / 墙面 / 门窗（可空）/
+光源 / 前景 / 中景 / 远景 / 氛围 / 色调 / 材质与洁净度。
+
+**道具（prop）profile**：名称 / 尺寸 / 材质 / 颜色 / 状态 / 边缘与纹理 / 光泽 / 磨损（可空）/ 背景。
+
+- **有参考图**：先 \`read_asset\` 看图 → 逐项按画面反推（脸型、发型、服装、材质、光线、构图）
+  → 带 \`sourceImage\` 调 \`set_subject_profile\`。图与剧本冲突时以图为准，并告诉用户改了哪几项。
+- **没有图**：按剧本补齐字段；缺的项列成「缺图清单」让用户补，不要编。
+- 提示词由服务端生成，**Agent 不要再手写三视图/场景/道具模板**；返回的 \`prompt\` 就是页面「提示词」的内容。
+
 ## 2. 身份锚点句（外观锁）
 
 一句话封装：性别年龄 + 面部特征 + 发型 + 体型 + 服装 + 标志物。
@@ -204,11 +232,13 @@ const SUBJECTS = `# 技能：主体库（subjects）
 1. \`upsert_subject({ name, kind, aliases, note:身份锚点句 })\` —— 先 dryRun，清单给用户确认后才写。
    **新建时不传 episodeIds 会自动按名字/别名在剧本里关联出现过的集**；返回 autoEpisodes 给用户核对，
    若提示「剧本里没找到这个名字」，必须在页面上手动选出现集数，不能默认全部集（2026-11-12 用户反馈）。
-2. \`upload_asset({ filename, dataBase64, mime, refId:"subject-state:<subjectId>/<state>" })\` → 拿 \`storageKey\`。
+2. \`set_subject_profile({ subjectId, kind, profile, sourceImage? })\` —— 按 1.7 的字段表提交；
+   服务端校验后生成标准提示词（角色三视图 / 场景宫格 / 道具参考图）。字段不全会被拒。
+3. \`upload_asset({ filename, dataBase64, mime, refId:"subject-state:<subjectId>/<state>" })\` → 拿 \`storageKey\`。
    **默认只落 CAS，不建素材记录**：主体图属于主体库，进素材页就会变成「一张图两处显示」。只有要给片段当素材用的图才加 \`toLibrary:true\`。
-3. \`set_subject_image({ subjectId, storageKey, stateTag, prompt: 反推提示词, cover:true })\` ——
+4. \`set_subject_image({ subjectId, storageKey, stateTag, prompt: 反推提示词, cover:true })\` ——
    必须先 \`read_asset\` 看过这张图；\`prompt\` 是这张图反推出来的真实画面描述（不是愿望），不带 prompt 会被拒；第一张设为封面。
-4. 关联片段：\`link_subject_to_shot({ shotId, subjectId, state })\` —— 写进片段 references，页面上才看得到缩略图；同一片段最多 9 张参考图。
+5. 关联片段：\`link_subject_to_shot({ shotId, subjectId, state })\` —— 写进片段 references，页面上才看得到缩略图；同一片段最多 9 张参考图。
 
 > 只建主体不挂图 = 页面上是个空壳；只挂图不 link = 生成本段时用不上；把主体图也塞进素材库 = 同一张图两处出现。三步都要走，素材库那一步不要走。`;
 

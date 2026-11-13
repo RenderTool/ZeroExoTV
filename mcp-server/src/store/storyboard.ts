@@ -93,8 +93,39 @@ export async function upsertSubject(
   return { ...res, subject, created };
 }
 
-/** 按名称/别名模糊匹配主体候选（link_subject_to_shot 的 matchByName 用）。 */
-export function matchSubjectCandidates(storyboard: StoryboardContainer, name: string): ProductionItem[] {
+/**
+ * 写主体人设模板（2026-11-13）：身份锚点句 → item.note；标准提示词（三视图 / 场景宫格 / 道具参考图）
+ * → 主体树基础状态 fullPrompt/deltaPrompt。字段校验在 lib/subject-profile，这里是唯一落盘入口。
+ */
+export async function setSubjectProfile(
+  root: string,
+  projectId: string,
+  opts: { baseVersion: number; subjectId: string; anchor: string; prompt: string; dryRun?: boolean },
+): Promise<UpdateResult<StoryboardContainer> & { subject: ProductionItem; rootId: string }> {
+  let subject!: ProductionItem;
+  let rootId = "";
+  const res = await updateVersionedJson<StoryboardContainer>(paths.storyboard(projectId, root), {
+    baseVersion: opts.baseVersion,
+    createIfMissing: () => emptyStoryboard(),
+    dryRun: opts.dryRun,
+    mutate: (s) => {
+      const found = s.entities.find((e) => e.id === opts.subjectId);
+      if (!found) throw new McpError("NOT_FOUND", `主体不存在: ${opts.subjectId}`);
+      found.note = opts.anchor;
+      subject = found;
+      const tree = ensureTree(s, found);
+      rootId = tree.rootId;
+      const base = (tree.states ?? []).find((st) => st.id === "__base__") ?? tree.states[0];
+      if (base) {
+        base.fullPrompt = opts.prompt;
+        base.deltaPrompt = opts.prompt;
+      }
+    },
+  });
+  return { ...res, subject, rootId };
+}
+
+/** 按名称/别名模糊匹配主体候选（link_subject_to_shot 的 matchByName 用）。 */export function matchSubjectCandidates(storyboard: StoryboardContainer, name: string): ProductionItem[] {
   const q = name.toLowerCase();
   return storyboard.entities.filter(
     (e) => e.name.toLowerCase().includes(q) || e.aliases.some((a) => a.toLowerCase().includes(q)),

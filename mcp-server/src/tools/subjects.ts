@@ -1,11 +1,12 @@
-/** 主体域：list_subjects / upsert_subject / link_subject_to_shot */
+/** 主体域：list_subjects / upsert_subject / set_subject_profile / set_subject_image / link_subject_to_shot */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import { isImageReviewed } from "../lib/image-review.js";
-import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, syncSubjectEpisodes, upsertSubject } from "../store/storyboard.js";
+import { buildSubjectProfile } from "../lib/subject-profile.js";
+import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, setSubjectProfile, syncSubjectEpisodes, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -208,6 +209,65 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
                 : "剧本里没找到这个名字：episodeIds 为空（页面会显示为全部集），请在页面上手动选择出现集数",
             }
           : {}),
+      };
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "set_subject_profile",
+    description:
+      "写主体人设模板（2026-11-13 强制约束）：按 kind 提交必填字段，服务端校验后拼出标准提示词——" +
+      "角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 2×2 空场景宫格；道具 = 单品参考图。" +
+      "身份锚点句写 item.note，标准提示词写主体树基础状态 fullPrompt/deltaPrompt。字段不全直接拒绝并列出缺项。" +
+      "有参考图时必须先 read_asset 看图、按图反推字段，再把 sourceImage 一起传；不要凭想象填。baseVersion = storyboard version。",
+    bits: ["subject.write"],
+    schema: {
+      projectId: z.string(),
+      baseVersion: z.number().int().min(0),
+      subjectId: z.string(),
+      kind: z.enum(["character", "scene", "prop", "candidate"]),
+      profile: z.record(z.string(), z.string()).describe(
+        "字段表：角色=时代基底/国家朝代/物种/族裔/类型基底/显著特征/脸型/发型/身材/头身比/年龄/性格/变装/上身着装/下身着装/鞋子（耳饰可选）；"
+          + "场景=时代基底/地点/建筑风格/空间结构/地面/墙面/光源/前景/中景/远景/氛围/色调/材质与洁净度（门窗可选）；"
+          + "道具=名称/尺寸/材质/颜色/状态/边缘与纹理/光泽/背景（磨损可选）。",
+      ),
+      sourceImage: z.string().optional()
+        .describe("参考图的 storageKey；有图时必须先 read_asset 看过，并按图反推上面这些字段"),
+      dryRun: z.boolean().optional(),
+    },
+    handler: async (args, token) => {
+      const built = buildSubjectProfile(args.kind, args.profile);
+      if (!built.built) {
+        if (args.dryRun) {
+          return { written: false, label: built.label, missing: built.missing };
+        }
+        throw new McpError(
+          "SUBJECT_PROFILE_INCOMPLETE",
+          `${built.label}字段不全，缺：${built.missing.join("、")}。`
+            + "先把这些从剧本/参考图里补全（有图必须先 read_asset 看图、按画面反推真实特征）再写；禁止留空或凭想象编。",
+        );
+      }
+      if (!args.dryRun && args.sourceImage && !isImageReviewed(token.id, args.sourceImage)) {
+        throw new McpError(
+          "IMAGE_REVIEW_REQUIRED",
+          `你给了 sourceImage，但本次会话没看过它。先 read_asset({ projectId: "${args.projectId}", storageKey: "${args.sourceImage}" }) 看图，`
+            + "再按画面反推 profile 字段重试。",
+        );
+      }
+      const res = await setSubjectProfile(dataRoot(), args.projectId, {
+        baseVersion: args.baseVersion,
+        subjectId: args.subjectId,
+        anchor: built.built.anchor,
+        prompt: built.built.prompt,
+        dryRun: args.dryRun,
+      });
+      return {
+        written: res.written,
+        version: res.after.version,
+        subjectId: res.subject.id,
+        rootId: res.rootId,
+        anchor: built.built.anchor,
+        prompt: built.built.prompt,
       };
     },
   });

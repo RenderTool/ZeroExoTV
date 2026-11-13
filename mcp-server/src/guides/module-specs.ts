@@ -38,7 +38,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     stage: 3,
     name: "提主体",
     action:
-      "从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源）→ 逐主体给用户一张表 + 缺图清单（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用）→ 确认后 upsert_subject；" +
+      "从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源）→ 逐主体给用户一张表 + 缺图清单（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用）→ 确认后 upsert_subject → set_subject_profile 按强制字段表生成三视图/场景/道具标准提示词；" +
       "挂图必须先 read_asset 亲眼看、把画面反推成 prompt，再 set_subject_image（没看过/没 prompt 会被拒）；多人合照/模特合集/别的角色图不许挂",
     gate: "主体清单经用户确认才建主体/状态、才进阶段4——清单未确认不得 upsert、不得挂图",
   },
@@ -177,9 +177,11 @@ export const MODULE_SPECS: ModuleSpec[] = [
     ],
     order: 4,
     stage: 3,
-    mcpTools: ["list_subjects", "upsert_subject", "set_subject_image", "link_subject_to_shot"],
+    mcpTools: ["list_subjects", "upsert_subject", "set_subject_profile", "set_subject_image", "link_subject_to_shot"],
     caveats: [
       "前置阶段3 提主体：主体清单（名称/类型/别名/状态/出现集数/身份锚点句/图片来源）+ 缺图清单先给用户确认（gate：清单未确认不得 upsert、不得建状态，不得进阶段4）",
+      "强制字段：每个主体必须 set_subject_profile 提交完整字段（角色 16 项 / 场景 / 道具），服务端生成三视图/场景宫格/道具参考图提示词；字段不全返回 SUBJECT_PROFILE_INCOMPLETE",
+      "有参考图：先 read_asset 看图，按图反推字段后带 sourceImage 调 set_subject_profile；图与剧本冲突以图为准并告知用户",
       "挂图硬门槛：先 read_asset 真正看过这张图 → 把画面反推成 prompt → set_subject_image；没读过返回 IMAGE_REVIEW_REQUIRED，空 prompt 返回 IMAGE_PROMPT_REQUIRED",
       "角色图必须单人、同一张脸；多人合照/模特合集/候选人群像/别的角色图一律不许挂；场景必须空场景，道具必须单品",
       "身份锚点句一经锁定，同场景所有提示词逐字复用；改写 = 视觉漂移",
