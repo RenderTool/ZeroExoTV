@@ -316,9 +316,13 @@ export interface ComfyuiEndpointState extends ComfyuiEndpointPrefs {
   disconnect: () => void;
 }
 
+const INITIAL_ENDPOINT = loadComfyuiEndpoint();
+// 页面一打开就把当前地址广播给 MCP：即使用户连的是云端、且还没重新点测试，Agent 也不该去猜 localhost
+void publishComfyuiEndpoint({ address: INITIAL_ENDPOINT.address, connected: false });
+
 export const useComfyuiEndpointStore = create<ComfyuiEndpointState>()((set, get) => ({
-  ...loadComfyuiEndpoint(),
-  vramMode: loadComfyuiEndpoint().vramMode ?? 'auto',
+  ...INITIAL_ENDPOINT,
+  vramMode: INITIAL_ENDPOINT.vramMode ?? 'auto',
   connected: false,
   backend: null,
   models: [],
