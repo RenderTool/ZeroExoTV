@@ -89,6 +89,23 @@ function clean(text: string): string {
 
 const shotSize = ["中景", "中近景", "近景", "特写"];
 
+/** 正文里的主体名首次出现时补上 <Subject N>，否则参考图等于挂空 */
+export function anchorSubjectMentions(text: string, subjects: PromptSubject[]): string {
+  let t = text;
+  for (const s of subjects) {
+    const slot = s.slot ?? 0;
+    if (slot <= 0) continue;
+    const plain = s.name.replace(/（.*?）/g, "").trim();
+    if (!plain) continue;
+    const idx = t.indexOf(plain);
+    if (idx < 0) continue;
+    if (/<Subject\s+\d+>\s*$/.test(t.slice(Math.max(0, idx - 14), idx))) continue;
+    t = `${t.slice(0, idx)}<Subject ${slot}> ${plain}${t.slice(idx + plain.length)}`;
+  }
+  return t;
+}
+
+
 function subjectDefinition(s: PromptSubject, assetsBound: boolean): string {
   const n = s.slot ?? 0;
   const ref = `@Picture${n}`;
@@ -117,7 +134,7 @@ export function composeImagePrompt(input: ComposeShotInput): string {
   const chars = subjects.filter((s) => s.kind === "character");
   const props = subjects.filter((s) => s.kind === "prop");
   const sceneRef = scene ? `Subject ${scene.slot}` : "";
-  const action = clean(input.action);
+  const action = anchorSubjectMentions(clean(input.action), subjects);
   const colors = input.style.colors;
   const colorText = colors
     ? [
@@ -136,6 +153,8 @@ export function composeImagePrompt(input: ComposeShotInput): string {
   ]
     .filter(Boolean)
     .join("\n");
+
+  const defsText = `${defs}\n主体锚定：${subjects.map((s) => `<Subject ${s.slot}>＝${s.name}（@Picture${s.slot}）`).join("；")}。凡正文出现其中任一主体，即按该图锁形制、不锁构图。`;
 
   const size = shotSize[input.number % shotSize.length]!;
   const cam = input.index === 0 ? "固定机位，缓慢推近" : "固定机位";
@@ -157,7 +176,7 @@ export function composeImagePrompt(input: ComposeShotInput): string {
 
   return [
     "subject_definitions:",
-    defs,
+    defsText,
     "",
     "detailed_description:",
     "画面为干净画面：无字幕、无字卡、无屏显文字、无任何可读文字、无水印、无标志；所有台词仅为声音，绝不渲染为画面文字。" +

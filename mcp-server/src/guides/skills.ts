@@ -341,6 +341,9 @@ const SHOTS_PROMPTS = `# 技能：分镜与视频提示词（shots-prompts）
   旁白/台词只进 <d>[Chinese] …</d>，描述里不重复。
   \`\`\`
 - \`negativePrompt\`：只写本镜真实风险的实例（no plastic, no wristwatch, no printed logos），不写「no modern objects」这种范畴词。
+- **每个挂了参考图的槽位，正文都必须至少出现一次 \`<Subject N>\`**（首次提到该主体时写成 \`<Subject N> 名字\`）。
+  只写 \`<Subject N> 是…\` 的定义、正文里却只用名字，引擎会当成没这张图——人和道具直接不锁形制。
+  \`validate_project\` 会对「槽位有图、正文无 <Subject N>」直接报错。
 
 ## 3. 十二条铁律（输出前自查）
 

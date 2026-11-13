@@ -149,6 +149,16 @@ export function registerPlanTools(server: McpServer, ctx: Ctx): void {
             errors.push(`片段 ${shot.number} 引用了 @Picture${m[1]} 但没有对应槽位（悬空引用）`);
           }
         }
+        // 反向也要查：槽位挂了图，正文却没用 <Subject N> 指代 —— 图等于挂空
+        for (const r of shot.references ?? []) {
+          const slot = r.slotNo ?? 0;
+          if (slot <= 0) continue;
+          if (!new RegExp(`<Subject\\s+${slot}>`).test(shot.imagePrompt ?? "")) {
+            errors.push(
+              `片段 ${shot.number} 的参考图 @Picture${slot}（${r.title ?? "未命名"}）没有在提示词里用 <Subject ${slot}> 指代：图挂上了但正文没用它，生成时会被忽略`
+            );
+          }
+        }
         const frames = durationToFrames(shot.duration);
         const budget = alignedBudget(frames, wb?.sharedParams?.params);
         if (budget > 736) errors.push(`片段 ${shot.number} 采样 ${budget} 帧 > 736`);
