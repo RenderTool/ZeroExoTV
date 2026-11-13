@@ -29,6 +29,7 @@ import {
 } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import { fetchBridgeModels } from '@/features/canvas-tabs/comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connection.js';
+import { applyConnectionResult } from '@/features/canvas-tabs/comfyui-auto-connect.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
@@ -238,14 +239,15 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     try {
       const res = await testEndpointConnection(address);
       if (res.kind === 'ok') {
-        useComfyuiEndpointStore.getState().markTested(address, res.backend, res.models, res.machine);
+        // 关键：同时写 endpoint 与 comfyui-connection 两个 store，
+        // 否则导演台/画布只认 connection.connected，会继续提示“尚未连接”。
+        const applied = await applyConnectionResult(res);
         const backendLabel = res.backend === 'zeroexo'
           ? t('onboarding.backendZeroexo', 'ZeroExo 插件')
           : res.backend === 'direct'
             ? t('onboarding.backendDirect', '直连桥接')
             : t('onboarding.backendOpenAI', 'OpenAI 兼容口');
-        setTestResult(`${t('onboarding.comfyOk', '已连接')}：${backendLabel}`);
-        void loadModels(address);
+        setTestResult(`${t('onboarding.comfyOk', '已连接')}：${backendLabel}${applied.bridgeMissing ? '（模型列表读取失败，可点刷新）' : ''}`);
       } else {
         setTestResult(res.message);
       }
