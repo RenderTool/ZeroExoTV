@@ -73,6 +73,7 @@ export const DockReferencesSection = memo(function DockReferencesSection({
   onUpload,
   onExtractFrame,
   onReplaceRef,
+  onOpenPicker,
   accept: acceptProp,
 }: {
   nodeId: string;
@@ -94,6 +95,11 @@ export const DockReferencesSection = memo(function DockReferencesSection({
   accept?: string;
   /** Plan#71 T8：失效引用替换回调（宿主 re-resolve 最新图/改引后写回）；stale 卡 hover 出现替换按钮 */
   onReplaceRef?: (sourceNodeId: string) => void;
+  /**
+   * 统一资产选择页（2026-11-13）：传了就点上传格打开「画布 / 资产 / 主体」选择页，
+   * 不再直接弹系统文件框；文本类素材仍走隐藏 file input。
+   */
+  onOpenPicker?: (anchor: HTMLElement) => void;
 }) {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -102,7 +108,10 @@ export const DockReferencesSection = memo(function DockReferencesSection({
   const bgHover = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)';
   const dangerColor = theme.toolbar.danger ?? '#ef4444';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const handleAddReference = useCallback(() => { fileInputRef.current?.click(); }, []);
+  const handleAddReference = useCallback((anchor?: HTMLElement) => {
+    if (onOpenPicker && anchor) { onOpenPicker(anchor); return; }
+    fileInputRef.current?.click();
+  }, [onOpenPicker]);
   /** Plan#71 T8：hover 卡片时显示「替换失效引用」按钮 */
   const [hoverRefId, setHoverRefId] = useState<string | null>(null);
 
@@ -217,7 +226,7 @@ export const DockReferencesSection = memo(function DockReferencesSection({
                   </button>
                 </div>
               ) : (
-                <button type="button" onClick={handleAddReference} title={t('nodeDock.uploadFirstFrame', '上传图片作为首帧/尾帧')} style={{ width: 56, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }}
+                <button type="button" onClick={(e) => handleAddReference(e.currentTarget)} title={t('nodeDock.uploadFirstFrame', '上传图片作为首帧/尾帧')} style={{ width: 56, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
                   <Upload size={14} />
@@ -233,9 +242,30 @@ export const DockReferencesSection = memo(function DockReferencesSection({
           ))}
           {otherNodes.map(renderThumb)}
         </>
+      ) : onOpenPicker && incomingNodes.length === 0 && !textOnly ? (
+        /* 空参考区 = 一整块可点击入口（与图 2 一致）：点开统一资产选择页，而不是系统文件框 */
+        <button
+          type="button"
+          data-ref-picker-open
+          onClick={(e) => handleAddReference(e.currentTarget)}
+          style={{
+            width: '100%', height: 56, borderRadius: 10, boxSizing: 'border-box',
+            border: `1.5px dashed ${navBorder}`, background: 'transparent',
+            color: theme.toolbar.textMuted ?? '', cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontSize: 12, transition: 'background 0.12s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <Upload size={15} />
+          {mode === 'video-edit' || mode === 'video-extend'
+            ? t('nodeDock.editRefHint', '编辑/延长模式:上传参考视频,并描述要修改或延伸的画面')
+            : t('nodeDock.refHint', '拖入节点连入参考,或点击上传素材')}
+        </button>
       ) : (
         <>
-          <button type="button" onClick={handleAddReference} style={{ width: 48, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }} title={textOnly ? t('nodeDock.uploadRefText', '上传文本素材(图片/视频转剧本链路暂未开放)') : t('nodeDock.uploadRef', '上传参考素材(支持图片/视频/文本)')}
+          <button type="button" onClick={(e) => handleAddReference(e.currentTarget)} style={{ width: 48, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }} title={textOnly ? t('nodeDock.uploadRefText', '上传文本素材(图片/视频转剧本链路暂未开放)') : t('nodeDock.uploadRef', '上传参考素材(支持图片/视频/文本)')}
             onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
             <Upload size={15} />
@@ -244,7 +274,7 @@ export const DockReferencesSection = memo(function DockReferencesSection({
         </>
       )}
       <input ref={fileInputRef} type="file" accept={accept} style={{ display: 'none' }} onChange={handleFileInputChange} />
-      {incomingNodes.length === 0 && (
+      {incomingNodes.length === 0 && !(onOpenPicker && !textOnly) && (
         <span style={{ fontSize: 11, color: theme.toolbar.textMuted ?? '', flexShrink: 0 }}>
           {isFirstLast
             ? t('nodeDock.firstLastHint', '首尾帧模式:按顺序填入首帧/尾帧,最多 2 张图片')

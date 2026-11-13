@@ -145,6 +145,21 @@ export function MediaLightbox({ items, index, onIndexChange, onClose, actions }:
   // 点遮罩关闭：只有「按下与抬起都在遮罩上、且位移 < 6px」才关。
   // 拖拽平移/缩放松手、按下在内容抬起又在遮罩上、按下遮罩抬起在内容上，都不关。
   const backdropPressRef = useRef<{ target: EventTarget | null; x: number; y: number } | null>(null);
+  /**
+   * 图片元素铺满舞台（object-fit: contain），左右/上下留白也属于 <img> 的点击命中区。
+   * 因此「点非媒体区域关闭」不能只比对 target===currentTarget，必须按图片真实绘制矩形判断：
+   * 点在图片内容之外 = 点空白，关闭；点在图片上 = 不关（平移/缩放不受影响）。
+   */
+  const isImageLetterboxClick = (target: EventTarget | null, x: number, y: number): boolean => {
+    if (!(target instanceof HTMLImageElement) || target.naturalWidth <= 0 || target.naturalHeight <= 0) return false;
+    const rect = target.getBoundingClientRect();
+    const scale = Math.min(rect.width / target.naturalWidth, rect.height / target.naturalHeight);
+    const drawW = target.naturalWidth * scale;
+    const drawH = target.naturalHeight * scale;
+    const left = rect.left + (rect.width - drawW) / 2;
+    const top = rect.top + (rect.height - drawH) / 2;
+    return x < left || x > left + drawW || y < top || y > top + drawH;
+  };
   const onBackdropPointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     backdropPressRef.current = { target: e.target, x: e.clientX, y: e.clientY };
   };
@@ -152,12 +167,11 @@ export function MediaLightbox({ items, index, onIndexChange, onClose, actions }:
     const press = backdropPressRef.current;
     backdropPressRef.current = null;
     if (!press) return;
-    // 按下必须落在遮罩本身（内容区不算）
-    if (press.target !== e.currentTarget) return;
-    // 抬起也必须落在遮罩本身（从遮罩拖到内容/按钮上松手不算点击）
-    if (e.target !== e.currentTarget) return;
     if (Math.hypot(e.clientX - press.x, e.clientY - press.y) >= LIGHTBOX_BACKDROP_CLOSE_MAX_MOVE) return;
-    onClose();
+    // 按下必须落在遮罩/内容/图片留白上（图片内容、按钮、视频、文本都不算）
+    if (press.target !== e.currentTarget && press.target !== e.target) return;
+    if (e.target === e.currentTarget || press.target === e.currentTarget) { onClose(); return; }
+    if (isImageLetterboxClick(e.target, e.clientX, e.clientY)) onClose();
   };
 
   // 关闭后把焦点还给打开前的元素（通常是触发的卡片/按钮），并避免抢滚动位置

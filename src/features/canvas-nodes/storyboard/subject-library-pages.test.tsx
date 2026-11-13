@@ -223,8 +223,8 @@ describe('两级导航与面包屑', () => {
     // 仍在同一页：面包屑只到主体，状态由卡内编辑面板标出
     expect(document.querySelector('[data-subject-crumb="state"]')).toBeNull();
     expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('state-1');
-    // 状态编辑字段（真实输入控件）
-    expect((document.querySelector('[data-field="name"]') as HTMLInputElement).value).toBe('东海龙王 · 状态2');
+    // 状态编辑字段（真实输入控件）：状态名就在卡片最上方，编辑态可直接改
+    expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王 · 状态2');
     expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value).toBe('');
     expect(screen.getByText('出现集数')).toBeTruthy();
 
@@ -507,21 +507,16 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(card.querySelector('[data-state-ready]')).toBeTruthy();
   });
 
-  it('「添加状态」= 顶部共享 AddTile（与资产「上传素材」同款同形）；页头无红色主按钮、无悬停提示文案', async () => {
+  it('「添加状态」= 页头同一行的标准按钮（不再单独占一条虚线行）', async () => {
     renderPages(makeTree());
     await openSubjectPage();
 
-    // 单一入口：整宽虚线格（2026-11-06 起统一放顶部；格内 16:9 添加卡与页头主按钮均已下线）
+    // 单一入口：页头右侧按钮（2026-11-13 用户指令：主体页收敛到一行）
     expect(document.querySelectorAll('[data-add-state]').length).toBe(1);
     const add = document.querySelector('[data-add-state]') as HTMLElement;
     expect(add.tagName).toBe('BUTTON');
-    expect(add.className).not.toContain('ant-btn');
-    expect(add.style.width).toBe('100%');
-    expect(add.style.border).toContain('dashed');
+    expect(add.className).toContain('ant-btn');
     expect(add.textContent).toContain('添加状态');
-    // 中性色：边框不得是主题 accent（旧格内卡 hover 会亮强调色）
-    expect(add.style.border).not.toContain('rgb(59, 130, 246)');
-
     // 旧形态零残留
     expect(document.querySelector('[data-add-state-cover]')).toBeNull();
     expect(document.querySelector('[data-add-state-header]')).toBeNull();
@@ -731,7 +726,8 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
     const basic = document.querySelector('[data-form-section="basic"]') as HTMLElement;
     expect(basic.querySelector('[data-media-slot]')).toBeTruthy();
-    expect(document.querySelectorAll('[data-form-section]').length).toBe(2); // basic + media（嵌套在 basic 内）
+    expect(document.querySelectorAll('[data-form-section]').length).toBe(3); // basic + reference + media（后两者嵌套在 basic 内）
+    expect(document.querySelector('[data-form-section="reference"]')).toBeTruthy();
     expect(document.querySelectorAll('section[data-form-section="media"]').length).toBe(0);
     // 卡片风格（圆角+描边+面板底色）已移除
     expect(basic.style.borderRadius).toBe('');
@@ -1064,7 +1060,7 @@ describe('基础状态 = 独立状态（2026-11-08）', () => {
 });
 
 describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出现集数」（2026-11-08）', () => {
-  it('基础状态 = 主体本身：不单独起名、不写 state', async () => {
+  it('基础状态 = 主体本身：状态名就是卡片标题，编辑态可直接改主体名', async () => {
     const onChangeTree = vi.fn();
     renderPages(makeTree(), PID, onChangeTree);
     await openSubjectPage();
@@ -1073,8 +1069,8 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
 
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    // 2026-11-12：基础状态即主体本身，不再提供独立状态名输入
-    expect(document.querySelector('[data-base-state-name]')?.textContent).toContain('东海龙王');
+    // 2026-11-13：基础状态名移到卡片最上方，编辑态是可直接修改的输入框（不再重复一行只读文本）
+    expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王');
     expect(document.querySelector('[data-field="name"]')).toBeNull();
     expect(document.querySelector('[data-field="prompt"]')).toBeTruthy();
     expect(screen.getByText('出现集数')).toBeTruthy();
@@ -1089,7 +1085,7 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
     // 基础状态即主体：编辑面板直接用主体名，面包屑不再重复第三级
-    expect(document.querySelector('[data-base-state-name]')?.textContent).toContain('东海龙王');
+    expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王');
     expect(document.querySelector('[data-subject-crumb="state"]')).toBeNull();
   });
 
@@ -1103,5 +1099,62 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
     expect(tree).toContain('isBase={node.id === SUBJECT_BASE_STATE_ID}');
     expect(tree).toContain("t('subject.statePromptLabel', '提示词')");
     expect(tree).toContain('<EpisodeMultiSelect');
+  });
+});
+
+describe('状态页直接出图 + 参考素材（2026-11-13 P0）', () => {
+  it('编辑态顶部有参考素材入口；底部有比例/尺寸/步数/种子/引用基础状态 + 生成/发送到画布', async () => {
+    renderPages(makeTree());
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+
+    expect(document.querySelector('[data-subject-ref-add]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-generate]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-send-canvas]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-aspect]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-size]')).toBeTruthy();
+    expect(document.querySelector('[data-subject-baseref]')).toBeTruthy();
+    // 提示词为空时生成按钮禁用（不发起空任务）
+    expect((document.querySelector('[data-subject-generate]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('基础状态没有「引用基础状态」开关（自己就是基准）', async () => {
+    renderPages(makeTree());
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    expect(document.querySelector('[data-subject-baseref]')).toBeNull();
+    expect(document.querySelector('[data-subject-ref-add]')).toBeTruthy();
+  });
+
+  it('状态名在卡片最上方直接改：基础状态改名 = 主体改名，派生状态只改 state', async () => {
+    const onChangeTree = vi.fn();
+    renderPages(makeTree(), PID, onChangeTree);
+    await openSubjectPage();
+
+    fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
+    const baseInput = document.querySelector('[data-state-name-input]') as HTMLInputElement;
+    fireEvent.change(baseInput, { target: { value: '敖广' } });
+    fireEvent.blur(baseInput);
+    await waitFor(() => {
+      const calls = onChangeTree.mock.calls;
+      const next = calls[calls.length - 1]?.[0] as SubjectTree[] | undefined;
+      expect(next?.[0]?.name).toBe('敖广');
+    });
+
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')?.getAttribute('data-state-id')).toBe('state-1'));
+    const stateInput = document.querySelector('[data-state-name-input]') as HTMLInputElement;
+    fireEvent.change(stateInput, { target: { value: '战损' } });
+    fireEvent.blur(stateInput);
+    await waitFor(() => {
+      const calls = onChangeTree.mock.calls;
+      const next = calls[calls.length - 1]?.[0] as SubjectTree[] | undefined;
+      expect(next?.[0]?.states.find((s) => s.id === 'state-1')?.state).toBe('战损');
+      // 改派生状态名不会顺手改主体名（基础状态那一步已把主体名改成「敖广」）
+      expect(next?.[0]?.name).toBe('敖广');
+    });
   });
 });

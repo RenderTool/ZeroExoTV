@@ -652,7 +652,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       const store = refs.store;
       const cq = refs.commandQueue;
       if (!store || !cq) return;
-      const detail = event as { name?: string; prompt?: string; storageKey?: string };
+      const detail = event as { name?: string; prompt?: string; storageKey?: string; referenceStorageKey?: string };
+      const referenceKey = detail.referenceStorageKey ?? detail.storageKey;
       const vp = store.getViewport();
       const el = containerRef.current;
       const viewW = el?.clientWidth ?? 800;
@@ -680,7 +681,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             // 标准 2K（16:9）= 2048×1152；Qwen 最长边也卡 2048，不再用 2816 的电商档
             size: { width: 2048, height: 1152 },
           },
-          ...(detail.storageKey ? { referenceStorageKey: detail.storageKey } : {}),
+          ...(referenceKey ? { referenceStorageKey: referenceKey } : {}),
         },
       } as NodeRecord));
       store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });

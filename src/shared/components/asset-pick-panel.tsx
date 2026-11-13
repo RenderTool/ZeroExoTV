@@ -163,6 +163,8 @@ export interface AssetPickPanelProps {
   isDuplicate?: (assetId: string) => boolean;
   /** 该类型槽位是否已满（h3 图9/音3/视3；满则只标「已满」，写入由调用方拒绝） */
   isKindFull?: (kind: DirectorAssetRef['kind']) => boolean;
+  /** 只允许这些媒体类型（参考素材区/图片节点用；缺省三类全允许） */
+  allowedKinds?: Array<DirectorAssetRef['kind']>;
   /** 单击资产条目（占槽 + 插 @ 块由调用方执行） */
   onPickAsset: (ref: DirectorAssetRef) => void;
   /** 单击画布媒体条目（缺省回落 onPickAsset） */
@@ -212,6 +214,7 @@ export function AssetPickPanel({
   slotLabels = {},
   isDuplicate,
   isKindFull,
+  allowedKinds,
   onPickAsset,
   onPickCanvasMedia,
   onPickSubject,
@@ -282,6 +285,8 @@ export function AssetPickPanel({
   }, [panelTab, placement]);
 
   const query = searchQ.trim().toLowerCase();
+  const allowedSet = useMemo(() => (allowedKinds ? new Set(allowedKinds) : null), [allowedKinds]);
+  const kindAllowed = useCallback((kind: DirectorAssetRef['kind']): boolean => !allowedSet || allowedSet.has(kind), [allowedSet]);
 
   const groups = useMemo(() => {
     const pool = query ? candidates.filter((a) => (a.title ?? '').toLowerCase().includes(query)) : candidates;
@@ -364,12 +369,13 @@ export function AssetPickPanel({
         .map((st) => ({
           stateId: st.id,
           stateName: st.state || t('director.subjectStateFallback', '剧照'),
-          media: (st.media ?? []).find((m) => m.type === 'image' || m.type === 'audio' || m.type === 'video') ?? null,
-        }));
+          media: (st.media ?? []).find((m) => kindAllowed(m.type === 'audio' || m.type === 'video' ? m.type : 'image')) ?? null,
+        }))
+        .filter((row) => !allowedSet || row.media !== null);
       if (rows.length > 0) out.push({ tree, rows });
     }
     return out;
-  }, [subjectTrees, query, t]);
+  }, [subjectTrees, query, t, kindAllowed]);
 
   const toggleSubject = useCallback((id: string) => {
     setExpandedSubjects((prev) => {

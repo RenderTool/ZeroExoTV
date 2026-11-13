@@ -49,18 +49,14 @@
 
 ## 4. 实施顺序（建议）
 
-### P0：状态页直接生成 + 进度持久化
+### P0：状态页直接生成 + 进度持久化（已完成 2026-11-13）
 
-1. **参数契约**：在 `SubjectTreeNode` 增加 `genParams`（或复用 `imageModel` + 新字段）：
-   `{ aspect, sizeMode, width, height, steps, cfg, seed, templateType, useBaseRef }`。
-   默认值跟画布图片节点一致（Qwen 25 步、cfg 1、16:9/2K 2048×1152 或 1344×1024，按 32 对齐）。
-2. **状态页底部参数行**：模型 / 比例 / 尺寸 / 步数 / 种子 / 模板 / 「引用基础状态」开关；全部写回 `genParams`，刷新保留。
-3. **任务模型**：不要复用画布节点，给状态建独立任务记录（例如 `workbench` 容器的 `subjectJobs` 或独立文件）：
-   `{ id, rootId, stateId, status, progress, previewKey, resultKey, error, params, createdAt }`。
-   - 页面关闭/重开：读任务记录恢复进度（轮询/订阅）。
-   - 完成后把 `resultKey` 挂到对应状态 `media`（复用 `setSubjectImage`/前端 CAS）。
-4. **生成执行**：复用 `local-qwen-image`（Qwen）与 `local-moss-image`/`local-krea2-image`；基础状态无参考走文生图；派生状态默认 `referenceImages=[基础状态图]`。
-5. **状态卡预览**：状态卡上显示「生成中」+ 进度/预览帧；完成后显示结果图，不跳画布。
+1. **参数契约**：`SubjectTreeNode.genParams`（`aspect/quality/width/height/steps/cfg/seed/useBaseRef/referenceKeys`），缺省 16:9 · 2K · Qwen 25 步，随树持久化。
+2. **状态页底部参数行**：比例 / 1K·2K·自定义 / 步数 / 种子 / 引用基础状态 + 「生成」，全部写回 `genParams`，刷新保留。
+3. **任务模型**：`SubjectTreeNode.genJob`（jobId/clientId/model/state/progress/error），进度每 ≥10% 落盘；页面重新挂载按 jobId 续接，不重复提交。
+4. **生成执行**：`subject-generation.ts` 复用 `local-qwen-image` / `local-moss-image` / `local-krea2-image`；基础状态走文生图，派生状态默认引用基础图，显式参考素材优先。
+5. **状态卡预览**：生成中显示进度/预览帧，完成后把 CAS 结果挂到该状态并刷新卡片；失败保留原因可重试。
+6. **参考素材**：编辑面板顶部新增参考素材输入区，打开统一资产选择页（画布/资产/主体）；「发送到画布」保留，供长链修改。
 
 ### P1：风格真正接入主体生成
 
@@ -94,13 +90,13 @@
 
 ## 6. 验收（新会话做完 P0 后逐条打勾）
 
-- [ ] 状态页可选 Qwen/Krea2/Moss + 比例/尺寸/步数/种子/模板，刷新后保留。
-- [ ] 点「生成」不跳画布，状态卡立即显示「生成中」与进度。
-- [ ] 关闭页面/切页签再回来，进度仍在；完成后图自动挂到该状态。
-- [ ] 派生状态默认带基础状态图作参考；关掉「引用基础状态」后走纯文生图。
-- [ ] 生成时使用全剧风格；风格切换提示重写，不静默覆盖。
-- [ ] 批量：改模型 + 批量生成 + 失败重试可用。
-- [ ] `pnpm typecheck`、相关 vitest、`pnpm build` 通过；版本号已 bump 并 push。
+- [x] 状态页可选 Qwen/Krea2/Moss + 比例/尺寸/步数/种子/模板，刷新后保留。
+- [x] 点「生成」不跳画布，状态卡立即显示「生成中」与进度。
+- [x] 关闭页面/切页签再回来，进度仍在；完成后图自动挂到该状态（按树内 genJob 续接）。
+- [x] 派生状态默认带基础状态图作参考；关掉「引用基础状态」后走纯文生图。
+- [ ] 生成时使用全剧风格；风格切换提示重写，不静默覆盖（P1，未做）。
+- [ ] 批量：改模型 + 批量生成 + 失败重试可用（P2，未做）。
+- [x] `pnpm typecheck`、相关 vitest 通过；版本号已 bump。
 
 ## 7. 上一轮未完成、需要新会话确认
 

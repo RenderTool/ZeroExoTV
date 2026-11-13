@@ -398,24 +398,32 @@ describe('releaseSubjectStateMediaRefs（删除状态/树防孤儿）', () => {
   });
 });
 
-describe('来源面板 @ 形态契约（fs 断言，2026-11-05 约定；2026-11-07 统一到共享面板）', () => {
+describe('来源面板 @ 形态契约（fs 断言，2026-11-05 约定；2026-11-13 统一到资产插槽选择页）', () => {
   const read = (rel: string) => readFileSync(path.resolve(here, rel), 'utf8');
   const panelSrc = () => read('subject-media-source-panel.tsx');
+  const pickerSrc = () => read('../../../shared/components/asset-slot-picker.tsx');
   const sharedSrc = () => read('../../../shared/components/asset-pick-panel.tsx');
 
-  it('页签 = 画布 / 资产（项目+公共）/ 手动上传（共享面板同一实现，不另做一套）', () => {
+  it('页签 = 画布 / 资产 / 主体（统一选择页同一实现，不另做一套）', () => {
     const src = panelSrc();
-    const tabs = src.match(/const TABS: AssetPickTab\[\] = \[([^\]]+)\]/)?.[1] ?? '';
-    expect(tabs.replace(/\s/g, '')).toBe("'canvas','asset','upload'");
-    // 面板只注入数据与回调，UI 全部来自共享实现
-    expect(src).toContain("from '@/shared/components/asset-pick-panel.js'");
-    expect(src).toContain('<AssetPickPanel');
+    // 面板只注入数据与回调，UI 全部来自共享资产插槽选择页
+    expect(src).toContain("from '@/shared/components/asset-slot-picker.js'");
+    expect(src).toContain('<AssetSlotPicker');
+    expect(src).toContain("acceptKinds={['image', 'audio']}");
+    const picker = pickerSrc();
+    expect(picker).toContain("from '@/shared/components/asset-pick-panel.js'");
+    expect(picker).toContain('<AssetPickPanel');
+    expect(picker).toContain("tabs = ['canvas', 'asset', 'subject']");
+    // 媒体类型过滤仍由共享面板承接
+    expect(picker).toContain('allowedKinds={acceptKinds}');
+    expect(sharedSrc()).toContain('allowedKinds');
   });
 
   it('手动上传不污染全局库：面板不调用 addAsset/createAsset（只 uploadAsset 落 CAS）', () => {
-    const src = panelSrc();
+    const src = pickerSrc();
     expect(src).toContain("from '@/features/asset-picker/services/upload-asset.js'");
     expect(src).not.toMatch(/addAsset|createAsset/);
+    expect(panelSrc()).not.toMatch(/addAsset|createAsset/);
   });
 
   it('@ 面板形态要素：分区 tab + 搜索框 + Esc 关闭 + popover data 标识', () => {
@@ -429,19 +437,19 @@ describe('来源面板 @ 形态契约（fs 断言，2026-11-05 约定；2026-11-
 
   it('可见关闭按钮（2026-11-05 修复）：常驻 header、aria-label、点击不写入、Esc 仍可用', () => {
     const shared = sharedSrc();
-    const src = panelSrc();
+    const picker = pickerSrc();
     // 共享面板：常驻 × 按钮，带可访问性 label
     expect(shared).toContain('data-asset-pick-close');
     expect(shared).toMatch(/aria-label=\{t\('assetPick\.close'/);
     // 关闭按钮与页签同一行（页签下所有分区都在）
     expect(shared.indexOf('data-asset-pick-close')).toBeGreaterThan(shared.indexOf('data-asset-pick-tab'));
-    // 三条退出路径（× / Esc / 点外部）在主体面板收口 closeWithFocus —— 只聚焦+onClose，不调 onPick（不写入）
-    const closeBody = src.slice(src.indexOf('closeWithFocus = useCallback'), src.indexOf('doPick = useCallback'));
+    // 三条退出路径（× / Esc / 点外部）在选择页收口 closeWithFocus —— 只聚焦+onClose，不调 onPick（不写入）
+    const closeBody = picker.slice(picker.indexOf('closeWithFocus = useCallback'), picker.indexOf('const sourceCanvas'));
     expect(closeBody).toContain('anchorEl?.focus?.()');
     expect(closeBody).toContain('onClose()');
     expect(closeBody).not.toContain('onPick');
-    expect(src).toMatch(/e\.key === 'Escape'/); // Esc 快捷键仍可用
-    expect(src).toMatch(/panelRef\.current\?\.contains\(target\)/); // 点外部关闭
+    expect(picker).toMatch(/e\.key === 'Escape'/); // Esc 快捷键仍可用
+    expect(picker).toMatch(/panelRef\.current\?\.contains\(target\)/); // 点外部关闭
   });
 
   it('占位卡/已有媒体点击都打开来源面板（空卡与替换同一入口）', () => {

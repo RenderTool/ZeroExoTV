@@ -122,6 +122,43 @@ export interface DevLookEntry {
   imageKey?: string;
 }
 
+/**
+ * 状态出图参数（2026-11-13 P0）：跟画布图片节点同一套参数语义，随状态持久化。
+ * 空字段 = 用默认值（16:9 / 2K / 模型默认步数），不要求每个状态都存全量。
+ */
+export interface SubjectGenParams {
+  /** 生成比例："16:9" / "1:1" …；缺省 16:9 */
+  aspect?: string;
+  /** 尺寸档位：1K / 2K / custom（custom 时以 width/height 为准） */
+  quality?: '1k' | '2k' | 'custom';
+  width?: number;
+  height?: number;
+  steps?: number;
+  cfg?: number;
+  /** -1 = 随机 */
+  seed?: number;
+  /** 派生状态是否把基础状态图当参考（仅 Qwen 支持参考图） */
+  useBaseRef?: boolean;
+  /** 参考素材（图1 选择页写入；生成时按顺序作为参考图；空 = 不加参考） */
+  referenceKeys?: string[];
+}
+
+/** 状态出图任务（随树持久化；刷新/切页签后据此续接进度） */
+export interface SubjectGenJob {
+  /** ComfyUI 作业 id */
+  jobId: string;
+  /** /ws 预览与进度用的 clientId（续接必须与提交时一致） */
+  clientId: string;
+  /** 模型 key */
+  model: string;
+  state: 'queued' | 'running' | 'success' | 'error' | 'cancelled';
+  /** 0..100 */
+  progress?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 /** 主体状态迭代节点 */
 export interface SubjectTreeNode {
   /** 节点稳定 id */
@@ -172,6 +209,10 @@ export interface SubjectTreeNode {
   templateType?: SubjectTemplateType;
   /** 2026-11-13：这个状态出图用的模型（与画布图片节点同一套 key；空 = Qwen） */
   imageModel?: string;
+  /** 2026-11-13 P0：出图参数（比例/尺寸/步数/种子/是否引用基础状态） */
+  genParams?: SubjectGenParams;
+  /** 2026-11-13 P0：进行中的出图任务；成功后清空，失败保留原因供重试 */
+  genJob?: SubjectGenJob | null;
   /** 仅基础状态：模板选择理由（后端 LLM 契约字段，从旧 baseState 迁来） */
   templateReason?: string;
 }

@@ -32,7 +32,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Select, Tooltip } from 'antd';
+import { App as AntdApp, Button, Checkbox, Dropdown, Input, InputNumber, Popover, Select, Switch, Tooltip } from 'antd';
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
@@ -66,6 +66,7 @@ import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
 import { readScript, watchScript, displayEpisodeTitle, type ScriptVisualStyle } from '@/entities/script-store.js';
 import { applyStylePromptToPrompt } from '@/shared/style-presets.js';
+import { clampQwenSize } from '@/features/canvas-tabs/qwen-limits.js';
 import {
   NAVIGATE_FOCUS_SUBJECT_EVENT,
   takePendingNavigateFocus,
@@ -86,6 +87,8 @@ import {
   type SubjectTreeNode,
   type SubjectTree,
   type SubjectTemplateType,
+  type SubjectGenJob,
+  type SubjectGenParams,
 } from './subject-tree-types';
 import { buildBaseStatePrompt } from './subject-prompt-templates';
 import {
@@ -96,6 +99,17 @@ import {
   type SubjectStateMediaAsset,
 } from './subject-state-media';
 import { SubjectMediaSourcePanel } from './subject-media-source-panel';
+import { AssetSlotPicker, type AssetSlotPick } from '@/shared/components/asset-slot-picker.js';
+import {
+  SUBJECT_GEN_RATIOS,
+  cancelSubjectGeneration,
+  resolveSubjectGenParams,
+  resumeSubjectGeneration,
+  startSubjectGeneration,
+  subjectGenSize,
+  subjectJobKey,
+  useSubjectGenerationStore,
+} from './subject-generation';
 import { SubjectMediaThumb, useSubjectMediaAlive } from './subject-media-preview';
 import {
   SUBJECT_STATE_CARD_GAP,
@@ -397,29 +411,6 @@ function kindLabelOf(kind: ProductionItemKind | undefined | null, t: ReturnType<
   return t(`entity.${kind}`, KIND_LABEL_FALLBACK[kind]);
 }
 
-/** 状态名草稿输入：只在失焦/回车时写盘，避免每敲一个字就落盘导致卡顿与回退（2026-11-12 用户反馈） */
-function DraftStateName({ value, onCommit, placeholder, ariaLabel }: {
-  value: string;
-  onCommit: (next: string) => void;
-  placeholder: string;
-  ariaLabel: string;
-}): React.ReactElement {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => { setDraft(value); }, [value]);
-  const commit = (): void => { if (draft !== value) onCommit(draft); };
-  return (
-    <Input
-      data-field="name"
-      aria-label={ariaLabel}
-      value={draft}
-      placeholder={placeholder}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onPressEnter={commit}
-    />
-  );
-}
-
 /** 提示词草稿框：同样只在失焦时写盘 */
 function DraftPromptField({ value, onCommit, placeholder }: {
   value: string;
@@ -450,6 +441,39 @@ function DraftPromptField({ value, onCommit, placeholder }: {
   );
 }
 
+
+/** 数字草稿输入：只在失焦/回车写盘（步数/种子不必每敲一位就落盘） */
+function DraftNumber({ value, min, max, onCommit, ariaLabel, width = 92 }: {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (next: number) => void;
+  ariaLabel: string;
+  width?: number;
+}): React.ReactElement {
+  const [draft, setDraft] = useState<number | null>(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = (): void => {
+    if (draft === null || !Number.isFinite(draft)) return;
+    const next = Math.max(min, Math.min(max, Math.round(draft)));
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <InputNumber
+      size="small"
+      aria-label={ariaLabel}
+      min={min}
+      max={max}
+      step={1}
+      precision={0}
+      value={draft}
+      onChange={(v) => setDraft(typeof v === 'number' && Number.isFinite(v) ? v : null)}
+      onBlur={commit}
+      onPressEnter={commit}
+      style={{ width }}
+    />
+  );
+}
 
 function KindTabs({
   theme, activeKind, total, counts, onChange,
@@ -688,6 +712,118 @@ function SubjectGridCard({
 }
 
 /**
+ * 状态封面上的生成进度层（2026-11-13 P0）：
+ * 进度/预览只在内存里高频更新，由这个小组件单独订阅，避免整页跟着 10fps 重渲染。
+ * 页面重挂载后 runtime 为空 → 回落到树里持久化的 genJob（进度不丢）。
+ */
+function StateJobCoverOverlay({ jobKey, persistedJob, theme }: {
+  jobKey: string;
+  persistedJob?: SubjectGenJob | null;
+  theme: ThemeConfig;
+}): React.ReactElement | null {
+  const { t } = useTranslation();
+  const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
+  const state = runtime?.state ?? persistedJob?.state;
+  const progress = Math.max(0, Math.min(100, Math.round(runtime?.progress ?? persistedJob?.progress ?? 0)));
+  const error = runtime?.error ?? persistedJob?.error;
+  if (state === 'error') {
+    return (
+      <div data-state-job-error style={{ position: 'absolute', top: 6, left: 6, zIndex: 4 }}>
+        <Tooltip title={error}>
+          <Badge theme={theme} tone="danger">{t('subject.generateFailed', '生成失败')}</Badge>
+        </Tooltip>
+      </div>
+    );
+  }
+  if (state !== 'running' && state !== 'queued') return null;
+  return (
+    <div
+      data-state-job-progress
+      style={{
+        position: 'absolute', inset: 0, zIndex: 2, borderRadius: 'inherit', overflow: 'hidden',
+        background: 'rgba(0,0,0,0.52)', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 8,
+      }}
+    >
+      {runtime?.preview && (
+        <img
+          src={runtime.preview}
+          alt=""
+          data-state-job-preview
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.75 }}
+        />
+      )}
+      <span style={{ position: 'relative', zIndex: 1, color: '#fff', fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+        {t('subject.generating', '生成中')} {progress}%
+      </span>
+      <div style={{ position: 'relative', zIndex: 1, width: 120, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.28)' }}>
+        <div style={{ width: `${progress}%`, height: '100%', borderRadius: 2, background: '#fff', transition: 'width .3s' }} />
+      </div>
+    </div>
+  );
+}
+
+/** 生成按钮：运行中显示进度 + 取消；空闲/失败/成功后回到「生成」 */
+function StateJobButton({ jobKey, disabled, onStart, onCancel }: {
+  jobKey: string;
+  disabled?: boolean;
+  onStart: () => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
+  const runningNow = runtime?.state === 'running' || runtime?.state === 'queued';
+  if (runningNow) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <Button size="small" disabled data-subject-generating>
+          {t('subject.generating', '生成中')} {Math.round(runtime?.progress ?? 0)}%
+        </Button>
+        <Button size="small" type="text" danger data-subject-generate-cancel onClick={onCancel}>
+          {t('common.cancel', '取消')}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <Button
+      size="small"
+      type="primary"
+      data-subject-generate
+      disabled={disabled}
+      onClick={onStart}
+    >
+      {t('subject.generate', '生成')}
+    </Button>
+  );
+}
+
+/** 编辑面板媒体区上的生成预览（运行中才出现；只订阅任务，不拖整页重渲染） */
+function StateJobMediaOverlay({ jobKey }: { jobKey: string }): React.ReactElement | null {
+  const { t } = useTranslation();
+  const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
+  if (!runtime || (runtime.state !== 'running' && runtime.state !== 'queued')) return null;
+  const pct = Math.max(0, Math.min(100, Math.round(runtime.progress)));
+  return (
+    <div
+      data-state-panel-preview
+      style={{
+        position: 'absolute', inset: 0, zIndex: 2, borderRadius: 'inherit', overflow: 'hidden',
+        background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        pointerEvents: 'none',
+      }}
+    >
+      {runtime.preview && (
+        <img src={runtime.preview} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0.82 }} />
+      )}
+      <span style={{ position: 'relative', zIndex: 1, color: '#fff', fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+        {t('subject.generating', '生成中')} {pct}%
+      </span>
+    </div>
+  );
+}
+
+/**
  * 状态卡：封面 16:9 按容器自适应宽度，名称/集数都在封面下方。
  * 卡内动作（悬停/聚焦露出）：设为封面 / 进入编辑 / 删除状态 —— 不必进详情就能维护状态。
  * 基础状态不可删除（它是主体树根，没有为它挂删除入口）。
@@ -696,7 +832,7 @@ function SubjectGridCard({
 function StateGridCard({
   stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, editMode, editPanel,
   onClick, onToggleCover, onDelete, onToggleEdit,
-  onRename, onCanvasGenerate,
+  onRename, onCanvasGenerate, jobKey, persistedJob,
 }: {
   stateId: string;
   title: string;
@@ -718,20 +854,72 @@ function StateGridCard({
   onToggleCover?: () => void;
   /** 缺省 = 不渲染删除入口（基础状态） */
   onDelete?: () => void;
-  /** 就地改状态名（基础状态不传 = 不可改，名称即主体名） */
+  /** 就地改状态名（基础状态传 = 同时改主体名） */
   onRename?: (next: string) => void;
   /** 就地换图：打开媒体来源面板 */
   /** 画布生成：只建节点并挂提示词，不发起 API */
   onCanvasGenerate?: () => void;
+  /** 该状态的生成任务 key（进度层订阅用） */
+  jobKey?: string;
+  /** 树里持久化的任务（重挂载后显示进度/失败） */
+  persistedJob?: SubjectGenJob | null;
 }): React.ReactElement {
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
+  useEffect(() => { setDraftTitle(title); }, [title]);
   const alive = useSubjectMediaAlive(thumbKey ?? undefined);
   const dead = thumbKey ? !alive : false;
   const active = hover || focus;
+  const commitRename = (): void => {
+    const v = draftTitle.trim();
+    if (v && v !== title) onRename?.(v);
+  };
+  const actionButtons = (
+    <>
+      {onCanvasGenerate && (
+        <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
+          <IconButton
+            theme={theme}
+            size="sm"
+            aria-label={t('subject.canvasGenerate', '画布生成')}
+            data-state-action="canvas-generate"
+            onClick={(e) => { e.stopPropagation(); onCanvasGenerate(); }}
+          >
+            <Wand2 size={13} />
+          </IconButton>
+        </Tooltip>
+      )}
+      <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
+        <IconButton
+          theme={theme}
+          size="sm"
+          aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
+          data-state-action="cover"
+          data-cover-active={isCover ? '1' : undefined}
+          style={isCover ? { color: theme.toolbar.accent } : undefined}
+          onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
+        >
+          <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
+        </IconButton>
+      </Tooltip>
+      {onDelete && (
+        <Tooltip title={t('subject.deleteState', '删除状态')}>
+          <IconButton
+            theme={theme}
+            size="sm"
+            aria-label={t('subject.deleteState', '删除状态')}
+            data-state-action="delete"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          >
+            <Trash2 size={13} />
+          </IconButton>
+        </Tooltip>
+      )}
+    </>
+  );
   return (
     <div
       data-state-card={stateId}
@@ -780,6 +968,7 @@ function StateGridCard({
           fit="contain"
           emptyLabel={emptyLabel}
         />
+        {jobKey && <StateJobCoverOverlay jobKey={jobKey} persistedJob={persistedJob} theme={theme} />}
         {isCover && (
           <ThumbBadge data-state-cover-badge style={{ position: 'absolute', top: 6, left: 6, zIndex: 3 }}>
             {t('subject.coverBadge', '封面')}
@@ -796,42 +985,66 @@ function StateGridCard({
         paddingLeft: UI_CARD_INFO_PADDING_X, paddingRight: UI_CARD_INFO_PADDING_X,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', height: 24, gap: 8 }}>
-          {editing && onRename ? (
+          {editing ? (
             <Input
               size="small"
               autoFocus
               data-state-name-input
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
-              onBlur={() => { setEditing(false); const v = draftTitle.trim(); if (v && v !== title) onRename(v); }}
-              onPressEnter={() => { setEditing(false); const v = draftTitle.trim(); if (v && v !== title) onRename(v); }}
+              onBlur={() => { setEditing(false); commitRename(); }}
+              onPressEnter={() => { setEditing(false); commitRename(); }}
               onClick={(e) => e.stopPropagation()}
               style={{ width: '100%' }}
+            />
+          ) : editMode ? (
+            /* 编辑态：状态名就在卡片最上方，直接可改（不再在面板里重复一行「状态名」留白） */
+            <Input
+              size="small"
+              variant="borderless"
+              data-state-name
+              data-state-name-input
+              aria-label={t('subject.stateNameLabel', '状态名')}
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={commitRename}
+              onPressEnter={commitRename}
+              onClick={(e) => e.stopPropagation()}
+              style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0, padding: '0 4px', marginLeft: -4 }}
             />
           ) : (
             <span
               data-state-name
-              title={onRename ? t('subject.inlineRenameHint', '双击改状态名') : undefined}
-              onDoubleClick={(e) => { if (!onRename) return; e.stopPropagation(); setDraftTitle(title); setEditing(true); }}
+              title={t('subject.inlineRenameHint', '双击改状态名')}
+              onDoubleClick={(e) => { e.stopPropagation(); setDraftTitle(title); setEditing(true); }}
               style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}
             >
               {title}
             </span>
           )}
-          {/* 2026-11-12 用户指令：编辑态要有一个明确的「收纳回卡片」按钮，不能只靠再点一次卡 */}
+          {/* 编辑态一行收口：名称 + 动作 + 收起编辑都在同一行（2026-11-13 用户指令） */}
           {editMode && (
-            <Button
-              size="small"
-              type="text"
-              data-state-action="collapse"
-              icon={<ChevronUp size={13} />}
-              onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
-              style={{ flexShrink: 0, color: theme.toolbar.accent }}
-            >
-              {t('subject.closeEdit', '收起编辑')}
-            </Button>
+            <>
+              <div
+                data-state-actions
+                style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}
+              >
+                {actionButtons}
+              </div>
+              <Button
+                size="small"
+                type="text"
+                data-state-action="collapse"
+                icon={<ChevronUp size={13} />}
+                onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
+                style={{ flexShrink: 0, color: theme.toolbar.accent }}
+              >
+                {t('subject.closeEdit', '收起编辑')}
+              </Button>
+            </>
           )}
         </div>
+        {!editMode && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <span style={{
             display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6,
@@ -847,50 +1060,13 @@ function StateGridCard({
             data-state-actions
             style={{
               display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
-              opacity: active || editMode ? 1 : 0, transition: 'opacity .2s',
+              opacity: active ? 1 : 0, transition: 'opacity .2s',
             }}
           >
-            {onCanvasGenerate && (
-              <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
-                <IconButton
-                  theme={theme}
-                  size="sm"
-                  aria-label={t('subject.canvasGenerate', '画布生成')}
-                  data-state-action="canvas-generate"
-                  onClick={(e) => { e.stopPropagation(); onCanvasGenerate(); }}
-                >
-                  <Wand2 size={13} />
-                </IconButton>
-              </Tooltip>
-            )}
-            <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
-              <IconButton
-                theme={theme}
-                size="sm"
-                aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
-                data-state-action="cover"
-                data-cover-active={isCover ? '1' : undefined}
-                style={isCover ? { color: theme.toolbar.accent } : undefined}
-                onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
-              >
-                <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
-              </IconButton>
-            </Tooltip>
-            {onDelete && (
-              <Tooltip title={t('subject.deleteState', '删除状态')}>
-                <IconButton
-                  theme={theme}
-                  size="sm"
-                  aria-label={t('subject.deleteState', '删除状态')}
-                  data-state-action="delete"
-                  onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                >
-                  <Trash2 size={13} />
-                </IconButton>
-              </Tooltip>
-            )}
+            {actionButtons}
           </div>
         </div>
+        )}
       </div>
       {editMode && editPanel}
     </div>
@@ -906,6 +1082,7 @@ function StateGridCard({
 function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
   onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
+  jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onSendToCanvas,
 }: {
   tree: SubjectTree;
   node: SubjectTreeNode;
@@ -919,6 +1096,15 @@ function StateEditPanel({
   onRemoveMedia: () => void;
   onRestoreMedia: (ref: SubjectNodeMediaRef) => void;
   onDeleteHistoryMedia: (ref: SubjectNodeMediaRef) => void;
+  /** 本状态的生成任务 key */
+  jobKey: string;
+  onStartGenerate: () => void;
+  onCancelGenerate: () => void;
+  /** 参考素材：打开统一选择页（画布 / 资产 / 主体） */
+  onAddReference: (anchor: HTMLElement) => void;
+  onRemoveReference: () => void;
+  /** 发送到画布继续做长链修改（只挂提示词与参考图，不发起生成） */
+  onSendToCanvas: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
   const { message: antdMessage } = AntdApp.useApp();
@@ -926,8 +1112,27 @@ function StateEditPanel({
   const slotKind = slotMediaKind(slotMedia);
   const hasMedia = Boolean(slotMedia);
   const promptValue = node.fullPrompt || node.deltaPrompt || '';
-  const stateName = node.state ?? '';
   const isBase = node.id === SUBJECT_BASE_STATE_ID;
+  const genParams = resolveSubjectGenParams(node);
+  const model = node.imageModel ?? LOCAL_IMAGE_MODEL_KEY;
+  const referenceKey = genParams.referenceKeys[0] ?? '';
+  /** 参数一次写全，刷新后保留（不做「只存改过的键」的隐式合并） */
+  const commitGenParams = (patch: Partial<typeof genParams>): void => {
+    const next = { ...genParams, ...patch };
+    onUpdateNode({
+      genParams: {
+        aspect: next.aspect,
+        quality: next.quality,
+        width: next.width,
+        height: next.height,
+        steps: next.steps,
+        cfg: next.cfg,
+        seed: next.seed,
+        useBaseRef: next.useBaseRef,
+        referenceKeys: next.referenceKeys,
+      },
+    });
+  };
   const validEpisodes = episodes.slice().sort((a, b) => a.number - b.number);
   const selectedEpisodes = (node.appearEpisodes ?? []).filter((n) => validEpisodes.some((e) => e.number === n));
   const toggleEpisode = (n: number) => {
@@ -975,24 +1180,57 @@ function StateEditPanel({
       }}
     >
       <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-        {/* 状态名放最上面（2026-11-13 用户指令） */}          {/* 状态名 */}
-          <div>
-            <div style={labelStyle}>{t('subject.stateNameLabel', '状态名')}</div>
-            {isBase ? (
-              <div data-base-state-name style={{ ...hintStyle, fontSize: 13, fontWeight: 600, color: theme.toolbar.text, padding: '4px 0' }}>
-                {tree.name}
-              </div>
-            ) : (
-              <DraftStateName
-                key={node.id}
-                value={stateName}
-                ariaLabel={t('subject.stateNameLabel', '状态名')}
-                placeholder={t('subject.stateNamePlaceholder', '如：正常人类 / 女鬼')}
-                onCommit={(next) => onUpdateNode({ state: next })}
-              />
+        {/* 参考素材（2026-11-13 用户指令：状态页顶部也要有参考输入区 + 统一选择页） */}
+        <div data-form-section="reference" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ ...labelStyle, marginBottom: 0 }}>{t('subject.referenceMaterial', '参考素材')}</div>
+            <span style={hintStyle}>{t('subject.referenceHint', '可不加；加一张参考图后按图生成')}</span>
+            {referenceKey && model !== LOCAL_IMAGE_MODEL_KEY && (
+              <span data-subject-ref-model-hint style={{ ...hintStyle, color: '#f59e0b' }}>
+                {t('subject.genBaseRefQwenOnly', '仅 Qwen 支持参考图')}
+              </span>
             )}
           </div>
-
+          {referenceKey ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ position: 'relative', width: 72, height: 72, borderRadius: 8, overflow: 'hidden', border: `1px solid ${theme.toolbar.border}` }}>
+                <SubjectMediaThumb storageKey={referenceKey} kind="image" dark={isDark} fill fit="cover" />
+                <button
+                  type="button"
+                  data-subject-ref-remove
+                  aria-label={t('subject.referenceRemove', '移除参考素材')}
+                  onClick={onRemoveReference}
+                  style={{
+                    position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: 8, padding: 0,
+                    border: 'none', background: 'rgba(0,0,0,0.62)', color: '#fff', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <Trash2 size={9} />
+                </button>
+              </div>
+              <Button size="small" type="text" data-subject-ref-change onClick={(e) => onAddReference(e.currentTarget)}>
+                {t('subject.referenceChange', '更换参考')}
+              </Button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-subject-ref-add
+              onClick={(e) => onAddReference(e.currentTarget)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                width: '100%', height: 56, borderRadius: 8, boxSizing: 'border-box',
+                border: `1.5px dashed ${isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}`,
+                background: 'transparent', color: theme.toolbar.textMuted,
+                fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
+              }}
+            >
+              <ImagePlus size={15} />
+              {t('subject.referenceAdd', '添加参考素材（画布 / 资产 / 主体）')}
+            </button>
+          )}
+        </div>
 
         {/* 媒体工具：小预览 + 右上角换图 / 删除媒体 + 历史图恢复 */}
         <div
@@ -1009,6 +1247,7 @@ function StateEditPanel({
               fit="contain"
               emptyLabel={t('subject.mediaPending', '待补媒体')}
             />
+            <StateJobMediaOverlay jobKey={jobKey} />
             <div
               data-media-actions
               style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 2 }}
@@ -1198,6 +1437,145 @@ function StateEditPanel({
             />
           </div>
         </div>
+        {/* 第二行：出图参数（比例 / 尺寸 / 步数 / 种子 / 引用基础状态 / 生成） */}
+        <div
+          data-subject-gen-row
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: 12,
+            alignItems: 'end',
+          }}
+        >
+          <div data-subject-aspect-field>
+            <div style={labelStyle}>{t('subject.genAspect', '生成比例')}</div>
+            <Select
+              size="small"
+              data-subject-aspect
+              value={genParams.aspect}
+              options={SUBJECT_GEN_RATIOS.map((r) => ({ value: r, label: r }))}
+              onChange={(value: string) => {
+                const size = subjectGenSize(value, genParams.quality === '1k' ? '1k' : '2k');
+                commitGenParams({ aspect: value, width: size.width, height: size.height });
+              }}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div data-subject-size-field>
+            <div style={labelStyle}>{t('subject.genSize', '尺寸')}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Select
+                size="small"
+                data-subject-size
+                value={genParams.quality}
+                options={[
+                  { value: '1k', label: '1K' },
+                  { value: '2k', label: '2K' },
+                  { value: 'custom', label: t('subject.genSizeCustom', '自定义') },
+                ]}
+                onChange={(value: '1k' | '2k' | 'custom') => {
+                  if (value === 'custom') { commitGenParams({ quality: 'custom' }); return; }
+                  const size = subjectGenSize(genParams.aspect, value);
+                  commitGenParams({ quality: value, width: size.width, height: size.height });
+                }}
+                style={{ width: 82, flexShrink: 0 }}
+              />
+              {genParams.quality === 'custom' && (
+                <>
+                  <DraftNumber
+                    value={genParams.width}
+                    min={64}
+                    max={2048}
+                    ariaLabel={t('subject.genWidth', '宽')}
+                    width={72}
+                    onCommit={(next) => {
+                      const size = clampQwenSize(next, genParams.height);
+                      commitGenParams({ width: size.width, height: size.height });
+                    }}
+                  />
+                  <span style={{ fontSize: 11, opacity: 0.6 }}>×</span>
+                  <DraftNumber
+                    value={genParams.height}
+                    min={64}
+                    max={2048}
+                    ariaLabel={t('subject.genHeight', '高')}
+                    width={72}
+                    onCommit={(next) => {
+                      const size = clampQwenSize(genParams.width, next);
+                      commitGenParams({ width: size.width, height: size.height });
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+          <div data-subject-steps-field>
+            <div style={labelStyle}>{t('subject.genSteps', '步数')}</div>
+            <DraftNumber
+              value={genParams.steps}
+              min={1}
+              max={100}
+              ariaLabel={t('subject.genSteps', '步数')}
+              onCommit={(next) => commitGenParams({ steps: next })}
+            />
+          </div>
+          <div data-subject-seed-field>
+            <div style={labelStyle}>{t('subject.genSeed', '种子')}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <DraftNumber
+                value={genParams.seed}
+                min={-1}
+                max={0x7fffffff}
+                ariaLabel={t('subject.genSeed', '种子')}
+                width={96}
+                onCommit={(next) => commitGenParams({ seed: next })}
+              />
+              <Button
+                size="small"
+                type="text"
+                data-subject-seed-random
+                disabled={genParams.seed === -1}
+                onClick={() => commitGenParams({ seed: -1 })}
+                style={{ fontSize: 11, padding: '0 4px' }}
+              >
+                {t('subject.genSeedRandom', '随机')}
+              </Button>
+            </div>
+          </div>
+          {!isBase && (
+            <div data-subject-baseref-field>
+              <div style={labelStyle}>{t('subject.genUseBaseRef', '引用基础状态')}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Switch
+                  size="small"
+                  data-subject-baseref
+                  checked={genParams.useBaseRef}
+                  disabled={model !== LOCAL_IMAGE_MODEL_KEY}
+                  onChange={(checked) => commitGenParams({ useBaseRef: checked })}
+                />
+                {model !== LOCAL_IMAGE_MODEL_KEY && (
+                  <span data-subject-baseref-hint style={hintStyle}>{t('subject.genBaseRefQwenOnly', '仅 Qwen 支持参考图')}</span>
+                )}
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', gap: 6 }}>
+            <Button size="small" type="text" data-subject-send-canvas onClick={onSendToCanvas}>
+              {t('subject.sendToCanvas', '发送到画布')}
+            </Button>
+            <StateJobButton
+              jobKey={jobKey}
+              disabled={!promptValue.trim()}
+              onStart={onStartGenerate}
+              onCancel={onCancelGenerate}
+            />
+          </div>
+        </div>
+        {node.genJob?.state === 'error' && node.genJob.error && (
+          <div data-subject-gen-error style={{ ...hintStyle, color: theme.toolbar.danger }}>
+            {node.genJob.error}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -1405,6 +1783,21 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     });
     return () => clearCurrentSubjectStateContext(projectId, openState.rootId, openState.stateId);
   }, [openState, openNode, openTree, projectId, openStateName]);
+
+  /**
+   * 刷新/切页签回来：树里还有 running/queued 的 genJob 就按原 jobId 续接。
+   * runJob 内部按 key 去重，两处页面实例同时挂着也不会重复提交同一张图。
+   */
+  useEffect(() => {
+    if (!projectId) return;
+    for (const tr of trees) {
+      for (const n of tr.states ?? []) {
+        if (n.genJob && (n.genJob.state === 'running' || n.genJob.state === 'queued')) {
+          resumeSubjectGeneration({ projectId, tree: tr, node: n });
+        }
+      }
+    }
+  }, [projectId, trees]);
 
   // ===== 列表数据 =====
   const cards = useMemo<SubjectCardData[]>(() => {
@@ -1654,6 +2047,19 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }));
   }, [updateTree]);
 
+  /** 参考素材的唯一写入点：写 genParams.referenceKeys（空 = 不加参考） */
+  const setNodeReference = useCallback((rootId: string, nodeId: string, storageKey: string | null) => {
+    const node = treesRef.current.find((tr) => tr.rootId === rootId)?.states.find((n) => n.id === nodeId);
+    if (!node) return;
+    const p = resolveSubjectGenParams(node);
+    const genParams: SubjectGenParams = {
+      aspect: p.aspect, quality: p.quality, width: p.width, height: p.height,
+      steps: p.steps, cfg: p.cfg, seed: p.seed, useBaseRef: p.useBaseRef,
+      referenceKeys: storageKey ? [storageKey] : [],
+    };
+    updateNode(rootId, nodeId, { genParams });
+  }, [updateNode]);
+
   const renameTree = useCallback((rootId: string, name: string) => {
     const tree = treesRef.current.find((tr) => tr.rootId === rootId);
     if (!tree || tree.name === name) return;
@@ -1798,6 +2204,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
 
   // ===== 媒体来源面板（状态编辑页接收位） =====
   const [panel, setPanel] = useState<{ rootId: string; stateId: string; anchorEl?: HTMLElement | null } | null>(null);
+  /** 参考素材选择页（与画布/导演台同一实现，只收图片） */
+  const [refPanel, setRefPanel] = useState<{ rootId: string; stateId: string; anchorEl?: HTMLElement | null } | null>(null);
 
   /**
    * 唯一媒体写入路径 = linkSubjectStateMedia（CAS 记账 + 首槽替换）。
@@ -2195,6 +2603,17 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           theme={theme}
           maxWidth={maxWidthFor(STATE_MAX_WIDTH)}
           pad={pagePad}
+          actions={(
+            <Button
+              size="small"
+              type="primary"
+              icon={<Plus size={14} />}
+              data-add-state
+              onClick={addState}
+            >
+              {t('subject.addState', '添加状态')}
+            </Button>
+          )}
         >
           <SubjectBreadcrumb
             theme={theme}
@@ -2216,23 +2635,14 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             {stateCountText}
           </span>
         </SubjectPageHeader>
-        {/* 主操作统一放顶部（2026-11-06 用户指令）：添加状态在页头下方，不再埋到列表底端 */}
-        <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
-          <AddTile
-            label={t('subject.addState', '添加状态')}
-            icon={<Plus size={16} />}
-            onClick={addState}
-            theme={theme}
-            dataAttr={{ 'data-add-state': '' }}
-          />
-        </div>
         <div style={scrollStyle}>
-          <div style={{ ...stateFrame.content, paddingTop: 16 }}>
+          <div style={{ ...stateFrame.content, paddingTop: 12 }}>
             {/* 2026-11-08：基础状态是 states[0]，与其余状态共用同一张卡组件、同一个 map */}
             <SubjectStateGrid>
               {(openTree.states ?? []).map((node) => {
                 const isBase = node.id === SUBJECT_BASE_STATE_ID;
                 const first = (node.media ?? [])[0];
+                const jobKey = subjectJobKey(projectId ?? '', openTree.rootId, node.id);
                 return (
                   <StateGridCard
                     key={node.id}
@@ -2248,6 +2658,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     isCover={isCoverState(node.id)}
                     editMode={openState?.stateId === node.id}
                     onToggleEdit={() => toggleEdit(node.id)}
+                    jobKey={jobKey}
+                    persistedJob={node.genJob}
                     editPanel={openState?.stateId === node.id && openNode ? (
                       <StateEditPanel
                         tree={openTree}
@@ -2256,17 +2668,44 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         isDark={isDark}
                         episodes={episodes}
                         visualStyle={visualStyle}
+                        jobKey={jobKey}
                         onUpdateNode={(patch) => updateNode(openTree.rootId, node.id, patch)}
                         onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                             onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
                         onRestoreMedia={(ref) => { void restoreMedia(openTree.rootId, node.id, ref); }}
                         onDeleteHistoryMedia={(ref) => deleteHistoryMedia(openTree.rootId, node.id, ref)}
+                        onStartGenerate={() => {
+                          if (!projectId) return;
+                          // 用最新树取节点：点「生成」会先让提示词失焦写盘，闭包里的 node 可能还是上一版
+                          const latestTree = treesRef.current.find((tr) => tr.rootId === openTree.rootId) ?? openTree;
+                          const latestNode = latestTree.states.find((n) => n.id === node.id) ?? node;
+                          startSubjectGeneration({ projectId, tree: latestTree, node: latestNode });
+                        }}
+                        onCancelGenerate={() => {
+                          if (!projectId) return;
+                          cancelSubjectGeneration(projectId, openTree.rootId, node.id);
+                        }}
+                        onAddReference={(anchor) => setRefPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
+                        onRemoveReference={() => setNodeReference(openTree.rootId, node.id, null)}
+                        onSendToCanvas={() => {
+                          const latestTree = treesRef.current.find((tr) => tr.rootId === openTree.rootId) ?? openTree;
+                          const latestNode = latestTree.states.find((n) => n.id === node.id) ?? node;
+                          nodeActionBus.emit('subject:sendStateToCanvas', {
+                            nodeId: '',
+                            name: isBase ? latestTree.name : (latestNode.state?.trim() || latestTree.name),
+                            prompt: latestNode.fullPrompt || latestNode.deltaPrompt || '',
+                            storageKey: first?.key,
+                            referenceStorageKey: resolveSubjectGenParams(latestNode).referenceKeys[0],
+                          });
+                        }}
                       />
                     ) : undefined}
                     onToggleCover={() => toggleCover(openTree, node.id)}
                     onClick={() => toggleEdit(node.id)}
                     onDelete={isBase ? undefined : () => handleDeleteState(openTree.rootId, node)}
-                    onRename={isBase ? undefined : (next) => updateNode(openTree.rootId, node.id, { state: next })}
+                    onRename={isBase
+                      ? (next) => renameTree(openTree.rootId, next)
+                      : (next) => updateNode(openTree.rootId, node.id, { state: next })}
                     onCanvasGenerate={() => {
                       nodeActionBus.emit('subject:sendStateToCanvas', {
                         nodeId: '',
@@ -2297,6 +2736,20 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           anchorEl={panel.anchorEl}
           current={panelCurrentOf(slotMediaOf(trees.find((x) => x.rootId === panel.rootId), panel.stateId))}
           onPick={(asset) => { void pickMedia(asset); }}
+        />
+      )}
+      {refPanel && (
+        <AssetSlotPicker
+          open
+          onClose={() => setRefPanel(null)}
+          theme={theme}
+          projectId={projectId ?? undefined}
+          anchorEl={refPanel.anchorEl}
+          acceptKinds={['image']}
+          initialTab="canvas"
+          onPick={(pick: AssetSlotPick) => {
+            setNodeReference(refPanel.rootId, refPanel.stateId, pick.storageKey);
+          }}
         />
       )}
     </>

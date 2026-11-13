@@ -612,6 +612,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         ...(sharedParams.params ?? {}),
         stylePrompt: stylePresetPrompt(preset),
         styleName: preset.nameZh,
+        stylePresetId: preset.id,
         styleGuide: styleShotGuide(preset),
       },
     });
@@ -1382,7 +1383,15 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 />
                 <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
                 <Button size="small" type="text" data-director-global-style icon={<Palette size={14} />} style={{ fontSize: 12 }} onClick={() => setStyleGalleryOpen(true)}>
-                  风格{String(sharedParams.params?.['styleName'] ?? '') ? `：${String(sharedParams.params?.['styleName'])}` : ''}
+                  {(() => {
+                    // 风格名优先取导演台自己的可变参数；没选过则回落全剧风格（本剧信息里设的那套）
+                    const name = String(
+                      sharedParams.params?.['styleName']
+                      ?? visualStyle?.name
+                      ?? '',
+                    ).trim();
+                    return name ? `风格：${name}` : '风格';
+                  })()}
                 </Button>
                 {String(sharedParams.params?.['stylePrompt'] ?? '').trim() ? (
                   <Button
@@ -1951,7 +1960,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         <StyleGalleryDialog
           open={styleGalleryOpen}
           onClose={() => setStyleGalleryOpen(false)}
-          selectedId={visualStyle?.presetId ?? null}
+          selectedId={String(sharedParams.params?.['stylePresetId'] ?? visualStyle?.presetId ?? '') || null}
           onSelect={(preset) => handlePickGlobalStyle(preset)}
           theme={theme}
         />

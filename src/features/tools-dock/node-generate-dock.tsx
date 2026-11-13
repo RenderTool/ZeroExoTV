@@ -47,6 +47,7 @@ import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import type { WorkbenchShotReference } from '@/features/canvas-nodes/storyboard/workbench-types.js';
+import { AssetSlotPicker, type AssetSlotKind, type AssetSlotPick } from '@/shared/components/asset-slot-picker.js';
 
 /** 生成模式(宿主节点类型映射;text 模式走文本能力) */
 export type GenerationMode = 'text' | 'image' | 'video' | 'audio';
@@ -454,6 +455,50 @@ export function NodeGenerateDock({
 
   // 参考素材区是否出现：纯文生图模型（Krea2）只吃文本，不给「上传参考图」的假入口
   const supportsReferenceInput = supportedInputTypes.some((t) => t !== 'text');
+
+  // ===== 参考素材统一选择页（2026-11-13）=====
+  const [assetPickerAnchor, setAssetPickerAnchor] = useState<HTMLElement | null>(null);
+  const pickerKinds = useMemo<AssetSlotKind[]>(
+    () => (['image', 'video', 'audio'] as const).filter((k) => supportedInputTypes.includes(k)),
+    [supportedInputTypes],
+  );
+  /** 该节点接受哪些媒体类型，就只列哪类画布节点；纯文本入口仍走文件框 */
+  const canOpenPicker = supportsReferenceInput
+    && pickerKinds.length > 0
+    && !controlledReferences
+    && !(accept && !/(image|video|audio)/.test(accept));
+  const pickerCanvasNodes = useMemo(() => {
+    const graph = store.getGraph();
+    return graph.nodes
+      .filter((n) => n.type === 'image' || n.type === 'video' || n.type === 'audio')
+      .map((n) => {
+        const d = (n.data ?? {}) as Record<string, unknown>;
+        return {
+          id: n.id,
+          type: n.type,
+          title: n.title,
+          storageKey: typeof d.storageKey === 'string' ? d.storageKey : undefined,
+          url: typeof d.url === 'string' ? d.url : undefined,
+          content: typeof d.content === 'string' ? d.content : undefined,
+        };
+      });
+    // graphVersion 变化时重建（订阅 store 的图版本）
+  }, [store, graphVersion]);
+  const handleSlotPick = useCallback((pick: AssetSlotPick) => {
+    if (pick.fromNodeId) {
+      // 画布已有节点：直接连过去，不复制第二个节点
+      nodeActionBus.emit('nodeDock:connectReferenceNode', { nodeId, sourceNodeId: pick.fromNodeId });
+    } else {
+      nodeActionBus.emit('nodeDock:addReferenceNode', {
+        nodeId,
+        kind: pick.kind,
+        title: pick.title,
+        storageKey: pick.storageKey,
+        content: '',
+      });
+    }
+    setAssetPickerAnchor(null);
+  }, [nodeId]);
 
   // 每个连入节点与当前模型的兼容性(蓝勾/红叉)
   const nodeCompatibility = useMemo(() => {
@@ -921,6 +966,7 @@ export function NodeGenerateDock({
             onUpload={controlledReferences ? handleControlledUpload : undefined}
             onExtractFrame={onExtractFrame}
             accept={accept}
+            onOpenPicker={canOpenPicker ? (anchor) => setAssetPickerAnchor(anchor) : undefined}
           />
         </div>
       ) : (
@@ -1007,6 +1053,19 @@ export function NodeGenerateDock({
         </div>
         </div>
       </div>
+      {assetPickerAnchor && canOpenPicker && (
+        <AssetSlotPicker
+          open
+          onClose={() => setAssetPickerAnchor(null)}
+          theme={theme}
+          anchorEl={assetPickerAnchor}
+          acceptKinds={pickerKinds}
+          canvasNodes={pickerCanvasNodes}
+          tabs={['canvas', 'asset', 'subject']}
+          initialTab="canvas"
+          onPick={handleSlotPick}
+        />
+      )}
     </div>
   );
 }

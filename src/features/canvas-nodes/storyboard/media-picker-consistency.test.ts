@@ -71,19 +71,21 @@ describe('@ 块：删除与悬停预览', () => {
 
 describe('主体库来源面板：预览与上传', () => {
   const panel = read('src/features/canvas-nodes/storyboard/subject-media-source-panel.tsx');
+  const picker = read('src/shared/components/asset-slot-picker.tsx');
   const pickPanel = read('src/shared/components/asset-pick-panel.tsx');
 
   it('缩略图统一走共享面板的 ThumbImage（本地键经媒体 URL 提供者解析，不再用旧资源 URL 链）', () => {
     expect(pickPanel).toContain('ThumbImage');
-    expect(panel).toContain('AssetPickPanel');
+    expect(panel).toContain('AssetSlotPicker');
     expect(panel).not.toContain('getResourceUrl');
     expect(panel).not.toContain('AuthorizedImage');
   });
 
-  it('悬停条目有预览区（右侧只读详情）；手动上传是面板内页签按钮', () => {
+  it('悬停条目有预览区（右侧只读详情）；手动上传走面板内「导入资产」同一链', () => {
     expect(pickPanel).toContain('data-asset-detail');
-    expect(pickPanel).toContain('data-asset-pick-upload');
-    expect(panel).toContain('onUploadFiles');
-    expect(panel).toMatch(/const TABS: AssetPickTab\[\] = \[[^\]]*'upload'/);
+    expect(pickPanel).toContain('data-asset-import');
+    expect(picker).toContain('onUploadFiles');
+    expect(picker).toContain("from '@/features/asset-picker/services/upload-asset.js'");
+    expect(picker).toContain('handleUpload');
   });
 });

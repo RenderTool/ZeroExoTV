@@ -1214,6 +1214,25 @@ export function useEditorInteractions({
       });
     });
 
+    // nodeDock:connectReferenceNode: 统一素材选择页选中「画布已有节点」→ 直接连该节点，不复制第二份
+    const unsubConnectRef = nodeActionBus.on('nodeDock:connectReferenceNode', (event: any) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const graph = store.getGraph();
+      const host = graph.nodes.find((n: any) => n.id === event.nodeId);
+      const source = graph.nodes.find((n: any) => n.id === event.sourceNodeId);
+      if (!host || !source) return;
+      if (graph.edges.some((e: any) => e.source?.nodeId === source.id && e.target?.nodeId === host.id)) return;
+      const sourcePin = NODE_OUTPUT_PIN[source.type] ?? 'output';
+      const targetPin = NODE_INPUT_PIN[host.type] ?? 'input';
+      q.execute(new AddEdgeCommand({
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        source: { nodeId: source.id, pinId: sourcePin },
+        target: { nodeId: host.id, pinId: targetPin },
+      }));
+    });
+
     // nodeDock:removeConnection: 面板删除参考素材 → 移除对应连线
     const unsubRemoveRef = nodeActionBus.on('nodeDock:removeConnection', (event: any) => {
       const store = refs.store;
@@ -1383,6 +1402,7 @@ export function useEditorInteractions({
       unsubManageProduction();
       unsubEpisodesDeleted();
       unsubAddRef();
+      unsubConnectRef();
       unsubRemoveRef();
       unsubNovelImport();
       unsubNovelImportInto();
