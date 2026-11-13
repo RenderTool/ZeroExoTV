@@ -470,6 +470,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     return result;
   }, [episodeGroups, scriptEpisodeIds]);
   const [episodeOverride, setEpisodeOverride] = useState<string | null>(null);
+  const placeholderKeyRef = useRef<string | null>(null);
   const activeEpisodeKey = useMemo(() => {
     if (episodeKeys.length === 0) return null;
     const remembered = projectId ? workbenchEpisodeByProject[projectId] : undefined;
@@ -482,7 +483,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     () => (activeEpisodeKey ? (episodeGroups[activeEpisodeKey] ?? []) : shots),
     [activeEpisodeKey, episodeGroups, shots],
   );
-  const showEmptyEpisode = scriptEpisodeIds.length > 0 && Boolean(activeEpisodeKey) && visibleShots.length === 0;
   const episodeOptions = useMemo(() => episodeKeys.map((key) => {
     const count = episodeGroups[key]?.length ?? 0;
     const ep = episodeContext.episodes.find((e) => e.id === key);
@@ -550,13 +550,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     markDirty();
   }, [isActive, projectId, defaultEpisodeId, shots, setWorkbenchActiveEpisode, markDirty]);
 
-  const addSegmentToActiveEpisode = useCallback(() => {
-    if (!activeEpisodeKey) return;
-    const seg = createSegment(1, activeEpisodeKey === UNASSIGNED_EPISODE_KEY ? undefined : activeEpisodeKey);
-    setShots((prev) => [...prev, seg]);
-    setActiveShotId(seg.id);
-    markDirty();
-  }, [activeEpisodeKey, markDirty]);
 
   const handlePickGlobalStyle = useCallback(async (preset: StylePreset) => {
     if (!projectId) return;
@@ -568,6 +561,17 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       message.error(err instanceof Error ? err.message : '设置全剧风格失败');
     }
   }, [projectId, message]);
+
+  // 切到没有片段的分集：自动挂一个空片段（导演台永远不出现空白页）
+  useEffect(() => {
+    if (!isActive || !projectId || !activeEpisodeKey || visibleShots.length > 0) return;
+    if (placeholderKeyRef.current === activeEpisodeKey) return;
+    placeholderKeyRef.current = activeEpisodeKey;
+    const seg = createSegment(1, activeEpisodeKey === UNASSIGNED_EPISODE_KEY ? undefined : activeEpisodeKey);
+    setShots((prev) => [...prev, seg]);
+    setActiveShotId(seg.id);
+    markDirty();
+  }, [isActive, projectId, activeEpisodeKey, visibleShots.length, markDirty]);
 
   /** 公共参数写入口（与 shots 同一防抖链路落盘） */
   const updateSharedParams = useCallback(
@@ -1282,29 +1286,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   return (
     <CanvasTabContentBoundary>
       <div data-workbench-page style={{ position: 'absolute', inset: 0 }}>
-        {showEmptyEpisode ? (
-          <div
-            data-director-episode-empty
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}
-          >
-            <ListVideo size={28} color={theme.toolbar.textMuted} />
-            <div style={{ fontSize: 14, fontWeight: 600, color: theme.toolbar.text }}>本集还没有片段</div>
-            <div style={{ fontSize: 12, color: theme.toolbar.textMuted, textAlign: 'center', maxWidth: 380, lineHeight: 1.7 }}>
-              先在这里新建一段，或让 Agent 按本集剧本拆分镜。切换上方分集可以看别的集。
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Select
-                size="small"
-                value={activeEpisodeKey ?? undefined}
-                options={episodeOptions}
-                onChange={(key: string) => handleEpisodeChange(key)}
-                style={{ minWidth: 170 }}
-                popupMatchSelectWidth={false}
-              />
-              <Button type="primary" size="small" onClick={addSegmentToActiveEpisode}>新建片段</Button>
-            </div>
-          </div>
-        ) : (
         <StoryboardMergedTab
           entities={[]}
           showAssetSidebar={false}
@@ -1570,7 +1551,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           theme={theme}
           isDark={isDark}
         />
-        )}
         {/* 版本操作确认：走项目统一 ConfirmDialog（主题 + zIndex，不用静态 Modal.confirm） */}
         <ConfirmDialog
           open={versionConfirm !== null}
