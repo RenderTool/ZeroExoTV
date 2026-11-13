@@ -346,6 +346,48 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
 
   // ===== T3：触发生成（核心） =====
   defTool(server, ctx, {
+    name: "request_director_run",
+    description: "把导演台运行请求投递给网页执行（唯一执行入口）。MCP 不直接提交 GPU 作业、不改画布/导演台运行态；网页打开同一项目后自动开始，预览、进度、落库都在网页完成。",
+    bits: ["workbench.write"],
+    schema: {
+      projectId: z.string(),
+      selectedIds: z.array(z.string()).optional(),
+      baseUrl: z.string().optional(),
+      dryRun: z.boolean().optional(),
+      confirm: z.boolean().optional(),
+    },
+    handler: async (args) => {
+      guardDryRunConfirm(args);
+      const wb = await readWorkbench(dataRoot(), args.projectId);
+      if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
+      const selectedIds = args.selectedIds?.length ? args.selectedIds : wb.shots.map((s) => s.id);
+      if (selectedIds.length === 0) throw new McpError("VALIDATION", "导演台没有片段");
+      if (args.dryRun) return { written: false, dryRun: true, projectId: args.projectId, selectedIds };
+      const requestId = `zxrun_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+      const dir = path.join(dataRoot(), ".lf", "zeroexo", "app_meta", "director-jobs");
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, `${requestId}.json`),
+        JSON.stringify({
+          schemaVersion: 1,
+          requestId,
+          projectId: args.projectId,
+          selectedIds,
+          ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
+          requestedAt: new Date().toISOString(),
+        }, null, 2),
+        "utf8",
+      );
+      return {
+        queued: true,
+        requestId,
+        selectedIds,
+        hint: "请求已投递；网页打开同一项目后会自动开始。不要再用 run_generation 直接提交，否则会和网页运行态分叉。",
+      };
+    },
+  });
+
+  defTool(server, ctx, {
     name: "run_generation",
     description: "经 MCP 直接向 ComfyUI 插件提交导演台生成作业。selectedIds 省略=全部片段；按时间线解析引导（显式槽 > 前一段 media.guide > use_prev_guide）。开启延续法时：必须有 plan_continuity_edit 计划、按时间线连续选段、严格串行（上一段 success 拿到 guide 才提交下一段），否则直接拒绝。低资源测试用 steps/scaleFactor 调小。",
     bits: ["workbench.write"],

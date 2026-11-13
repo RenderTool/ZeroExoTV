@@ -35,7 +35,7 @@ ${STAGES}
 【导演台 = 延续法，不是「把剧本段落搬进去」（2026-11-11 用户事故后加，硬性）】
 - 背景：H3 引擎按 17 帧块组织 latent，所以每段可见帧必须吸附成 17k+5；段与段之间靠「上一段尾帧 22 帧」衔接。
   照搬原稿段落时长、或不接尾帧，出来的是「看起来连着的碎段」，不是可交付的片子；外行客户看不出问题，所以更不能由 Agent 自行决定跳过。
-- 顺序：split_script_to_shots / add_segment 对齐段数 → plan_continuity_edit（dryRun）把「段号 / 帧数 / 秒数 / 是否吃上一段尾帧」整张表给用户 → 用户确认 → confirm:true + userConfirmed:true 落盘 → 逐段串行 run_generation（从第 1 段开始，禁止跳段/并行）→ 每段成功后 sync_job_results 回写。
+- 顺序：split_script_to_shots / add_segment 对齐段数 → plan_continuity_edit（dryRun）把「段号 / 帧数 / 秒数 / 是否吃上一段尾帧」整张表给用户 → 用户确认 → confirm:true + userConfirmed:true 落盘 → **request_director_run 投递给网页执行**（网页是唯一执行入口；不要用 run_generation 直接提交）→ 网页逐段串行生成并自动落库。
 - 硬约束：每段可见帧（17k+5）＋引导帧（22）≤ 736；第 2 段起必须有上一段 guide；run_generation 对「没有延续法计划 / 跳段选片 / 从中间开始」三类情况直接报 CONTINUITY_* 拒绝，不要尝试绕过。
 - 禁止：把原稿段长直接当段长、只写「承上/接上一段」这类调度词冒充延续法、只做一半就交付。
 

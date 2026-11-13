@@ -32,6 +32,7 @@ import { History, Link2, Link2Off, Palette, Star, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import { useMcpDirectorJobs } from '@/features/mcp-director-jobs/use-mcp-director-jobs.js';
 import {
   UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys,
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
@@ -917,6 +918,12 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     },
     [comfyRun, subjects, projectId, trackMode, exitBatchMode, message, t],
   );
+
+  // MCP 只投递请求；真正运行必须由当前网页执行（预览/进度/落库都归网页）
+  useMcpDirectorJobs({
+    projectId,
+    onRequest: (req) => startRunNow(req.selectedIds ?? []),
+  });
 
   /** 批量导轨「生成」：确认勾选后直接开始。 */
   const openBatchPreflight = useCallback(() => {
