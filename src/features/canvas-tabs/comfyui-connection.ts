@@ -109,14 +109,19 @@ export function pickDefaultModels(
   models: { unet: string[]; vae: string[]; clip: string[] },
   current: ComfyuiConnectionPrefs['models'],
 ): { unet: string; videoVae: string; audioVae: string; clip: string } {
-  const pick = (list: string[], keyword: string, currentVal: string): string => {
-    if (currentVal && list.includes(currentVal)) return currentVal;
-    return list.find((f) => f.toLowerCase().includes(keyword)) ?? list[0] ?? '';
+  /**
+   * 只允许 MiniMax H3 对应的模型：云端/第三方仓库经常混着 LTX、Wan 的 VAE，
+   * 名字里没有 h3 的一律不自动选，宁可留空让用户明确选兼容版本（第三方量化也可以）。
+   */
+  const pick = (list: string[], patterns: RegExp[], currentVal: string): string => {
+    const compatible = (name: string): boolean => patterns.some((p) => p.test(name));
+    if (currentVal && list.includes(currentVal) && compatible(currentVal)) return currentVal;
+    return list.find(compatible) ?? '';
   };
   return {
-    unet: pick(models.unet, 'minimax_h3', current.unet),
-    videoVae: pick(models.vae, 'video', current.videoVae) || pick(models.vae, 'minimax_h3', current.videoVae),
-    audioVae: pick(models.vae, 'audio', current.audioVae),
-    clip: pick(models.clip, 'minimax_h3', current.clip),
+    unet: pick(models.unet, [/minimax_h3/i, /fasth3/i], current.unet),
+    videoVae: pick(models.vae, [/minimax_h3[^/]*video_vae/i, /h3[^/]*video_vae/i, /video_vae[^/]*h3/i], current.videoVae),
+    audioVae: pick(models.vae, [/minimax_h3[^/]*audio_vae/i, /h3[^/]*audio_vae/i, /audio_vae[^/]*h3/i], current.audioVae),
+    clip: pick(models.clip, [/qwen3vl[^/]*minimax_h3/i, /qwen3vl[^/]*h3/i, /h3[^/]*qwen3vl/i], current.clip),
   };
 }

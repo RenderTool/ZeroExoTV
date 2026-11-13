@@ -261,13 +261,26 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const comfyDone = endpoint.connected;
   const advanceRoot = currentDataRootPath();
 
+  /** 只列 MiniMax H3 对应版本；云端/第三方仓库的普通 VAE 不混进来 */
+  const isCompatModel = (slot: string, name: string): boolean => {
+    if (slot === 'unet') return /minimax_h3|fasth3/i.test(name);
+    if (slot === 'videoVae') return /minimax_h3.*video_vae|h3.*video_vae|video_vae.*h3/i.test(name);
+    if (slot === 'audioVae') return /minimax_h3.*audio_vae|h3.*audio_vae|audio_vae.*h3/i.test(name);
+    if (slot === 'clip') return /qwen3vl.*minimax_h3|qwen3vl.*h3|h3.*qwen3vl/i.test(name);
+    return true;
+  };
   /** 模型四件套：只给当前 ComfyUI 实际返回的文件名，推荐项加后缀，用户仍可自由改选 */
   const modelSlots: Array<{ slot: 'unet' | 'videoVae' | 'audioVae' | 'clip'; label: string; list: string[] }> = [
-    { slot: 'unet', label: t('onboarding.modelUnet', '视频主模型'), list: availableModels.unet },
-    { slot: 'videoVae', label: t('onboarding.modelVideoVae', '视频 VAE'), list: availableModels.vae },
-    { slot: 'audioVae', label: t('onboarding.modelAudioVae', '音频 VAE'), list: availableModels.vae },
-    { slot: 'clip', label: t('onboarding.modelClip', '文本编码器'), list: availableModels.clip },
+    { slot: 'unet', label: t('onboarding.modelUnet', '视频主模型'), list: availableModels.unet.filter((n) => isCompatModel('unet', n)) },
+    { slot: 'videoVae', label: t('onboarding.modelVideoVae', '视频 VAE'), list: availableModels.vae.filter((n) => isCompatModel('videoVae', n)) },
+    { slot: 'audioVae', label: t('onboarding.modelAudioVae', '音频 VAE'), list: availableModels.vae.filter((n) => isCompatModel('audioVae', n)) },
+    { slot: 'clip', label: t('onboarding.modelClip', '文本编码器'), list: availableModels.clip.filter((n) => isCompatModel('clip', n)) },
   ];
+  const vaeListEmpty = (availableModels.vae.length > 0
+    && (!modelSlots.find((s) => s.slot === 'videoVae')?.list.length
+      || !modelSlots.find((s) => s.slot === 'audioVae')?.list.length));
+  const currentVaeUnsupported = (Boolean(models.videoVae) && !isCompatModel('videoVae', models.videoVae))
+    || (Boolean(models.audioVae) && !isCompatModel('audioVae', models.audioVae));
   const modelOptionLabel = (slot: string, name: string): string => {
     if (slot === 'unet' && name.includes('minimax_h3_hybrid_fl2va_ref2va_b15-49-int8')) return `${name}（推荐）`;
     if (slot === 'videoVae' && name === 'minimax_h3_video_vae_fp16.safetensors') return `${name}（推荐）`;
@@ -450,8 +463,13 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               </div>
             ))}
             <span style={hintStyle(theme)}>
-              {t('onboarding.modelPickHint', '推荐只是标注，可以自由改选；不确定就用带「推荐」的那一项。')}
+              {t('onboarding.modelPickHint', '推荐只是标注，可以自由改选；不确定就用带「推荐」的那一项。视频/音频 VAE 必须是 MiniMax H3 专用版本；云端没有就换文件名带 h3 的第三方量化版，别选普通 VAE。')}
             </span>
+            {(vaeListEmpty || currentVaeUnsupported) ? (
+              <span data-onboarding-vae-warning style={{ fontSize: 11, lineHeight: 1.65, color: '#d97706' }}>
+                {t('onboarding.vaeWarning', '当前连接里没有可用的 MiniMax H3 视频/音频 VAE（或当前选中的不是 H3 版本）。请更换为文件名带 h3 的兼容版本；第三方量化版也可以，但不要选 LTX/Wan 的普通 VAE。')}
+              </span>
+            ) : null}
           </div>
           {/* 机器档位 → 推荐用法（只讲能不能做，不讲量化术语） */}
           <div data-model-recommendations style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
