@@ -1076,7 +1076,19 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment],
   );
 
-  const selectedShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0];
+  const selectedShot: WorkbenchShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0] ?? {
+    id: '__empty__',
+    number: 1,
+    description: '',
+    shotType: '',
+    duration: 5,
+    imagePrompt: '',
+    videoPrompt: '',
+    status: 'pending',
+    clipState: 'placeholder',
+    references: [],
+    paramValues: {},
+  };
   const selectedShotIndex = selectedShot ? visibleShots.findIndex((s) => s.id === selectedShot.id) : 0;
 
   /**
@@ -1230,7 +1242,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   if (!isActive) return null;
 
   // 容器未就绪：渲染加载提示，不白屏、不显示任何占位状态文案
-  if (loadState !== 'ready' || !selectedShot) {
+  if (loadState !== 'ready') {
     return (
       <CanvasTabContentBoundary>
         <div
