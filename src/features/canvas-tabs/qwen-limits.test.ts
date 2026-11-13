@@ -6,6 +6,7 @@ describe('Qwen 2K 尺寸限制', () => {
     expect(clampQwenEdge(4096)).toBe(QWEN_MAX_EDGE);
     expect(clampQwenEdge(10)).toBe(64);
     expect(clampQwenEdge(1345)).toBe(1344);
+    expect(clampQwenSize(340, 240)).toEqual({ width: 352, height: 256 });
   });
 
   it('总像素超过 4MP 时按比例缩小', () => {

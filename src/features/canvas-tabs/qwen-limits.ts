@@ -13,7 +13,7 @@ export const QWEN_DEFAULT_STEPS = 25;
 /** 夹取到 64..2048，并按 16 对齐（ComfyUI latent 步长 16） */
 export function clampQwenEdge(value: number, fallback = 1024): number {
   const n = Number.isFinite(value) ? value : fallback;
-  return Math.max(64, Math.min(QWEN_MAX_EDGE, Math.round(n / 16) * 16));
+  return Math.max(64, Math.min(QWEN_MAX_EDGE, Math.round(n / 32) * 32));
 }
 
 /** 同时夹最长边与总像素（超 4MP 时按比例缩到 4MP 内） */
