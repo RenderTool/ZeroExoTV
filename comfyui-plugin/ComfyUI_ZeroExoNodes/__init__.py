@@ -802,8 +802,14 @@ async def cancel_job(request):
     job = JOBS.get(request.match_info["job_id"])
     if not job:
         return web.json_response({"ok": False, "error": "job 不存在"}, status=404)
-    # 还没真正提交给 ComfyUI 的排队项：直接从插件队列移除
-    VIDEO_QUEUE[:] = [x for x in VIDEO_QUEUE if x.get("job", {}).get("jobId") != job.get("jobId")]
+    # 取消任意一段 = 取消同项目还没提交的整条批量队列，否则 worker 会继续把下一段送进 ComfyUI，
+    # 页面已经显示取消、云端却还在跑。
+    if job.get("kind") == "reference_video":
+        project = (job.get("params") or {}).get("project")
+        VIDEO_QUEUE[:] = [
+            x for x in VIDEO_QUEUE
+            if (x.get("job", {}).get("params") or {}).get("project") != project
+        ]
     if job.get("promptId"):
         try:
             pq = PromptServer.instance.prompt_queue
