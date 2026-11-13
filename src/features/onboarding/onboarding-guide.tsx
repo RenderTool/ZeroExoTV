@@ -138,7 +138,9 @@ function ModelNamePicker({
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
       showSearch
-      filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+      // 当前值就是完整模型名时，默认过滤会只剩它自己，用户看不到云端其它模型。
+      // 这里始终展示云端完整列表；输入内容仍可通过 onChange 改成任意模型名。
+      filterOption={() => true}
       style={{ flex: 1, minWidth: 0 }}
     />
   );
