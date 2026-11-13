@@ -528,7 +528,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(document.body.textContent).not.toContain('悬停状态卡可编辑或删除');
   });
 
-  it('状态卡悬停露出「编辑 / 删除」；基础状态不提供删除入口', async () => {
+  it('状态卡悬停露出「换图 / 删除」；编辑靠点卡片，基础状态不提供删除入口', async () => {
     renderPages(makeTree());
     await openSubjectPage();
 
@@ -537,14 +537,14 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(actions.style.opacity).toBe('0');
     fireEvent.mouseEnter(card);
     await waitFor(() => expect(actions.style.opacity).toBe('1'));
-    expect(actions.querySelector('[data-state-action="edit"]')).toBeTruthy();
+    expect(actions.querySelector('[data-state-action="edit"]')).toBeNull();
     expect(actions.querySelector('[data-state-action="delete"]')).toBeTruthy();
 
     // 基础状态是主体树根：只能进入编辑，没有删除入口
     const base = document.querySelector('[data-state-card="__base__"]') as HTMLElement;
     fireEvent.mouseEnter(base);
     await waitFor(() => expect((base.querySelector('[data-state-actions]') as HTMLElement).style.opacity).toBe('1'));
-    expect(base.querySelector('[data-state-action="edit"]')).toBeTruthy();
+    expect(base.querySelector('[data-state-action="edit"]')).toBeNull();
     expect(base.querySelector('[data-state-action="delete"]')).toBeNull();
   });
 
@@ -641,26 +641,14 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(screen.getByText('已选 3 集')).toBeTruthy();
   });
 
-  it('提示词区只显示全剧风格（不再每个状态各配一套下拉）', async () => {
-    scriptMock.meta = { visualStyle: { presetId: 'wong-kar-wai', name: '王家卫', prompt: '王家卫电影风格, 高饱和情绪化色彩' } };
+  it('状态页不再放全剧风格入口（归本剧信息 / 导演台）', async () => {
+    scriptMock.meta = { visualStyle: { presetId: 'wong-kar-wai', name: '王家卫', prompt: '王家卫电影风格' } };
     renderPages(makeTree());
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    expect(document.querySelector('[data-prompt-style-summary]')).toBeNull();
     expect(document.querySelector('[data-prompt-style-form]')).toBeNull();
-    const summary = document.querySelector('[data-prompt-style-summary]');
-    expect(summary?.textContent).toContain('王家卫');
-    expect(summary?.textContent).toContain('全剧风格');
-  });
-
-  it('主体面板「全剧风格」整行直接打开风格画廊', async () => {
-    renderPages(makeTree());
-    await openSubjectPage();
-    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
-    await waitFor(() => expect(document.querySelector('[data-prompt-style-summary]')).toBeTruthy());
-    fireEvent.click(document.querySelector('[data-prompt-style-summary]') as Element);
-    await waitFor(() => expect(document.querySelector('[data-style-gallery]')).toBeTruthy());
-    expect(document.querySelectorAll('[data-style-card]').length).toBeGreaterThan(20);
   });
 
   it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {

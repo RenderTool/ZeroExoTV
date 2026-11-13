@@ -35,7 +35,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
 import {
   ArrowLeft,
-  Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
+  Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
   Shapes, Square, Star, Trash2, UserRound, Wand2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -94,9 +94,6 @@ import {
   type SubjectStateMediaAsset,
 } from './subject-state-media';
 import { SubjectMediaSourcePanel } from './subject-media-source-panel';
-import { StyleGalleryDialog } from './style-gallery-dialog';
-import { saveGlobalStyle } from './global-style';
-import type { StylePreset } from '@/shared/style-presets.js';
 import { SubjectMediaThumb, useSubjectMediaAlive } from './subject-media-preview';
 import {
   SUBJECT_STATE_CARD_GAP,
@@ -891,19 +888,6 @@ function StateGridCard({
                 <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
               </IconButton>
             </Tooltip>
-            {!editMode && (
-              <Tooltip title={t('subject.editState', '编辑状态')}>
-                <IconButton
-                  theme={theme}
-                  size="sm"
-                  aria-label={t('subject.editState', '编辑状态')}
-                  data-state-action="edit"
-                  onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
-                >
-                  <Pencil size={13} />
-                </IconButton>
-              </Tooltip>
-            )}
             {onDelete && (
               <Tooltip title={t('subject.deleteState', '删除状态')}>
                 <IconButton
@@ -932,7 +916,7 @@ function StateGridCard({
  * data-subject-page="state" 保留为「当前有状态处于编辑态」的口径标记。
  */
 function StateEditPanel({
-  tree, node, theme, isDark, episodes, visualStyle, onPickGlobalStyle, onUpdateNode,
+  tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
   onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
 }: {
   tree: SubjectTree;
@@ -940,9 +924,8 @@ function StateEditPanel({
   theme: ThemeConfig;
   isDark: boolean;
   episodes: Array<{ number: number; title?: string }>;
-  /** 全剧视觉风格（只读；点整行打开风格画廊） */
+  /** 全剧视觉风格（只读；风格入口在本剧信息/导演台） */
   visualStyle: ScriptVisualStyle | null;
-  onPickGlobalStyle: () => void;
   onUpdateNode: (patch: Partial<SubjectTreeNode>) => void;
   onReplaceMedia: (anchor: HTMLElement) => void;
   onRemoveMedia: () => void;
@@ -1141,33 +1124,6 @@ function StateEditPanel({
                 {t('subject.copyPrompt', '复制')}
               </Button>
             </div>
-            {/* 全剧风格（2026-11-13 用户指令）：整行可点，直接打开风格画廊；不用先去「本剧信息」 */}
-            <button
-              type="button"
-              data-prompt-style-summary
-              onClick={onPickGlobalStyle}
-              title={t('subject.globalStylePickHint', '点击选择 / 更换全剧风格')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginBottom: 10, padding: '6px 8px',
-                borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', minWidth: 0,
-                border: `1px solid ${visualStyle ? 'rgba(128,128,128,0.25)' : theme.toolbar.accent}`,
-                background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-              }}
-            >
-              <span style={{ fontSize: 11, color: theme.toolbar.textMuted, flexShrink: 0 }}>{t('subject.globalStyle', '全剧风格')}</span>
-              <span style={{ fontSize: 12, fontWeight: 500, color: theme.toolbar.text, flexShrink: 0 }}>
-                {visualStyle?.name ?? t('subject.globalStyleUnset', '未设置')}
-              </span>
-              <span
-                title={visualStyle?.prompt ?? ''}
-                style={{ fontSize: 11, color: theme.toolbar.textMuted, minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              >
-                {visualStyle?.prompt ?? t('subject.globalStyleHint', '点击选择一套全剧风格')}
-              </span>
-              <span style={{ fontSize: 11, color: theme.toolbar.accent, flexShrink: 0 }}>
-                {visualStyle ? t('subject.globalStyleChange', '更换') : t('subject.globalStyleChoose', '选择')}
-              </span>
-            </button>
             <DraftPromptField
               key={node.id}
               value={promptValue}
@@ -1361,7 +1317,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   // ===== 剧集列表（出现集数候选）+ 全剧风格 =====
   const [episodes, setEpisodes] = useState<Array<{ number: number; title?: string }>>([]);
   const [visualStyle, setVisualStyle] = useState<ScriptVisualStyle | null>(null);
-  const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
   useEffect(() => {
     if (!projectId) { setEpisodes([]); setVisualStyle(null); return; }
     let cancelled = false;
@@ -1512,24 +1467,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }
     return c;
   }, [cards]);
-
-  /** 全剧风格：直接从主体面板打开画廊；选中即写 meta + 统一改写提示词并重读本地树 */
-  const handlePickGlobalStyle = useCallback(async (preset: StylePreset) => {
-    if (!projectId) return;
-    try {
-      const res = await saveGlobalStyle(projectId, preset);
-      setVisualStyle(res.visualStyle);
-      const sb = await readStoryboardContainer(projectId);
-      const next = Array.isArray(sb?.subjectTree) ? (sb.subjectTree as SubjectTree[]) : [];
-      treesRef.current = next;
-      setTrees(next);
-      antdMessage.success(res.synced > 0
-        ? t('subject.globalStyleApplied', '已切换全剧风格，{{n}} 个提示词已同步', { n: res.synced })
-        : t('subject.globalStyleAppliedNoPrompt', '已切换全剧风格'));
-    } catch (err) {
-      antdMessage.error(err instanceof Error ? err.message : t('subject.globalStyleFailed', '设置全剧风格失败'));
-    }
-  }, [projectId, antdMessage, t]);
 
   /** 新手可见的项目体检（2026-11-13）：只列「还差什么」，一键补能补的 */
   const subjectHealth = useMemo(() => {
@@ -2135,7 +2072,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
               ))}
             </div>
           )}
-          {(subjectHealth.noPrompt.length > 0 || subjectHealth.noImage.length > 0 || !visualStyle) && (
+          {(subjectHealth.noPrompt.length > 0 || subjectHealth.noImage.length > 0) && (
             <div
               data-subject-health
               style={{
@@ -2145,12 +2082,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                 background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
               }}
             >
-              {!visualStyle && (
-                <div data-subject-health-style style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: theme.toolbar.text }}>还没设全剧风格</span>
-                  <Button size="small" onClick={() => setStyleGalleryOpen(true)}>选择风格</Button>
-                </div>
-              )}
               {subjectHealth.noPrompt.length > 0 && (
                 <div data-subject-health-prompt style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 12, color: theme.toolbar.text }}>有 {subjectHealth.noPrompt.length} 个主体还没提示词</span>
@@ -2293,7 +2224,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         isDark={isDark}
                         episodes={episodes}
                         visualStyle={visualStyle}
-                        onPickGlobalStyle={() => setStyleGalleryOpen(true)}
                         onUpdateNode={(patch) => updateNode(openTree.rootId, node.id, patch)}
                         onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                         onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
@@ -2338,13 +2268,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           onPick={(asset) => { void pickMedia(asset); }}
         />
       )}
-      <StyleGalleryDialog
-        open={styleGalleryOpen}
-        onClose={() => setStyleGalleryOpen(false)}
-        selectedId={visualStyle?.presetId ?? null}
-        onSelect={(preset) => { void handlePickGlobalStyle(preset); }}
-        theme={theme}
-      />
     </>
   );
 });

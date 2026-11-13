@@ -35,6 +35,9 @@ import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import {
   UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys,
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
+import { StyleGalleryDialog } from '@/features/canvas-nodes/storyboard/style-gallery-dialog.js';
+import { saveGlobalStyle } from '@/features/canvas-nodes/storyboard/global-style.js';
+import type { StylePreset } from '@/shared/style-presets.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
@@ -71,7 +74,7 @@ import type { TimelineClipData } from '@/features/canvas-nodes/storyboard/timeli
 import { DIRECTOR_ARROW_SIZE, DIRECTOR_CARD_GAP, DIRECTOR_CARD_WIDTH_BASE, TRACK_CLIP_TOP, directorArrowTone, directorCardHeight } from '@/features/canvas-nodes/storyboard/timeline-constants.js';
 import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
-import { readScript, watchScript, displayEpisodeTitle } from '@/entities/script-store.js';
+import { readScript, watchScript, displayEpisodeTitle, type ScriptVisualStyle } from '@/entities/script-store.js';
 import type {
   WorkbenchNodeData,
   WorkbenchShot,
@@ -239,6 +242,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    * 主体列表按「出现集数」排序（命中本集/未标注前、其它集后 +「标注为第 N 集」小字）。
    * activeEpisodeId 取不到 = null → 不重排不加标签（与主体库 StoryboardSubjectTree 同口径）。
    */
+  const [visualStyle, setVisualStyle] = useState<ScriptVisualStyle | null>(null);
+  const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
   const [episodeContext, setEpisodeContext] = useState<{
     activeEpisodeId: string | null;
     numberById: Record<string, number>;
@@ -428,7 +433,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       return;
     }
     let cancelled = false;
-    const apply = (e: { episodes?: Array<{ id?: string; number: number; title?: string }>; activeEpisodeId?: string } | null) => {
+    const apply = (e: { episodes?: Array<{ id?: string; number: number; title?: string }>; activeEpisodeId?: string; meta?: { visualStyle?: ScriptVisualStyle } } | null) => {
       if (cancelled) return;
       const numberById: Record<string, number> = {};
       const episodes: Array<{ id: string; number: number; title?: string }> = [];
@@ -439,6 +444,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       }
       const active = typeof e?.activeEpisodeId === 'string' ? e.activeEpisodeId : null;
       setEpisodeContext({ activeEpisodeId: active && numberById[active] != null ? active : null, numberById, episodes });
+      setVisualStyle(e?.meta?.visualStyle ?? null);
     };
     void readScript(pid).then(apply);
     const un = watchScript(pid, apply);
@@ -551,6 +557,17 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     setActiveShotId(seg.id);
     markDirty();
   }, [activeEpisodeKey, markDirty]);
+
+  const handlePickGlobalStyle = useCallback(async (preset: StylePreset) => {
+    if (!projectId) return;
+    try {
+      const res = await saveGlobalStyle(projectId, preset);
+      setVisualStyle(res.visualStyle);
+      message.success(res.synced > 0 ? `已切换全剧风格，${res.synced} 个主体提示词已同步` : '已切换全剧风格');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '设置全剧风格失败');
+    }
+  }, [projectId, message]);
 
   /** 公共参数写入口（与 shots 同一防抖链路落盘） */
   const updateSharedParams = useCallback(
@@ -1381,6 +1398,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   popupMatchSelectWidth={false}
                 />
                 <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
+                <Button size="small" type="text" data-director-global-style style={{ fontSize: 12 }} onClick={() => setStyleGalleryOpen(true)}>
+                  全剧风格{visualStyle ? `：${visualStyle.name}` : ''}
+                </Button>
               </div>
             ) : null,
             tracks: [track],
@@ -1898,6 +1918,13 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             </div>
           )}
         </Modal>
+        <StyleGalleryDialog
+          open={styleGalleryOpen}
+          onClose={() => setStyleGalleryOpen(false)}
+          selectedId={visualStyle?.presetId ?? null}
+          onSelect={(preset) => { void handlePickGlobalStyle(preset); }}
+          theme={theme}
+        />
       </div>
     </CanvasTabContentBoundary>
   );
