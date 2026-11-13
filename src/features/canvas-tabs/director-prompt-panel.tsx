@@ -1252,7 +1252,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                 title={t('director.guideRemove', '移除引导')}
                 onClick={(e) => { e.stopPropagation(); onShotChange({ guide: undefined }); }}
                 style={{
-                  position: 'absolute', top: -6, right: -6, width: 18, height: 18, padding: 0, zIndex: 4,
+                  position: 'absolute', top: 2, right: 2, width: 18, height: 18, padding: 0, zIndex: 10,
                   borderRadius: '50%', border: `1px solid ${palette.popBorder}`, background: palette.popBg,
                   color: palette.sub, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 }}
@@ -1289,6 +1289,18 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                   <span style={{ fontSize: 10, color: palette.sub }}>
                     {t('director.guideBadge', '引导')}{shot.guide.frames ? ` · ${shot.guide.frames}f` : ''}
                   </span>
+                  <button
+                    type="button"
+                    data-guide-remove-visible
+                    onClick={(e) => { e.stopPropagation(); setHoverGuide(false); onShotChange({ guide: undefined }); }}
+                    style={{
+                      alignSelf: 'flex-start', height: 24, padding: '0 8px', borderRadius: 5,
+                      border: `1px solid ${palette.popBorder}`, background: 'transparent',
+                      color: palette.sub, fontSize: 11, cursor: 'pointer',
+                    }}
+                  >
+                    {t('director.guideRemove', '移除引导')}
+                  </button>
                 </span>
               )}
             </span>
