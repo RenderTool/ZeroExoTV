@@ -46,25 +46,40 @@ export function RootGate({ open }: RootGateProps): React.ReactElement {
   }, [open]);
 
   /**
-   * 一次点击两条路径（刷新后权限恢复纪律：不允许自动弹 requestPermission）：
-   * 1. 有已保存句柄 → requestPermission 一次点击恢复授权 → 整页刷新重绑驱动；
-   * 2. 无句柄/恢复被拒 → 走 activateRoot：重选目录（+可选迁移）。
+   * 「使用上次目录」：只走已保存句柄的权限恢复。
+   * 与「选择文件夹」拆成两个按钮——恢复失败时不能再顺手调 picker，
+   * 否则 requestPermission 已经吃掉用户手势，picker 会静默不弹。
    */
-  const handlePick = useCallback(async () => {
+  const handleRestore = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
       const restored = await withPermissionPrompt(() => restoreRoot(true));
       if (restored) {
-        reloadWithDisk(); // 驱动在实例 ready 时选定，运行中授权必须刷新避免双轨
+        reloadWithDisk();
         return;
       }
+      setError('没有可恢复的上次目录，请点「选择文件夹」重新选择');
     } catch {
-      /* 恢复失败（拒绝/异常）→ 落到新选目录路径 */
+      setError('恢复上次目录失败，请点「选择文件夹」重新选择');
+    } finally {
+      setBusy(false);
     }
-    const outcome = await activateRoot({ migrate: migrate && items > 0 });
-    setBusy(false);
-    if (outcome.status === 'error') setError('没能打开文件夹，请重试');
+  }, []);
+
+  /** 「选择文件夹」：必须直接调系统选择器，前面不能有 await（会吃掉用户手势） */
+  const handlePick = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const outcome = await activateRoot({ migrate: migrate && items > 0 });
+      if (outcome.status === 'error') setError('没能打开文件夹，请重试');
+      if (outcome.status === 'cancelled') setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '没能打开文件夹，请重试');
+    } finally {
+      setBusy(false);
+    }
   }, [migrate, items]);
 
   return (
@@ -76,9 +91,14 @@ export function RootGate({ open }: RootGateProps): React.ReactElement {
       mask={{ closable: false }}
       keyboard={false}
       footer={
-        <Button type="primary" onClick={handlePick} loading={busy} disabled={!supported}>
-          选择文件夹
-        </Button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={() => void handleRestore()} loading={busy}>
+            使用上次目录
+          </Button>
+          <Button type="primary" onClick={() => void handlePick()} loading={busy} disabled={!supported}>
+            选择文件夹
+          </Button>
+        </div>
       }
       centered
     >
