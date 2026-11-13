@@ -98,7 +98,9 @@ export function setRootHandleForTest(handle: DirHandle | null): void {
 
 /** 用户手动选择目录（必须由点击等用户手势触发） */
 export async function pickRoot(suggestPath?: string): Promise<string> {
-  await httpFsReady;
+  // 不能先 await 任何探测：httpFsReady 慢/失败会吃掉用户手势，
+  // showDirectoryPicker 随后抛 SecurityError，表现为“点选择文件夹没反应、一直停在选择目录页”。
+  // 目录选择本身只依赖浏览器 FSA，不需要等本地数据服务。
   // startIn 只接受两种形状：WellKnownDirectory 字符串枚举，或 { mode: 'path', path }
   // 传对象字面量（如 { id: 'documents' }）会直接抛 TypeError
   type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };
