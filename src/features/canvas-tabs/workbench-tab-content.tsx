@@ -28,14 +28,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Checkbox, Modal, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { History, Link2, Link2Off, ListChecks, ListVideo, Star, Trash2 } from 'lucide-react';
+import { History, Link2, Link2Off, ListVideo, Star, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import {
-  UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys, pickInitialEpisodeKey,
+  UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys,
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
-import { buildEpisodeCheck } from '@/features/canvas-nodes/storyboard/workbench-episode-check.js';
 import { CanvasTabContentBoundary } from './CanvasTabContentBoundary.js';
 import {
   ensureWorkbenchContainer,
@@ -446,47 +445,44 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     return () => { cancelled = true; un(); };
   }, [isActive, projectId]);
 
-  // 2026-11-13 导演台按集切换：episodeId 分组 → 当前集可见片段；未分集单列一桶
+  // 2026-11-13 导演台按集切换：一个地点/集一份；默认第一集，其它集为空
   const workbenchEpisodeByProject = useViewPrefsStore((s) => s.workbench.activeEpisodeByProject);
   const setWorkbenchActiveEpisode = useViewPrefsStore((s) => s.setWorkbenchActiveEpisode);
   const episodeGroups = useMemo(() => groupShotsByEpisode(shots), [shots]);
   const scriptEpisodeIds = useMemo(() => episodeContext.episodes.map((e) => e.id), [episodeContext.episodes]);
+  /** 默认集 = 第一集正片（跳过「故事大纲/设定」这类非正片条目） */
+  const defaultEpisodeId = useMemo(() => {
+    const list = episodeContext.episodes;
+    const drama = list.find((e) => !/(大纲|设定|梗概|人物小传|分集)/.test(e.title ?? ''));
+    return (drama ?? list[0])?.id ?? null;
+  }, [episodeContext.episodes]);
   const episodeKeys = useMemo(() => {
-    // 剧本里的集全部列出（空集置灰，方便看出还差哪几集）；再补剧本已删但仍有片段的集
     const result = [...scriptEpisodeIds];
     for (const key of orderEpisodeKeys(episodeGroups, scriptEpisodeIds)) {
-      if (!result.includes(key)) result.push(key);
+      if (key !== UNASSIGNED_EPISODE_KEY && !result.includes(key)) result.push(key);
     }
     return result;
   }, [episodeGroups, scriptEpisodeIds]);
-  /** 用户手动选过的集（优先）；失效时回落到记忆/剧本当前集/第一个有片段的集 */
   const [episodeOverride, setEpisodeOverride] = useState<string | null>(null);
-  const [episodeCheckOpen, setEpisodeCheckOpen] = useState(false);
   const activeEpisodeKey = useMemo(() => {
     if (episodeKeys.length === 0) return null;
     const remembered = projectId ? workbenchEpisodeByProject[projectId] : undefined;
     const candidate = episodeOverride ?? remembered ?? null;
-    if (candidate) {
-      const valid = Boolean(episodeGroups[candidate]?.length);
-      if (valid) return candidate;
-    }
-    return pickInitialEpisodeKey(episodeGroups, scriptEpisodeIds, {
-      scriptActiveId: episodeContext.activeEpisodeId,
-    });
-  }, [episodeKeys, episodeGroups, scriptEpisodeIds, episodeContext.activeEpisodeId, episodeOverride, projectId, workbenchEpisodeByProject]);
+    if (candidate && episodeKeys.includes(candidate)) return candidate;
+    if (defaultEpisodeId && episodeKeys.includes(defaultEpisodeId)) return defaultEpisodeId;
+    return episodeKeys.find((k) => episodeGroups[k]?.length) ?? episodeKeys[0] ?? null;
+  }, [episodeKeys, episodeGroups, defaultEpisodeId, episodeOverride, projectId, workbenchEpisodeByProject]);
   const visibleShots = useMemo(
     () => (activeEpisodeKey ? (episodeGroups[activeEpisodeKey] ?? []) : shots),
     [activeEpisodeKey, episodeGroups, shots],
   );
+  const showEmptyEpisode = scriptEpisodeIds.length > 0 && Boolean(activeEpisodeKey) && visibleShots.length === 0;
   const episodeOptions = useMemo(() => episodeKeys.map((key) => {
     const count = episodeGroups[key]?.length ?? 0;
-    if (key === UNASSIGNED_EPISODE_KEY) return { value: key, label: `未分集（${count} 段）` };
     const ep = episodeContext.episodes.find((e) => e.id === key);
     const label = ep ? displayEpisodeTitle(ep.title, ep.number) : '已删除的集';
-    return { value: key, label: `${label}（${count} 段）`, disabled: count === 0 };
+    return { value: key, label: `${label}（${count} 段）` };
   }), [episodeKeys, episodeGroups, episodeContext.episodes]);
-  const episodeCheck = useMemo(() => buildEpisodeCheck(visibleShots), [visibleShots]);
-  const activeEpisodeLabel = episodeOptions.find((o) => o.value === activeEpisodeKey)?.label ?? '';
 
   const handleEpisodeChange = useCallback((key: string) => {
     setEpisodeOverride(key);
@@ -538,6 +534,23 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     },
     [markDirty],
   );
+
+  // 旧数据兜底：所有片段都没分集时，归到第一集（用户默认看到第一集，不是「未分集」）
+  useEffect(() => {
+    if (!isActive || !projectId || !defaultEpisodeId || shots.length === 0) return;
+    if (!shots.some((s) => !s.episodeId)) return;
+    setShots((prev) => prev.map((s) => (s.episodeId ? s : { ...s, episodeId: defaultEpisodeId })));
+    setWorkbenchActiveEpisode(projectId, defaultEpisodeId);
+    markDirty();
+  }, [isActive, projectId, defaultEpisodeId, shots, setWorkbenchActiveEpisode, markDirty]);
+
+  const addSegmentToActiveEpisode = useCallback(() => {
+    if (!activeEpisodeKey) return;
+    const seg = createSegment(1, activeEpisodeKey === UNASSIGNED_EPISODE_KEY ? undefined : activeEpisodeKey);
+    setShots((prev) => [...prev, seg]);
+    setActiveShotId(seg.id);
+    markDirty();
+  }, [activeEpisodeKey, markDirty]);
 
   /** 公共参数写入口（与 shots 同一防抖链路落盘） */
   const updateSharedParams = useCallback(
@@ -1240,6 +1253,29 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   return (
     <CanvasTabContentBoundary>
       <div data-workbench-page style={{ position: 'absolute', inset: 0 }}>
+        {showEmptyEpisode ? (
+          <div
+            data-director-episode-empty
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}
+          >
+            <ListVideo size={28} color={theme.toolbar.textMuted} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.toolbar.text }}>本集还没有片段</div>
+            <div style={{ fontSize: 12, color: theme.toolbar.textMuted, textAlign: 'center', maxWidth: 380, lineHeight: 1.7 }}>
+              先在这里新建一段，或让 Agent 按本集剧本拆分镜。切换上方分集可以看别的集。
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Select
+                size="small"
+                value={activeEpisodeKey ?? undefined}
+                options={episodeOptions}
+                onChange={(key: string) => handleEpisodeChange(key)}
+                style={{ minWidth: 170 }}
+                popupMatchSelectWidth={false}
+              />
+              <Button type="primary" size="small" onClick={addSegmentToActiveEpisode}>新建片段</Button>
+            </div>
+          </div>
+        ) : (
         <StoryboardMergedTab
           entities={[]}
           showAssetSidebar={false}
@@ -1333,40 +1369,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   popupMatchSelectWidth={false}
                 />
                 <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
-                <Button
-                  size="small"
-                  type="text"
-                  data-episode-check
-                  title="检查本集还差什么"
-                  icon={<ListChecks size={14} />}
-                  onClick={() => setEpisodeCheckOpen(true)}
-                  style={{ fontSize: 12 }}
-                >检查</Button>
-                {activeEpisodeKey && activeEpisodeKey !== UNASSIGNED_EPISODE_KEY && shots.some((x) => !x.episodeId) && (
-                  <Button
-                    size="small"
-                    type="text"
-                    data-director-adopt-unassigned
-                    style={{ fontSize: 12 }}
-                    onClick={() => {
-                      const count = shots.filter((x) => !x.episodeId).length;
-                      Modal.confirm({
-                        centered: true,
-                        title: '归入本集',
-                        content: `把 ${count} 段未分集片段全部归入「${activeEpisodeLabel || '当前集'}」？`,
-                        okText: '归入',
-                        cancelText: '取消',
-                        onOk: () => {
-                          setShots((prev) => prev.map((x) => (x.episodeId ? x : { ...x, episodeId: activeEpisodeKey })));
-                          markDirty();
-                          message.success(`已归入 ${count} 段`);
-                        },
-                      });
-                    }}
-                  >
-                    归入本集
-                  </Button>
-                )}
               </div>
             ) : null,
             tracks: [track],
@@ -1501,35 +1503,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             // 分割/合并不接线（undefined）
           }}
           promptPanelOverride={
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-              <div
-                data-director-segment-episode
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flexShrink: 0,
-                  borderBottom: '1px solid rgba(128,128,128,0.2)',
-                }}
-              >
-                <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>本段所属</span>
-                <Select
-                  size="small"
-                  value={selectedShot?.episodeId ?? UNASSIGNED_EPISODE_KEY}
-                  options={[
-                    { value: UNASSIGNED_EPISODE_KEY, label: '未分集' },
-                    ...episodeOptions.filter((o) => !o.disabled),
-                  ]}
-                  onChange={(value: string) => {
-                    if (!selectedShot) return;
-                    updateShot(selectedShot.id, {
-                      episodeId: value === UNASSIGNED_EPISODE_KEY ? undefined : value,
-                    });
-                  }}
-                  disabled={!selectedShot}
-                  style={{ minWidth: 140 }}
-                  popupMatchSelectWidth={false}
-                />
-                <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>可单独改这一段</span>
-              </div>
-              <div style={{ flex: 1, minHeight: 0 }}>
             <DirectorPromptPanel
               shared={sharedParams}
               onSharedChange={updateSharedParams}
@@ -1561,12 +1534,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               // 2026-11-04 参数区搬家：比例/系数/尺寸/运行整组移到导轨工具行（paramsButton/runButton），
               // 本面板不再渲染参数行；批量唯一入口 = 导轨工具栏 batchEntry（onRunAll 已删除）。
             />
-              </div>
-            </div>
           }
           theme={theme}
           isDark={isDark}
         />
+        )}
         {/* 版本操作确认：走项目统一 ConfirmDialog（主题 + zIndex，不用静态 Modal.confirm） */}
         <ConfirmDialog
           open={versionConfirm !== null}
@@ -1913,54 +1885,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
               </div>
             </div>
           )}
-        </Modal>
-        <Modal
-          open={episodeCheckOpen}
-          onCancel={() => setEpisodeCheckOpen(false)}
-          footer={null}
-          centered
-          width={460}
-          title={<span data-episode-check-title>本集检查</span>}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
-              {activeEpisodeLabel || '当前集'} · {episodeCheck.shotCount} 段 · 预计 {Math.floor(episodeCheck.durationSec / 60)}:
-              {String(Math.round(episodeCheck.durationSec % 60)).padStart(2, '0')}
-            </div>
-            {episodeCheck.ready ? (
-              <div data-episode-check-ok style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(82,196,26,0.10)', color: '#52c41a', fontSize: 13 }}>
-                本集检查通过，可以出片。
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {episodeCheck.issues.map((issue) => (
-                  <div
-                    key={issue.key}
-                    data-episode-check-issue={issue.key}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8,
-                      border: '1px solid rgba(128,128,128,0.25)',
-                    }}
-                  >
-                    <span style={{ flex: 1, fontSize: 13, color: theme.toolbar.text }}>{issue.label}</span>
-                    <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>{issue.count} 段</span>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        setActiveShotId(issue.shotIds[0] ?? null);
-                        setEpisodeCheckOpen(false);
-                      }}
-                    >
-                      定位
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ fontSize: 11, color: theme.toolbar.textMuted, lineHeight: 1.6 }}>
-              只检查这一集有没有漏，不会改你的内容；点「定位」跳到第一段有问题的片段。
-            </div>
-          </div>
         </Modal>
       </div>
     </CanvasTabContentBoundary>

@@ -36,7 +36,7 @@
 | S-27 | 2026-11-13 | 主体面板「全剧风格」整行直达画廊；MCP 增 list/get/set_global_style（读写权 + 组织规范） | 独立热修 | 🟢 merged | [2026-11-13-style-gallery-direct-and-mcp.md](2026-11-13-style-gallery-direct-and-mcp.md) |
 | S-28 | 2026-11-13 | 导演台分集下拉：片段 episodeId、未分集单列、MCP split/add_segment 带集 | 独立热修 | 🟢 merged | [2026-11-13-director-episode-switch.md](2026-11-13-director-episode-switch.md) |
 | S-29 | 2026-11-13 | MCP 升级后主动查漏补缺：audit_upgrade / get_upgrade_guide + 询问修复 | 独立热修 | 🟢 merged | [2026-11-13-mcp-upgrade-audit.md](2026-11-13-mcp-upgrade-audit.md) |
-| S-30 | 2026-11-13 | 导演台「本集检查」：只用用户语言报缺什么；不做 sceneId/camera/REF 槽位等术语暴露 | 独立热修 | 🟢 merged | [2026-11-13-episode-check-user-language.md](2026-11-13-episode-check-user-language.md) |
+| S-30 | 2026-11-13 | 导演台「本集检查」（后按要求移除界面入口，检查归 MCP） | 独立热修 | 🟢 merged | [2026-11-13-episode-check-user-language.md](2026-11-13-episode-check-user-language.md) |
 | S-31 | 2026-11-13 | 不让用户看到半成品：主体空提示词自愈 + 交付前 ensure_project_ready 补全 | 独立热修 | 🟢 merged | [2026-11-13-no-half-finished.md](2026-11-13-no-half-finished.md) |
 | S-32 | 2026-11-13 | 场景一个地点一个主体（consolidate_scenes）；角色一个演员（同一张脸门槛）；片段可改分集 | 独立热修 | 🟢 merged | [2026-11-13-scene-granularity-and-identity.md](2026-11-13-scene-granularity-and-identity.md) |
 
