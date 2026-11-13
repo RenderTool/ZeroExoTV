@@ -221,6 +221,17 @@ export async function readWorkbench(root: string, projectId: string): Promise<Wo
 
 export type WbOpts = { baseVersion: number; dryRun?: boolean };
 
+/** 片段编号按集重置：每集从 1 开始，禁止全剧连续编号 */
+function renumberShotsPerEpisode(wb: WorkbenchContainer): void {
+  const counters = new Map<string, number>();
+  for (const shot of wb.shots) {
+    const key = shot.episodeId || "__no_episode__";
+    const next = (counters.get(key) ?? 0) + 1;
+    counters.set(key, next);
+    shot.number = next;
+  }
+}
+
 async function updateWorkbench(
   root: string,
   projectId: string,
@@ -234,6 +245,7 @@ async function updateWorkbench(
       if (!Array.isArray(wb.tracks)) wb.tracks = [];
       if (migrateSharedPromptInPlace(wb)) logSharedPromptMigration(projectId, wb);
       opts.mutate(wb);
+      renumberShotsPerEpisode(wb);
       rebuildMainTrack(wb);
       wb.totalDuration = wb.shots.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
     },

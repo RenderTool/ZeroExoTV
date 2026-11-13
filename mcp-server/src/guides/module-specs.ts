@@ -248,6 +248,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
       "标准拆分镜顺序：split_script_to_shots dryRun:true → 用户确认切分 → confirm:true + 最新 baseVersion 落盘",
       "片段属性写具体可观察项：景别、运镜（自然语言）、时长秒数；禁形容词汤",
       "双轨提示词：imagePrompt 管首帧画面，videoPrompt 管运动与变化；同场景身份锚点逐字复用",
+      "片段编号按集重置：每集从 1 开始（第1集 1–N，第2集重新 1–M），禁止全剧连续编号；episodeId 必须归到正确剧集，禁止把全剧场次挂到第1集",
       "写前 get_workbench 重读 version；遇 VERSION_CONFLICT 重读再写，不盲目重试",
     ],
   },
