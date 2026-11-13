@@ -227,8 +227,10 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       el.style.bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
     }, []);
     const showMentionPopup = useCallback(() => {
+      const el = mentionPopupRef.current;
+      if (!el) return;
       positionMentionPopup();
-      showMentionPopup();
+      el.style.display = 'flex';
     }, [positionMentionPopup]);
     useEffect(() => {
       const reflow = (): void => positionMentionPopup();
