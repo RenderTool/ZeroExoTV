@@ -148,6 +148,8 @@ async function submitJob(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
+        // 网关偶发不回包：不能无限停在「提交中」
+        signal: AbortSignal.timeout(90_000),
       });
       lastErr = null;
       break;
@@ -236,7 +238,7 @@ export async function warmZeroexoConnection(baseUrl: string): Promise<void> {
 /** 查询作业状态（GET 天然幂等：keep-alive 被关时换连接重试一次，避免一次抖动打死整次生成） */
 export async function fetchZeroexoJob(baseUrl: string, jobId: string): Promise<ZeroexoJobStatus> {
   const url = `${trimBase(baseUrl)}/zeroexo/v1/jobs/${encodeURIComponent(jobId)}`;
-  const res = await fetch(url).catch(() => fetch(url));
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => fetch(url, { signal: AbortSignal.timeout(15_000) }));
   if (!res.ok) throw new Error(`/zeroexo/v1/jobs/${jobId} ${await readError(res)}`);
   const data = (await res.json().catch(() => null)) as ZeroexoJobStatus | null;
   if (!data) throw new Error('作业状态响应不是 JSON');
