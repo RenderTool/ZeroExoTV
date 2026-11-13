@@ -659,6 +659,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
            * 按 runArgs.shots 全序找前一段（不是本次勾选下标），所以单独重跑第 3 段
            * 也能拿到第 2 段的引导；上一段还没产物时退回服务端 LAST_GUIDE 兜底。
            */
+          const selectedIdSet = new Set(selected.map((s) => s.id));
           const guideFor = (shot: RunShotLike): { id?: string; usePrev: boolean } => {
             const explicit = shot.guide?.id;
             if (explicit) return { id: explicit, usePrev: false };
@@ -668,10 +669,15 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
               : continuityOn;
             const idx = runArgs.shots.findIndex((s) => s.id === shot.id);
             if (!enabled || idx <= 0) return { usePrev: false };
-            const prevGuideId = runArgs.shots[idx - 1]?.media?.guide?.id;
-            // 只有上一段真的已有 guide 才喂；没有就明确“本段无引导输入”，
-            // 绝不能退回服务端 LAST_GUIDE 拿别的场景尾帧。
-            return prevGuideId ? { id: prevGuideId, usePrev: false } : { usePrev: false };
+            const prev = runArgs.shots[idx - 1];
+            const prevGuideId = prev?.media?.guide?.id;
+            // 上一段已有 guide：显式传，插件不再猜。
+            if (prevGuideId) return { id: prevGuideId, usePrev: false };
+            // 上一段在本次批量里：插件会按队列串行执行，并在上一段成功后写 LAST_GUIDE
+            // （按 project/episode 隔离），所以这里让插件取“上一段刚产出的 guide”。
+            if (prev && selectedIdSet.has(prev.id)) return { usePrev: true };
+            // 上一段既没 guide、又不在本次批量：明确本段无引导输入，绝不拿别的段兜底。
+            return { usePrev: false };
           };
           // 实时预览：v1 作业同样支持 clientId → /ws minimax_director_preview
           const previewClientId = createPreviewClientId();

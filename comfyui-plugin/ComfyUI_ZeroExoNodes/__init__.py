@@ -13,6 +13,7 @@ ComfyUI_ZeroExoNodes - ZeroExo 纯参数生成节点（参考生视频 / 引导�
   GET  jobs/{id}       状态 + 产物（video / guide）
   POST jobs/{id}/cancel
 """
+import asyncio
 import hashlib
 import json
 import os
@@ -36,6 +37,10 @@ JOBS: dict[str, dict[str, Any]] = {}
 # 「上一段生成的引导」服务端登记表（2026-11-07）：key = project|episode。
 # use_prev_guide=true 且没有显式 guide_id 时取它；显式 guide 优先且强制关闭 use_prev_guide。
 LAST_GUIDE: dict[str, str] = {}
+# 视频作业串行队列：批量一次提交多段时，后续段必须等上一段成功、拿到 guide 后再真正提交，
+# 否则提交时就解析 guide，会永远拿到空值。图片作业不在此队列。
+VIDEO_QUEUE: list[dict[str, Any]] = []
+VIDEO_QUEUE_WORKER: "asyncio.Task | None" = None
 GUIDE_ID_PATTERN = re.compile(r"^gd_[A-Za-z0-9_-]{4,64}$")
 
 # 可见参数（前端按 schema 渲染；默认值来自模板，不属于前端）
@@ -581,6 +586,68 @@ async def capabilities(_request):
     })
 
 
+def _patch_guide_path(template: dict[str, Any], guide_path: str) -> None:
+    for node in template.values():
+        if isinstance(node, dict) and node.get("class_type") == "ZeroExoRefVideo":
+            node["inputs"]["prev_guide_path"] = guide_path
+
+
+async def _post_prompt(job: dict[str, Any], template: dict[str, Any], client_id: str) -> None:
+    server = PromptServer.instance
+    await server.send_json("zeroexo.v1.job", {"jobId": job["jobId"], "state": "queued"})
+    url = f"http://127.0.0.1:{server.port}/prompt"
+    payload: dict[str, Any] = {"prompt": template}
+    if client_id:
+        payload["client_id"] = client_id
+    async with aiohttp.ClientSession() as sess:
+        async with sess.post(url, json=payload) as resp:
+            data = await resp.json()
+            if resp.status != 200 or not data.get("prompt_id"):
+                raise RuntimeError(f"ComfyUI 队列拒绝: {data.get('error') or data}")
+            node_errors = data.get("node_errors") or {}
+            if node_errors:
+                raise RuntimeError(f"ComfyUI 工作流校验失败: {_format_node_errors(node_errors)}")
+    job["promptId"] = data["prompt_id"]
+    job["state"] = "running"
+    _save_last_prompt(job["jobId"], job["promptId"], template, job["params"])
+
+
+async def _video_queue_worker() -> None:
+    """视频作业串行执行：上一段 success 后，下一段才在“执行时”解析 guide 并提交。"""
+    global VIDEO_QUEUE_WORKER
+    try:
+        while VIDEO_QUEUE:
+            item = VIDEO_QUEUE.pop(0)
+            job = item["job"]
+            if job.get("state") == "cancelled":
+                continue
+            params = job["params"]
+            if _truthy(params.get("use_prev_guide")) and not str(params.get("guide_in_path") or "").strip():
+                prev = LAST_GUIDE.get(_guide_key(params)) or ""
+                if prev and os.path.isfile(prev):
+                    _patch_guide_path(item["template"], prev)
+                    params["guide_in_path"] = prev
+                    job["guideInPath"] = prev
+                    job["guideSource"] = "prev"
+            try:
+                await _post_prompt(job, item["template"], item.get("clientId") or "")
+            except Exception as e:  # noqa: BLE001
+                job["state"] = "error"
+                job["error"] = str(e)
+                continue
+            while job.get("state") in ("queued", "running"):
+                await asyncio.sleep(1)
+                refresh_job(job)
+    finally:
+        VIDEO_QUEUE_WORKER = None
+
+
+def _ensure_video_worker() -> None:
+    global VIDEO_QUEUE_WORKER
+    if VIDEO_QUEUE_WORKER is None or VIDEO_QUEUE_WORKER.done():
+        VIDEO_QUEUE_WORKER = asyncio.create_task(_video_queue_worker())
+
+
 @routes.post("/zeroexo/v1/jobs")
 async def submit_job(request):
     body = await request.json()
@@ -684,6 +751,10 @@ async def submit_job(request):
     JOBS[job_id] = job
     # 2026-11-07：先落盘再提交，队列校验失败时也能查本次完整 prompt
     _save_last_prompt(job_id, "", template, params)
+    if kind == "reference_video":
+        VIDEO_QUEUE.append({"job": job, "template": template, "clientId": client_id})
+        _ensure_video_worker()
+        return web.json_response({"ok": True, "jobId": job_id, "state": "queued", "error": None})
     server = PromptServer.instance
     try:
         await server.send_json("zeroexo.v1.job", {"jobId": job_id, "state": "queued"})
@@ -723,6 +794,8 @@ async def cancel_job(request):
     job = JOBS.get(request.match_info["job_id"])
     if not job:
         return web.json_response({"ok": False, "error": "job 不存在"}, status=404)
+    # 还没真正提交给 ComfyUI 的排队项：直接从插件队列移除
+    VIDEO_QUEUE[:] = [x for x in VIDEO_QUEUE if x.get("job", {}).get("jobId") != job.get("jobId")]
     if job.get("promptId"):
         try:
             pq = PromptServer.instance.prompt_queue
