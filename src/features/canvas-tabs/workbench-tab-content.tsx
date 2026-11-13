@@ -1146,6 +1146,15 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment, comfyRun.preview?.segmentIndex],
   );
 
+  // 切项目只清本地运行态，绝不取消上一个项目的云端作业：项目之间是并发排队，
+  // 切回来/切过去都不该要求用户点「取消」。
+  const runProjectRef = useRef(projectId);
+  useEffect(() => {
+    if (runProjectRef.current === projectId) return;
+    runProjectRef.current = projectId;
+    comfyRun.reset();
+  }, [projectId, comfyRun.reset]);
+
   // 外部（MCP/另一条链路）已经把全部选中片段写成 done+media 时，网页残留的 submitting/queued
   // 运行态必须让位，否则卡片会永远停在「排队」，成片入口也被旧 phase 挡住。
   useEffect(() => {
