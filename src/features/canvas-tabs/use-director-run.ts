@@ -712,6 +712,11 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
               }
             }
             const guide = guideFor(shot);
+            // 不允许把「上一段没有 guide」降级成服务端 LAST_GUIDE：那会拿别的场景尾帧，
+            // 生成结果和上一段完全不是同一个场景。必须显式失败，先重跑上一段。
+            if (guide.usePrev) {
+              throw new Error(`第 ${i + 1} 段开启了段间衔接，但上一段没有可用的 guide；请先重跑上一段，生成 guide 后再生成本段。`);
+            }
             const job = await submitZeroexoJob(cfg.baseUrl, {
               clientJobId: `zx_${runArgs.projectId}_${shot.id}_${Date.now()}`,
               clientId: previewClientId,
