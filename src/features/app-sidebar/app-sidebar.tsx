@@ -18,7 +18,6 @@
 
 import { useState, useCallback } from 'react';
 import { Tooltip } from 'antd';
-import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { LAYOUT } from '@/shared/components/LAYOUT_CONSTANTS.js';
 import { LogoIcon } from '@/assets/ico/index.js';
@@ -26,13 +25,13 @@ import { SidebarAnimatedIcon } from './sidebar-animated-icon.js';
 
 export interface AppSidebarProps {
   activeRoute: string;
-  onNavigate: (route: 'home' | 'canvas' | 'assets' | 'openlib' | 'publicPrompts' | 'policies' | { name: 'auth'; mode: 'login' }) => void;
+  onNavigate: (route: 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies' | { name: 'auth'; mode: 'login' }) => void;
 }
 
 export interface NavItem {
   key: string;
   label: string;
-  iconType: 'home' | 'canvas' | 'assets' | 'openlib' | 'publicPrompts' | 'policies';
+  iconType: 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies';
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -40,18 +39,15 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'canvas', label: '项目', iconType: 'canvas' },
   { key: 'assets', label: '资产', iconType: 'assets' },
   // 2026-11-05 任务D 约定：开源资产库入口 = 侧栏图标按钮（与「资产」同级，
-  // hover tooltip「开源资产库」），点击进入独立 #/openlib；首页不再放任何开源入口
-  { key: 'openlib', label: '开源资产库', iconType: 'openlib' },
 ];
 
 export function AppSidebar({ activeRoute, onNavigate }: AppSidebarProps): React.ReactElement {
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const { theme } = useTheme();
-  const { t } = useTranslation();
   const isDark = theme.mode === 'dark';
 
   const handleNavigate = useCallback((key: string) => {
-    onNavigate(key as 'home' | 'canvas' | 'assets' | 'openlib' | 'publicPrompts' | 'policies');
+    onNavigate(key as 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies');
   }, [onNavigate]);
 
   const bg = isDark ? 'transparent' : '#ffffff';
@@ -113,7 +109,7 @@ export function AppSidebar({ activeRoute, onNavigate }: AppSidebarProps): React.
             const isActive = activeRoute === item.key;
             const isHovered = hoveredKey === item.key;
             // 三语不硬编码：新入口文案走 i18n（既有项沿用原文案不动）
-            const label = item.key === 'openlib' ? t('nav.openLib', '开源资产库') : item.label;
+            const label = item.label;
             return (
               <Tooltip key={item.key} title={label} placement="right">
                 <button

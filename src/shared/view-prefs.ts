@@ -96,7 +96,7 @@ export interface HierarchyViewPrefs {
  * 2026-11-06 用户指令：开源库排最后；「我的资产」改名「全局」与本项目/开源库同语义）。
  * 字面量与 canvas-assets 的 MaterialScopeTab 同形；shared 不反向依赖 features。
  */
-export type CanvasDrawerScope = 'library' | 'project' | 'openlib' | 'subject';
+export type CanvasDrawerScope = 'library' | 'project' | 'subject';
 
 export interface CanvasDrawerViewPrefs {
   /** projectId → 上次所在分段 */
@@ -162,7 +162,7 @@ function canvasTabLastSlot(v: unknown): CanvasTabLastSlot | null {
 
 /** 抽屉分段合法值校验（损坏容错） */
 function canvasDrawerScope(v: unknown): CanvasDrawerScope | null {
-  return v === 'library' || v === 'project' || v === 'openlib' || v === 'subject' ? v : null;
+  return v === 'library' || v === 'project' || v === 'subject' ? v : null;
 }
 
 /** 从任意解析结果修复出合法切片（逐字段兜底） */

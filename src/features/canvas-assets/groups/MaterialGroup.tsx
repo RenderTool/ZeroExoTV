@@ -24,7 +24,6 @@ import { MultiSelectCheckbox } from '@/features/asset-library/components/multi-s
 import type { Asset } from '@/features/asset-picker/index.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
 import { sendAssetToWorkbench } from '../send-to-workbench.js';
-import { OpenLibGroup } from './OpenLibGroup.js';
 import { SubjectGroup } from './SubjectGroup.js';
 import { useSubjectTotalCount } from '@/features/canvas-nodes/storyboard/use-storyboard-subject-data.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
@@ -184,7 +183,6 @@ export function MaterialGroup({ store, theme }: {
         onChange={store.setMaterialScopeTab}
         libraryCount={store.materialScopeCounts.library}
         projectCount={store.materialScopeCounts.project}
-        openLibCount={store.openLibCount}
         showSubject
         subjectCount={subjectCount}
         theme={theme}
@@ -214,25 +212,6 @@ export function MaterialGroup({ store, theme }: {
       {capsuleBar}
 
       {/* 开源库只读作用域：独立渲染（分页 60/页、18+ 门控、按需下载落 CAS 后可发送），不走用户素材编排 */}
-      {store.materialScopeTab === 'openlib' ? (
-        <>
-          <OpenLibGroup store={store} theme={theme} />
-
-          {/* 素材详情统一走 MediaLightbox 壳（2026-11-05 用户定稿：图片/视频/文本同一 UI） */}
-          {store.assetDetail && (() => {
-            const item = assetToLightboxItem(store.assetDetail as Asset);
-            if (!item) return null;
-            return (
-              <MediaLightbox
-                items={[item]}
-                index={0}
-                onIndexChange={() => undefined}
-                onClose={() => setAssetDetail(null)}
-              />
-            );
-          })()}
-        </>
-      ) : (
         <>
       {/* 主操作统一放顶部（2026-11-06 用户指令：原来埋在最底下每次找半天） */}
       <div style={{ padding: '12px 20px 4px', flexShrink: 0 }}>
@@ -419,7 +398,6 @@ export function MaterialGroup({ store, theme }: {
         );
       })()}
         </>
-      )}
 
       {/* 大图查看（点卡片开；同列表前后切换，取图走统一 storageKey 解析链） */}
       {lightbox && (

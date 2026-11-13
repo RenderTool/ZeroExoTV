@@ -14,7 +14,7 @@ import type { AssetScope } from '@/features/asset-picker/index.js';
 import { CapsuleTabs, type CapsuleSegment } from './capsule-tabs.js';
 
 /** 胶囊分段键：用户两作用域 + 主体（抽屉内）+ 开源库（只读，排最后） */
-export type ScopeCapsuleTab = AssetScope | 'openlib' | 'subject';
+export type ScopeCapsuleTab = AssetScope | 'subject';
 
 export interface ScopeCapsuleTabsProps {
   /** 当前激活段 */
@@ -29,7 +29,6 @@ export interface ScopeCapsuleTabsProps {
    * 开源库条目总数；undefined = 未启用开源库 → 不渲染第三段（场外调用方零改动）。
    * openlib 为只读展示作用域，与公共/本项目用户数据互不混排。
    */
-  openLibCount?: number | null;
   /**
    * 是否追加「主体」段（仅画布资产抽屉启用；资产库其它调用方不传 → 保持三段）。
    */
@@ -47,7 +46,6 @@ export function ScopeCapsuleTabs({
   onChange,
   libraryCount,
   projectCount,
-  openLibCount,
   showSubject,
   subjectCount,
   theme,
@@ -71,14 +69,6 @@ export function ScopeCapsuleTabs({
       key: 'subject',
       label: t('assetLibrary.scopeCapsuleSubject', '主体'),
       count: subjectCount ?? null,
-      disabled: false,
-    });
-  }
-  if (openLibCount !== undefined) {
-    segments.push({
-      key: 'openlib',
-      label: t('openLib.scopeTab', '开源库'),
-      count: openLibCount,
       disabled: false,
     });
   }

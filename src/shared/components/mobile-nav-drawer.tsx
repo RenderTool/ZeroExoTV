@@ -53,7 +53,7 @@ function DrawerIcon(icon: ReactNode): ReactNode {
 }
 
 export interface NavRouteItem {
-  key: 'home' | 'canvas' | 'assets' | 'openlib' | 'publicPrompts' | 'policies';
+  key: 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies';
   label: string;
   icon?: React.ReactNode;
 }
@@ -334,8 +334,6 @@ function defaultNavIcon(key: NavRouteItem['key']): React.ReactNode {
         return <SidebarAnimatedIcon type="canvas" size={18} active={false} hovered={false} color="currentColor" mode="inline" />;
       case 'assets':
         return <SidebarAnimatedIcon type="assets" size={18} active={false} hovered={false} color="currentColor" mode="inline" />;
-      case 'openlib':
-        return <SidebarAnimatedIcon type="openlib" size={18} active={false} hovered={false} color="currentColor" mode="inline" />;
       case 'publicPrompts':
         return <SidebarAnimatedIcon type="publicPrompts" size={18} active={false} hovered={false} color="currentColor" mode="inline" />;
       case 'policies':

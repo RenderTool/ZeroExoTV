@@ -21,12 +21,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { ThemeConfig } from '@zeroexo/shared';
 import { ChevronDown, Film, Image as ImageIcon, Music, Plus, User, Waypoints, X, Loader2, Upload as UploadIcon } from 'lucide-react';
 import type { DirectorAssetRef } from '@/entities/director-params.js';
-import type { Asset } from '@/features/asset-picker/index.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { nonBaseStates, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
-import { OpenLibBrowser } from '@/features/open-library/open-lib-browser.js';
 
 /** 素材面板条目拖拽 MIME：拖到已占用的插槽格 = 就地替换该槽内容（槽号不变） */
 export const DIRECTOR_ASSET_DRAG_MIME = 'application/x-director-asset';
@@ -38,9 +36,9 @@ export const ASSET_PICK_ROW_HEIGHT = 44;
 export const ASSET_PICK_THUMB_SIZE = 36;
 export const ASSET_PICK_DETAIL_WIDTH = 216;
 
-export type AssetPickTab = 'canvas' | 'asset' | 'subject' | 'openlib' | 'upload' | 'guide';
+export type AssetPickTab = 'canvas' | 'asset' | 'subject' | 'upload' | 'guide';
 
-const DEFAULT_TABS: AssetPickTab[] = ['canvas', 'asset', 'subject', 'openlib'];
+const DEFAULT_TABS: AssetPickTab[] = ['canvas', 'asset', 'subject'];
 
 /**
  * 引导数据候选（2026-11-09）：来自已生成视频产物的 guide，进 `WorkbenchShot.guide` 独立槽，
@@ -175,8 +173,6 @@ export interface AssetPickPanelProps {
   onPickSubjectImage?: (item: ProductionItem, img: ProductionItemImage) => void;
   /** 单击主体状态级媒体行（`subject-state:<rootId>/<stateId>`） */
   onPickSubjectState?: (ref: DirectorAssetRef) => void;
-  /** 开源条目「入库后插入」回调 */
-  onPickAssetFromOpenLib?: (a: Asset) => void;
   /** 引导数据候选（已生成视频的 guide）；给了才出现「引导」页签 */
   guideCandidates?: GuideCandidate[];
   /** 选中引导 → 调用方写入片段独立引导槽（不占标准素材槽） */
@@ -221,7 +217,6 @@ export function AssetPickPanel({
   onPickSubject,
   onPickSubjectImage,
   onPickSubjectState,
-  onPickAssetFromOpenLib,
   guideCandidates = [],
   onPickGuide,
   onUploadFiles,
@@ -237,17 +232,15 @@ export function AssetPickPanel({
   onClose,
   palette,
   t,
-  theme,
 }: AssetPickPanelProps): ReactElement {
   const visibleTabs = useMemo(() => {
     const list = tabs.filter((k) => {
-      if (k === 'openlib') return !!onPickAssetFromOpenLib;
       if (k === 'upload') return !!onUploadFiles;
       if (k === 'guide') return !!onPickGuide;
       return true;
     });
     return list.length > 0 ? list : ['asset' as AssetPickTab];
-  }, [tabs, onPickAssetFromOpenLib, onUploadFiles, onPickGuide]);
+  }, [tabs, onUploadFiles, onPickGuide]);
 
   const [activeIdx, setActiveIdx] = useState(0);
   const [panelTab, setPanelTab] = useState<AssetPickTab>(() => {
@@ -575,7 +568,6 @@ export function AssetPickPanel({
       case 'canvas': return t('director.canvasTab', '画布');
       case 'asset': return t('director.assetTab', '资产');
       case 'subject': return t('director.subjectTab', '主体');
-      case 'openlib': return t('director.openlibTab', '开源');
       case 'upload': return t('director.uploadTab', '手动上传');
       case 'guide': return t('director.guideTab', '引导');
     }
@@ -687,7 +679,7 @@ export function AssetPickPanel({
         </div>
 
         {/* 搜索（开源页签不渲染：OpenLibBrowser 自带分类/搜索） */}
-        {panelTab !== 'openlib' && (
+        {(
           <input
             data-asset-panel-search
             value={searchQ}
@@ -1135,17 +1127,8 @@ export function AssetPickPanel({
           </div>
         )}
 
-        {/* 开源页签：复用 OpenLibBrowser 单一定义源（分类/搜索/分页/门控） */}
-        {panelTab === 'openlib' && onPickAssetFromOpenLib && (
-          <div
-            data-asset-panel-openlib
-            style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}
-          >
-            <OpenLibBrowser theme={theme} onPickAsset={onPickAssetFromOpenLib} />
-          </div>
-        )}
       </div>
-      {panelTab !== 'openlib' && panelTab !== 'upload' && detailPanel}
+      {panelTab !== 'upload' && detailPanel}
     </div>
   );
 }

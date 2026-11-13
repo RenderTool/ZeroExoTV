@@ -120,49 +120,6 @@ vi.mock('@zeroexo/plugin-persistence', () => ({
   resolveImageUrl: thumbMock.orig,
 }));
 
-// ===== 开源页签（OpenLibBrowser 嵌入）测试桩（2026-11-05）=====
-// mock 数据源/入库/清理三模块；use-cas-upload 也 mock（导入链路单测在 use-cas-upload 侧）。
-const openLibMock = vi.hoisted(() => {
-  const entry = (n: number) => ({
-    id: `openlib:hanami:s${n}`, gallery: 'hanami', srcId: `s${n}`, title: `开源图${n}`,
-    category: 'cat-a', tags: [], adult: false, storage: 'remote',
-    imageUrl: `https://cdn.test/${n}.jpg`, cdnUrl: `https://cdn.test/${n}-big.jpg`,
-    sourceUrl: 'https://src.test/x',
-    license: { type: 'cc0', commercialUse: true, redistribution: true },
-  });
-  return {
-    entry,
-    getOpenLibMeta: vi.fn(async () => ({
-      schemaVersion: 2, generatedAt: '2026-11-05',
-      source: { repo: 'r', site: 's' }, ageGate: { defaultHidden: true, note: 'n' },
-      galleries: {
-        hanami: {
-          id: 'hanami', title: '花见', indexed: true, entryCount: 2,
-          categories: [{ id: 'cat-a', title: '分类A', count: 2 }],
-          sourceUrl: 'https://src.test/x',
-          license: { type: 'cc0', commercialUse: true, redistribution: true },
-        },
-      },
-      totals: { entries: 2, bundled: 0, remote: 2, adult: 0 },
-    })),
-    queryOpenLib: vi.fn(async () => ({ items: [entry(1), entry(2)], total: 2, page: 1, pageSize: 60, adultHidden: 0 })),
-    resolveOpenLibImageUrl: vi.fn(async (e: { imageUrl: string }) => e.imageUrl),
-    isAgeConfirmed: vi.fn(() => false),
-    confirmAge: vi.fn(),
-    revokeAgeConfirmation: vi.fn(),
-    importOpenLibEntry: vi.fn(async (e: { id: string; title: string }) => ({
-      id: e.id, title: e.title, scope: 'library',
-      data: { kind: 'image', dataUrl: 'data:image/png;base64,x' },
-    })),
-  };
-});
-vi.mock('@/features/open-library/open-library.js', () => openLibMock);
-vi.mock('@/features/open-library/import-open-lib-entry.js', () => ({
-  importOpenLibEntry: openLibMock.importOpenLibEntry,
-}));
-vi.mock('@/features/open-library/cleanup-open-lib-spill.js', () => ({
-  runOpenLibSpillCleanupOnce: vi.fn(async () => undefined),
-}));
 vi.mock('@/features/canvas-assets/use-cas-upload.js', () => ({
   useCasUpload: () => vi.fn(async () => []),
 }));
@@ -1348,7 +1305,7 @@ describe('缩略图单一解析（第六条）', () => {
   });
 });
 
-describe('@ 面板：空态导入 + 开源页签（2026-11-05 任务八）', () => {
+describe('@ 面板：空态导入（2026-11-05）', () => {
   const openPanel = (container: HTMLElement): HTMLElement => {
     fireEvent.click(container.querySelector('[data-asset-add="segment"]') as Element);
     return container.querySelector('[data-director-asset-panel]') as HTMLElement;
@@ -1364,7 +1321,6 @@ describe('@ 面板：空态导入 + 开源页签（2026-11-05 任务八）', () 
       // 三个页签（开源复用 OpenLibBrowser 嵌入）
       expect(panel.querySelector('[data-asset-panel-tab="asset"]')).toBeTruthy();
       expect(panel.querySelector('[data-asset-panel-tab="subject"]')).toBeTruthy();
-      expect(panel.querySelector('[data-asset-panel-tab="openlib"]')).toBeTruthy();
       // 空态块：不只留一句「暂无可引用资产」，直接给导入出口
       const empty = panel.querySelector('[data-asset-panel-import-empty]');
       expect(empty).toBeTruthy();
@@ -1387,67 +1343,6 @@ describe('@ 面板：空态导入 + 开源页签（2026-11-05 任务八）', () 
     expect(imports.length).toBe(1);
     expect(imports[0]?.textContent).toContain('导入资产');
   });
-
-  it('开源页签：复用 OpenLibBrowser 列出开源库条目（自动选中第一个库；18+ 门控沿用 isAgeConfirmed）', async () => {
-    const { container } = renderPanel({});
-    const panel = openPanel(container);
-    fireEvent.click(panel.querySelector('[data-asset-panel-tab="openlib"]') as Element);
-    const openlibPane = panel.querySelector('[data-asset-panel-openlib]') as HTMLElement;
-    expect(openlibPane).toBeTruthy();
-    // meta（异步）→ 默认选第一个库 hanami → query（异步）→ 条目网格
-    await waitFor(() => {
-      const card1 = openlibPane.querySelector('[data-openlib-entry="openlib:hanami:s1"]') as HTMLElement;
-      expect(card1).toBeTruthy();
-      expect(card1.textContent).toContain('开源图1');
-    });
-    expect(openlibPane.querySelector('[data-openlib-entry="openlib:hanami:s2"]')).toBeTruthy();
-    // 18+ 口径未绕开：adultHidden = 0 时不渲染解锁入口；isAgeConfirmed 保持 false
-    expect(openlibPane.querySelector('[data-testid="openlib-age-gate-button"]')).toBeNull();
-    expect(openLibMock.isAgeConfirmed()).toBe(false);
-    // 开源页签不渲染资产搜索框（OpenLibBrowser 自带分类/搜索）
-    expect(openlibPane.querySelector('[data-asset-panel-search]')).toBeNull();
-  });
-
-  it('点击开源条目 = 入库 + 插入当前片段（importOpenLibEntry → onPickAssetFromOpenLib → 占槽 + @Picture1 + 关面板）', async () => {
-    const patches: Array<Partial<WorkbenchShot>> = [];
-    const { container } = renderPanel({ onShotChange: (p) => patches.push(p) });
-    const panel = openPanel(container);
-    fireEvent.click(panel.querySelector('[data-asset-panel-tab="openlib"]') as Element);
-    // meta/query 异步落定后才渲染条目——查询必须放进 waitFor 回调（外部一次性查询拿到的是 stale null）
-    const card = await waitFor(() => {
-      const el = panel.querySelector('[data-openlib-entry="openlib:hanami:s1"]') as HTMLElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
-    fireEvent.click(card as Element);
-    // 入库：走 importOpenLibEntry（拉进用户 CAS，沿用开源素材入库路径）
-    await waitFor(() => {
-      expect(openLibMock.importOpenLibEntry).toHaveBeenCalledTimes(1);
-      expect(openLibMock.importOpenLibEntry).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'openlib:hanami:s1' }),
-      );
-    });
-    // 插入：与资产条目 onPick 同一执行路径——占 Picture1 槽 + 提示词插入引用块
-    await waitFor(() => {
-      const refPatch = patches.find((p) => Array.isArray(p.references));
-      expect(refPatch?.references?.some((r) => r.id === 'openlib:hanami:s1')).toBe(true);
-      const promptPatch = patches.find((p) => typeof p.imagePrompt === 'string');
-      expect(promptPatch?.imagePrompt).toContain('@Picture1 ');
-    });
-    // 插入后面板关闭
-    await waitFor(() => {
-      expect(container.querySelector('[data-director-asset-panel]')).toBeNull();
-    });
-    // 导演台内部插入不跳转（人已在原地，跳转会打断编辑）
-    expect(navMock.navigateToView).not.toHaveBeenCalled();
-  });
-});
-
-describe('@ 面板放大（2026-11-05 任务三）：尺寸 / 行高 / 缩略图 / 三页签 / 滚动容器 / 视口夹取', () => {
-  const openPanel = (container: HTMLElement): HTMLElement => {
-    fireEvent.click(container.querySelector('[data-asset-add="segment"]') as Element);
-    return container.querySelector('[data-director-asset-panel]') as HTMLElement;
-  };
 
   it('面板宽高 = min(560px, 92vw) / min(440px, 80vh)；行高 44、缩略图 36、详情宽 216、搜索 34', () => {
     const { container } = renderPanel({});
@@ -1494,11 +1389,11 @@ describe('@ 面板放大（2026-11-05 任务三）：尺寸 / 行高 / 缩略图
     expect(list.style.maxHeight).toBe('');
   });
 
-  it('放大后四个页签完整切换（画布 / 资产 / 主体 / 开源），导入入口保留在列表顶部', () => {
+  it('放大后三个页签完整切换（画布 / 资产 / 主体），导入入口保留在列表顶部', () => {
     const { container } = renderPanel({});
     const panel = openPanel(container);
     const tabs = panel.querySelectorAll('[data-asset-panel-tab]');
-    expect(tabs.length).toBe(4);
+    expect(tabs.length).toBe(3);
     // 画布页签只列图片/视频/音频（无画布媒体时为空态）
     fireEvent.click(panel.querySelector('[data-asset-panel-tab="canvas"]') as Element);
     expect(panel.querySelector('[data-canvas-media-list]')).toBeTruthy();
@@ -1507,11 +1402,6 @@ describe('@ 面板放大（2026-11-05 任务三）：尺寸 / 行高 / 缩略图
     // 主体
     fireEvent.click(panel.querySelector('[data-asset-panel-tab="subject"]') as Element);
     expect(panel.querySelector('[data-asset-panel-list]')).toBeTruthy();
-    // 开源：占满剩余高度（flex:1），不再固定 340
-    fireEvent.click(panel.querySelector('[data-asset-panel-tab="openlib"]') as Element);
-    const openlib = panel.querySelector('[data-asset-panel-openlib]') as HTMLElement;
-    expect(openlib.style.flex).toContain('1');
-    expect(openlib.style.height).toBe('');
     // 回到资产：导入入口仍在
     fireEvent.click(panel.querySelector('[data-asset-panel-tab="asset"]') as Element);
     expect(panel.querySelectorAll('[data-asset-import]').length).toBe(1);

@@ -209,15 +209,12 @@ describe('切换后偏好保持（store 动作 → 落盘 → 重挂载读回）
 
   it('资产抽屉分段（含主体）：按项目记忆并重载恢复', () => {
     useViewPrefsStore.getState().setDrawerMaterialScope('p-1', 'subject');
-    useViewPrefsStore.getState().setDrawerMaterialScope('p-2', 'openlib');
     expect(loadViewPrefs().canvasDrawer.materialScopeByProject).toEqual({
       'p-1': 'subject',
-      'p-2': 'openlib',
     });
     // 同项目再切回其它段：覆盖该项目的旧值，不影响其它项目
     useViewPrefsStore.getState().setDrawerMaterialScope('p-1', 'library');
     expect(loadViewPrefs().canvasDrawer.materialScopeByProject['p-1']).toBe('library');
-    expect(loadViewPrefs().canvasDrawer.materialScopeByProject['p-2']).toBe('openlib');
   });
 
   it('资产抽屉分段：空项目 id / 非法值被拒绝且不落盘', () => {

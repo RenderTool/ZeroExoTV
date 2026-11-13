@@ -28,7 +28,6 @@ function renderTabs(showSubject: boolean, onChange = vi.fn()) {
       onChange={onChange}
       libraryCount={2}
       projectCount={3}
-      openLibCount={4}
       showSubject={showSubject}
       theme={THEME}
     />,
@@ -41,7 +40,7 @@ describe('ScopeCapsuleTabs 主体段', () => {
     const onChange = renderTabs(true);
     const tabs = document.querySelectorAll('[data-scope]');
     expect(Array.from(tabs).map((el) => el.getAttribute('data-scope'))).toEqual([
-      'library', 'project', 'subject', 'openlib',
+      'library', 'project', 'subject',
     ]);
     const subjectTab = document.querySelector('[data-scope="subject"]') as HTMLElement;
     expect(subjectTab.textContent).toContain('主体');
@@ -53,19 +52,19 @@ describe('ScopeCapsuleTabs 主体段', () => {
     renderTabs(false);
     const tabs = document.querySelectorAll('[data-scope]');
     expect(Array.from(tabs).map((el) => el.getAttribute('data-scope'))).toEqual([
-      'library', 'project', 'openlib',
+      'library', 'project',
     ]);
     expect(screen.queryByText('主体')).toBeNull();
   });
 
   // 2026-11-06 用户反馈：其它三段都有计数，主体段没有 → 补上总数徽标
   it('传 subjectCount：主体段显示总数；不传/未加载则不显示徽标（不假称 0）', () => {
-    render(<ScopeCapsuleTabs value="subject" onChange={vi.fn()} libraryCount={5} projectCount={2} openLibCount={7260} showSubject subjectCount={12} theme={THEME} />);
+    render(<ScopeCapsuleTabs value="subject" onChange={vi.fn()} libraryCount={5} projectCount={2} showSubject subjectCount={12} theme={THEME} />);
     expect(document.querySelector('[data-scope="subject"]')?.textContent).toContain('12');
     expect(document.querySelector('[data-scope-count="subject"]')).toBeTruthy();
 
     cleanup();
-    render(<ScopeCapsuleTabs value="subject" onChange={vi.fn()} libraryCount={5} projectCount={2} openLibCount={7260} showSubject theme={THEME} />);
+    render(<ScopeCapsuleTabs value="subject" onChange={vi.fn()} libraryCount={5} projectCount={2} showSubject theme={THEME} />);
     expect(document.querySelector('[data-scope-count="subject"]')).toBeNull();
     expect(document.querySelector('[data-scope="subject"]')?.textContent).toBe('主体');
   });

@@ -1303,11 +1303,6 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
               palette={palette}
               t={(key, fallback, opts) => t(key, fallback ?? key, opts)}
               theme={theme}
-              onPickAssetFromOpenLib={(a) => {
-                /* 开源条目「入库后插入」：与资产条目同一执行路径（占槽 + 插 @PictureN 块） */
-                const ref = assetToDirectorRef(a);
-                if (ref) handlePanelPick(ref);
-              }}
             />
           </>
         )}

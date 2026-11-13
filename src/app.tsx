@@ -32,7 +32,6 @@ import { AppSidebar, AppTopBar } from '@/features/app-sidebar/index.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { EditorPage } from '@/pages/editor/editor-canvas/editor-page.js';
 import { AssetLibraryPage } from '@/features/asset-library/index.js';
-import { OpenLibraryPage } from '@/features/open-library/open-lib-page.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 import { ErrorBoundary } from '@/shared/components/index.js';
 import { CanvasPage } from '@/pages/home/canvas-page.js';
@@ -60,7 +59,6 @@ type Route =
   | { name: 'canvas'; canvasId?: string }
   | { name: 'editor'; canvasId: string }
   | { name: 'assets'; defaultGroup?: string; defaultChild?: string; focusId?: string }
-  | { name: 'openlib' }
   ;
 
 /**
@@ -69,8 +67,6 @@ type Route =
  *   #/canvas/<canvasId>    → 画布列表（指定 id）
  *   #/editor/<canvasId>    → 编辑器
  *   #/assets?group=&child=&focus= → 我的资产
- *   #/openlib              → 开源资产库（独立整页画廊，2026-11-05 任务C 约定：
- *                            首页不内嵌开源库内容，只放一个入口按钮切换到本页）
  * 主页（门户）、公共提示词、法律页、登录页、协作邀请页、canvas-v2 均已移除。
  */
 function parseHash(hash: string): Route {
@@ -95,8 +91,6 @@ function parseHash(hash: string): Route {
         defaultChild: searchParams.get('child') || undefined,
         focusId: searchParams.get('focus') || undefined,
       };
-    case 'openlib':
-      return { name: 'openlib' };
     default:
       return { name: 'canvas' };
   }
@@ -115,8 +109,6 @@ function serializeRoute(route: Route): string {
       if (route.focusId) qp.push(`focus=${encodeURIComponent(route.focusId)}`);
       return qp.length > 0 ? `#/assets?${qp.join('&')}` : '#/assets';
     }
-    case 'openlib':
-      return '#/openlib';
     default:
       return '#/canvas';
   }
@@ -213,7 +205,7 @@ export function App(): React.ReactElement {
   // 当前项目 id（entities 三件套的监听目标）；列表页/资产页为 null
   const activeProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
-    const pid = (route.name === 'assets' || route.name === 'openlib') ? null : route.canvasId ?? null;
+    const pid = route.name === 'assets' ? null : route.canvasId ?? null;
     activeProjectIdRef.current = pid;
     setWatchTarget(pid);
     // 把「当前打开的项目」广播到数据根：MCP 的 get_current_project 读它，
@@ -315,14 +307,12 @@ export function App(): React.ReactElement {
   // 需要显示顶部栏 + 侧边栏的路由（画布列表与资产页套主布局；editor 为全屏独立画布页，自带 TopBar）
   const showHeaderAndSidebar = route.name !== 'editor' && !(route.name === 'canvas' && !!route.canvasId);
 
-  // 当前活跃路由名（用于侧边栏高亮；#/openlib 独立页自己的入口按钮呈选中态，返回其它页取消）
-  const activeRoute = route.name === 'canvas'
-    ? 'canvas'
-    : route.name === 'assets' ? 'assets' : route.name === 'openlib' ? 'openlib' : '';
+  // 当前活跃路由名（用于侧边栏高亮）
+  const activeRoute = route.name === 'canvas' ? 'canvas' : route.name === 'assets' ? 'assets' : '';
 
   /** 侧边栏导航回调（签名沿用 AppSidebar/AppTopBar/MobileNavDrawer 契约，canvas/assets/openlib 可达） */
-  const handleNavigate = (target: 'home' | 'canvas' | 'assets' | 'openlib' | 'publicPrompts' | 'policies' | { name: 'auth'; mode: 'login' }): void => {
-    if (target === 'canvas' || target === 'assets' || target === 'openlib') {
+  const handleNavigate = (target: 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies' | { name: 'auth'; mode: 'login' }): void => {
+    if (target === 'canvas' || target === 'assets') {
       setRoute({ name: target } as Route);
       return;
     }
@@ -334,7 +324,6 @@ export function App(): React.ReactElement {
   const navItems: NavRouteItem[] = [
     { key: 'canvas', label: t('nav.canvas') },
     { key: 'assets', label: t('nav.assets') },
-    { key: 'openlib', label: t('nav.openLib', '开源资产库') },
   ];
 
   return (
@@ -437,9 +426,6 @@ export function App(): React.ReactElement {
                 onBack={() => setRoute({ name: 'canvas' })}
                 onOpenProject={(id) => setRoute({ name: 'editor', canvasId: id })}
               />
-            ) : route.name === 'openlib' ? (
-              /* 开源资产库独立整页（任务D 约定：入口=侧栏图标按钮；本页与抽屉同一 OpenLibBrowser） */
-              <OpenLibraryPage />
             ) : (
               /* 我的资产（保留） */
               <AssetLibraryPage

@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Checkbox, Modal, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { History, Link2, Link2Off, ListVideo, Star, Trash2 } from 'lucide-react';
+import { History, Link2, Link2Off, Palette, Star, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
@@ -1371,7 +1371,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           multitrackProps={{
             railExtra: (scriptEpisodeIds.length > 0 || episodeKeys.length > 1) ? (
               <div data-director-episode-switcher style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <ListVideo size={14} color={theme.toolbar.textMuted} />
                 <Select
                   size="small"
                   data-director-episode
@@ -1382,8 +1381,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   popupMatchSelectWidth={false}
                 />
                 <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{visibleShots.length} 段</span>
-                <Button size="small" type="text" data-director-global-style style={{ fontSize: 12 }} onClick={() => setStyleGalleryOpen(true)}>
-                  全剧风格{String(sharedParams.params?.['styleName'] ?? '') ? `：${String(sharedParams.params?.['styleName'])}` : ''}
+                <Button size="small" type="text" data-director-global-style icon={<Palette size={14} />} style={{ fontSize: 12 }} onClick={() => setStyleGalleryOpen(true)}>
+                  风格{String(sharedParams.params?.['styleName'] ?? '') ? `：${String(sharedParams.params?.['styleName'])}` : ''}
                 </Button>
                 {String(sharedParams.params?.['stylePrompt'] ?? '').trim() ? (
                   <Button

@@ -977,7 +977,7 @@ export const WorkbenchMultiTrack = memo(function WorkbenchMultiTrack({
           flex: 1,
           position: 'relative',
           overflowY: 'auto',
-          overflowX: zeroBaseRail ? 'auto' : 'hidden',
+          overflowX: zeroBaseRail && timeline.shots.length > 1 ? 'auto' : 'hidden',
           minHeight: 0,
           padding: '2px 0',
         }}

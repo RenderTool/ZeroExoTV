@@ -29,8 +29,6 @@ import { bindCanvasScript } from '@/services/canvas-script.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { autoEpisodeTitle } from '@/entities/script-store.js';
 import { openCanvasTab } from '@/features/canvas-tabs/canvas-tab-store.js';
-import { importOpenLibEntry } from '@/features/open-library/import-open-lib-entry.js';
-import type { OpenLibEntry } from '@/features/open-library/open-library.js';
 import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 
 /** 拖拽 MIME 类型(与 picker-card.tsx 的 DRAG_MIME 保持一致) */
@@ -44,7 +42,6 @@ const LIB_DRAG_MIME = 'application/x-testlib-item';
  * importOpenLibEntry（源站高清图 → 同源缩略图降级），再复用与「我的资产」
  * 同一条建节点链路，保证两作用域拖拽行为一致。
  */
-const OPENLIB_DRAG_MIME = 'application/x-openlib-item';
 
 export interface UseDropHandlerOptions {
   refs: EditorRefs;
@@ -158,32 +155,6 @@ export function useDropHandler({
         } catch (err) {
           console.error('[drop-handler] failed to parse library item payload:', err);
           onError?.('素材拖入画布失败：数据解析异常');
-        }
-        return;
-      }
-
-      // 0b. 开源资产卡片拖拽：先入库再建节点（与我的资产同一链路；失败给可读原因，不静默失败）
-      const openLibRaw = e.dataTransfer.getData(OPENLIB_DRAG_MIME);
-      if (openLibRaw) {
-        try {
-          const entry = JSON.parse(openLibRaw) as OpenLibEntry;
-          const asset = await importOpenLibEntry(entry);
-          const node = await buildNodeFromLibraryItem(
-            { type: 'asset', id: asset.id, name: asset.title, data: asset },
-            pos,
-            (msg) => onError?.(msg),
-            containerSize(),
-          );
-          if (node) {
-            insertNodeAt(node);
-            refs.store?.setSelection({
-              selectedNodeIds: new Set([node.id]),
-              selectedEdgeIds: new Set(),
-            });
-          }
-        } catch (err) {
-          console.error('[drop-handler] open-lib drop failed:', err);
-          onError?.(`开源素材导入失败：${(err as Error)?.message ?? '未知原因'}`);
         }
         return;
       }

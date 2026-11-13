@@ -31,7 +31,6 @@ import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-res
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { isAuthorized } from '@/platform/fs.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
-import { getOpenLibMeta } from '@/features/open-library/open-library.js';
 import { countHistoryByKind, libraryCasHashes } from './history-utils.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { App } from 'antd';
@@ -54,7 +53,7 @@ export type { DrawerGroup } from './tab-defs.js';
  * openlib / subject 不参与资产存储口径（filterAssetsStrictScope/countAssetsByScope/resolveUploadScope
  * 均只接受 AssetScope），store 层对两者显式旁路，确保不与用户数据混排。
  */
-export type MaterialScopeTab = AssetScope | 'openlib' | 'subject';
+export type MaterialScopeTab = AssetScope | 'subject';
 
 export interface SendToCanvasItem {
   type: 'asset' | 'script';
@@ -161,15 +160,6 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     if (projectId) useViewPrefsStore.getState().setDrawerMaterialScope(projectId, tab);
   }, []);
 
-  // ── 开源库条目总数（胶囊徽标；meta 缓存读一次，失败降级 0 不阻断抽屉） ──
-  const [openLibCount, setOpenLibCount] = useState<number | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void getOpenLibMeta()
-      .then((m) => { if (alive) setOpenLibCount(m ? m.totals.entries : 0); })
-      .catch(() => { if (alive) setOpenLibCount(0); });
-    return () => { alive = false; };
-  }, []);
 
   // ── 弹窗 / 详情状态 ──
   // 2026-11-05 约定：删除改就地立即生效 + 3 秒撤销浮层，原「删除确认」弹窗与 confirmDelete 状态一并移除
@@ -219,7 +209,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
    *  openlib 段为只读开源库展示作用域、subject 段为主体库页面：两者恒为空数组，
    *  条目分别由 OpenLibGroup / SubjectGroup 独立渲染，不与用户数据混排 */
   const filteredAssets = useMemo(() => {
-    if (materialScopeTab === 'openlib' || materialScopeTab === 'subject') return [];
+    if (materialScopeTab === 'subject') return [];
     const canvasId = getCurrentCanvasId();
     let result = (Array.isArray(assets) ? assets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
@@ -240,7 +230,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
     // openlib/subject 段不是用户素材（独立渲染），分类计数直接归零
-    if (materialScopeTab === 'openlib' || materialScopeTab === 'subject') {
+    if (materialScopeTab === 'subject') {
       return { all: 0, image: 0, video: 0, audio: 0, text: 0 };
     }
     const scoped = filterAssetsStrictScope(base, {
@@ -537,7 +527,6 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     setMaterialScopeTab,
     materialScopeCounts,
     materialKindCounts,
-    openLibCount,
     // 素材批量操作（与资产库页面多选同形）
     assetMultiSelect,
     setAssetMultiSelect,

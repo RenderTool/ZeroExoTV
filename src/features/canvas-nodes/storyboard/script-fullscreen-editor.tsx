@@ -455,7 +455,6 @@ export function ScriptFullscreenEditor({
               <ChevronDown size={13} style={{ opacity: 0.6, flexShrink: 0 }} />
             </button>
           </Dropdown>
-          <div style={{ width: 1, height: 20, background: cardBorder, margin: '0 4px', flexShrink: 0 }} />
           <Tooltip title={t('scriptEditor.importScript') || '导入'}>
             <Button
               type="text"
@@ -477,7 +476,9 @@ export function ScriptFullscreenEditor({
               disabled={!histAvail.canUndo}
               onClick={() => historyControlsRef.current?.undo()}
               style={{ ...toolBtnStyle, color: mutedColor }}
-            />
+            >
+              {t('scriptEditor.undo')}
+            </Button>
           </Tooltip>
           <Tooltip title={t('scriptEditor.redo') || '重做'}>
             <Button
@@ -488,7 +489,9 @@ export function ScriptFullscreenEditor({
               disabled={!histAvail.canRedo}
               onClick={() => historyControlsRef.current?.redo()}
               style={{ ...toolBtnStyle, color: mutedColor }}
-            />
+            >
+              {t('scriptEditor.redo')}
+            </Button>
           </Tooltip>
           {/* 版本/快照入口（2026-11-04）：与撤销/重做同组；仅剧本页注入 projectId 时显示 */}
           {snapshotProjectId ? (
@@ -500,7 +503,9 @@ export function ScriptFullscreenEditor({
                 icon={<History size={15} />}
                 onClick={() => setSnapshotOpen((v) => !v)}
                 style={{ ...toolBtnStyle, color: snapshotOpen ? accent : mutedColor }}
-              />
+              >
+                {t('scriptEditor.snapshot', '版本')}
+              </Button>
             </Tooltip>
           ) : null}
         </div>
