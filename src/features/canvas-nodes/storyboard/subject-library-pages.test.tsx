@@ -639,6 +639,23 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(screen.getByText('已选 3 集')).toBeTruthy();
   });
 
+  it('提示词风格表单：灯光下拉直接改写提示词行（旧「按剧本…定」被替换）', async () => {
+    const tree = makeTree();
+    const st = tree.states.find((s) => s.id === 'state-1')!;
+    st.fullPrompt = '角色描述：古装女侠\n灯光：按剧本时代与场景定（自然主义柔光为主）\n色彩：按剧本时代/题材定调';
+    renderPages(tree);
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    fireEvent.mouseDown(document.querySelector('[data-prompt-style="light"] .ant-select') as Element);
+    await waitFor(() => expect(document.querySelector('.ant-select-item-option[title="戏剧化主光"]')).toBeTruthy());
+    fireEvent.click(document.querySelector('.ant-select-item-option[title="戏剧化主光"]') as Element);
+    await waitFor(() => expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value)
+      .toContain('灯光：戏剧化主光，明暗对比清晰'));
+    expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value)
+      .not.toContain('按剧本时代与场景定');
+  });
+
   it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {
     const tree = makeTree();
     const st = tree.states.find((s) => s.id === 'state-1')!;

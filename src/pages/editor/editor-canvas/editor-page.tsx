@@ -677,7 +677,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           params: {
             aspectRatio: '16:9',
             resolution: '2k',
-            size: { width: 2816, height: 1584 },
+            // 标准 2K（16:9）= 2048×1152；Qwen 最长边也卡 2048，不再用 2816 的电商档
+            size: { width: 2048, height: 1152 },
           },
           ...(detail.storageKey ? { referenceStorageKey: detail.storageKey } : {}),
         },

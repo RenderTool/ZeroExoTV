@@ -32,7 +32,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Tooltip } from 'antd';
+import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Select, Tooltip } from 'antd';
 import {
   ArrowLeft,
   Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search,
@@ -160,6 +160,54 @@ const KIND_FILTERS: Array<{ key: 'all' | ProductionItemKind; labelKey: string }>
   { key: 'prop', labelKey: 'entity.prop' },
   { key: 'candidate', labelKey: 'entity.candidate' },
 ];
+
+/**
+ * 提示词「风格」表单（2026-11-13 用户反馈）：
+ * 模板里不再写「灯光：按剧本时代与题材定」这种偷懒占位，改成可选的固定选项 + 默认值；
+ * 人设 / 本状态变化仍在提示词正文里写，风格块由下拉直接改写对应行。
+ */
+const PROMPT_STYLE_OPTIONS = [
+  { value: '写实电影定妆照', label: '写实电影定妆' },
+  { value: '商务棚拍定妆照', label: '商务棚拍' },
+  { value: '古风写意定妆', label: '古风写意' },
+  { value: '科幻冷峻定妆', label: '科幻冷峻' },
+  { value: '纪实现场抓拍', label: '纪实抓拍' },
+];
+const PROMPT_LIGHT_OPTIONS = [
+  { value: '自然柔光为主，侧光塑形', label: '自然柔光' },
+  { value: '戏剧化主光，明暗对比清晰', label: '戏剧化主光' },
+  { value: '冷白顶光，均匀铺光', label: '冷白顶光' },
+  { value: '暖黄烛火，低照度', label: '暖黄烛火' },
+  { value: '阴天散射，柔和无硬阴影', label: '阴天散射' },
+  { value: '逆光轮廓，发丝高光', label: '逆光轮廓' },
+];
+const PROMPT_COLOR_OPTIONS = [
+  { value: '现代自然色调，低饱和', label: '现代自然' },
+  { value: '古装暖黄，低饱和', label: '古装暖黄' },
+  { value: '民国低饱和，灰绿调', label: '民国低饱和' },
+  { value: '科幻冷青，高对比', label: '科幻冷青' },
+  { value: '黑白高反差', label: '黑白' },
+];
+const PROMPT_TEXTURE_OPTIONS = [
+  { value: '写实电影质感，真实皮肤与布料纹理', label: '写实电影' },
+  { value: '干净商业质感，均匀柔光', label: '干净商业' },
+  { value: '胶片颗粒，复古年代感', label: '胶片颗粒' },
+  { value: '哑光布料，低反射', label: '哑光布料' },
+];
+
+/** 读提示词里的「标签：内容」行（没有 = null） */
+function readPromptField(prompt: string, label: string): string | null {
+  const m = prompt.match(new RegExp(`^${label}：(.+)$`, 'm'));
+  return m?.[1]?.trim() || null;
+}
+
+/** 改写/追加提示词里的「标签：内容」行 */
+function writePromptField(prompt: string, label: string, value: string): string {
+  const line = `${label}：${value}`;
+  const re = new RegExp(`^${label}：.*$`, 'm');
+  if (re.test(prompt)) return prompt.replace(re, line);
+  return `${prompt.trimEnd()}\n${line}`;
+}
 
 /**
  * 出现集数选择器（2026-11-12 简化）：
@@ -1132,6 +1180,38 @@ function StateEditPanel({
               >
                 {t('subject.copyPrompt', '复制')}
               </Button>
+            </div>
+            {/* 风格表单（2026-11-13 用户指令）：固定选项 + 默认值，直接改写提示词里的风格块；
+                人设 / 本状态变化仍在下方正文里写，不再把「按剧本…定」这类占位塞进提示词 */}
+            <div
+              data-prompt-style-form
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 10 }}
+            >
+              {([
+                { key: 'style', label: '风格', lineLabel: '风格', options: PROMPT_STYLE_OPTIONS },
+                { key: 'light', label: '灯光', lineLabel: '灯光', options: PROMPT_LIGHT_OPTIONS },
+                { key: 'color', label: '色彩', lineLabel: '色彩', options: PROMPT_COLOR_OPTIONS },
+                { key: 'texture', label: '质感', lineLabel: '质感', options: PROMPT_TEXTURE_OPTIONS },
+              ] as const).map((field) => {
+                const current = readPromptField(promptValue, field.lineLabel) ?? field.options[0]!.value;
+                const options = field.options.some((o) => o.value === current)
+                  ? [...field.options]
+                  : [{ value: current, label: current.length > 12 ? `${current.slice(0, 12)}…` : current }, ...field.options];
+                return (
+                  <div key={field.key} data-prompt-style={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                    <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{t(`subject.promptStyle.${field.key}`, field.label)}</span>
+                    <Select
+                      size="small"
+                      value={current}
+                      options={options}
+                      onChange={(v: string) => {
+                        const next = writePromptField(promptValue, field.lineLabel, v);
+                        onUpdateNode({ fullPrompt: next, deltaPrompt: next });
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <DraftPromptField
               key={node.id}
