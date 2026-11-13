@@ -27,6 +27,13 @@ vi.mock('react-i18next', () => ({
 }));
 
 const memfs = vi.hoisted(() => new Map<string, unknown>());
+/** 剧本集数据源（可被单个用例改写；默认两集） */
+const scriptMock = vi.hoisted(() => ({
+  episodes: [
+    { id: 'ep-1', number: 1, title: '第一集' },
+    { id: 'ep-2', number: 2, title: '第二集' },
+  ] as Array<{ id: string; number: number; title: string }>,
+}));
 vi.mock('@/platform/fs', () => ({
   readJson: async (p: string) => (memfs.has(p) ? (memfs.get(p) as never) : null),
   writeJson: async (p: string, v: unknown) => { memfs.set(p, v); },
@@ -51,7 +58,7 @@ vi.mock('@/entities/cas-store.js', () => ({
   releaseCas: async () => {},
 }));
 vi.mock('@/entities/script-store.js', () => ({
-  readScript: async () => ({ episodes: [{ number: 1, title: '第一集' }, { number: 2, title: '第二集' }] }),
+  readScript: async () => ({ episodes: scriptMock.episodes }),
   watchScript: () => () => {},
   displayEpisodeTitle: (title: string | undefined, n: number) => title || `第${n}集`,
 }));
@@ -169,6 +176,10 @@ async function openSubjectPage(): Promise<void> {
 
 beforeEach(() => {
   memfs.clear();
+  scriptMock.episodes = [
+    { id: 'ep-1', number: 1, title: '第一集' },
+    { id: 'ep-2', number: 2, title: '第二集' },
+  ];
   // 清掉上一条用例残留的 subject 页面 history marker / pending 聚焦请求，避免跨用例恢复层级
   window.history.replaceState(null, '');
   takePendingNavigateFocus();
@@ -571,15 +582,61 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
-    // 已选第 1 集：摘要写在按钮上，不渲染标签
+    // 已选第 1 集：摘要按标题显示（与弹层里勾选行同一口径），不渲染标签
     expect(document.querySelector('[data-episode-chip]')).toBeNull();
-    expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第 1 集');
-    // 点按钮才展开下拉列表；勾选第 2 集后摘要压成区间，仍然不铺标签
+    expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第一集');
+    // 点按钮才展开下拉列表；勾选第 2 集后摘要显示两集标题，仍然不铺标签
     fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
     await waitFor(() => expect(document.querySelector('[data-episode-option="2"]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-episode-option="2"]') as Element);
-    await waitFor(() => expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第 1–2 集'));
+    await waitFor(() => expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第一集、第二集'));
     expect(document.querySelector('[data-episode-chip]')).toBeNull();
+  });
+
+  it('剧本第 1 条是「故事大纲」时：勾选哪一行就只勾哪一行，摘要按同一行显示（不按 number 错位）', async () => {
+    scriptMock.episodes = [
+      { id: 'ep-outline', number: 1, title: '故事大纲（全剧设定以此为准）' },
+      ...Array.from({ length: 16 }, (_, i) => ({
+        id: `ep-${i + 1}`,
+        number: i + 2,
+        title: `第${i + 1}集｜标题${i + 1}`,
+      })),
+    ];
+    const tree = makeTree();
+    tree.states.find((s) => s.id === 'state-1')!.appearEpisodes = [];
+    renderPages(tree);
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-episode-option="2"]')).toBeTruthy());
+
+    // 点「第1集｜标题1」这一行（number 2）：只勾这一行，摘要显示这一行的标题
+    const row = document.querySelector('[data-episode-option="2"]') as HTMLElement;
+    expect(row.textContent).toContain('第1集｜标题1');
+    fireEvent.click(row);
+    await waitFor(() => expect((row.querySelector('input') as HTMLInputElement).checked).toBe(true));
+    expect((document.querySelector('[data-episode-option="1"] input') as HTMLInputElement).checked).toBe(false);
+    expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第1集｜标题1');
+  });
+
+  it('出现集数「全选」一次写入全部集（不是只留最后一项）', async () => {
+    scriptMock.episodes = [
+      { id: 'ep-1', number: 1, title: '第1集' },
+      { id: 'ep-2', number: 2, title: '第2集' },
+      { id: 'ep-3', number: 3, title: '第3集' },
+    ];
+    const tree = makeTree();
+    tree.states.find((s) => s.id === 'state-1')!.appearEpisodes = [];
+    renderPages(tree);
+    await openSubjectPage();
+    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
+    fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
+    await waitFor(() => expect(document.querySelector('[data-episode-option="1"]')).toBeTruthy());
+    fireEvent.click(screen.getByText('全选'));
+    await waitFor(() => expect(document.querySelector('[data-episodes-picker]')?.textContent).toContain('第1集、第2集、第3集'));
+    expect(screen.getByText('已选 3 集')).toBeTruthy();
   });
 
   it('每状态「画布生成」只把提示词挂进事件，不发起 API', async () => {

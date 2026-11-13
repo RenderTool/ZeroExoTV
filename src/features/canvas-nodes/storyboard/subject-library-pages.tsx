@@ -161,24 +161,6 @@ const KIND_FILTERS: Array<{ key: 'all' | ProductionItemKind; labelKey: string }>
   { key: 'candidate', labelKey: 'entity.candidate' },
 ];
 
-/** 剧集摘要（空 = 全部；悬空编号只过滤显示，不清数据） */
-/**
- * 已选集数压缩成连续区间（1–3、5、8–10），避免 80+ 集时把每个数字平铺出来。
- */
-function compressEpisodeRanges(nums: number[]): string[] {
-  const sorted = [...nums].sort((a, b) => a - b);
-  const out: string[] = [];
-  let start = 0;
-  for (let i = 0; i < sorted.length; i += 1) {
-    const cur = sorted[i]!;
-    if (sorted[i + 1] !== cur + 1) {
-      const from = sorted[start]!;
-      out.push(from === cur ? `${from}` : `${from}–${cur}`);
-      start = i + 1;
-    }
-  }
-  return out;
-}
 /**
  * 出现集数选择器（2026-11-12 简化）：
  * 80+ 集时不再把每个集铺成一行 chip；默认只显示「已选 N 集」，点开后在弹层里搜索/勾选。
@@ -187,12 +169,14 @@ function EpisodePickerContent({
   episodes,
   selected,
   onToggle,
+  onSetAll,
   theme,
   t,
 }: {
   episodes: Array<{ number: number; title?: string }>;
   selected: number[];
   onToggle: (n: number) => void;
+  onSetAll: (numbers: number[]) => void;
   theme: ThemeConfig;
   t: ReturnType<typeof useTranslation>['t'];
 }): React.ReactElement {
@@ -221,10 +205,8 @@ function EpisodePickerContent({
           <Button
             size="small"
             type="link"
-            onClick={() => {
-              if (allSelected) episodes.forEach((ep) => { if (selected.includes(ep.number)) onToggle(ep.number); });
-              else episodes.forEach((ep) => { if (!selected.includes(ep.number)) onToggle(ep.number); });
-            }}
+            data-episodes-set-all={allSelected ? 'clear' : 'all'}
+            onClick={() => onSetAll(allSelected ? [] : episodes.map((ep) => ep.number))}
           >
             {allSelected ? t('subject.clearEpisodes', '清空') : t('subject.selectAllEpisodes', '全选')}
           </Button>
@@ -977,12 +959,22 @@ function StateEditPanel({
   };
   const labelStyle: CSSProperties = { fontSize: 12, fontWeight: 500, color: theme.toolbar.textMuted, marginBottom: 8 };
   const hintStyle: CSSProperties = { fontSize: 11, lineHeight: 1.6, color: theme.toolbar.textMuted };
-  const episodeRanges = compressEpisodeRanges(selectedEpisodes);
+  /**
+   * 摘要必须与弹层里勾选的行**同一口径**：用剧集标题，不用裸集号。
+   * 剧本第 1 条是「故事大纲」这类元条目时，number 与标题里的「第N集」天然错位；
+   * 摘要显示裸集号会让用户以为勾错了行（2026-11-13 用户反馈）。
+   */
+  const selectedEpisodeTitles = selectedEpisodes
+    .map((n) => validEpisodes.find((e) => e.number === n))
+    .filter((e): e is { number: number; title?: string } => Boolean(e))
+    .map((e) => displayEpisodeTitle(e.title, e.number));
   const episodeLabel = selectedEpisodes.length === 0
     ? t('subject.appearEpisodesAllShort', '全部剧集')
-    : episodeRanges.length > 5 || selectedEpisodes.length > 12
-      ? t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selectedEpisodes.length })
-      : t('subject.appearEpisodesRanges', '第 {{ranges}} 集', { ranges: episodeRanges.join('、') });
+    : selectedEpisodeTitles.length <= 3
+      ? selectedEpisodeTitles.join('、')
+      : t('subject.appearEpisodesSelected', '已选 {{n}} 集', { n: selectedEpisodes.length });
+  /** 全选/清空一次写回（逐项 onToggle 会因闭包拿到同一份旧 selected，只剩最后一项） */
+  const setAllEpisodes = (numbers: number[]) => onUpdateNode({ appearEpisodes: numbers });
   // 编辑卡置顶后，点下方状态卡时把展开的编辑区滚进视野（已在视野内则不动）
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => { rootRef.current?.scrollIntoView?.({ block: 'nearest' }); }, []);
@@ -1164,6 +1156,7 @@ function StateEditPanel({
                     episodes={validEpisodes}
                     selected={selectedEpisodes}
                     onToggle={toggleEpisode}
+                    onSetAll={setAllEpisodes}
                     theme={theme}
                     t={t}
                   />

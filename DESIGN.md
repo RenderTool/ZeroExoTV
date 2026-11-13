@@ -302,7 +302,8 @@ page container (height: 100%, flex column, overflow: hidden)
 - 卡片一律走 `@/shared/ui`（`CardShell` / `Badge` / `IconButton` / `uiCardNameStyle` / `uiCardMetaStyle`），**禁止**再新建一套卡片 token；类型角标统一 `Badge tone="neutral"`，业务类型不承载颜色。
 - 工具栏：搜索用 antd `Input`（240 + prefix 图标 + `allowClear`）；分类筛选用**下划线 Tab**（36 高 / 13px / 选中主文本色 + 2px accent 下划线 + 11px 计数）；次级筛选用 antd `Button size="small"`。
 - 卡内动作：悬停/聚焦露出 `IconButton size="sm"` + antd `Tooltip`，危险动作走 `danger` + `Modal.confirm`。卡内有按钮时根节点用 `div[role="button"]`，禁止 `button` 嵌套 `button`。
-- **出现集数只显示一枚摘要按钮**（「全部剧集」/「第 1–12 集」/「已选 N 集」），点开弹层搜索/勾选，单集增删在弹层里完成；**禁止把每个已选集铺成标签**（58 集会铺十几行、把卡片撑爆），也禁止把全部集号平铺成一行长文本。
+- **出现集数只显示一枚摘要按钮**（全部 / 标题 / 「已选 N 集」），点开弹层搜索/勾选，单集增删在弹层里完成；**禁止把每个已选集铺成标签**（58 集会铺十几行、把卡片撑爆），也禁止把全部集号平铺成一行长文本。
+- **出现集数摘要必须用剧集标题**（与弹层里勾选的行同一口径），禁止拿 `number` 的裸集号拼「第 N 集」——剧本首条是「故事大纲」这类元条目时，number 与标题天然错位，裸集号会让用户以为勾错了行。「全选 / 清空」一次写回，禁止在循环里逐项 `onToggle`（闭包会只剩最后一项）。
 - **主体图必须对得上主体**：角色图单人、同一张脸，场景空场景、道具单品；**禁止多人合照 / 模特合集 / 候选人群像 / 别的角色图**入主体库。MCP 挂图前必须 `read_asset` 真正看过 + 带上「画面反推提示词」（`set_subject_image` 由 `IMAGE_REVIEW_REQUIRED` / `IMAGE_PROMPT_REQUIRED` 把关）。
 - 抽屉内嵌（`embedded`）：页边距 20、取消定宽；面包屑不再需要折叠中间层（只有两级）。
 
