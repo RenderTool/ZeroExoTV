@@ -32,7 +32,13 @@ const SEEN_KEY = 'zeroexo:onboarding.seen';
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
 const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
 
-/** 页面内直接列出的生成模型（写死当前支持的四类，不引额外接口） */
+/** 机器档位 → 模型推荐（本地 / 云端）。8GB 本地只建议图片；H3 按量化档位选。 */
+const MODEL_RECOMMENDATIONS: Array<{ vram: string; local: string; cloud: string }> = [
+  { vram: '8 GB', local: '图片：QwenImage2.1（GGUF Q4）/ Krea2 / MossImage。视频不推荐本地跑 H3。', cloud: 'H3 INT8 / 云端 2K' },
+  { vram: '12–16 GB', local: '图片全量；H3：pruned INT8 + NVFP4 文本编码器 + offload，0.4MP 短片段（建议 32GB 内存）。', cloud: 'H3 INT8' },
+  { vram: '24 GB', local: 'H3：pruned INT8 常驻（约 21GB）+ 文本编码器编码后卸载；图片全量。', cloud: 'H3 INT8 / 2K' },
+  { vram: '32 GB+', local: 'H3：pruned INT8，Blackwell 可用 NVFP4；全画布 768p。', cloud: '2K 托管' },
+];
 const MODELS: Array<{ name: string; note: string }> = [
   { name: 'QwenImage2.1', note: '图片 / 图生图' },
   { name: 'Krea2', note: '图片' },
@@ -380,6 +386,31 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
                 <span style={{ opacity: 0.6, marginLeft: 4 }}>{m.note}</span>
               </Tag>
             ))}
+          </div>
+          {/* 机器档位 → 模型推荐（本地 / 云端）：8GB 只建议图片，H3 按量化档位选 */}
+          <div data-model-recommendations style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>{t('onboarding.modelGuide', '机器配置推荐')}</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, lineHeight: 1.5 }}>
+              <thead>
+                <tr style={{ color: theme.toolbar.textMuted, textAlign: 'left' }}>
+                  <th style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{t('onboarding.vram', '显存')}</th>
+                  <th style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{t('onboarding.localPick', '本地推荐')}</th>
+                  <th style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{t('onboarding.cloudPick', '云端 / 远程')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {MODEL_RECOMMENDATIONS.map((row) => (
+                  <tr key={row.vram}>
+                    <td style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{row.vram}</td>
+                    <td style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{row.local}</td>
+                    <td style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{row.cloud}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <span style={hintStyle(theme)}>
+              {t('onboarding.modelGuideHint', 'H3 官方推荐：pruned INT8 扩散（约 21GB）+ NVFP4 文本编码器（14.6GB）；BF16 66GB 非消费级，本地任何卡都出不了 2K。8GB 机器优先做图片，视频走云端 INT8。')}
+            </span>
           </div>
         </StepCard>
       </div>
