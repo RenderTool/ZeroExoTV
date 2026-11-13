@@ -1,6 +1,6 @@
 {
   "name": "@zeroexo/mcp-server",
-  "version": "0.2.38",
+  "version": "0.2.39",
   "description": "MCP server for zeroexo-comfyui project management (M1)",
   "type": "module",
   "bin": {

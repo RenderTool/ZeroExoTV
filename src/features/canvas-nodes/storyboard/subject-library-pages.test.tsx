@@ -838,7 +838,7 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
     renderPages(marked);
     act(() => useViewPrefsStore.getState().setSubjectActiveEpisode(PID, 2));
     await waitFor(() => expect(document.querySelector('[data-subject-card="item-1"]')).toBeNull());
-    expect(document.querySelector('[data-subject-episode-empty]')?.textContent).toContain('第 2 集暂无主体');
+    expect(document.querySelector('[data-subject-episode-empty]')?.textContent).toContain('第二集 暂无主体');
 
     fireEvent.click(document.querySelector('[data-subject-episode-reset]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-card="item-1"]')).toBeTruthy());
@@ -851,7 +851,7 @@ describe('主体列表页按集筛选（选项来自剧本真实集数）', () =
       const btn = document.querySelector('[data-subject-episode-filter]') as HTMLElement;
       expect(btn.dataset.episode).toBe('2');
     });
-    expect((document.querySelector('[data-subject-episode-filter]') as HTMLElement).textContent).toContain('第 2 集');
+    expect((document.querySelector('[data-subject-episode-filter]') as HTMLElement).textContent).toContain('第二集');
   });
 });
 

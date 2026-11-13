@@ -1789,6 +1789,9 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
 
   // ===== 工具栏片段（整页与抽屉共用同一实现，2026-11-06）=====
   /** 按集筛选：选项来自剧本真实集数；落位由调用处决定（旧版自带 marginLeft:auto，抽屉里被右边缘裁成半截） */
+  /** 当前筛选集的显示名：与出现集数一样用剧集标题，不用裸集号（number 可能与标题里的第N集错位） */
+  const activeEpisodeItem = activeEpisode === null ? null : episodes.find((ep) => ep.number === activeEpisode) ?? null;
+  const activeEpisodeLabel = activeEpisodeItem ? displayEpisodeTitle(activeEpisodeItem.title, activeEpisodeItem.number) : '';
   const episodeFilter = (
     <Dropdown
       trigger={['click']}
@@ -1814,7 +1817,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                 <span style={{ width: 12, display: 'inline-flex', justifyContent: 'center' }}>
                   {activeEpisode === ep.number ? <Check size={12} /> : null}
                 </span>
-                {t('subject.episodeN', { n: ep.number, defaultValue: `第 ${ep.number} 集` })}
+                {displayEpisodeTitle(ep.title, ep.number)}
               </span>
             ),
             onClick: () => setSubjectActiveEpisode(projectId ?? '', ep.number),
@@ -1830,9 +1833,9 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         iconPlacement="end"
         style={{ flexShrink: 0 }}
       >
-        {activeEpisode === null
+        {activeEpisode === null || !activeEpisodeLabel
           ? t('subject.episodeAll', '全集')
-          : `${t('subject.episodeN', { n: activeEpisode, defaultValue: `第 ${activeEpisode} 集` })} · ${episodeCards.length} 个`}
+          : `${activeEpisodeLabel} · ${episodeCards.length} 个`}
       </Button>
     </Dropdown>
   );
@@ -2023,7 +2026,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             {activeEpisode !== null && episodeCards.length === 0 ? (
               <div data-subject-episode-empty style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 0', textAlign: 'center' }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: theme.toolbar.text }}>
-                  {t('subject.episodeEmpty', { n: activeEpisode, defaultValue: `第 ${activeEpisode} 集暂无主体` })}
+                  {t('subject.episodeEmptyTitle', { title: activeEpisodeLabel, defaultValue: `${activeEpisodeLabel} 暂无主体` })}
                 </span>
                 <Button size="small" data-subject-episode-reset onClick={() => setSubjectActiveEpisode(projectId ?? '', null)}>
                   {t('subject.episodeBackAll', '查看全集')}
