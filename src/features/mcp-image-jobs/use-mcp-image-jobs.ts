@@ -18,6 +18,21 @@ import { generateMossImage } from '@/pages/editor/editor-canvas/interactions/loc
 import { generateKrea2Image } from '@/pages/editor/editor-canvas/interactions/local-krea2-image.js';
 import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
 import { MOSS_MODEL_KEY, KREA2_MODEL_KEY, LOCAL_IMAGE_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { clampQwenSize } from '@/features/canvas-tabs/qwen-limits.js';
+
+/** MCP 请求的最终尺寸：显式 width/height 优先；否则按 aspect + megapixels 计算；都没有则跟随源图 */
+function resolveRequestedSize(req: McpImageRequest): { width: number; height: number } | null {
+  if (req.width && req.height) return clampQwenSize(req.width, req.height);
+  if (!req.aspect) return null;
+  const parts = req.aspect.split(':');
+  const rw = Number(parts[0]);
+  const rh = Number(parts[1]);
+  if (!Number.isFinite(rw) || !Number.isFinite(rh) || rw <= 0 || rh <= 0) return null;
+  const pixels = Math.max(0.1, req.megapixels ?? 1) * 1024 * 1024;
+  const width = Math.sqrt(pixels * (rw / rh));
+  const height = width * (rh / rw);
+  return clampQwenSize(width, height);
+}
 
 export const MCP_IMAGE_JOB_DIR = '.lf/zeroexo/app_meta/image-jobs';
 
@@ -78,21 +93,24 @@ async function generateOne(
   blob: Blob; width: number; height: number; mimeType: string; bytes: number; generationId: string;
 }> {
   const model = req.model ?? 'moss';
+  const targetSize = resolveRequestedSize(req);
   const params = {
     prompt: req.prompt,
     negative_prompt: req.negative_prompt ?? '',
     steps: req.steps,
     seed: req.seed,
     megapixels: req.megapixels,
-    width: req.width,
-    height: req.height,
+    width: targetSize?.width ?? req.width,
+    height: targetSize?.height ?? req.height,
+    // 显式尺寸必须压过「编辑跟随原图」的默认分支，否则宽高会被静默丢弃回落 4:3
+    ...(targetSize ? { sizeMode: 'custom' as const } : {}),
   };
   // 改图（图生图）：只有 Qwen 支持 image 输入；原图 + 可选遮罩，输出到新节点，不动原图
   if (edit?.sourceDataUrl) {
     return generateLocalQwenImage({
       prompt: req.prompt,
-      width: req.width,
-      height: req.height,
+      width: targetSize?.width ?? req.width,
+      height: targetSize?.height ?? req.height,
       referenceImages: [edit.sourceDataUrl],
       maskDataUrl: edit.maskDataUrl,
       params: { ...params, edit_mode: false },
@@ -206,6 +224,7 @@ export function useMcpImageJobs(opts: {
         const col = i % 5;
         const row = Math.floor(i / 5);
         const position = { x: 120 + col * 300, y: 120 + row * 320 };
+        const targetSize = resolveRequestedSize(req);
         cq.execute(new AddNodeCommand({
           id: nodeId,
           type: 'image',
@@ -220,6 +239,7 @@ export function useMcpImageJobs(opts: {
             paramValues: {
               aspect: req.aspect ?? '1:1',
               megapixels: req.megapixels ?? 1,
+              ...(targetSize ? { width: targetSize.width, height: targetSize.height, sizeMode: 'custom' } : {}),
               steps: req.steps,
               seed: req.seed ?? -1,
               cfg: req.model === 'moss' ? 2.5 : undefined,

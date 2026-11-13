@@ -16,14 +16,22 @@ export function clampQwenEdge(value: number, fallback = 1024): number {
   return Math.max(64, Math.min(QWEN_MAX_EDGE, Math.round(n / 32) * 32));
 }
 
-/** 同时夹最长边与总像素（超 4MP 时按比例缩到 4MP 内） */
+/** 同时夹最长边与总像素（按原比例缩放，禁止单边夹取把 16:9 拉成 4:3） */
 export function clampQwenSize(width: number, height: number): { width: number; height: number } {
-  let w = clampQwenEdge(width);
-  let h = clampQwenEdge(height);
+  const w0 = Number.isFinite(width) && width > 0 ? width : 1024;
+  const h0 = Number.isFinite(height) && height > 0 ? height : 1024;
+  const scale = Math.min(
+    1,
+    QWEN_MAX_EDGE / w0,
+    QWEN_MAX_EDGE / h0,
+    Math.sqrt(QWEN_MAX_PIXELS / (w0 * h0)),
+  );
+  let w = clampQwenEdge(Math.round(w0 * scale));
+  let h = clampQwenEdge(Math.round(h0 * scale));
   if (w * h > QWEN_MAX_PIXELS) {
-    const scale = Math.sqrt(QWEN_MAX_PIXELS / (w * h));
-    w = clampQwenEdge(Math.floor(w * scale));
-    h = clampQwenEdge(Math.floor(h * scale));
+    const down = Math.sqrt(QWEN_MAX_PIXELS / (w * h));
+    w = clampQwenEdge(Math.floor(w * down));
+    h = clampQwenEdge(Math.floor(h * down));
   }
   return { width: w, height: h };
 }

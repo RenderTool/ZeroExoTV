@@ -66,7 +66,14 @@ interface HistoryRecord {
     origin?: string;
     originSource?: string;
     guide?: GuideInfo;
-    generation?: { jobId?: string; provider?: string };
+    generation?: { jobId?: string; provider?: string; prompt?: string; model?: string };
+    width?: number;
+    height?: number;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    prompt?: string;
+    model?: string;
+    originNodeId?: string;
   };
 }
 
@@ -85,6 +92,12 @@ function historyItem(a: HistoryRecord): Record<string, unknown> {
     projectId: a.projectId, scope: a.scope, storageKey: a.data?.storageKey,
     origin: a.data?.origin, originSource: a.data?.originSource,
     jobId: a.data?.generation?.jobId,
+    // 画布生成资产：给 Agent 足够信息直接挑图（尺寸/提示词/来源节点/模型）
+    width: a.data?.width ?? a.data?.naturalWidth ?? null,
+    height: a.data?.height ?? a.data?.naturalHeight ?? null,
+    prompt: a.data?.prompt ?? a.data?.generation?.prompt ?? null,
+    originNodeId: a.data?.originNodeId ?? null,
+    model: a.data?.generation?.model ?? a.data?.model ?? null,
     guide: a.data?.guide ?? null,
   };
 }

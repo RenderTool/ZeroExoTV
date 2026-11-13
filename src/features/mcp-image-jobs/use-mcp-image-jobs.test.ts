@@ -30,5 +30,9 @@ describe('useMcpImageJobs 结构契约', () => {
     // 节点必须按原图比例重算（MCP 建节点用 300×300 占位）
     expect(src).toContain('ResizeNodeCommand');
     expect(src).toContain('fitImageNodeSize(300');
+    // 改图也必须尊重 aspect/megapixels/width/height，不能静默回落固定 4:3
+    expect(src).toContain('resolveRequestedSize');
+    expect(src).toContain("sizeMode: 'custom'");
+    expect(src).toContain('width: targetSize.width, height: targetSize.height');
   });
 });

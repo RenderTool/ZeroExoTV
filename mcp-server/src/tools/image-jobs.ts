@@ -96,6 +96,8 @@ export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
       maskStorageKey: z.string().optional(),
       steps: z.number().int().min(1).max(100).optional(),
       seed: z.number().int().optional(),
+      aspect: z.string().optional().describe("输出比例（与 megapixels 一起决定最终尺寸）"),
+      megapixels: z.number().min(0.5).max(4).optional().describe("百万像素（与 aspect 一起决定最终尺寸）"),
       width: z.number().int().optional(),
       height: z.number().int().optional(),
     },
@@ -112,6 +114,8 @@ export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
         maskStorageKey: args.maskStorageKey,
         steps: args.steps,
         seed: args.seed,
+        aspect: args.aspect,
+        megapixels: args.megapixels,
         width: args.width,
         height: args.height,
       }]);

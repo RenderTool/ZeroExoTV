@@ -509,6 +509,7 @@ Krea 2 吃**自然语言 + 明确视觉选择**，越像给摄影师/美术指�
 1. 先确定原图：
    - 画布节点：\`get_canvas\` 找到该节点的 \`storageKey\`，用 \`sourceNodeId\` 传节点 id；
    - 资产/历史：\`list_assets\` 或 \`list_history\` 拿 \`storageKey\`（\`cas:<hash>.<ext>\` / \`image:<id>\`），用 \`sourceStorageKey\`。
+   - **画布上手动生成/改过的图不在 get_canvas 的「提交节点」里也可能存在**：先调 \`list_history({ projectId, source:"canvas" })\`，它会返回 \`storageKey\`、\`width/height\`、\`prompt\`、\`originNodeId\`；不要只凭 get_canvas 的节点数判断「没有生成图」。
 2. 提示词写法：**「只改什么 + 其余保持不变 + 原图关键元素复述」**，例如：
    \`只把画面中的玻璃罩煤油灯换成明代陶/铜油灯（矮身、无玻璃罩、暖色油焰），其余保持不变：人物姿势、服装、构图、光线、背景街道与雨夜氛围都保持原样。\`
    不要写「重新生成一张…」；不要把整张图重新描述成新构图。

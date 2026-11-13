@@ -290,7 +290,6 @@ export function NodeCapsuleToolbar({
   }, [node]);
 
   const sendMenuItems: MenuProps['items'] = node ? [
-    { key: 'send-project', label: t('send.toProjectAssets', '本项目资产'), icon: <Copy size={14} /> },
     { key: 'send-library', label: t('send.toGlobalAssets', '全局资产'), icon: <Copy size={14} /> },
     { key: 'send-as', label: t('send.saveAsAsset', '另存为资产…'), icon: <Copy size={14} /> },
     ...(node.type === 'image' || node.type === 'audio' || node.type === 'video'
@@ -660,8 +659,7 @@ export function NodeCapsuleToolbar({
             menu={{
               items: sendMenuItems,
               onClick: ({ key }) => {
-                if (key === 'send-project') void handleSendToAssets('project');
-                else if (key === 'send-library') void handleSendToAssets('library');
+                if (key === 'send-library') void handleSendToAssets('library');
                 else if (key === 'send-as') handleSaveAsAsset();
                 else if (key === 'send-subject') handleSendToSubject();
                 else if (key === 'canvas-copy') onCreateCanvasCopy?.();
