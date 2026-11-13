@@ -527,7 +527,26 @@ export function NodeGenerateDock({
     let cancelled = false;
     void (async () => {
       const next: Record<string, string> = {};
-      await Promise.all(incomingNodes.map(async (n) => {
+      // 连入素材 + 画布上所有图片节点：@ 列表里的图片也要有缩略图（badge 显示）
+      const graph = store.getGraph();
+      const seen = new Set<string>();
+      const resolveNodes: Array<{ id: string; type: string; content?: string; storageKey?: string }> = [];
+      for (const n of incomingNodes) {
+        if (!seen.has(n.id)) { seen.add(n.id); resolveNodes.push(n); }
+      }
+      for (const n of graph.nodes) {
+        if (n.type === 'image' && !seen.has(n.id)) {
+          const d = (n.data ?? {}) as Record<string, unknown>;
+          seen.add(n.id);
+          resolveNodes.push({
+            id: n.id,
+            type: 'image',
+            content: typeof d.content === 'string' ? d.content : undefined,
+            storageKey: typeof d.storageKey === 'string' ? d.storageKey : undefined,
+          });
+        }
+      }
+      await Promise.all(resolveNodes.map(async (n) => {
         if ((n.type === 'image' || n.type === 'video') && n.storageKey) {
           try {
             const u = await resolveAnyThumbUrl(n.storageKey);
@@ -542,7 +561,6 @@ export function NodeGenerateDock({
           next[n.id] = n.content;
         } else if (n.type === 'stacked-media') {
           // 堆叠:展开解析各卡片缩略图(@ 列表与参考区展示用)
-          const graph = store.getGraph();
           const src = graph.nodes.find((g) => g.id === n.id);
           const cards = ((src?.data as { cards?: Array<{ id: string; sourceType: string; data?: Record<string, unknown> }> } | undefined)?.cards) ?? [];
           for (const card of cards) {
@@ -562,7 +580,7 @@ export function NodeGenerateDock({
       if (!cancelled) setRefUrlMap(next);
     })();
     return () => { cancelled = true; };
-  }, [incomingNodes, store]);
+  }, [incomingNodes, store, graphVersion]);
 
   // @ 引用列表(与生成器 GeneratorPromptEditor 的 references 契约一致)
   // 堆叠在此展开为具体卡片条目:只有明确 @ 到支持类型的卡片才会作为 API 资产源输入;
@@ -607,7 +625,7 @@ export function NodeGenerateDock({
     const graph = store.getGraph();
     const incomingIds = new Set(incomingNodes.map((n) => n.id));
     return graph.nodes
-      .filter((n) => n.type === 'image' && n.id !== nodeId && !incomingIds.has(n.id))
+      .filter((n) => n.type === 'image' && !incomingIds.has(n.id))
       .map((n) => {
         const d = (n.data ?? {}) as Record<string, unknown>;
         return {
