@@ -281,7 +281,13 @@ export async function uploadZeroexoReference(
   }
   try {
     const form = new FormData();
-    form.append('image', new File([blob], filename, { type: blob.type || 'image/png' }));
+    // 文件名必须带内容哈希：ComfyUI 的 LoadImage 缓存按输入文件名命中；
+    // 同名 overwrite 会让同一 shot 的参考图一直用旧缓存（场景/主体不更新）。
+    const dot = filename.lastIndexOf('.');
+    const ext = dot > 0 ? filename.slice(dot) : '';
+    const stem = (dot > 0 ? filename.slice(0, dot) : filename).replace(/[\\/]/g, '_');
+    const uploadName = hash ? `${stem}_${hash.slice(0, 12)}${ext}` : filename;
+    form.append('image', new File([blob], uploadName, { type: blob.type || 'image/png' }));
     form.append('overwrite', 'true');
     const url = `${trimBase(baseUrl)}/upload/image`;
     const post = (): Promise<Response> => fetch(url, { method: 'POST', body: form });
