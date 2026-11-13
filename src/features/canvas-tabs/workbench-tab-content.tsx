@@ -505,7 +505,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       const shot = list[i]!;
       setActiveShotId(shot.id);
       setPreviewAutoPlayKey((k) => k + 1);
-      sequenceTimer.current = window.setTimeout(() => playAt(i + 1), Math.max(1, Number(shot.duration) || 5) * 1000 + 120);
+      sequenceTimer.current = window.setTimeout(() => playAt(i + 1), Math.max(1, Number(shot.duration) || 5) * 1000 + 700);
     };
     setSequencePlaying(true);
     playAt(startIdx);
