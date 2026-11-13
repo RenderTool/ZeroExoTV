@@ -669,7 +669,9 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
             const idx = runArgs.shots.findIndex((s) => s.id === shot.id);
             if (!enabled || idx <= 0) return { usePrev: false };
             const prevGuideId = runArgs.shots[idx - 1]?.media?.guide?.id;
-            return prevGuideId ? { id: prevGuideId, usePrev: false } : { usePrev: true };
+            // 只有上一段真的已有 guide 才喂；没有就明确“本段无引导输入”，
+            // 绝不能退回服务端 LAST_GUIDE 拿别的场景尾帧。
+            return prevGuideId ? { id: prevGuideId, usePrev: false } : { usePrev: false };
           };
           // 实时预览：v1 作业同样支持 clientId → /ws minimax_director_preview
           const previewClientId = createPreviewClientId();
@@ -689,18 +691,8 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
           // 显存策略属于服务层：读一次机器信息，auto 时低显存机器自动走低显存链
           await ensureComfyuiMachineInfo(cfg.baseUrl);
           const useLowVram = shouldUseLowVram();
-          // 批量里第 2 段起若上一段还没有 guide，不能整批直接报错：先跑能连续的前缀，
-          // 完成后再让用户跑下一段（guide 由上一段结果生成）。
-          const firstMissingGuide = selected.findIndex((s, i) => i > 0 && guideFor(s).usePrev);
-          if (firstMissingGuide === 0) {
-            throw new Error("第 1 段开启了段间衔接，但上一段没有可用的 guide；请先重跑上一段。");
-          }
-          const runSelected = firstMissingGuide > 0 ? selected.slice(0, firstMissingGuide) : selected;
-          if (firstMissingGuide > 0) {
-            cbRef.current.onNotice('warning', `第 ${firstMissingGuide + 1} 段还没有上一段 guide，本次先跑前 ${runSelected.length} 段；完成后请再运行后续片段。`);
-          }
           const submitted: Array<{ jobId: string; shotId: string }> = [];
-          for (const [i, shot] of runSelected.entries()) {
+          for (const [i, shot] of selected.entries()) {
             // 参考图：插件节点只收一张 → 取该片段第一张图片参考（其余槽位生成本身不支持）
             const firstImage = (shot.references ?? []).find((r) => r.kind === 'image');
             let referenceImage = '';
@@ -715,9 +707,6 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
             const guide = guideFor(shot);
             // 不允许把「上一段没有 guide」降级成服务端 LAST_GUIDE：那会拿别的场景尾帧，
             // 生成结果和上一段完全不是同一个场景。必须显式失败，先重跑上一段。
-            if (guide.usePrev) {
-              throw new Error(`第 ${i + 1} 段开启了段间衔接，但上一段没有可用的 guide；请先重跑上一段，生成 guide 后再生成本段。`);
-            }
             const job = await submitZeroexoJob(cfg.baseUrl, {
               clientJobId: `zx_${runArgs.projectId}_${shot.id}_${Date.now()}`,
               clientId: previewClientId,
@@ -749,7 +738,7 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
             submitted.push({ jobId: job.jobId, shotId: shot.id });
           }
           zeroexoJobs.current = new Map(submitted.map((j, i) => [i + 1, j]));
-          segmentShotIds = runSelected.map((s) => s.id);
+          segmentShotIds = selected.map((s) => s.id);
           // activeJob.jobId 只做元数据展示；绝不能把多段 id 拼成逗号串（轮询会变成 Unknown jobId: A,B）
           jobId = submitted[0]?.jobId ?? '';
         } else if (cfg.mode === 'openai') {
