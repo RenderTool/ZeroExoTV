@@ -21,7 +21,7 @@ import {
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
 import { readLastSeed, recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
-import { clampQwenSize, QWEN_DEFAULT_STEPS, QWEN_MAX_EDGE } from '@/features/canvas-tabs/qwen-limits.js';
+import { clampQwenSize, QWEN_DEFAULT_STEPS } from '@/features/canvas-tabs/qwen-limits.js';
 import {
   createPreviewClientId,
   ComfyuiPreviewSocket,
@@ -101,22 +101,6 @@ async function readImageSize(blob: Blob): Promise<{ width: number; height: numbe
   }
 }
 
-/** 把输入图按原比例缩到最长边 ≤ maxEdge（超过 2K 的参考图不再按原尺寸采样） */
-async function capDataUrlEdge(dataUrl: string, maxEdge = QWEN_MAX_EDGE): Promise<string> {
-  const blob = await dataUrlBlob(dataUrl);
-  if (!blob) return dataUrl;
-  const bitmap = await createImageBitmap(blob);
-  try {
-    const maxSide = Math.max(bitmap.width, bitmap.height);
-    if (maxSide <= maxEdge) return dataUrl;
-    const scale = maxEdge / maxSide;
-    const w = Math.max(16, Math.round((bitmap.width * scale) / 16) * 16);
-    const h = Math.max(16, Math.round((bitmap.height * scale) / 16) * 16);
-    return await fitDataUrlToSize(dataUrl, w, h);
-  } finally {
-    bitmap.close();
-  }
-}
 
 /** 把输入图按「填满并居中裁切」缩放到指定尺寸；用于用户显式选择输出尺寸的编辑。 */
 async function fitDataUrlToSize(dataUrl: string, width: number, height: number): Promise<string> {
@@ -179,11 +163,16 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
   const params = req.params ?? {};
   const source = req.referenceImages?.[0];
   const requested = clampQwenSize(num(params.width, 1344), num(params.height, 1008));
-  // 有参考图且用户选「跟随原图」→ 输出跟随输入图（超过 2K 先按原比例缩到 2K）；
-  // 显式选尺寸 → 先把输入图缩放到目标尺寸（目标也受 2K 限制）。
-  const followSource = Boolean(source) && params.sizeMode !== 'custom';
-  const outWidth = followSource ? undefined : requested.width;
-  const outHeight = followSource ? undefined : requested.height;
+  // 2026-11-13 修复 tensor mismatch：有参考图时，输出尺寸必须与输入图完全一致（都按 16 对齐、≤2K）。
+  // 以前「跟随原图」把 width/height 传 undefined，服务端回退 1024×1024，输入却是别的尺寸 → latent 对不上。
+  const sourceBlob = source ? await dataUrlBlob(source) : null;
+  const sourceSize = sourceBlob ? await readImageSize(sourceBlob) : null;
+  const followSource = Boolean(sourceSize) && params.sizeMode !== 'custom';
+  const target = followSource && sourceSize
+    ? clampQwenSize(sourceSize.width, sourceSize.height)
+    : requested;
+  const outWidth = target.width;
+  const outHeight = target.height;
   const clientId = req.resume?.clientId ?? createPreviewClientId();
   // 先连 /ws 再提交：插件把 clientId 透传进 /prompt，ComfyUI 才会把 progress / 预览帧发给这个连接
   let previewSocket: ComfyuiPreviewSocket | null = null;
@@ -200,12 +189,8 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
     let jobId = req.resume?.jobId ?? '';
     let state: ZeroexoJobState = 'queued';
     if (!req.resume) {
-      let inputSource = source;
-      if (source && followSource) {
-        inputSource = await capDataUrlEdge(source);
-      } else if (source && outWidth && outHeight) {
-        inputSource = await fitDataUrlToSize(source, outWidth, outHeight);
-      }
+      // 输入图一律缩放到与输出完全相同的尺寸（含遮罩），避免 Qwen latent 尺寸不一致
+      const inputSource = source ? await fitDataUrlToSize(source, outWidth, outHeight) : undefined;
       let inputName = '';
       if (inputSource) {
         const blob = await dataUrlBlob(inputSource);
@@ -215,7 +200,8 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
       }
       let maskName = '';
       if (req.maskDataUrl) {
-        const blob = await dataUrlBlob(req.maskDataUrl);
+        const maskFitted = await fitDataUrlToSize(req.maskDataUrl, outWidth, outHeight);
+        const blob = await dataUrlBlob(maskFitted);
         if (!blob) throw new Error('遮罩读取失败');
         maskName = (await uploadZeroexoReference(base, blob, 'zx_qwen_mask.png')) ?? '';
         if (!maskName) throw new Error('遮罩上传 ComfyUI 失败');
