@@ -114,13 +114,16 @@ describe('图片编辑 = 独立页签（Photoshop 式）', () => {
     expect(mask).toContain('data-brush-cursor');
     expect(mask).toContain("cursor: 'none'");
     expect(mask).toContain('brushSize * brushCursor.scale');
-    // 缩放/平移：工具条图标 + 滚轮缩放 + 手型拖拽；右侧笔刷预览
-    expect(mask).toContain('data-mask-view-tools');
+    // 缩放/平移：与涂抹弹窗共用 ViewToolsBar（图标/手型都在共享组件里）
+    expect(mask).toContain('<ViewToolsBar');
+    expect(mask).toContain('prefix="mask"');
+    const viewTools = read('packages/plugins/image-editor/src/dialogs/view-tools-bar.tsx');
+    expect(viewTools).toContain('data-${prefix}-view-tools');
+    expect(viewTools).toContain('Hand');
+    expect(viewTools).toContain('ZoomIn');
     expect(mask).toContain('data-brush-preview');
     expect(mask).toContain("addEventListener('wheel'");
     expect(mask).toContain('setPointerCapture');
-    expect(mask).toContain('Hand');
-    expect(mask).toContain('ZoomIn');
   });
 
 });

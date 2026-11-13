@@ -20,10 +20,10 @@ describe('手动涂抹编辑器', () => {
     expect(dialog).toContain('Pipette');
   });
 
-  it('涂抹支持缩放（Ctrl/⌘+滚轮与按钮），便于精细涂抹', () => {
-    expect(dialog).toContain('data-paint-zoom-in');
-    expect(dialog).toContain('data-paint-zoom-reset');
-    expect(dialog).toContain('Ctrl / ⌘ + 滚轮也可缩放');
+  it('涂抹支持缩放：复用蒙版弹窗同一条 ViewToolsBar（不再自造按钮组）', () => {
+    expect(dialog).toContain("from './view-tools-bar.js'");
+    expect(dialog).toContain('<ViewToolsBar');
+    expect(dialog).toContain('prefix="paint"');
     expect(dialog).toContain('zoom');
   });
 

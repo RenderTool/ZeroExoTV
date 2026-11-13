@@ -11,7 +11,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Modal, Button, Slider, Input } from 'antd';
-import { Brush, Eraser, RotateCcw, Sparkles, ZoomIn, ZoomOut, Hand, Maximize2 } from 'lucide-react';
+import { Brush, Eraser, RotateCcw, Sparkles } from 'lucide-react';
+import { ViewToolsBar } from './view-tools-bar.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { readImageMeta } from '../utils/image-meta.js';
 import type { MaskEditPayload, ImageMeta } from '../types.js';
@@ -327,69 +328,17 @@ export function MaskEditDialog({
         </div>
       </div>
 
-      {/* 缩放 / 平移工具条（按钮 + 百分比；图标与画布工具栏同风格） */}
-      <div
-        data-mask-view-tools
-        style={{
-          position: 'absolute', left: 10, bottom: 10, zIndex: 6,
-          display: 'inline-flex', alignItems: 'center', gap: 2, padding: 3,
-          borderRadius: 8, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          title="缩小"
-          aria-label="缩小"
-          onClick={() => zoomBy(1 / 1.25)}
-          style={{ width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer' }}
-        >
-          <ZoomOut size={14} />
-        </button>
-        <button
-          type="button"
-          title="恢复到 100%"
-          aria-label="恢复到 100%"
-          onClick={() => setView((prev) => ({ ...prev, zoom: 1 }))}
-          style={{ minWidth: 46, height: 24, padding: '0 4px', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}
-        >
-          {Math.round(view.zoom * 100)}%
-        </button>
-        <button
-          type="button"
-          title="放大"
-          aria-label="放大"
-          onClick={() => zoomBy(1.25)}
-          style={{ width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer' }}
-        >
-          <ZoomIn size={14} />
-        </button>
-        <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.25)', margin: '0 3px' }} />
-        <button
-          type="button"
-          title="适应窗口（重置缩放与平移）"
-          aria-label="适应窗口"
-          onClick={resetView}
-          style={{ width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 5, background: 'transparent', color: '#fff', cursor: 'pointer' }}
-        >
-          <Maximize2 size={14} />
-        </button>
-        <button
-          type="button"
-          title="平移（手型工具：拖拽移动图片）"
-          aria-label="平移"
-          aria-pressed={panMode}
-          onClick={() => setPanMode((v) => { if (!v) setBrushCursor(null); return !v; })}
-          style={{
-            width: 26, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            border: 'none', borderRadius: 5, cursor: 'pointer',
-            background: panMode ? theme.toolbar.accent : 'transparent',
-            color: '#fff',
-          }}
-        >
-          <Hand size={14} />
-        </button>
-      </div>
+      {/* 缩放 / 平移工具条：与涂抹弹窗共用同一胶囊（ViewToolsBar） */}
+      <ViewToolsBar
+        zoom={view.zoom}
+        onZoomIn={() => zoomBy(1.25)}
+        onZoomOut={() => zoomBy(1 / 1.25)}
+        onReset={resetView}
+        theme={theme}
+        prefix="mask"
+        panMode={panMode}
+        onTogglePan={() => setPanMode((v) => { if (!v) setBrushCursor(null); return !v; })}
+      />
 
       {/* 笔刷大小圆环（舞台坐标系：位置含平移、直径含缩放，不会二次缩放） */}
       {brushCursor && (

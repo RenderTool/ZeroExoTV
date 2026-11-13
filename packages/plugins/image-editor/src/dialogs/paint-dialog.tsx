@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Button, Slider } from 'antd';
 import { Brush, Eraser, Palette, Pipette, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { ViewToolsBar } from './view-tools-bar.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { loadImage, readImageMeta } from '../utils/image-meta.js';
 import type { ImageMeta } from '../types.js';
@@ -55,8 +56,10 @@ export function PaintDialog({
   const [saving, setSaving] = useState(false);
   const [hasPaint, setHasPaint] = useState(false);
   const [undoCount, setUndoCount] = useState(0);
-  /** 画布缩放（2026-11-12 用户要求：涂抹支持缩放，便于精细涂抹） */
+  /** 画布缩放（与蒙版弹窗同一套 10%–800% / 1.25 步进 / 适应窗口重置） */
   const [zoom, setZoom] = useState(1);
+  const clampZoom = (z: number): number => Math.min(8, Math.max(0.1, z));
+  const zoomBy = (factor: number): void => setZoom((z) => clampZoom(z * factor));
   const [cursor, setCursor] = useState<{ x: number; y: number; scale: number } | null>(null);
 
   useEffect(() => {
@@ -281,10 +284,18 @@ export function PaintDialog({
         />
       ) : null}
       {!hasPaint ? (
-        <div style={{ position: 'absolute', left: 10, bottom: 10, padding: '4px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 11, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', left: 10, top: 10, padding: '4px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 11, pointerEvents: 'none' }}>
           直接在图上涂抹即可；确认后生成一张新图片节点
         </div>
       ) : null}
+      <ViewToolsBar
+        zoom={zoom}
+        onZoomIn={() => zoomBy(1.25)}
+        onZoomOut={() => zoomBy(1 / 1.25)}
+        onReset={() => setZoom(1)}
+        theme={theme}
+        prefix="paint"
+      />
     </div>
   );
 
@@ -343,20 +354,6 @@ export function PaintDialog({
           <span style={{ fontWeight: 600, color: theme.toolbar.text }}>{brushSize}px</span>
         </div>
         <Slider min={2} max={160} step={1} value={brushSize} onChange={(v) => setBrushSize(v)} />
-      </div>
-
-      {/* 画布缩放（Ctrl/⌘ + 滚轮，或按钮） */}
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 4 }}>
-          <span>画布缩放</span>
-          <span data-paint-zoom-value style={{ fontWeight: 600, color: theme.toolbar.text }}>{Math.round(zoom * 100)}%</span>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <Button size="small" data-paint-zoom-out onClick={() => setZoom((z) => Math.max(1, Math.round((z - 0.25) * 100) / 100))} disabled={zoom <= 1}>缩小</Button>
-          <Button size="small" data-paint-zoom-reset onClick={() => setZoom(1)}>100%</Button>
-          <Button size="small" data-paint-zoom-in onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.25) * 100) / 100))} disabled={zoom >= 4}>放大</Button>
-        </div>
-        <div style={{ marginTop: 4, fontSize: 11, color: theme.toolbar.textMuted }}>Ctrl / ⌘ + 滚轮也可缩放</div>
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>

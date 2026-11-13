@@ -46,7 +46,6 @@ import {
   startExternalWatcher,
   stopExternalWatcher,
 } from '@/platform/watcher.js';
-import { ServiceCenterDialog } from '@/features/service-center/service-center-dialog.js';
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
 import { applySavedDataRoot } from '@/platform/fs.js';
@@ -460,18 +459,13 @@ export function App(): React.ReactElement {
           />
         ) : null}
 
-        {/* MCP 服务配置弹窗(全局唯一) */}
-        <ServiceCenterDialog
-          open={servicesOpen}
-          onClose={() => setServicesOpen(false)}
-        />
-
-        {/* 首次使用指引 */}
+        {/* 服务 / 使用指引：同一个页面（顶栏「服务」与主页「使用指引」都开它） */}
         <OnboardingGuide
-          open={onboardingOpen}
+          open={onboardingOpen || servicesOpen}
           onClose={() => {
             markOnboardingDone();
             setOnboardingOpen(false);
+            setServicesOpen(false);
           }}
         />
 

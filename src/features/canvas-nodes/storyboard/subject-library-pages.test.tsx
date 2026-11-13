@@ -228,7 +228,7 @@ describe('两级导航与面包屑', () => {
     // 状态编辑字段（真实输入控件）：状态名就在卡片最上方，编辑态可直接改
     expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王 · 状态2');
     expect((document.querySelector('[data-field="prompt"]') as HTMLTextAreaElement).value).toBe('');
-    expect(screen.getByText('出现集数')).toBeTruthy();
+    expect(document.querySelector('[data-episodes-picker]')).toBeTruthy();
 
     // 点二级面包屑 → 收起编辑面板，回主体状态页
     fireEvent.click(document.querySelector('[data-subject-crumb="subject"]') as Element);
@@ -538,12 +538,12 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(actions.querySelector('[data-state-action="edit"]')).toBeNull();
     expect(actions.querySelector('[data-state-action="delete"]')).toBeTruthy();
 
-    // 基础状态是主体树根：只能进入编辑，没有删除入口
+    // 基础状态 = 主体本体：删除入口 = 删除整个主体（先确认）
     const base = document.querySelector('[data-state-card="__base__"]') as HTMLElement;
     fireEvent.mouseEnter(base);
     await waitFor(() => expect((base.querySelector('[data-state-actions]') as HTMLElement).style.opacity).toBe('1'));
     expect(base.querySelector('[data-state-action="edit"]')).toBeNull();
-    expect(base.querySelector('[data-state-action="delete"]')).toBeNull();
+    expect(base.querySelector('[data-state-action="delete"]')).toBeTruthy();
   });
 
   it('2026-11-12 最终形态：点状态卡不跳新页面，编辑面板就在卡片内展开', async () => {
@@ -744,7 +744,7 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
     expect(basic.textContent).not.toContain('删除后不可恢复');
   });
 
-  it('媒体动作换到封面右上角（与外层卡片同位）；页头不再有「返回主体 / 删除状态」', async () => {
+  it('媒体动作与状态动作收在同一条工具栏；页头不再有「返回主体 / 删除状态」', async () => {
     const tree = makeTree();
     tree.states.find((s) => s.id === 'state-1')!.media = [{ key: 'state-key-1', type: 'image' }];
     renderPages(tree, PID);
@@ -752,15 +752,15 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
 
-    const actions = document.querySelector('[data-media-actions]') as HTMLElement;
-    expect(actions).toBeTruthy();
-    // 动作在封面卡内部右上角（CardShell 子树），不再排在图片下方成一条
-    expect(actions.closest('[data-ui-card-shell]')).toBeTruthy();
-    expect(actions.style.top).toBe('6px');
-    expect(actions.style.right).toBe('6px');
-    expect(actions.querySelector('[data-media-action="replace"]')).toBeTruthy();
-    expect(actions.querySelector('[data-media-action="remove"]')).toBeTruthy();
+    const toolbar = document.querySelector('[data-state-card="state-1"] [data-state-actions]') as HTMLElement;
+    expect(toolbar).toBeTruthy();
+    // 换图 / 删媒体 / 画布生成 / 封面 / 收起编辑都在卡片顶行同一条工具栏
+    expect(toolbar.querySelector('[data-media-action="replace"]')).toBeTruthy();
+    expect(toolbar.querySelector('[data-media-action="remove"]')).toBeTruthy();
+    expect(toolbar.querySelector('[data-state-action="canvas-generate"]')).toBeTruthy();
+    expect(toolbar.querySelector('[data-state-action="collapse"]')).toBeTruthy();
     // 旧按钮行与隐藏 file input 全部下线
+    expect(document.querySelector('[data-media-actions]')).toBeNull();
     expect(document.querySelector('[data-open-media-panel]')).toBeNull();
     expect(document.querySelector('[data-remove-media]')).toBeNull();
     expect(document.querySelector('[data-base-upload]')).toBeNull();
@@ -1036,7 +1036,7 @@ describe('基础状态 = 独立状态（2026-11-08）', () => {
     // 详情页仍有「出现集数」入口
     fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(screen.getByText('出现集数')).toBeTruthy();
+    expect(document.querySelector('[data-episodes-picker]')).toBeTruthy();
   });
 
   it('基础状态编辑页与更多状态同一套表单：提示词 + 出现集数，勾选写回 baseState', async () => {
@@ -1048,7 +1048,7 @@ describe('基础状态 = 独立状态（2026-11-08）', () => {
 
     // label 统一为「提示词」（不再是「完整提示词 / 备注」二选一）
     expect(document.querySelector('[data-field="prompt"]')?.getAttribute('aria-label')).toBe('提示词');
-    expect(screen.getByText('出现集数')).toBeTruthy();
+    expect(document.querySelector('[data-episodes-picker]')).toBeTruthy();
     // 2026-11-12：集数选择收进弹层（80+ 集不再平铺），先打开「选择集数」
     fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
     await waitFor(() => expect(document.querySelectorAll('[data-episode-option]').length).toBe(2));
@@ -1075,7 +1075,7 @@ describe('基础状态与更多状态：同一套「状态名 / 提示词 / 出�
     expect((document.querySelector('[data-state-name-input]') as HTMLInputElement).value).toBe('东海龙王');
     expect(document.querySelector('[data-field="name"]')).toBeNull();
     expect(document.querySelector('[data-field="prompt"]')).toBeTruthy();
-    expect(screen.getByText('出现集数')).toBeTruthy();
+    expect(document.querySelector('[data-episodes-picker]')).toBeTruthy();
   });
 
   it('基础状态卡与面包屑显示主体名（基础状态即主体）', async () => {

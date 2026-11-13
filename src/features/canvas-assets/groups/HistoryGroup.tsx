@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Dropdown, Tooltip } from 'antd';
+import { App, Button, Dropdown, Select, Tooltip } from 'antd';
 import { CheckSquare, Clapperboard, Download, Film, Image as ImageIcon, ImagePlus, FolderInput, LibraryBig, LocateFixed, MoreHorizontal, Pencil, Share2, Square, Trash2, Waypoints } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -30,6 +30,8 @@ import { downloadAssetsAsZip } from '@/features/asset-picker/services/download-a
 import { deleteAssetsWithUndo } from '@/features/asset-library/delete-with-undo.jsx';
 import { assetMayHaveGuide } from '@/features/asset-picker/services/guide-resolve.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
+import { readWorkbenchContainer } from '@/entities/slot-containers.js';
+import { readScript, displayEpisodeTitle } from '@/entities/script-store.js';
 import { MultiSelectCheckbox } from '@/features/asset-library/components/multi-select-checkbox.js';
 import { CapsuleTabs } from '@/features/asset-library/components/capsule-tabs.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
@@ -413,6 +415,13 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
   /** 历史多选（2026-11-07 用户指令：导出只能作用于选中的项目，且目标由用户选择） */
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  /** 导演台类目筛选（2026-11-13 用户指令）：按集数 / 按片段（一个片段可有 N 个备用版本） */
+  const [directorEpisode, setDirectorEpisode] = useState<string>('all');
+  const [directorShot, setDirectorShot] = useState<string>('all');
+  const [workbenchShots, setWorkbenchShots] = useState<Array<{
+    id: string; number: number; duration?: number; episodeId?: string;
+  }>>([]);
+  const [scriptEpisodes, setScriptEpisodes] = useState<Array<{ id: string; number: number; title?: string }>>([]);
 
   const setHistorySource = (source: HistorySource): void => {
     setHistorySourceState(source);
@@ -433,9 +442,75 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
     () => filterHistoryAssets(store.allAssets, projectId, effectiveKind, historySource),
     [store.allAssets, projectId, effectiveKind, historySource],
   );
-  const { page: curPage, slice } = useMemo(() => paginate(items, page), [items, page]);
-  const selectedAssets = useMemo(() => items.filter((a) => selectedIds.has(a.id)), [items, selectedIds]);
-  const allSelected = items.length > 0 && selectedAssets.length === items.length;
+
+  /** 导演台筛选选项：片段来自 workbench 容器；集标题来自剧本 */
+  useEffect(() => {
+    if (forcedSource !== 'director' || !projectId) return;
+    let cancelled = false;
+    void Promise.all([readWorkbenchContainer(projectId), readScript(projectId)]).then(([wb, script]) => {
+      if (cancelled) return;
+      setScriptEpisodes((script?.episodes ?? []).map((ep) => ({ id: ep.id, number: ep.number, title: ep.title })));
+      setWorkbenchShots(((Array.isArray(wb?.shots) ? wb.shots : []) as Array<{
+        id?: string; number?: number; duration?: number; episodeId?: string;
+      }>).filter((s) => s?.id).map((s, i) => ({
+        id: String(s.id), number: Number(s.number ?? i + 1), duration: s.duration, episodeId: s.episodeId,
+      })));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [forcedSource, projectId]);
+
+  const shotById = useMemo(
+    () => new Map(workbenchShots.map((s) => [s.id, s])),
+    [workbenchShots],
+  );
+  const visibleItems = useMemo(() => {
+    if (forcedSource !== 'director') return items;
+    return items.filter((a) => {
+      const shotId = (a.data as { originNodeId?: string })?.originNodeId;
+      if (directorShot !== 'all' && shotId !== directorShot) return false;
+      if (directorEpisode !== 'all') return Boolean(shotId && shotById.get(shotId)?.episodeId === directorEpisode);
+      return true;
+    });
+  }, [items, forcedSource, directorShot, directorEpisode, shotById]);
+
+  const directorEpisodeOptions = useMemo(() => {
+    if (forcedSource !== 'director') return [];
+    const byId = new Map<string, { id: string; number: number; title?: string }>();
+    for (const ep of scriptEpisodes) byId.set(ep.id, ep);
+    for (const s of workbenchShots) {
+      if (s.episodeId && !byId.has(s.episodeId)) byId.set(s.episodeId, { id: s.episodeId, number: byId.size + 1 });
+    }
+    return [
+      { value: 'all', label: t('assetLibrary.filterAllEpisodes', '全部集数') },
+      ...[...byId.values()]
+        .sort((a, b) => a.number - b.number)
+        .map((ep) => ({ value: ep.id, label: displayEpisodeTitle(ep.title, ep.number) })),
+    ];
+  }, [forcedSource, scriptEpisodes, workbenchShots, t]);
+
+  const directorShotOptions = useMemo(() => {
+    if (forcedSource !== 'director') return [];
+    const counts = new Map<string, number>();
+    for (const a of items) {
+      const shotId = (a.data as { originNodeId?: string })?.originNodeId;
+      if (shotId) counts.set(shotId, (counts.get(shotId) ?? 0) + 1);
+    }
+    return [
+      { value: 'all', label: t('assetLibrary.filterAllSegments', '全部片段') },
+      ...workbenchShots
+        .filter((s) => directorEpisode === 'all' || s.episodeId === directorEpisode)
+        .map((s) => {
+          const versions = counts.get(s.id) ?? 0;
+          return {
+            value: s.id,
+            label: `${t('director.segmentTitle', '镜头 {{num}}', { num: s.number })}${s.duration ? ` · ${s.duration}s` : ''}${versions > 0 ? `（${versions} 个版本）` : ''}`,
+          };
+        }),
+    ];
+  }, [forcedSource, items, workbenchShots, directorEpisode, t]);
+  const { page: curPage, slice } = useMemo(() => paginate(visibleItems, page), [visibleItems, page]);
+  const selectedAssets = useMemo(() => visibleItems.filter((a) => selectedIds.has(a.id)), [visibleItems, selectedIds]);
+  const allSelected = visibleItems.length > 0 && selectedAssets.length === visibleItems.length;
 
   const toggleSelect = (id: string): void => {
     setSelectedIds((prev) => {
@@ -446,7 +521,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
   };
   const exitSelect = (): void => { setSelectMode(false); setSelectedIds(new Set()); };
   const toggleSelectAll = (): void => {
-    setSelectedIds(allSelected ? new Set() : new Set(items.map((a) => a.id)));
+    setSelectedIds(allSelected ? new Set() : new Set(visibleItems.map((a) => a.id)));
   };
 
   const batchDelete = (): void => {
@@ -533,6 +608,35 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
             theme={theme}
           />
         )}
+        {forcedSource === 'director' && (
+          <>
+            <Select
+              size="small"
+              data-director-episode-filter
+              value={directorEpisode}
+              options={directorEpisodeOptions}
+              onChange={(value: string) => {
+                setDirectorEpisode(value);
+                setDirectorShot('all');
+                setPage(1);
+                setSelectedIds(new Set());
+              }}
+              style={{ width: 160, flexShrink: 0 }}
+            />
+            <Select
+              size="small"
+              data-director-shot-filter
+              value={directorShot}
+              options={directorShotOptions}
+              onChange={(value: string) => {
+                setDirectorShot(value);
+                setPage(1);
+                setSelectedIds(new Set());
+              }}
+              style={{ width: 180, flexShrink: 0 }}
+            />
+          </>
+        )}
         <span style={{ flex: 1 }} />
         <Tooltip title={selectMode ? t('common.multiSelectExit', '退出多选') : t('common.multiSelect', '多选')}>
           <Button
@@ -554,7 +658,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
           </span>
           <span style={{ flex: 1 }} />
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <Button size="small" data-history-select-all disabled={items.length === 0} onClick={toggleSelectAll}>
+            <Button size="small" data-history-select-all disabled={visibleItems.length === 0} onClick={toggleSelectAll}>
               {allSelected ? t('common.batchSelectNone', '取消全选') : t('common.batchSelectAll', '全选')}
             </Button>
             <Button
@@ -603,7 +707,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       )}
 
       <div style={SCROLL_AREA_STYLE}>
-        {items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <EmptyState text={emptyText} theme={theme} />
         ) : (
           <MasonryGrid paddingX={20} paddingBottom={16}>
@@ -661,7 +765,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
         )}
       </div>
 
-      <PaginationBar page={curPage} total={items.length} pageSize={HISTORY_PAGE_SIZE} onChange={setPage} />
+      <PaginationBar page={curPage} total={visibleItems.length} pageSize={HISTORY_PAGE_SIZE} onChange={setPage} />
     </>
   );
 }

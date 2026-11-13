@@ -3133,10 +3133,8 @@
     "specCopied": "コピー済み"
   },
   "onboarding": {
-    "mcpFirstRun": "MCP サービスがまだ見つかりません。初回はダウンロードして一度起動してください。起動後に token 付き設定が自動で表示されます。",
-    "stepMcpFirstRun": "MCP サービスがまだ見つかりません。初回は「インストールコマンドをコピー」をターミナルに貼って一度実行してください（Node 18+ 必須）。公式パッケージを取得し、現在のデータルートと token で起動します。その後ここで更新し、標準 MCP 設定をコピーできます。",
-    "downloadMcp": "MCP パッケージをダウンロード",
-    "refreshMcp": "起動済み、状態を更新",
+    "mcpFirstRun": "MCP サービスがまだ見つかりません。インストールコマンドを一度実行してください。",
+    "stepMcpFirstRun": "インストールコマンドをコピーしてターミナルで一度実行してください。成功するとこのページが自動で認識します。",
     "copyBootstrap": "インストールコマンドをコピー",
     "bootstrapPending": "インストールコマンドを生成中（先に保存先を承認してください）…",
     "rootManaged": "ローカルデータサービスが管理中：",
@@ -3146,6 +3144,28 @@
     "rootPathRequired": "データフォルダの絶対パスを入力してください",
     "rootSwitched": "データフォルダを切り替えました。再読み込み中…",
     "rootSwitchFailed": "フォルダ切り替えに失敗しました",
-    "rootGuess": "ブラウザは絶対パスを公開しません。フォルダ名から {{path}} と推定しました。確認して「切り替え」を押してください。"
+    "rootGuess": "フォルダ名から {{path}} と推定しました。確認して「切り替え」を押してください。",
+    "title": "使用ガイド",
+    "stepRoot": "保存先フォルダを選択",
+    "stepMcp": "MCP を接続（Agent IDE 用）",
+    "stepComfy": "ComfyUI に接続",
+    "stepMcpHint": "設定をコピーして Agent IDE の MCP 設定に貼り付けます。",
+    "copyMcp": "MCP 設定をコピー",
+    "downloadPlugin": "プラグイン ZIP をダウンロード",
+    "pluginPathHint": "{{path}} に解凍し、ComfyUI を再起動",
+    "models": "対応モデル",
+    "advanced": "詳細オプション",
+    "advancedKeys": "詳細オプション（キー / 完全な設定）",
+    "mcpAdvancedHint": "通常は変更不要。手動設定や接続調査のときだけ使います。",
+    "mcpNotReady": "MCP 未準備のためコピーできる設定がありません",
+    "notice": "初めてですか？保存先・MCP・ComfyUI の3つを準備してください。",
+    "start": "制作を開始",
+    "footerHint": "ホーム下部の「使用ガイド」からいつでも開けます",
+    "chooseRoot": "フォルダを選択",
+    "changeRoot": "選び直す",
+    "rootNone": "未選択",
+    "testComfy": "接続テスト",
+    "comfyOk": "接続済み",
+    "comfyFailed": "接続に失敗しました"
   }
 }

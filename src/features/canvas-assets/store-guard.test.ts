@@ -93,7 +93,10 @@ vi.mock('@/services/canvas-script.js', () => ({
   findCanvasScript: () => null,
   ensureCanvasScript: vi.fn(async () => null),
 }));
-vi.mock('@/features/canvas-tabs/canvas-tab-store.js', () => ({ openCanvasTab: vi.fn() }));
+vi.mock('@/features/canvas-tabs/canvas-tab-store.js', () => ({
+  openCanvasTab: vi.fn(),
+  useCanvasTabStore: (sel: (s: { activeProjectId: string | null }) => unknown) => sel({ activeProjectId: null }),
+}));
 
 import { addAsset, listAssets, clearAllAssets } from '@/features/asset-picker/asset-store.js';
 import { setCurrentCanvasId } from '@/shared/current-canvas-id.js';

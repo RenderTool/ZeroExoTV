@@ -23,10 +23,10 @@ describe('静态资源与部署路径', () => {
     expect(existsSync(resolve(process.cwd(), 'public/runtime-config.js'))).toBe(true);
   });
 
-  it('两个部署工作流都用相对 base（同一构建适配根路径与子路径）', () => {
-    for (const wf of ['.github/workflows/deploy-pages.yml', '.github/workflows/deploy-gh-pages.yml']) {
-      expect(read(wf)).toContain('VITE_BASE_PATH: ./');
-    }
+  it('gh-pages 部署工作流用相对 base（同一构建适配根路径与子路径）', () => {
+    expect(read('.github/workflows/deploy-gh-pages.yml')).toContain('VITE_BASE_PATH: ./');
+    // artifact 发布与 branch-based Pages 冲突，已移除
+    expect(existsSync(resolve(process.cwd(), '.github/workflows/deploy-pages.yml'))).toBe(false);
   });
 
   it('index.html 带旧 hash 资源 404 的自愈重载（限频一次）', () => {

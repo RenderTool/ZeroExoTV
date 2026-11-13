@@ -106,6 +106,9 @@ const INFO_BTN_STYLE: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
+/** 大图壳顶部动作按钮统一规格（调用方注入的发送按钮必须复用它，保证图标+文本同高同圆角） */
+export const LIGHTBOX_ACTION_BTN_STYLE = INFO_BTN_STYLE;
+
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '';
   const m = Math.floor(seconds / 60);

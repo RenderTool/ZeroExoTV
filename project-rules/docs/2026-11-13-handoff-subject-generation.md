@@ -78,7 +78,7 @@
 
 ## 5. 约束与坑
 
-- **版本**：每次 push 前 `pnpm version:bump`；一次 push 一个版本；当前 0.2.66。
+- **版本**：每次 push 前 `pnpm version:bump`；一次 push 一个版本；当前 0.2.68。
 - **构建**：Windows 下 `pnpm build` 的 esbuild 临时文件删除会 `Access is denied`；先设
   `$env:TEMP='D:\AICode\zeroexo\zeroexo-comfyui\.tmpbuild'; $env:TMP=$env:TEMP`，构建后删目录。
   `.tmpbuild` 已加 `.gitignore`。

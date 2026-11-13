@@ -821,6 +821,7 @@ function StateGridCard({
   stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, editMode, editPanel,
   onClick, onToggleCover, onDelete, onToggleEdit,
   onRename, onCanvasGenerate, jobKey, persistedJob,
+  onReplaceMedia, onRemoveMedia, hasMedia,
 }: {
   stateId: string;
   title: string;
@@ -851,6 +852,10 @@ function StateGridCard({
   jobKey?: string;
   /** 树里持久化的任务（重挂载后显示进度/失败） */
   persistedJob?: SubjectGenJob | null;
+  /** 编辑态媒体动作：与状态动作同一条工具栏 */
+  onReplaceMedia?: (anchor: HTMLElement) => void;
+  onRemoveMedia?: () => void;
+  hasMedia?: boolean;
 }): React.ReactElement {
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
@@ -936,7 +941,13 @@ function StateGridCard({
         cursor: 'pointer', outline: 'none', color: theme.toolbar.text,
         /* 编辑态拉通整行：编辑区不再挤在 240px 卡里（2026-11-12 用户指令）；
            置顶（order -1）避免网格在整行卡片前留一个空列 */
-        ...(editMode ? { gridColumn: '1 / -1', order: -1 } : {}),
+        ...(editMode ? {
+          gridColumn: '1 / -1', order: -1,
+          border: `1px solid ${theme.toolbar.accent}66`,
+          borderRadius: 10,
+          background: theme.mode === 'dark' ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.025)',
+          padding: '8px 10px 12px',
+        } : {}),
       }}
     >
       {!editMode && (
@@ -1011,55 +1022,74 @@ function StateGridCard({
             </span>
           )}
           {/* 编辑态一行收口：名称 + 动作 + 收起编辑都在同一行（2026-11-13 用户指令） */}
+          {!editMode && (
+            <>
+              <span data-state-ready style={dead ? { color: theme.toolbar.danger, fontSize: 11, flexShrink: 0 } : { flexShrink: 0 }}>
+                {dead ? deadText : ''}
+              </span>
+              <div
+                data-state-actions
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
+                  opacity: active ? 1 : 0, transition: 'opacity .2s',
+                }}
+              >
+                {actionButtons}
+              </div>
+            </>
+          )}
           {editMode && (
             <>
               <div
                 data-state-actions
                 style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}
               >
+                {onReplaceMedia && (
+                  <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片')}>
+                    <IconButton
+                      theme={theme}
+                      size="sm"
+                      aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片')}
+                      data-media-action="replace"
+                      onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
+                    >
+                      <ImagePlus size={13} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {hasMedia && onRemoveMedia && (
+                  <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
+                    <IconButton
+                      theme={theme}
+                      size="sm"
+                      aria-label={t('subject.deleteMedia', '删除媒体')}
+                      data-media-action="remove"
+                      onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
+                    >
+                      <Trash2 size={13} />
+                    </IconButton>
+                  </Tooltip>
+                )}
                 {actionButtons}
+                <Button
+                  size="small"
+                  type="default"
+                  data-state-action="collapse"
+                  icon={<ChevronUp size={13} />}
+                  onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
+                  style={{
+                    flexShrink: 0, fontWeight: 600,
+                    color: theme.toolbar.accent,
+                    borderColor: theme.toolbar.accent,
+                    background: `${theme.toolbar.accent}1f`,
+                  }}
+                >
+                  {t('subject.closeEdit', '收起编辑')}
+                </Button>
               </div>
-              <Button
-                size="small"
-                type="default"
-                data-state-action="collapse"
-                icon={<ChevronUp size={13} />}
-                onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
-                style={{
-                  flexShrink: 0, fontWeight: 600,
-                  color: theme.toolbar.accent,
-                  borderColor: theme.toolbar.accent,
-                  background: `${theme.toolbar.accent}1f`,
-                }}
-              >
-                {t('subject.closeEdit', '收起编辑')}
-              </Button>
             </>
           )}
         </div>
-        {!editMode && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{
-            display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6,
-            ...uiCardMetaStyle(theme),
-          }}>
-            {dead && <span aria-hidden style={{ opacity: 0.45 }}>·</span>}
-            <span data-state-ready style={dead ? { color: theme.toolbar.danger } : undefined}>
-              {dead ? deadText : ''}
-            </span>
-          </span>
-          {/* 与主体库卡片同一位置：信息行右下角动作区，hover/focus 出现；不再盖在封面右上角 */}
-          <div
-            data-state-actions
-            style={{
-              display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
-              opacity: active ? 1 : 0, transition: 'opacity .2s',
-            }}
-          >
-            {actionButtons}
-          </div>
-        </div>
-        )}
       </div>
       {editMode && editPanel}
     </div>
@@ -1072,7 +1102,7 @@ function StateGridCard({
  * 不再在页面里平铺一排 antd Select/InputNumber。
  */
 function SubjectGenFooter({
-  jobKey, theme, model, prompt, paramValues, referenceKey,
+  jobKey, theme, model, prompt, paramValues, referenceKey, leading,
   onModelChange, onParamsChange, onPromptPreset, onStart, onCancel, onSendToCanvas,
 }: {
   jobKey: string;
@@ -1081,6 +1111,8 @@ function SubjectGenFooter({
   prompt: string;
   paramValues: Record<string, unknown>;
   referenceKey: string;
+  /** 主体专属的紧凑控件（出现集数 / 提示词模板），与底栏同一行 */
+  leading?: React.ReactNode;
   onModelChange: (model: string) => void;
   onParamsChange: (patch: Record<string, unknown>) => void;
   onPromptPreset: (body: string) => void;
@@ -1092,8 +1124,9 @@ function SubjectGenFooter({
   const runtime = useSubjectGenerationStore((s) => s.jobs[jobKey]);
   const running = runtime?.state === 'running' || runtime?.state === 'queued';
   return (
-    <div data-subject-gen-footer style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+    <div data-subject-gen-footer style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', width: '100%' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+        {leading}
         {/* 弹层/StyledSelect 依赖 ThemeProvider，这里用当前模式的同一套 token 包一层 */}
         <ThemeProvider mode={theme.mode}>
           <DockFooterBar
@@ -1128,7 +1161,7 @@ function SubjectGenFooter({
  */
 function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
-  onReplaceMedia, onRemoveMedia, onRestoreMedia, onDeleteHistoryMedia,
+  onRestoreMedia, onDeleteHistoryMedia,
   jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onSendToCanvas, onRenameSubject,
 }: {
   tree: SubjectTree;
@@ -1139,8 +1172,6 @@ function StateEditPanel({
   /** 全剧视觉风格（只读；风格入口在本剧信息/导演台） */
   visualStyle: ScriptVisualStyle | null;
   onUpdateNode: (patch: Partial<SubjectTreeNode>) => void;
-  onReplaceMedia: (anchor: HTMLElement) => void;
-  onRemoveMedia: () => void;
   onRestoreMedia: (ref: SubjectNodeMediaRef) => void;
   onDeleteHistoryMedia: (ref: SubjectNodeMediaRef) => void;
   /** 本状态的生成任务 key */
@@ -1159,7 +1190,6 @@ function StateEditPanel({
   const { message: antdMessage } = AntdApp.useApp();
   const slotMedia = slotMediaOf(tree, node.id);
   const slotKind = slotMediaKind(slotMedia);
-  const hasMedia = Boolean(slotMedia);
   const promptValue = node.fullPrompt || node.deltaPrompt || '';
   const isBase = node.id === SUBJECT_BASE_STATE_ID;
   const genParams = resolveSubjectGenParams(node);
@@ -1243,10 +1273,10 @@ function StateEditPanel({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       style={{
-        width: '100%', boxSizing: 'border-box', marginTop: 10,
-        padding: '12px 12px 14px', borderRadius: 8,
-        border: `1px solid ${theme.toolbar.accent}55`,
-        background: isDark ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.025)',
+        width: '100%', boxSizing: 'border-box', marginTop: 4,
+        padding: 0, borderRadius: 0,
+        border: 'none',
+        background: 'transparent',
       }}
     >
       <section data-form-section="basic" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
@@ -1279,7 +1309,6 @@ function StateEditPanel({
               onAdd={onAddReference}
               addTitle={t('subject.referenceAdd', '添加参考素材（画布 / 资产 / 主体）')}
               onRemove={onRemoveReference}
-              hint={t('subject.referenceSlotHint', '点 + 从画布 / 资产 / 主体选一张')}
             />
           </div>
           {!isBase && (
@@ -1315,37 +1344,6 @@ function StateEditPanel({
               emptyLabel={t('subject.mediaPending', '待补媒体')}
             />
             <StateJobMediaOverlay jobKey={jobKey} />
-            <div
-              data-media-actions
-              style={{ position: 'absolute', top: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 2 }}
-            >
-              <Tooltip title={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}>
-                <IconButton
-                  theme={theme}
-                  size="sm"
-                  variant="overlay"
-                  aria-label={hasMedia ? t('subject.replaceMedia', '替换') : t('subject.uploadMedia', '上传图片/语音')}
-                  data-media-action="replace"
-                  onClick={(e) => onReplaceMedia(e.currentTarget)}
-                >
-                  <ImagePlus size={13} />
-                </IconButton>
-              </Tooltip>
-              {hasMedia && (
-                <Tooltip title={t('subject.deleteMedia', '删除媒体')}>
-                  <IconButton
-                    theme={theme}
-                    size="sm"
-                    variant="overlay"
-                    aria-label={t('subject.deleteMedia', '删除媒体')}
-                    data-media-action="remove"
-                    onClick={onRemoveMedia}
-                  >
-                    <Trash2 size={13} />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </div>
           </CardShell>
           {(node.mediaHistory?.length ?? 0) > 0 && (
             <div data-media-history>
@@ -1434,62 +1432,7 @@ function StateEditPanel({
           </div>
 
         </div>
-        {/* 最下面一行：集数 / 生图模型 / 提示词模板（模型与画布同一套 key） */}
-        <div
-          data-subject-params-row
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-            gap: 12,
-            alignItems: 'end',
-            paddingTop: 12,
-            borderTop: '1px solid rgba(128,128,128,0.18)',
-          }}
-        >
-          {/* 出现集数：一个按钮 → 点击展开下拉列表编辑 */}
-          <div data-episodes-field>
-            <div style={labelStyle}>{t('subject.appearEpisodes', '出现集数')}</div>
-            {validEpisodes.length === 0 ? (
-              <div style={hintStyle}>{t('subject.appearEpisodesEmpty', '暂无剧集')}</div>
-            ) : (
-              /* 集数只给摘要按钮：已选集不铺标签（58 集 = 15 行），单集增删在弹层里完成 */
-              <Popover
-                trigger="click"
-                placement="bottomLeft"
-                content={(
-                  <EpisodePickerContent
-                    episodes={validEpisodes}
-                    selected={selectedEpisodes}
-                    onToggle={toggleEpisode}
-                    onSetAll={setAllEpisodes}
-                    theme={theme}
-                    t={t}
-                  />
-                )}
-              >
-                <Button size="small" data-episodes-picker style={{ maxWidth: '100%' }}>
-                  {episodeLabel} <ChevronDown size={12} />
-                </Button>
-              </Popover>
-            )}
-          </div>
-          <div data-subject-template-field>
-            <div style={labelStyle}>{t('subject.promptTemplate', '提示词模板')}</div>
-            <Select
-              size="small"
-              data-subject-template
-              value={node.templateType ?? (tree.kind === 'scene' ? 'environment_panorama' : tree.kind === 'prop' ? 'prop_detail' : 'character_lineup')}
-              options={tree.kind === 'scene'
-                ? [{ value: 'environment_panorama', label: '场景全景' }]
-                : tree.kind === 'prop'
-                  ? [{ value: 'prop_detail', label: '道具细节' }]
-                  : [{ value: 'character_lineup', label: '角色三视图' }, { value: 'creature_reference', label: '生物参考图' }]}
-              onChange={(value: string) => onUpdateNode({ templateType: value as SubjectTemplateType })}
-              style={{ width: '100%' }}
-            />
-          </div>
-        </div>
-        {/* 出图底栏 = 画布提示词底栏同一套（模型 / 参数弹层 / 提示词库 / 生成） */}
+        {/* 出图底栏 = 画布提示词底栏同一套（集数 / 模板 / 模型 / 参数弹层 / 提示词库 / 生成） */}
         <SubjectGenFooter
           jobKey={jobKey}
           theme={theme}
@@ -1497,6 +1440,48 @@ function StateEditPanel({
           prompt={promptValue}
           paramValues={footerParamValues}
           referenceKey={referenceKey}
+          leading={(
+            <>
+              {validEpisodes.length === 0 ? null : (
+                <Popover
+                  trigger="click"
+                  placement="bottomLeft"
+                  content={(
+                    <EpisodePickerContent
+                      episodes={validEpisodes}
+                      selected={selectedEpisodes}
+                      onToggle={toggleEpisode}
+                      onSetAll={setAllEpisodes}
+                      theme={theme}
+                      t={t}
+                    />
+                  )}
+                >
+                  <Button
+                    size="small"
+                    type="text"
+                    data-episodes-picker
+                    style={{ fontSize: 12, paddingInline: 6, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {episodeLabel} <ChevronDown size={12} />
+                  </Button>
+                </Popover>
+              )}
+              <Select
+                size="small"
+                variant="borderless"
+                data-subject-template
+                value={node.templateType ?? (tree.kind === 'scene' ? 'environment_panorama' : tree.kind === 'prop' ? 'prop_detail' : 'character_lineup')}
+                options={tree.kind === 'scene'
+                  ? [{ value: 'environment_panorama', label: '场景全景' }]
+                  : tree.kind === 'prop'
+                    ? [{ value: 'prop_detail', label: '道具细节' }]
+                    : [{ value: 'character_lineup', label: '角色三视图' }, { value: 'creature_reference', label: '生物参考图' }]}
+                onChange={(value: string) => onUpdateNode({ templateType: value as SubjectTemplateType })}
+                style={{ width: 112, fontSize: 12 }}
+              />
+            </>
+          )}
           onModelChange={(next) => {
             if (next && next !== model) onUpdateNode({ imageModel: next });
           }}
@@ -2000,6 +1985,28 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
       },
     });
   }, [antdModal, t, projectId, commitTrees, applyLevel]);
+
+  /** 删除整个主体（基础状态是主体本体，删它就等于删主体及全部状态） */
+  const handleDeleteSubject = useCallback((tree: SubjectTree) => {
+    antdModal.confirm({
+      centered: true, okType: 'danger',
+      title: t('subject.deleteSubject', '删除主体'),
+      content: t('subject.deleteSubjectConfirm', { name: tree.name, defaultValue: `删除「${tree.name}」及其全部状态？` }),
+      okText: t('common.delete'), cancelText: t('common.cancel'),
+      onOk: () => {
+        const pid = projectId ?? undefined;
+        const item = findItemForTree(productionItems ?? [], tree, treesRef.current);
+        if (pid) {
+          for (const st of tree.states ?? []) {
+            void releaseSubjectStateMediaRefs({ trees: [tree], projectId: pid, rootId: tree.rootId, stateId: st.id });
+          }
+        }
+        commitTrees(treesRef.current.filter((x) => x.rootId !== tree.rootId));
+        if (item) onDeleteItem?.(item.id);
+        applyLevel({ view: 'list' }, { push: false, replace: true });
+      },
+    });
+  }, [antdModal, t, projectId, productionItems, commitTrees, onDeleteItem, applyLevel]);
 
   /** 添加状态（出现集数/媒体后续在状态编辑页填写） */
   const addState = useCallback(() => {
@@ -2634,6 +2641,9 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     onToggleEdit={() => toggleEdit(node.id)}
                     jobKey={jobKey}
                     persistedJob={node.genJob}
+                    hasMedia={Boolean(first?.key)}
+                    onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
+                    onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
                     editPanel={openState?.stateId === node.id && openNode ? (
                       <StateEditPanel
                         tree={openTree}
@@ -2644,8 +2654,6 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         visualStyle={visualStyle}
                         jobKey={jobKey}
                         onUpdateNode={(patch) => updateNode(openTree.rootId, node.id, patch)}
-                        onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
-                            onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
                         onRestoreMedia={(ref) => { void restoreMedia(openTree.rootId, node.id, ref); }}
                         onDeleteHistoryMedia={(ref) => deleteHistoryMedia(openTree.rootId, node.id, ref)}
                         onStartGenerate={() => {
@@ -2677,7 +2685,9 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                     ) : undefined}
                     onToggleCover={() => toggleCover(openTree, node.id)}
                     onClick={() => toggleEdit(node.id)}
-                    onDelete={isBase ? undefined : () => handleDeleteState(openTree.rootId, node)}
+                    onDelete={isBase
+                      ? () => handleDeleteSubject(openTree)
+                      : () => handleDeleteState(openTree.rootId, node)}
                     onRename={isBase
                       ? (next) => renameTree(openTree.rootId, next)
                       : (next) => updateNode(openTree.rootId, node.id, { state: next })}

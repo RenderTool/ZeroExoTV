@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Pagination, Tooltip, App as AntdApp } from 'antd';
-import { X } from 'lucide-react';
+import { Clapperboard, Send, X } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
@@ -31,9 +31,9 @@ import { autoEpisodeTitle } from '@/entities/script-store.js';
 import { HierarchyListView, useFilterOptions } from '@/features/hierarchy/components/hierarchy-list-view.js';
 import { downloadAssetsAsZip } from '@/features/asset-picker/services/download-asset.js';
 import { sendAssetToWorkbench } from '@/features/canvas-assets/send-to-workbench.js';
-import { MediaLightbox, type MediaLightboxItem, type MediaLightboxKind } from '@/shared/components/media-lightbox.js';
+import { MediaLightbox, LIGHTBOX_ACTION_BTN_STYLE, type MediaLightboxItem, type MediaLightboxKind } from '@/shared/components/media-lightbox.js';
 import { UploadDropZone } from '@/shared/components/upload-drop-zone.js';
-import { cardActionBtnStyle, SEND_ACTION_LABEL_KEYS } from './cards/card-send-actions.js';
+import { SEND_ACTION_LABEL_KEYS } from './cards/card-send-actions.js';
 import type { HierarchyListDataProps } from '@/features/hierarchy/components/hierarchy-list-view.js';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 
@@ -297,8 +297,9 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
           type="button"
           data-lightbox-action="sendToCanvas"
           onClick={() => handleSendItemToCanvas(lightboxPageItem)}
-          style={{ ...cardActionBtnStyle, width: 'auto', padding: '0 8px', fontSize: 11 }}
+          style={LIGHTBOX_ACTION_BTN_STYLE}
         >
+          <Send size={12} />
           {t(SEND_ACTION_LABEL_KEYS.sendToCanvas)}
         </button>
       )}
@@ -306,8 +307,9 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
         type="button"
         data-lightbox-action="sendToDirector"
         onClick={() => handleSendItemToDirector(lightboxPageItem)}
-        style={{ ...cardActionBtnStyle, width: 'auto', padding: '0 8px', fontSize: 11 }}
+        style={LIGHTBOX_ACTION_BTN_STYLE}
       >
+        <Clapperboard size={12} />
         {t(SEND_ACTION_LABEL_KEYS.sendToDirector)}
       </button>
     </>

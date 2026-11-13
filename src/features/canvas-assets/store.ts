@@ -29,6 +29,7 @@ import { downloadAssetWithGuide } from '@/features/asset-picker/services/downloa
 import { getGuideMeta } from '@/features/asset-picker/guide.js';
 import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-resolve.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
+import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { isAuthorized } from '@/platform/fs.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { countHistoryByKind, countHistoryBySourceAndKind, libraryCasHashes } from './history-utils.js';
@@ -93,6 +94,9 @@ export interface UseCanvasAssetsOptions {
 export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssetsOptions) {
   const { t } = useTranslation();
   const { message: antdMessage } = App.useApp();
+  /** 当前项目 id 必须响应式：切换项目时计数/列表一起重算，不能只依赖模块级 getCurrentCanvasId */
+  const activeProjectId = useCanvasTabStore((s) => s.activeProjectId);
+  const canvasProjectId = activeProjectId ?? getCurrentCanvasId();
 
   // ── 独立数据源 ──
   const { assets, loading: loadingAssets, refresh: refreshAssets, removeAssets, updateAsset } = useAssets();
@@ -210,7 +214,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
    *  条目分别由 OpenLibGroup / SubjectGroup 独立渲染，不与用户数据混排 */
   const filteredAssets = useMemo(() => {
     if (materialScopeTab === 'subject' || materialScopeTab === 'director') return [];
-    const canvasId = getCurrentCanvasId();
+    const canvasId = canvasProjectId;
     let result = (Array.isArray(assets) ? assets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
@@ -222,7 +226,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     const q = search.trim().toLowerCase();
     if (q) result = result.filter((a) => a.title.toLowerCase().includes(q));
     return result;
-  }, [assets, materialScopeTab, materialKind, search]);
+  }, [assets, materialScopeTab, materialKind, search, canvasProjectId]);
 
   /** 分类标签计数（素材分组口径：当前作用域 + 搜索后按类型统计，与结果同一 predicate，避免"有数字没内容"） */
   const materialKindCounts = useMemo(() => {
@@ -235,7 +239,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     }
     const scoped = filterAssetsStrictScope(base, {
       scopeTab: materialScopeTab as 'project' | 'library',
-      projectId: getCurrentCanvasId(),
+      projectId: canvasProjectId,
     });
     const q = search.trim().toLowerCase();
     const list = q ? scoped.filter((a) => a.title.toLowerCase().includes(q)) : scoped;
@@ -246,19 +250,19 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       audio: list.filter((a) => a.kind === 'audio').length,
       text: list.filter((a) => (a.kind as string) === 'text' || (a.kind as string) === 'zeroexo-text').length,
     };
-  }, [assets, materialScopeTab, search]);
+  }, [assets, materialScopeTab, search, canvasProjectId]);
 
   /** 胶囊徽标计数（素材分组口径：排除剧本/实体/plan 后按作用域统计） */
-  const directorCount = useMemo(() => countHistoryBySourceAndKind(assets, getCurrentCanvasId()).director.total, [assets]);
+  const directorCount = useMemo(() => countHistoryBySourceAndKind(assets, canvasProjectId).director.total, [assets, canvasProjectId]);
   const materialScopeCounts = useMemo(() => {
     const base = (Array.isArray(assets) ? assets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
-    return countAssetsByScope(base, getCurrentCanvasId());
-  }, [assets]);
+    return countAssetsByScope(base, canvasProjectId);
+  }, [assets, canvasProjectId]);
 
   // ===== 历史分组派生（2026-11-04 本地版重建：图片 / 视频，scope='project' 的本项目资产） =====
-  const historyProjectId = getCurrentCanvasId();
+  const historyProjectId = canvasProjectId;
   const allAssets = useMemo(() => (Array.isArray(assets) ? assets : []), [assets]);
   const historyCounts = useMemo(() => countHistoryByKind(allAssets, historyProjectId), [allAssets, historyProjectId]);
   const libraryHashes = useMemo(() => libraryCasHashes(allAssets), [allAssets]);
