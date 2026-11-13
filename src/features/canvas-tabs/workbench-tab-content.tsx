@@ -1144,6 +1144,17 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment, comfyRun.preview?.segmentIndex],
   );
 
+  // 外部（MCP/另一条链路）已经把全部选中片段写成 done+media 时，网页残留的 submitting/queued
+  // 运行态必须让位，否则卡片会永远停在「排队」，成片入口也被旧 phase 挡住。
+  useEffect(() => {
+    if (loadState !== 'ready') return;
+    if (!['submitting', 'queued', 'running'].includes(comfyRun.phase)) return;
+    if (visibleShots.length === 0) return;
+    const allDone = visibleShots.every((s) =>
+      s.status === 'done' && s.clipState === 'completed' && Boolean(s.media?.storageKey));
+    if (allDone) comfyRun.reset();
+  }, [loadState, comfyRun.phase, comfyRun.reset, visibleShots]);
+
   const selectedShot: WorkbenchShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0] ?? {
     id: '__empty__',
     number: 1,
