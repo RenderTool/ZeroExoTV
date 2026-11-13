@@ -20,7 +20,10 @@ const next = kind === 'major'
   ? `${major + 1}.0.0`
   : kind === 'minor'
     ? `${major}.${minor + 1}.0`
-    : `${major}.${minor}.${patch + 1}`;
+    // patch 最多两位数；到 100 前必须进位到 minor，禁止出现 0.2.100+
+    : patch >= 99
+      ? `${major}.${minor + 1}.0`
+      : `${major}.${minor}.${patch + 1}`;
 
 for (const file of files) {
   const raw = readFileSync(file, 'utf8');
