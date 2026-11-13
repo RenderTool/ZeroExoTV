@@ -441,7 +441,7 @@ export function App(): React.ReactElement {
         </AppLayout>
           </>
         ) : (
-          <RootGate open />
+          <RootGate open onActivated={() => setRootReady(true)} />
         )}
 
         {/* 换肤弹窗(全局唯一) */}

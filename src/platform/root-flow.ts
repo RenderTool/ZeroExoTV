@@ -8,7 +8,6 @@
 
 import { pickRoot } from './fs.js';
 import { migrateBrowserToDisk, type MigrateResult } from './migrate.js';
-import { reloadWithDisk } from './boot.js';
 
 export type ActivateOutcome = { status: 'cancelled' } | { status: 'error'; message: string } | { status: 'ok'; name: string; migrated: MigrateResult | null };
 
@@ -33,8 +32,9 @@ export async function activateRoot(options: { migrate: boolean }): Promise<Activ
     }
   }
 
-  // 稍等一下刷新，保证迁移写入已 close
+  // 不再 reload：FSA 的目录权限跨页面刷新通常不保留，reload 会把刚授权的目录丢掉，
+  // 形成「选目录 → 刷新 → 又回到选择目录」的死循环。授权后直接把 root 句柄交给当前页面，
+  // 页面首次挂载数据层时再初始化磁盘驱动。
   await new Promise((r) => setTimeout(r, 120));
-  reloadWithDisk();
   return { status: 'ok', name, migrated };
 }

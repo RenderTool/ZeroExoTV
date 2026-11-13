@@ -9,13 +9,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Checkbox, Modal, Typography } from 'antd';
 import { countBrowserItems } from './migrate.js';
 import { activateRoot } from './root-flow.js';
-import { reloadWithDisk } from './boot.js';
 import { restoreRoot, withPermissionPrompt } from './fs.js';
 
 const { Text } = Typography;
 
 export interface RootGateProps {
   open: boolean;
+  /** 目录授权成功：直接把当前页面切到主界面，不再整页刷新（刷新会丢 FSA 权限） */
+  onActivated: () => void;
 }
 
 /** FSA 能力检测：不支持时按钮禁用 + 一行提示（不白屏不报错）。类型绕行同 fs.pickRoot（dom lib 无该 API） */
@@ -26,7 +27,7 @@ function fsaSupported(): boolean {
   );
 }
 
-export function RootGate({ open }: RootGateProps): React.ReactElement {
+export function RootGate({ open, onActivated }: RootGateProps): React.ReactElement {
   const [items, setItems] = useState(0);
   const [migrate, setMigrate] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -56,7 +57,7 @@ export function RootGate({ open }: RootGateProps): React.ReactElement {
     try {
       const restored = await withPermissionPrompt(() => restoreRoot(true));
       if (restored) {
-        reloadWithDisk();
+        onActivated();
         return;
       }
       setError('没有可恢复的上次目录，请点「选择文件夹」重新选择');
@@ -72,11 +73,23 @@ export function RootGate({ open }: RootGateProps): React.ReactElement {
     setBusy(true);
     setError(null);
     try {
+      console.info('[root] pick start');
       const outcome = await activateRoot({ migrate: migrate && items > 0 });
-      if (outcome.status === 'error') setError('没能打开文件夹，请重试');
-      if (outcome.status === 'cancelled') setError(null);
+      console.info('[root] pick outcome', outcome);
+      if (outcome.status === 'error') {
+        const msg = outcome.message || '没能打开文件夹，请重试';
+        setError(/security|gesture|not allowed|denied/i.test(msg)
+          ? '浏览器拦截了目录选择：请用独立的 Chrome / Edge 标签页打开本站（不要在内嵌浏览器或 iframe 里）'
+          : msg);
+      } else if (outcome.status === 'cancelled') {
+        setError(null);
+      } else if (outcome.status === 'ok') {
+        onActivated();
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '没能打开文件夹，请重试');
+      console.error('[root] pick failed', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || '没能打开文件夹，请重试');
     } finally {
       setBusy(false);
     }
