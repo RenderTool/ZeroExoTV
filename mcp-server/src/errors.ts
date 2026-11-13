@@ -14,7 +14,11 @@ export type McpErrorCode =
   /** 延续法：片段没有 plan_continuity_edit 计划就生成（2026-11-11） */
   | "CONTINUITY_NOT_PLANNED"
   /** 延续法：跳段 / 从中间开始，接不上上一段尾帧 */
-  | "CONTINUITY_ORDER";
+  | "CONTINUITY_ORDER"
+  /** 挂主体图前没读过这张图（2026-11-13：禁瞎配图） */
+  | "IMAGE_REVIEW_REQUIRED"
+  /** 挂主体图没带「从图反推的提示词」 */
+  | "IMAGE_PROMPT_REQUIRED";
 
 export class McpError extends Error {
   constructor(

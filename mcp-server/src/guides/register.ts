@@ -137,9 +137,11 @@ function bootstrapProjectText(scriptContent: string): string {
 - 用户明确要求原样导入 → mode: "raw" 可直接入库（返回建议提示，不算失败）。
 
 阶段3 提主体
-- 从已入库剧本列主体清单（名称/可能状态/出现集数）；
-- ▼ 停：等用户确认清单或补图（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物）；
-- 确认后 upsert_subject（先 dryRun 再 confirm）；补图走 upload_asset → set_subject_image 挂状态。
+- 从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源），**逐主体给用户一张表**，不许只报名字；
+- 每个主体逐个走：先 \`list_subjects\` 查重 → 有图先 \`read_asset\` 亲眼看 → 反推提示词 → 给用户确认；
+- ▼ 停：等用户确认清单或补图（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物；缺图给缺图清单，不许自己找图凑）；
+- 确认后 upsert_subject（先 dryRun 再 confirm）；挂图必须 read_asset 看过 + 带反推 prompt 的 set_subject_image；
+  多人合照/模特合集/别的角色图一律不许挂；写完 audit_subjects。
 
 阶段4 拆分镜
 - ▼ 停：等用户确认「可以拆」才动手（用户未确认拆，就停在阶段3，不擅自拆）；

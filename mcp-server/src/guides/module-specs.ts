@@ -38,8 +38,9 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     stage: 3,
     name: "提主体",
     action:
-      "从已入库剧本列主体清单（名称/可能状态/出现集数）→ 先给用户确认或补图（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用），再 upsert_subject / set_subject_image 建主体与状态",
-    gate: "主体清单经用户确认才建状态、才进阶段4——清单未确认不得 upsert、不得建状态",
+      "从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源）→ 逐主体给用户一张表 + 缺图清单（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用）→ 确认后 upsert_subject；" +
+      "挂图必须先 read_asset 亲眼看、把画面反推成 prompt，再 set_subject_image（没看过/没 prompt 会被拒）；多人合照/模特合集/别的角色图不许挂",
+    gate: "主体清单经用户确认才建主体/状态、才进阶段4——清单未确认不得 upsert、不得挂图",
   },
   {
     stage: 4,
@@ -172,13 +173,15 @@ export const MODULE_SPECS: ModuleSpec[] = [
     optionalInputs: [
       "aliases 别名数组（剧本内多个称呼归并到同一主体）",
       "episodeIds 关联剧集",
-      "状态图：先 upload_asset 拿 storageKey，再 set_subject_image 挂 images[]（stateTag=状态名，如「定妆」）；画布里的图先 import_media_to_cas 转 CAS",
+      "状态图：先 read_asset 亲眼看这张图 → 把画面反推成 prompt → upload_asset 拿 storageKey → set_subject_image 挂 images[]（stateTag=状态名，prompt=反推文案）；画布里的图先 import_media_to_cas 转 CAS",
     ],
     order: 4,
     stage: 3,
     mcpTools: ["list_subjects", "upsert_subject", "set_subject_image", "link_subject_to_shot"],
     caveats: [
-      "前置阶段3 提主体：主体清单（名称/可能状态/出现集数）先给用户确认或补图（gate：清单未确认不得 upsert、不得建状态，不得进阶段4）",
+      "前置阶段3 提主体：主体清单（名称/类型/别名/状态/出现集数/身份锚点句/图片来源）+ 缺图清单先给用户确认（gate：清单未确认不得 upsert、不得建状态，不得进阶段4）",
+      "挂图硬门槛：先 read_asset 真正看过这张图 → 把画面反推成 prompt → set_subject_image；没读过返回 IMAGE_REVIEW_REQUIRED，空 prompt 返回 IMAGE_PROMPT_REQUIRED",
+      "角色图必须单人、同一张脸；多人合照/模特合集/候选人群像/别的角色图一律不许挂；场景必须空场景，道具必须单品",
       "身份锚点句一经锁定，同场景所有提示词逐字复用；改写 = 视觉漂移",
       "场景只收录 ≥2 场复用或承载关键剧情的；道具只收有剧情推动或象征意义的（通常一部短片 0-5 个）",
       "link_subject_to_shot 可先 matchByName 拿候选清单（不写盘），再给 subjectId 直写",

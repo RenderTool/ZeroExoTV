@@ -15,10 +15,10 @@
 
 状态：in-progress 3 / done 2 / 待拍板 0 / deprecated 0。
 
-## 二、需求征集（23 条，全部 merged）
+## 二、需求征集（25 条，全部 merged）
 
 索引见 [suggestion-board/README.md](suggestion-board/README.md)；模板见 [suggestion-board/_template.md](suggestion-board/_template.md)。
-2026-11-02 起全部为 comfyui 需求，2026-11-06 由外部库迁回本目录；S-23（2026-11-12）为之后新增。
+2026-11-02 起全部为 comfyui 需求，2026-11-06 由外部库迁回本目录；S-23（2026-11-12）为之后新增，S-25 为 2026-11-13 主体图闸门。
 
 ## 三、交接 / 设计记录
 

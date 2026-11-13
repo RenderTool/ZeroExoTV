@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError, imageResult } from "../errors.js";
+import { markImageReviewed } from "../lib/image-review.js";
 import { listAssets, uploadToCas } from "../store/cas.js";
 import { attachAssetToSlot } from "../store/workbench.js";
 import { defTool, type Ctx } from "./_register.js";
@@ -139,15 +140,19 @@ export function registerAssetTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "read_asset",
     description:
-      "读取画布/资产文件内容：图片直接返回 MCP image 内容块（模型可见）；视频/音频返回元数据（大小、mime），不塞 base64。storageKey 来自 get_canvas 节点 data.storageKey / list_assets（image:/video:/audio:/cas:）。",
+      "读取画布/资产文件内容：图片直接返回 MCP image 内容块（模型可见）；视频/音频返回元数据（大小、mime），不塞 base64。storageKey 来自 get_canvas 节点 data.storageKey / list_assets（image:/video:/audio:/cas:）。" +
+      "**给主体挂状态图之前必须先调用本工具真正看图**（set_subject_image 只认本次会话读过的图）。",
     bits: ["asset.read"],
     schema: {
       projectId: z.string(),
       storageKey: z.string().min(1),
     },
-    handler: async (args) => {
+    handler: async (args, token) => {
       const { buf, mime } = await readFirstCandidate(dataRoot(), args.storageKey);
-      if (mime.startsWith("image/")) return imageResult(buf.toString("base64"), mime);
+      if (mime.startsWith("image/")) {
+        markImageReviewed(token.id, args.storageKey);
+        return imageResult(buf.toString("base64"), mime);
+      }
       return {
         storageKey: args.storageKey,
         mimeType: mime,

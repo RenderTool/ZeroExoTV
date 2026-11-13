@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
+import { isImageReviewed } from "../lib/image-review.js";
 import { auditSubjects, deleteSubject, deleteSubjectImage, matchSubjectCandidates, mergeSubjects, readStoryboard, repairSubjectTrees, setSubjectImage, syncSubjectEpisodes, upsertSubject } from "../store/storyboard.js";
 import { linkSubjectToShot } from "../store/workbench.js";
 import { readScript } from "../store/script.js";
@@ -215,6 +216,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     name: "set_subject_image",
     description:
       "给主体挂状态图（写 ProductionItem.images[] 与 coverKey）。storageKey 来自 upload_asset 返回的 'cas:<hash>.<ext>'；stateTag=状态名（如「定妆」「美艳态」「恶鬼态」）。幂等：同 storageKey 已存在则原地更新。" +
+      "**硬门槛：写入前必须先 read_asset 真正看过这张图（服务端只认本次会话读过的图），并把画面反推成 prompt 一起写（人数/同一张脸/服装/背景/构图）。**" +
+      "角色图必须单人、同一张脸；多人合照/模特合集/候选人群像/别的角色图一律不许挂；看不到图就停下问用户，不要瞎猜。" +
       "防呆：同一张图已挂在其它主体下时直接拒绝（沈少误挂主演图事故），确需共享才传 allowCrossSubject:true。baseVersion = storyboard version。",
     bits: ["subject.write"],
     schema: {
@@ -223,14 +226,32 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       subjectId: z.string(),
       storageKey: z.string().min(1),
       stateTag: z.string().optional(),
-      prompt: z.string().optional(),
+      prompt: z.string().optional()
+        .describe("从这张图反推的提示词（真实写入必填）：画面里有几个人、是否同一张脸、年龄性别/脸型发型/服装/姿态/景别/光位/背景/色调/质感"),
       note: z.string().optional(),
       cover: z.boolean().optional(),
       allowCrossSubject: z.boolean().optional(),
       dryRun: z.boolean().optional(),
     },
-    handler: async (args) => {
+    handler: async (args, token) => {
       const { projectId, baseVersion, dryRun, allowCrossSubject, ...image } = args;
+      if (!dryRun) {
+        if (!isImageReviewed(token.id, args.storageKey)) {
+          throw new McpError(
+            "IMAGE_REVIEW_REQUIRED",
+            `挂主体图前必须先 read_asset({ projectId: "${projectId}", storageKey: "${args.storageKey}" }) 真正看过这张图。`
+              + "服务端只认本次会话读过的图：看完确认「画面只有该主体本人 / 同一张脸」再重试；看不到图就停下问用户，不要瞎配图。",
+          );
+        }
+        const prompt = (image.prompt ?? "").trim();
+        if (prompt.length < 12) {
+          throw new McpError(
+            "IMAGE_PROMPT_REQUIRED",
+            "必须先把这张图反推成提示词写进 prompt 再挂：几个人、是否同一张脸、年龄性别、脸型发型、服装、姿态、景别、光位、背景、色调、质感。"
+              + "空 prompt 挂图 = 没看图，直接拒绝。",
+          );
+        }
+      }
       const res = await setSubjectImage(dataRoot(), projectId, { baseVersion, image, allowCrossSubject, dryRun });
       return {
         written: res.written,
