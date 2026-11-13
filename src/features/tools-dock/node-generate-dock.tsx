@@ -456,6 +456,17 @@ export function NodeGenerateDock({
   // 参考素材区是否出现：纯文生图模型（Krea2）只吃文本，不给「上传参考图」的假入口
   const supportsReferenceInput = supportedInputTypes.some((t) => t !== 'text');
 
+  // 纯文生图模型不接收图片：把已有的图片连线明确断开（而不是留一条看似有效的线）
+  const supportedInputKey = supportedInputTypes.join(',');
+  useEffect(() => {
+    if (!currentModelValue || mode !== 'image' || supportedInputTypes.includes('image')) return;
+    for (const n of incomingNodes) {
+      if (n.type === 'image') {
+        nodeActionBus.emit('nodeDock:removeConnection', { nodeId, sourceNodeId: n.id });
+      }
+    }
+  }, [currentModelValue, mode, supportedInputKey, incomingNodes, nodeId]);
+
   // ===== 参考素材统一选择页（2026-11-13）=====
   const [assetPickerAnchor, setAssetPickerAnchor] = useState<HTMLElement | null>(null);
   const pickerKinds = useMemo<AssetSlotKind[]>(
@@ -587,6 +598,35 @@ export function NodeGenerateDock({
     }
     return out;
   }, [incomingNodes, refUrlMap, store]);
+
+  /**
+   * @ 图片：除了连入素材，画布上所有图片节点也应能 @。
+   * 这些图片只在“被 @ 到”时才作为输入源，避免没连线的图被静默塞进生成。
+   */
+  const canvasMentionRefs: ReferenceItem[] = useMemo(() => {
+    const graph = store.getGraph();
+    const incomingIds = new Set(incomingNodes.map((n) => n.id));
+    return graph.nodes
+      .filter((n) => n.type === 'image' && n.id !== nodeId && !incomingIds.has(n.id))
+      .map((n) => {
+        const d = (n.data ?? {}) as Record<string, unknown>;
+        return {
+          id: n.id,
+          type: 'image' as const,
+          name: n.title || (typeof d.title === 'string' ? d.title : undefined) || n.id.slice(0, 8),
+          url: refUrlMap[n.id] || (typeof d.content === 'string' ? d.content : undefined),
+          asset: {
+            content: typeof d.content === 'string' ? d.content : undefined,
+            storageKey: typeof d.storageKey === 'string' ? d.storageKey : undefined,
+          },
+        };
+      });
+  }, [incomingNodes, nodeId, refUrlMap, store, graphVersion]);
+
+  const mentionReferences = useMemo(
+    () => [...references, ...canvasMentionRefs],
+    [references, canvasMentionRefs],
+  );
 
   // ===== Plan#79 T2：预设标签（原胶囊动作下沉）=====
   // 上游名取自已连入的参考素材（堆叠内部卡片以 `::` 分隔，此处只认整体连入的节点），
@@ -796,10 +836,12 @@ export function NodeGenerateDock({
     // + @ 到的堆叠内部卡片(堆叠整体不发送,内部资源需显式 @ 才会作为输入源)
     const mentionedStacked = references.filter((r) => r.id.includes('::') && text.includes(`@${r.name}`));
     const nonStacked = references.filter((r) => !r.id.includes('::'));
-    onGenerate(nodeId, mode, text, [...nonStacked, ...mentionedStacked]);
+    // 画布上的图片可 @，但只有真的 @ 到才作为输入源（不连线不自动塞）
+    const mentionedCanvas = canvasMentionRefs.filter((r) => text.includes(`@${r.name}`));
+    onGenerate(nodeId, mode, text, [...nonStacked, ...mentionedCanvas, ...mentionedStacked]);
     setPrompt('');
     promptRef.current = '';
-  }, [isRunning, onGenerate, nodeId, mode, references]);
+  }, [isRunning, onGenerate, nodeId, mode, references, canvasMentionRefs]);
 
   const handleAction = useCallback(() => {
     if (isRunning) onStop(nodeId);
@@ -1017,7 +1059,7 @@ export function NodeGenerateDock({
         <DockInputSection
           value={prompt}
           onChange={updatePrompt}
-          references={references}
+          references={mentionReferences}
           placeholder={t('nodeDock.placeholder', '输入提示词... 连入的素材会自动作为输入源(堆叠节点需 @ 内部资源)')}
           mentionTypeFilter={mentionTypeFilter}
         />
