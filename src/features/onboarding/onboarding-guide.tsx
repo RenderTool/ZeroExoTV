@@ -9,7 +9,7 @@
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { App, Button, Collapse, Input, Modal, Select, Tag } from 'antd';
+import { App, AutoComplete, Button, Collapse, Input, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -34,6 +34,14 @@ import { applyConnectionResult } from '@/features/canvas-tabs/comfyui-auto-conne
 const SEEN_KEY = 'zeroexo:onboarding.seen';
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
 const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
+
+/** 每个槽位只推荐一个；连接后拿云端列表逐项核对是否有这个文件 */
+const RECOMMENDED_MODELS = {
+  unet: 'minimax_h3_hybrid_fl2va_ref2va_b15-49-int8.safetensors',
+  videoVae: 'minimax_h3_video_vae_fp16.safetensors',
+  audioVae: 'minimax_h3_audio_vae_fp32.safetensors',
+  clip: 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+} as const;
 
 /** 机器档位 → 推荐用法（只讲能不能做，不讲量化术语） */
 const MODEL_RECOMMENDATIONS: Array<{ vram: string; local: string; cloud: string }> = [
@@ -102,6 +110,39 @@ const hintStyle = (theme: ThemeConfig): React.CSSProperties => ({
   color: theme.toolbar.textMuted,
   lineHeight: 1.7,
 });
+
+/** 模型名可下拉选，也可手动输入（云端/第三方命名不一致时兜底） */
+function ModelNamePicker({
+  value, options, placeholder, onCommit, slot,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  placeholder: string;
+  onCommit: (value: string) => void;
+  slot: string;
+}): React.ReactElement {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = (): void => {
+    const next = draft.trim();
+    if (next && next !== value) onCommit(next);
+  };
+  return (
+    <AutoComplete
+      value={draft}
+      options={options}
+      data-onboarding-model={slot}
+      placeholder={placeholder}
+      onChange={(next) => setDraft(next)}
+      onSelect={(next: string) => { setDraft(next); onCommit(next); }}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+      showSearch
+      filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+      style={{ flex: 1, minWidth: 0 }}
+    />
+  );
+}
 
 export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () => void }): React.ReactElement {
   const { t } = useTranslation();
@@ -281,14 +322,18 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
       || !modelSlots.find((s) => s.slot === 'audioVae')?.list.length));
   const currentVaeUnsupported = (Boolean(models.videoVae) && !isCompatModel('videoVae', models.videoVae))
     || (Boolean(models.audioVae) && !isCompatModel('audioVae', models.audioVae));
-  const modelOptionLabel = (slot: string, name: string): string => {
-    if (slot === 'unet' && name.includes('minimax_h3_hybrid_fl2va_ref2va_b15-49-int8')) return `${name}（推荐）`;
-    if (slot === 'videoVae' && name === 'minimax_h3_video_vae_fp16.safetensors') return `${name}（推荐）`;
-    if (slot === 'audioVae' && name === 'minimax_h3_audio_vae_fp32.safetensors') return `${name}（推荐）`;
-    if (slot === 'clip' && name === 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors') return `${name}（推荐）`;
-    if (slot === 'clip' && name === 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors') return `${name}（新显卡推荐）`;
-    return name;
+  const cloudListFor = (slot: keyof typeof RECOMMENDED_MODELS): string[] => (
+    slot === 'unet' ? availableModels.unet : slot === 'clip' ? availableModels.clip : availableModels.vae
+  );
+  /** 云端是否真的有推荐的这个文件（未连接 = 未核对） */
+  const recommendedState = (slot: keyof typeof RECOMMENDED_MODELS): 'available' | 'missing' | 'unknown' => {
+    const list = cloudListFor(slot);
+    if (list.length === 0) return 'unknown';
+    return list.includes(RECOMMENDED_MODELS[slot]) ? 'available' : 'missing';
   };
+  const modelOptionLabel = (slot: keyof typeof RECOMMENDED_MODELS, name: string): string => (
+    name === RECOMMENDED_MODELS[slot] ? `${name}（推荐·云端已有）` : name
+  );
 
   return (
     <Modal
@@ -446,24 +491,35 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
                 {t('onboarding.modelRefresh', '刷新列表')}
               </Button>
             </div>
-            {modelSlots.map(({ slot, label, list }) => (
-              <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 76, flexShrink: 0, fontSize: 11, color: theme.toolbar.textMuted }}>{label}</span>
-                <Select
-                  size="small"
-                  data-onboarding-model={slot}
-                  value={models[slot] || undefined}
-                  placeholder={list.length ? t('onboarding.modelPick', '选择模型') : t('onboarding.modelEmpty', '连接后读取列表')}
-                  options={list.map((name) => ({ value: name, label: modelOptionLabel(slot, name) }))}
-                  onChange={(value: string) => setModel(slot, value)}
-                  showSearch
-                  optionFilterProp="label"
-                  style={{ flex: 1, minWidth: 0 }}
-                />
-              </div>
-            ))}
+            {modelSlots.map(({ slot, label, list }) => {
+              const recState = recommendedState(slot);
+              return (
+                <div key={slot} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 76, flexShrink: 0, fontSize: 11, color: theme.toolbar.textMuted }}>{label}</span>
+                    <ModelNamePicker
+                      slot={slot}
+                      value={models[slot] || ''}
+                      options={list.map((name) => ({ value: name, label: modelOptionLabel(slot, name) }))}
+                      placeholder={list.length ? t('onboarding.modelPick', '选择或输入模型名') : t('onboarding.modelEmpty', '连接后读取列表，也可手动输入')}
+                      onCommit={(value) => setModel(slot, value)}
+                    />
+                  </div>
+                  <div style={{ paddingLeft: 84, fontSize: 10.5, lineHeight: 1.5, color: theme.toolbar.textMuted }}>
+                    {t('onboarding.recommendPrefix', '推荐：')}{RECOMMENDED_MODELS[slot]}{' '}
+                    {recState === 'available' ? (
+                      <span style={{ color: '#16a34a' }}>{t('onboarding.recAvailable', '云端已有')}</span>
+                    ) : recState === 'missing' ? (
+                      <span style={{ color: '#d97706' }}>{t('onboarding.recMissing', '云端缺少，请换同槽位其它 h3 版本')}</span>
+                    ) : (
+                      <span>{t('onboarding.recUnknown', '连接后核对')}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
             <span style={hintStyle(theme)}>
-              {t('onboarding.modelPickHint', '推荐只是标注，可以自由改选；不确定就用带「推荐」的那一项。视频/音频 VAE 必须是 MiniMax H3 专用版本；云端没有就换文件名带 h3 的第三方量化版，别选普通 VAE。')}
+              {t('onboarding.modelPickHint', '每个槽位只选一个。推荐项会标出云端是否已有；缺少就换同槽位其它 h3 版本，或手动输入模型名。视频/音频 VAE 必须是 MiniMax H3 专用版本，第三方量化只要文件名带 h3 也可以。')}
             </span>
             {(vaeListEmpty || currentVaeUnsupported) ? (
               <span data-onboarding-vae-warning style={{ fontSize: 11, lineHeight: 1.65, color: '#d97706' }}>

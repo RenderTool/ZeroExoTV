@@ -63,7 +63,7 @@ describe('handleReplayGeneration（本机视频一键同款）', () => {
       'n1', { store, commandQueue: cq }, { containerSize: { width: 1000, height: 800 } },
       (k: string) => k, msg,
     );
-    // 返回下游节点信息：调用方据此直接触发同款生成（不覆盖原节点）
+    // 返回下游节点信息：调用方据此展开提示词编辑器；不再直接触发同款生成
     expect(target).toEqual({ nodeId: expect.any(String), mode: 'video', prompt: '一只狗' });
     expect(apiMock.apiGet).not.toHaveBeenCalled();
     expect(cq.execute).toHaveBeenCalledTimes(1);

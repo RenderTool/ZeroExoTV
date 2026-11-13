@@ -247,9 +247,9 @@ export async function handleReplayGeneration(
   else message.success(t('editor.replayDone', { n: copiedCount }));
 
   store.focusOnNode(newId, state.containerSize, w, h, 400, 51);
-  // 2026-11-11 用户要求：一键同款 = 直接在下游新节点上开始生成（绝不覆盖原节点）
+  // 2026-11-13 用户要求：一键同款只建节点并展开提示词，让用户自己改；不在这里发起生成。
+  // 即使提示词为空也返回节点，保证编辑器能展开给用户填写。
   const prompt = String(record.prompt ?? srcData.prompt ?? '');
-  if (!prompt.trim()) return null;
   const mode = (srcNode.type === 'video' || srcNode.type === 'audio' || srcNode.type === 'text' ? srcNode.type : 'image') as string;
   return { nodeId: newId, mode, prompt };
 }

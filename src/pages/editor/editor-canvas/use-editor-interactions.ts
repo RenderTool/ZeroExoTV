@@ -19,7 +19,7 @@ import { PREVIEW_GROUP_ID, getGroupBoundsWithEmptyFallback } from '@zeroexo/plug
 import { configToPinDefaults, configToNodeDefaults, configToGroupDefaults } from '@/features/top-bar/index.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
-import { requestNodeDockPrompt } from '@/features/tools-dock/node-generate-dock.js';
+import { requestNodeDockExpand, requestNodeDockPrompt } from '@/features/tools-dock/node-generate-dock.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
@@ -676,12 +676,14 @@ export function useEditorInteractions({
         : 'image') as GenerationMode;
       void handlePromptGenerate(node.id, mode, prompt);
     });
-    // 一键同款(征集#43):胶囊工具栏/右键菜单 emit → 复原完整生成链路
+    // 一键同款(征集#43):复原生成链路 → 建下游新节点并展开提示词，等用户自己改
     const unsubReplay = nodeActionBus.on('replayGeneration', (event: { nodeId: string }) => {
       void (async () => {
         const target = await handleReplayGeneration(event.nodeId, refs, state, t, message);
-        // 2026-11-11 用户要求：一键同款 = 建下游新节点并直接生成，不改动原节点
-        if (target) void handlePromptGenerate(target.nodeId, target.mode as GenerationMode, target.prompt);
+        if (!target) return;
+        // 2026-11-13 用户要求：一键同款只负责“建好节点 + 填好提示词”，不得直接发起生成
+        requestNodeDockExpand(target.nodeId);
+        if (target.prompt.trim()) requestNodeDockPrompt(target.nodeId, target.prompt);
       })();
     });
     const unsubCancel = nodeActionBus.on('cancel', (event: { nodeId: string }) => {
