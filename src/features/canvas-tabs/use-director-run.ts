@@ -52,6 +52,7 @@ import {
 import { useComfyuiConnectionStore } from './comfyui-connection.js';
 import { ensureComfyuiMachineInfo, shouldUseLowVram } from './vram-mode.js';
 import { createPreviewClientId, DirectorPreviewSocket, type DirectorPreviewFrame } from './comfyui-ws-client.js';
+import { saveDirectorPreview, readDirectorPreview, clearDirectorPreview } from './director-preview-cache.js';
 import { newMediaKey, putMedia, resolveMediaUrl } from '@/platform/media.js';
 import { isAuthorized } from '@/platform/fs.js';
 import type { DirectorModelTier, RunShotLike, SharedParamsLike, SubjectCoverOf } from '@/entities/director-params.js';
@@ -143,8 +144,6 @@ const INITIAL_STATE: DirectorRunState = {
 // ===== 刷新续接（2026-11-07 用户反馈：生成中刷新页面不能丢作业） =====
 // 进行中的作业写 sessionStorage；刷新后 mount 自动恢复 activeJob 并继续轮询（作业本身在 ComfyUI 侧不受影响）。
 const RUN_RESUME_KEY = 'zeroexo.directorRun.active';
-/** 刷新后恢复最后一帧实时预览（WS 连接会断，但已收到的帧不该一起消失） */
-const RUN_PREVIEW_KEY = 'zeroexo.directorRun.preview';
 
 interface ResumedRun {
   mode: 'openai' | 'direct' | 'zeroexo';
@@ -176,22 +175,11 @@ function readResumableRun(): ResumedRun | null {
 }
 
 function savePreviewFrame(frame: DirectorPreviewFrame): void {
-  try {
-    window.sessionStorage.setItem(RUN_PREVIEW_KEY, JSON.stringify(frame));
-  } catch { /* 帧过大/隐私模式：忽略 */ }
-}
-
-function readPreviewFrame(): DirectorPreviewFrame | null {
-  try {
-    const raw = window.sessionStorage.getItem(RUN_PREVIEW_KEY);
-    return raw ? (JSON.parse(raw) as DirectorPreviewFrame) : null;
-  } catch {
-    return null;
-  }
+  saveDirectorPreview(frame);
 }
 
 function clearPreviewFrame(): void {
-  try { window.sessionStorage.removeItem(RUN_PREVIEW_KEY); } catch { /* ignore */ }
+  clearDirectorPreview();
 }
 
 // ===== 主线程截帧（串行队列：同一时刻只解码一个视频） =====
@@ -916,10 +904,12 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
 
   // 刷新后恢复最后一帧（即使本次运行已经结束；预览图不该随刷新消失）
   useEffect(() => {
-    const savedFrame = readPreviewFrame();
-    if (savedFrame) {
+    let cancelled = false;
+    void readDirectorPreview<DirectorPreviewFrame>().then((savedFrame) => {
+      if (cancelled || !savedFrame) return;
       setState((s) => (s.preview ? s : { ...s, preview: savedFrame, livePreviewSupported: false }));
-    }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   // 刷新续接：mount 时若 sessionStorage 里有进行中的作业，恢复 activeJob 并继续轮询
@@ -948,8 +938,11 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
       jobId: saved.jobId ?? null,
       totalCount: saved.segmentShotIds.length,
       segmentShotIds: saved.segmentShotIds,
-      preview: readPreviewFrame(),
+      preview: null,
       livePreviewSupported: false, // 刷新后 WS clientId 已失效，不再假装能收实时帧
+    });
+    void readDirectorPreview<DirectorPreviewFrame>().then((savedFrame) => {
+      if (savedFrame) setState((s) => (s.preview ? s : { ...s, preview: savedFrame }));
     });
     pollTimer.current = window.setInterval(() => void pollTick(), pollMs);
     void pollTick();
