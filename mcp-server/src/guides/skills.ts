@@ -509,6 +509,7 @@ A cinematic studio portrait photograph of a young Chinese woman in a charcoal si
 - **色光锁逐字复用**：同一角色场景的所有轴图共用同一条光色基线句（暗部色 / 光源色 / 地面色 / 木作色 / 唯一暖源），逐字抄进每条提示词；不要每张图换一套颜色词导致蓝绿漂移。
 - **形制写死年代地域**：朝代/地域/构件（round pillars on stone bases、exposed beams、square brick、lattice door…）点名，禁止漂到日式、江南园林、隔壁朝代；IP 改编先查官方可考形制再写。
 - **空场景**：no people, no animals, no movable props, no text；场景与意境不符时先文生图重出或图生图编辑，不硬挂不像的图。
+- **暗部保材质可读**：雨夜/暗场用 soft cinematic contrast，木纹、砖地、湿石反光、梁架都要留在可读区间；禁止堆叠 crushed blacks / ink-black darkness / high contrast 这类压暗措辞，否则整图被压平、材质细节被吃掉。色光锁一句带过即可，不要在每条提示词里重复整段暗色词；走短散文，参照已认可的旧图口径。
 - 场景图同样不写 quality 词；光色用具体材质与光源描述（wet stone sheen、single amber lamp against ink-blue shadows），不写「氛围感、高级感」。
 
 ## 2. Krea2 写法
