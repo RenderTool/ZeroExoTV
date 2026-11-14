@@ -33,7 +33,7 @@ import {
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   Maximize2, Zap,
   Layers, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, Scaling,
-  Compass, PictureInPicture2, Send, Copy,
+  Compass, PictureInPicture2, Send, Copy, UserRound,
   } from 'lucide-react';
 import { DOCK_ICONS } from './icons.js';
 import { NodeJoystickNav } from './node-joystick-nav.js';
@@ -197,7 +197,7 @@ export function NodeCapsuleToolbar({
   onUnifySizes,
   onSort,
   onStackSelected,
-  usePureIcon = true,
+  usePureIcon = false,
 }: NodeCapsuleToolbarProps): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -290,18 +290,16 @@ export function NodeCapsuleToolbar({
   }, [node]);
 
   const sendMenuItems: MenuProps['items'] = node ? [
-    { key: 'send-library', label: t('send.toGlobalAssets', '全局资产'), icon: <Copy size={14} /> },
-    { key: 'send-as', label: t('send.saveAsAsset', '另存为资产…'), icon: <Copy size={14} /> },
+    { key: 'send-library', label: t('send.toGlobalAssets', '发送到全局'), icon: <Copy size={14} /> },
     ...(node.type === 'image' || node.type === 'audio' || node.type === 'video'
       ? [{
           key: 'send-subject',
           label: t('send.toSubject', '发送到主体'),
+          icon: <UserRound size={14} />,
           disabled: node.type === 'video' || !(node.data as { storageKey?: string } | undefined)?.storageKey,
           title: node.type === 'video' ? t('subject.videoNotSupported', '视频不再支持，请选择图片或语音') : undefined,
         }]
       : []),
-    { type: 'divider' as const },
-    { key: 'canvas-copy', label: t('canvasCopy.createShort', '另存为画布'), icon: <PictureInPicture2 size={14} /> },
   ] : [];
   // 批量堆叠可堆叠计数(征集#9 E2):多选且存在可堆叠节点且宿主注入执行逻辑时才有意义
   const stackableCount = useMemo(() => {
@@ -678,6 +676,7 @@ export function NodeCapsuleToolbar({
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
               <Send size={16} />
+              {!effectivePureIcon ? <span style={{ whiteSpace: 'nowrap' }}>{t('send.menu', '发送')}</span> : null}
             </button>
           </Dropdown>
         </div>
