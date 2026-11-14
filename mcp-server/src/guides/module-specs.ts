@@ -183,7 +183,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
     mcpTools: ["list_subjects", "upsert_subject", "set_subject_profile", "set_subject_image", "import_subject_from_project", "link_subject_to_shot", "merge_subjects", "consolidate_scenes", "list_style_presets", "get_global_style", "set_global_style"],
     caveats: [
       "前置阶段3 提主体：主体清单（名称/类型/别名/状态/出现集数/身份锚点句/图片来源）+ 缺图清单先给用户确认（gate：清单未确认不得 upsert、不得建状态，不得进阶段4）",
-      "强制字段：每个主体必须 set_subject_profile 提交完整字段（角色 16 项 / 场景 / 道具），服务端生成三视图/场景宫格/道具参考图提示词；字段不全返回 SUBJECT_PROFILE_INCOMPLETE",
+      "强制字段：每个主体必须 set_subject_profile 提交完整字段（角色 16 项 / 场景 / 道具），服务端生成三视图/场景轴图/道具参考图提示词；字段不全返回 SUBJECT_PROFILE_INCOMPLETE",
       "有参考图：先 read_asset 看图，按图反推字段后带 sourceImage 调 set_subject_profile；图与剧本冲突以图为准并告知用户",
       "挂图硬门槛：先 read_asset 真正看过这张图 → 把画面反推成 prompt → set_subject_image；没读过返回 IMAGE_REVIEW_REQUIRED，空 prompt 返回 IMAGE_PROMPT_REQUIRED",
       "项目隔离硬门槛：只允许本项目或公共库已引用的 CAS 素材挂图；别的项目的 storageKey 直接返回 CROSS_PROJECT_ASSET。需要复用别的项目同名主体时，先 import_subject_from_project（dryRun→userConfirmed）导成本项目的新主体，禁止跨项目直接引用/挂图",

@@ -141,7 +141,7 @@ function bootstrapProjectText(scriptContent: string): string {
 - 每个主体逐个走：先 \`list_subjects\` 查重 → 有图先 \`read_asset\` 亲眼看 → 反推提示词 → 给用户确认；
 - ▼ 停：等用户确认清单或补图（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物；缺图给缺图清单，不许自己找图凑）；
 - 确认后 upsert_subject（先 dryRun 再 confirm）→ set_subject_profile 按强制字段表（角色 16 项 / 场景 / 道具）
-  生成三视图/场景宫格/道具标准提示词；有图先 read_asset，按图反推字段；
+  生成三视图/场景轴图/道具标准提示词；有图先 read_asset，按图反推字段；
 - 挂图必须 read_asset 看过 + 带反推 prompt 的 set_subject_image；多人合照/模特合集/别的角色图一律不许挂；写完 audit_subjects。
 
 阶段4 拆分镜

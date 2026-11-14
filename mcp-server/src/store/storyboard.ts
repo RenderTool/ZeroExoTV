@@ -113,7 +113,7 @@ export async function upsertSubject(
 }
 
 /**
- * 写主体人设模板（2026-11-13）：身份锚点句 → item.note；标准提示词（三视图 / 场景宫格 / 道具参考图）
+ * 写主体人设模板（2026-11-13）：身份锚点句 → item.note；标准提示词（三视图 / 场景轴图 / 道具参考图）
  * → 主体树基础状态 fullPrompt/deltaPrompt。字段校验在 lib/subject-profile，这里是唯一落盘入口。
  */
 export async function setSubjectProfile(

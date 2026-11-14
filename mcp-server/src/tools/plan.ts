@@ -241,7 +241,7 @@ export function registerPlanTools(server: McpServer, ctx: Ctx): void {
           placeholderSubjects: [...wanted.values()],
           missingAssets: [...wanted.values()].map((v) => ({
             ...v,
-            needs: v.kind === "scene" ? "场景宫格图（4:3，2×2，空场景）" : "角色定妆图（16:9，正面大头特写 + 正面全身 + 背面全身，共 3 个画面）",
+            needs: v.kind === "scene" ? "场景轴图（21:9 单视角，空场景）" : "角色定妆图（16:9，正面大头特写 + 正面全身 + 背面全身，共 3 个画面）",
           })),
           note: "confirm:true 才写盘；写盘后图片由画布生成或外部制作，再 upload_asset + set_subject_image 挂上",
         };
@@ -365,7 +365,7 @@ export function registerPlanTools(server: McpServer, ctx: Ctx): void {
           id: e.id,
           name: e.name,
           kind: e.kind,
-          needs: e.kind === "scene" ? "场景宫格图（4:3，2×2，空场景）" : "角色定妆图（16:9，正面大头特写 + 正面全身 + 背面全身，共 3 个画面）",
+          needs: e.kind === "scene" ? "场景轴图（21:9 单视角，空场景）" : "角色定妆图（16:9，正面大头特写 + 正面全身 + 背面全身，共 3 个画面）",
         }));
 
       return {

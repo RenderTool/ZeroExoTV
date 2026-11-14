@@ -254,9 +254,9 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     name: "set_subject_profile",
     description:
       "写主体人设模板（2026-11-13 强制约束）：按 kind 提交必填字段，服务端校验后拼出标准提示词——" +
-      "角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 2×2 空场景宫格；道具 = 单品参考图。" +
+      "角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 单视角空场景轴图（21:9，默认；2×2 宫格仅用户明确要求）；道具 = 单品参考图。" +
       "身份锚点句写 item.note，标准提示词写主体树基础状态 fullPrompt/deltaPrompt。字段不全直接拒绝并列出缺项。" +
-      "renderMode 可选：sheet（默认，参考图/定妆）/ single（单张）/ white-bg（白底快速图，道具主图或要抠像的角色）。" +
+      "renderMode 可选：sheet（参考图/定妆：角色三视图 / 场景四视角宫格 / 道具细节图）/ single（场景默认，单张轴图）/ white-bg（白底快速图，道具主图或要抠像的角色）。" +
       "有参考图时必须先 read_asset 看图、按图反推字段，再把 sourceImage 一起传；不要凭想象填。baseVersion = storyboard version。",
     bits: ["subject.write"],
     schema: {
@@ -266,13 +266,13 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       kind: z.enum(["character", "scene", "prop", "candidate"]),
       profile: z.record(z.string(), z.string()).describe(
         "字段表：角色=时代基底/国家朝代/物种/族裔/类型基底/显著特征/脸型/发型/身材/头身比/年龄/性格/变装/上身着装/下身着装/鞋子（耳饰可选）；"
-          + "场景=时代基底/地点/建筑风格/空间结构/地面/墙面/光源/前景/中景/远景/氛围/色调/材质与洁净度（门窗可选）；"
+          + "场景=时代基底/地点/建筑风格/空间结构/地面/墙面/光源/前景/中景/远景/氛围/色调/材质与洁净度（门窗可选；调度空间/色光锁句可选但强烈建议填）；"
           + "道具=名称/尺寸/材质/颜色/状态/边缘与纹理/光泽/背景（磨损可选）。",
       ),
       sourceImage: z.string().optional()
         .describe("参考图的 storageKey；有图时必须先 read_asset 看过，并按图反推上面这些字段"),
       renderMode: z.enum(["sheet", "single", "white-bg"]).optional()
-        .describe("出图形态：sheet=参考图/定妆（角色三视图 / 场景2×2宫格 / 道具细节图，默认）；single=单张；white-bg=白底快速图（道具/需要抠像的角色，纯白底）"),
+        .describe("出图形态：sheet=参考图/定妆（角色三视图 / 场景四视角宫格 / 道具细节图）；single=场景默认，单张轴图；white-bg=白底快速图（道具/需要抠像的角色，纯白底）"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {
@@ -333,7 +333,8 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       stateTag: z.string().optional(),
       prompt: z.string().optional()
         .describe("从这张图反推的提示词（真实写入必填）：画面里有几个人、是否同一张脸、年龄性别/脸型发型/服装/姿态/景别/光位/背景/色调/质感"),
-      note: z.string().optional(),
+      note: z.string().optional()
+        .describe("审核留痕：用户在审核模式下给的打分（1–5）与改进建议；审核否决的图不挂主体"),
       cover: z.boolean().optional(),
       allowCrossSubject: z.boolean().optional(),
       samePersonConfirmed: z.boolean().optional()
@@ -382,7 +383,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
             "SUBJECT_PROFILE_REQUIRED",
             `主体「${item?.name ?? args.subjectId}」还没有人设/标准提示词，禁止先挂图。`
               + "先按 zeroexo://skills/subjects 1.7 的字段表调 set_subject_profile（角色 16 项 / 场景 / 道具；"
-              + "有参考图先 read_asset 按图反推），生成三视图/场景宫格/道具提示词后再挂图。",
+              + "有参考图先 read_asset 按图反推），生成三视图/场景轴图/道具提示词后再挂图。",
           );
         }
         if (item?.kind === "scene" && args.emptySceneConfirmed !== true) {

@@ -112,7 +112,7 @@ function subjectDefinition(s: PromptSubject, assetsBound: boolean): string {
   const state = s.state ? `（${s.state}）` : "";
   if (s.kind === "scene") {
     return assetsBound && n > 0
-      ? `<Subject ${n}> 是本段场景${s.name}${state}，取自 ${ref}（宫格图）：只作空间结构、材质与光位基准，不锁首帧、不锁构图。`
+      ? `<Subject ${n}> 是本段场景${s.name}${state}，取自 ${ref}（场景轴图）：只作空间结构、材质与光位基准，不锁首帧、不锁构图。`
       : `<Subject ${n}> 是本段场景${s.name}${state}，纯文字定义不设参考图：只作空间结构、材质与光位基准。`;
   }
   if (s.kind === "character") {

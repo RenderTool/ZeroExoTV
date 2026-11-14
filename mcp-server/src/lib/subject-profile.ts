@@ -6,7 +6,7 @@
  *
  * 本模块是服务端唯一一份：
  * - 每种主体的必填字段（缺一个就拒绝写入，并列出缺哪些）；
- * - 由字段拼出的标准提示词（角色 = 三视图；场景 = 2×2 空场景；道具 = 单品参考图）；
+ * - 由字段拼出的标准提示词（角色 = 三视图；场景 = 单视角空场景轴图，2×2 宫格仅显式要求；道具 = 单品参考图）；
  * - 身份锚点句（写进 ProductionItem.note，供后续分镜提示词逐字复用）。
  */
 
@@ -30,6 +30,9 @@ const SCENE_REQUIRED = [
   "时代基底", "地点", "建筑风格", "空间结构", "地面", "墙面", "光源",
   "前景", "中景", "远景", "氛围", "色调", "材质与洁净度",
 ] as const;
+
+/** 场景可选补充字段（不强制拒绝，但写了就进标准提示词） */
+const SCENE_OPTIONAL = ["调度空间", "色光锁句"] as const;
 
 const PROP_REQUIRED = [
   "名称", "尺寸", "材质", "颜色", "状态", "边缘与纹理", "光泽", "背景",
@@ -149,11 +152,19 @@ ${background}
 质量标签：AAA 级电影制作质量，超高分辨率，写实人体解剖结构，非动漫，非游戏渲染。`;
 }
 
-/** 场景模板：sheet = 2×2 宫格；single/white-bg = 单张全景（无人物） */
-export function buildScenePrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
+/** 场景模板：single（默认）= 单视角空场景轴图；sheet = 2×2 宫格（仅用户明确要四视角时）；white-bg 不适用场景 */
+export function buildScenePrompt(profile: SubjectProfile, mode: SubjectRenderMode = "single", stylePrompt?: string): string {
+  const blocking = v(profile, "调度空间");
+  const paletteLock = v(profile, "色光锁句");
   const layout = mode === "sheet"
     ? `画面布局：16:9（2048×1152），2×2 宫格，四个视角来自同一空间：左上 = 视角1；右上 = 视角2；左下 = 视角3；右下 = 视角4。四格必须是同一地点的连续空间，不得拼成四个不同地方。`
-    : `画面布局：16:9 单张全景，站在最能看清空间结构的位置拍摄；不要多格拼贴。`;
+    : `画面布局：21:9 单张轴图，平视大全景，机位选在最能看清空间结构与调度路线的位置；只出一个机位，不要多格拼贴，不要道具居中填满画面的装饰性剧照。`;
+  const blockingLine = blocking
+    ? `调度空间：${blocking}。入口/门槛、人物站位空地、进出通道必须在画面内可见；前景柱/框只作边缘框景，不得压住动线。`
+    : `调度空间：画面内必须留出人物站位空地与进出通道，前景构件只作边缘框景，不得压住动线。`;
+  const lockLine = paletteLock
+    ? `色光锁句（本场景所有轴图逐字复用，不改写、不换说法，避免同场景色调漂移）：${paletteLock}`
+    : "";
   return `专业电影级场景参考图（空场景，无人物）。
 ${layout}
 
@@ -166,6 +177,8 @@ ${layout}
 氛围：${v(profile, "氛围")}。
 色调：${v(profile, "色调")}。
 材质与洁净度：${v(profile, "材质与洁净度")}。
+${blockingLine}
+${lockLine}
 
 硬约束：画面中不得出现人物、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印、标志、文字；不得改变建筑结构。前景/中景/远景只能写固定不可移动的建筑、家具、植被与结构元素，不写苹果/杯子/手机/书这类可移动小物。
 ${styleBlock(stylePrompt)}`;
@@ -211,7 +224,7 @@ export function buildSubjectProfile(
   const k = normKind(kind);
   const missing = missingProfileFields(k, profile);
   if (missing.length > 0) return { missing, built: null, label: LABEL[k] };
-  const mode: SubjectRenderMode = opts.renderMode ?? "sheet";
+  const mode: SubjectRenderMode = opts.renderMode ?? (k === "scene" ? "single" : "sheet");
   const prompt = k === "scene" ? buildScenePrompt(profile, mode, opts.stylePrompt)
     : k === "prop" ? buildPropPrompt(profile, mode, opts.stylePrompt)
       : buildCharacterPrompt(profile, mode, opts.stylePrompt);
