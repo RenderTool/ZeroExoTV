@@ -29,6 +29,7 @@ import { TitleEditor } from './title-editor.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { CanvasTabBar } from '@/features/canvas-tabs/canvas-tab-bar.js';
 import { openServiceCenter } from '@/features/service-center/service-center-events.js';
+import { ComfyuiConnectButton } from '@/features/canvas-tabs/comfyui-connect-button.js';
 
 /** 路径中间省略：超长时保留头尾，完整路径仍在 tooltip 内可看 */
 export function middleEllipsis(value: string, max = 44): string {
@@ -269,6 +270,8 @@ export function TopBar({
                 onClick={openServiceCenter}
                 color={theme.toolbar.text}
               />
+              {/* ComfyUI 连接 + 显存策略（自动/低显存/高显存）入口 */}
+              <ComfyuiConnectButton />
               {/* 本地版（Plan#83）：协作入口随 collaboration 链路移除 */}
             </div>
             {/* 展开/收纳开关 */}
