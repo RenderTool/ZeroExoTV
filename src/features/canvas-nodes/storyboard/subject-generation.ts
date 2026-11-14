@@ -97,7 +97,9 @@ export function resolveSubjectGenParams(
     quality,
     width: size.width,
     height: size.height,
-    megapixels: p.megapixels ?? Math.round(((size.width * size.height) / (1024 * 1024)) * 100) / 100,
+    megapixels: p.megapixels ?? (model === MOSS_MODEL_KEY || model === KREA2_MODEL_KEY
+      ? 4
+      : Math.round(((size.width * size.height) / (1024 * 1024)) * 100) / 100),
     steps: p.steps ?? defaults.steps,
     cfg: p.cfg ?? defaults.cfg,
     denoise: p.denoise ?? 1,

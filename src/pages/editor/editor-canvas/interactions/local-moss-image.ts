@@ -34,7 +34,7 @@ export { MOSS_MODEL_KEY };
 export const MOSS_DEFAULT_STEPS = 25;
 export const MOSS_DEFAULT_CFG = 2.5;
 /** 默认百万像素：1MP = 1024×1024 */
-export const MOSS_DEFAULT_MEGAPIXELS = 1;
+export const MOSS_DEFAULT_MEGAPIXELS = 4;
 
 export interface LocalMossRequest {
   prompt: string;

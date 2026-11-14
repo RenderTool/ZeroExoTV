@@ -7,7 +7,7 @@
  * 这样 MCP 触发的图会出现在**用户正在看的实时画布**上（主画布由浏览器持有，外部不直接写 JSON）。
  */
 import { useEffect, useRef } from 'react';
-import { AddNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand, type CommandQueue } from '@zeroexo/core';
+import { AddEdgeCommand, AddNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand, type CommandQueue } from '@zeroexo/core';
 import { fitImageNodeSize } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { listDir, readJson, writeJson, removeFile } from '@/platform/fs.js';
@@ -28,7 +28,7 @@ function resolveRequestedSize(req: McpImageRequest): { width: number; height: nu
   const rw = Number(parts[0]);
   const rh = Number(parts[1]);
   if (!Number.isFinite(rw) || !Number.isFinite(rh) || rw <= 0 || rh <= 0) return null;
-  const pixels = Math.max(0.1, req.megapixels ?? 1) * 1024 * 1024;
+  const pixels = Math.max(0.1, req.megapixels ?? 4) * 1024 * 1024;
   const width = Math.sqrt(pixels * (rw / rh));
   const height = width * (rh / rw);
   return clampQwenSize(width, height);
@@ -238,7 +238,7 @@ export function useMcpImageJobs(opts: {
             model: modelKey,
             paramValues: {
               aspect: req.aspect ?? '1:1',
-              megapixels: req.megapixels ?? 1,
+              megapixels: req.megapixels ?? 4,
               ...(targetSize ? { width: targetSize.width, height: targetSize.height, sizeMode: 'custom' } : {}),
               steps: req.steps,
               seed: req.seed ?? -1,
@@ -247,6 +247,14 @@ export function useMcpImageJobs(opts: {
             },
           },
         } as never));
+        // 改图必须把源图节点真正连到新节点；否则画布上只有一张孤立结果。
+        if (isEdit && req.sourceNodeId) {
+          cq.execute(new AddEdgeCommand({
+            id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-mcp`,
+            source: { nodeId: req.sourceNodeId, pinId: 'image' },
+            target: { nodeId, pinId: 'prompt' },
+          }));
+        }
         item.state = 'running';
         await writeJson(statusRel, { ...status, updatedAt: new Date().toISOString() }).catch(() => undefined);
         try {

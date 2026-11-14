@@ -33,7 +33,7 @@ export { KREA2_MODEL_KEY };
 /** Krea2 默认采样步数（turbo 底模；与 Qwen 的 25 步不是一套） */
 export const KREA2_DEFAULT_STEPS = 10;
 /** 默认百万像素（ResolutionSelector 口径：1MP = 1024×1024，与视频尺寸同一套定义） */
-export const KREA2_DEFAULT_MEGAPIXELS = 3;
+export const KREA2_DEFAULT_MEGAPIXELS = 4;
 
 export interface LocalKrea2Request {
   prompt: string;
