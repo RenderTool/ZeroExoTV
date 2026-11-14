@@ -742,6 +742,17 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
               },
             });
             submitted.push({ jobId: job.jobId, shotId: shot.id });
+            // 每提交一段就落一次续接记录：刷新发生在批量提交中途时，
+            // 至少还能恢复已经提交的作业，而不是丢掉整条队列。
+            saveResumableRun({
+              mode: cfg.mode,
+              jobId: undefined,
+              jobs: submitted.map((j, jdx) => ({ segIndex: jdx + 1, jobId: j.jobId, shotId: j.shotId })),
+              segmentShotIds: selected.map((x) => x.id),
+              projectId: runArgs.projectId,
+              canvasId: getCurrentCanvasDocId(),
+              at: Date.now(),
+            });
           }
           zeroexoJobs.current = new Map(submitted.map((j, i) => [i + 1, j]));
           segmentShotIds = selected.map((s) => s.id);
@@ -931,6 +942,11 @@ export function useDirectorRun(args: UseDirectorRunArgs): DirectorRunState & {
     // 文档归属校验：在子画布发起的任务，刷新后（或切回主画布时）不得续接到主画布同 id 片段。
     // 记录保留，等用户重新打开发起它的那份画布文档时再续接。
     if (saved.canvasId && saved.canvasId !== getCurrentCanvasDocId()) return;
+    // 空的 zeroexo 续接记录 = 提交还没成功；不能恢复成 running 让页面永远卡在生成中
+    if (saved.mode === 'zeroexo' && !saved.jobs?.length) {
+      clearResumableRun();
+      return;
+    }
     statusFailures.current = 0;
     if (saved.mode === 'zeroexo' && saved.jobs?.length) {
       zeroexoJobs.current = new Map(saved.jobs.map((j) => [j.segIndex, { jobId: j.jobId, shotId: j.shotId }]));
