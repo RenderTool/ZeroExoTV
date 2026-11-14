@@ -348,6 +348,8 @@ function AssetCardGrid({
             <SendActionButtons
               onSendToCanvas={onSendToCanvas}
               onSendToDirector={onSendToDirector ? () => onSendToDirector('video') : undefined}
+              subjectStorageKey={typeof data.storageKey === 'string' ? data.storageKey : undefined}
+              subjectLabel={asset.title}
               hasGuide={hasGuide}
               onSendGuideToDirector={hasGuide && onSendToDirector ? () => onSendToDirector('guide') : undefined}
               kind={asset.kind}

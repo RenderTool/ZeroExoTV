@@ -16,7 +16,8 @@ import type { TFunction } from 'i18next';
 import { useState } from 'react';
 import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
-import { Clapperboard, ImagePlus, Loader2, Share2, Waypoints } from 'lucide-react';
+import { Clapperboard, ImagePlus, Loader2, Share2, UserRound, Waypoints } from 'lucide-react';
+import { openSubjectLinkDialog } from '@/features/canvas-nodes/storyboard/subject-link-dialog.js';
 
 // ===== 能力规则（与 workbench-slot-bus 槽位分配同口径） =====
 
@@ -63,6 +64,8 @@ export interface SendActionHandlers {
   hasGuide?: boolean;
   /** 发送引导数据到导演台当前片段引导槽（仅 hasGuide 时使用） */
   onSendGuideToDirector?: () => void;
+  /** 发送到主体库（图片/视频/音频 → 选择主体状态） */
+  onSendToSubject?: () => void;
   /** 素材类型（image/video/audio/text/script…）；决定导演台动作可用性（统一置灰规则） */
   kind?: string;
   /** 开源库首用下载中：两钮转圈禁用（用户资产恒为 false） */
@@ -90,6 +93,8 @@ export interface SendActionHandlers {
 export function SendActionButtons({
   onSendToCanvas,
   onSendToDirector,
+  subjectStorageKey,
+  subjectLabel,
   hasGuide,
   onSendGuideToDirector,
   kind,
@@ -99,6 +104,9 @@ export function SendActionButtons({
   alwaysVisible,
   t,
 }: SendActionHandlers & {
+  /** 发送到主体：目标素材键（提供时菜单出现「发送到主体」） */
+  subjectStorageKey?: string;
+  subjectLabel?: string;
   /** hover 可见性（opacity 过渡，触屏设备常驻半透明见 alwaysVisible） */
   visible: boolean;
   /** 常驻可见（抽屉窄列/触屏无 hover 时用；默认跟随 visible 过渡） */
@@ -124,6 +132,21 @@ export function SendActionButtons({
       icon: <Waypoints size={13} />,
       label: t('assetLibrary.sendGuideToDirector', '发送引导'),
       onClick: () => { setDirectorMenuOpen(false); onSendGuideToDirector(); },
+    });
+  }
+  if (subjectStorageKey && (kind === 'image' || kind === 'video' || kind === 'audio')) {
+    items.push({
+      key: 'sendToSubject',
+      icon: <UserRound size={13} />,
+      label: t('assetLibrary.sendToSubject', '发送到主体'),
+      onClick: () => {
+        setDirectorMenuOpen(false);
+        openSubjectLinkDialog({
+          storageKey: subjectStorageKey,
+          kind,
+          sourceLabel: subjectLabel,
+        });
+      },
     });
   }
   const btn: React.CSSProperties = {
