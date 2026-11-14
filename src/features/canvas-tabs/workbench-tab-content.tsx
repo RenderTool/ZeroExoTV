@@ -164,13 +164,20 @@ export function resolveClipStatus(
 
 /** WorkbenchShot → 时间轴 clip（与 workbench-multitrack.tsx byTrack 的转换逐项对齐，同一映射不两套） */
 function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null }): TimelineClipData {
+  const activeInRun = !!run
+    && ['submitting', 'queued', 'running'].includes(run.phase)
+    && run.segmentShotIds.includes(s.id);
   return {
     id: s.id,
     number: s.number,
     duration: s.duration,
-    status: s.clipState === 'completed' && s.media?.storageKey
-      ? 'done'
-      : resolveClipStatus(s.status, run, s.id),
+    // 重跑已完成片段时，旧成片仍然在 media 里；运行中的这一段必须优先显示进度，
+    // 不能被 “有视频 = done” 覆盖成完成。
+    status: activeInRun
+      ? resolveClipStatus(s.status, run, s.id)
+      : s.clipState === 'completed' && s.media?.storageKey
+        ? 'done'
+        : resolveClipStatus(s.status, run, s.id),
     // 生成完成段的缩略：会话内 objectURL（主线程截帧产物）优先，回落持久化 firstFrameKey
     thumbnailUrl: firstFrameUrls?.[s.id] ?? s.firstFrameKey,
     videoKey: s.clipState === 'completed' && s.media?.storageKey ? s.media.storageKey : undefined,
@@ -1194,7 +1201,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    * 2) /ws 实时帧带 1 基段号，必须映射回 shotId 且等于当前选中的片段才允许显示；
    *    否则用户点选未运行片段时，右侧会错误盖着正在生成的那一帧。
    */
-  const completedVideoKey = sequenceVideoKey ?? (selectedShot?.media?.storageKey
+  const rerunningSelected = ['submitting', 'queued', 'running'].includes(comfyRun.phase)
+    && comfyRun.segmentShotIds.includes(selectedShot.id)
+    && selectedShot.status === 'generating';
+  const completedVideoKey = sequenceVideoKey ?? (!rerunningSelected
+    && selectedShot?.media?.storageKey
     && selectedShot.clipState === 'completed'
     ? selectedShot.media.storageKey
     : undefined);
