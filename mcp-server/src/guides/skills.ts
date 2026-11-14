@@ -282,6 +282,8 @@ const SUBJECTS = `# 技能：主体库（subjects）
    **默认只落 CAS，不建素材记录**：主体图属于主体库，进素材页就会变成「一张图两处显示」。只有要给片段当素材用的图才加 \`toLibrary:true\`。
 4. \`set_subject_image({ subjectId, storageKey, stateTag, prompt: 反推提示词, cover:true })\` ——
    主体必须先 \`set_subject_profile\`（没写人设会被拒）；必须先 \`read_asset\` 看过这张图；\`prompt\` 是这张图反推出来的真实画面描述（不是愿望），不带 prompt 会被拒；第一张设为封面。
+   **画布生图/改图落库时必须带 \`origin\`**：\`{ model, steps, seed, aspect, megapixels, width, height, sourceStorageKey, jobId, rawPrompt }\`，
+   \`rawPrompt\` 是投喂模型的原始提示词（反推描述放 \`prompt\`），否则主体页看不出这张图是哪个模型、什么参数、从哪张原图改来的。
 5. 关联片段：\`link_subject_to_shot({ shotId, subjectId, state })\` —— 写进片段 references，页面上才看得到缩略图；同一片段最多 9 张参考图。
 
 > 只建主体不挂图 = 页面上是个空壳；只挂图不 link = 生成本段时用不上；把主体图也塞进素材库 = 同一张图两处出现。三步都要走，素材库那一步不要走。`;

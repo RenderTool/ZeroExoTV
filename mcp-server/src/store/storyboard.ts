@@ -15,6 +15,22 @@ import { parseCasStorageKey, readCasIndex, uploadToCas } from "./cas.js";
 
 export type SubjectKind = "character" | "scene" | "prop" | "candidate";
 
+/** 主体图的生成来源与参数（画布生图/改图落库时一并记录，便于追溯） */
+export interface SubjectImageOrigin {
+  model?: string; // moss / krea2 / qwen
+  steps?: number;
+  seed?: number;
+  aspect?: string;
+  megapixels?: number;
+  width?: number;
+  height?: number;
+  sourceStorageKey?: string; // 图生图原图
+  sourceNodeId?: string;
+  jobId?: string;
+  rawPrompt?: string; // 原始生成提示词（非反推描述）
+  createdAt?: string;
+}
+
 export interface ProductionItem {
   id: string;
   name: string;
@@ -23,7 +39,7 @@ export interface ProductionItem {
   consistency?: string;
   note?: string;
   episodeIds: string[];
-  images: { storageKey: string; stateTag?: string; prompt?: string; note?: string; tags?: string[]; label?: string }[];
+  images: { storageKey: string; stateTag?: string; prompt?: string; note?: string; tags?: string[]; label?: string; origin?: SubjectImageOrigin }[];
   coverKey?: string | null;
 }
 
@@ -144,6 +160,8 @@ export interface SubjectImageInput {
   tags?: string[];
   /** true = 设为该主体封面（coverKey） */
   cover?: boolean;
+  /** 生成来源与参数（模型/步数/种子/尺寸/原图/原始提示词），便于追溯 */
+  origin?: SubjectImageOrigin;
 }
 
 /** 主体树里的状态节点（MCP 只写必要字段，其余交给前端迁移/补全） */
@@ -156,7 +174,7 @@ interface TreeStateLike {
   deltaPrompt?: string;
   fullPrompt?: string;
   recognitionTerms?: string[];
-  media: Array<{ key: string; type: string; prompt?: string }>;
+  media: Array<{ key: string; type: string; prompt?: string; origin?: SubjectImageOrigin }>;
   mediaHistory?: unknown[];
   source?: string;
   baseRef?: string;
@@ -222,7 +240,7 @@ function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
   const base = tree.states[0];
   const tag = (input.stateTag ?? "").trim();
   if (!tag || tag === "定妆" || tag === "基础状态" || tag === "基础形态") {
-    base.media = [{ key: input.storageKey, type: "image", prompt: input.prompt }];
+    base.media = [{ key: input.storageKey, type: "image", prompt: input.prompt, ...(input.origin ? { origin: input.origin } : {}) }];
     if (input.prompt) base.fullPrompt = input.prompt;
     if (!base.state) base.state = tag === "定妆" ? "" : base.state;
     return;
@@ -245,7 +263,7 @@ function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
     };
     tree.states.push(state);
   }
-  state.media = [{ key: input.storageKey, type: "image", prompt: input.prompt }];
+  state.media = [{ key: input.storageKey, type: "image", prompt: input.prompt, ...(input.origin ? { origin: input.origin } : {}) }];
   if (input.prompt) state.fullPrompt = input.prompt;
 }
 
@@ -457,6 +475,7 @@ export async function setSubjectImage(
         prompt: input.prompt,
         note: input.note,
         tags: input.tags,
+        ...(input.origin ? { origin: input.origin } : {}),
       };
       if (existing) {
         Object.assign(existing, entry);

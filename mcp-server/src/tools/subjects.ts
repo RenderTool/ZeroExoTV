@@ -340,6 +340,20 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         .describe("角色已有多张图时必填：确认这张脸与已有图是同一个演员"),
       emptySceneConfirmed: z.boolean().optional()
         .describe("场景必填：确认这张图是空场景（没有人/动物/苹果等可移动道具）"),
+      origin: z.object({
+        model: z.string().optional().describe("moss / krea2 / qwen"),
+        steps: z.number().int().optional(),
+        seed: z.number().optional(),
+        aspect: z.string().optional(),
+        megapixels: z.number().optional(),
+        width: z.number().int().optional(),
+        height: z.number().int().optional(),
+        sourceStorageKey: z.string().optional().describe("图生图原图 storageKey"),
+        sourceNodeId: z.string().optional(),
+        jobId: z.string().optional(),
+        rawPrompt: z.string().optional().describe("原始生成提示词（非反推描述）"),
+        createdAt: z.string().optional(),
+      }).optional().describe("生成来源与参数，落库后可追溯：模型/步数/种子/尺寸/原图/原始提示词"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {

@@ -588,7 +588,13 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const selectedNodeHasContent = !!selectedNodeData?.content || !!selectedNodeData?.storageKey;
   const selectedHasIncoming = !!state.selectedNodeId && !!state.editor
     && state.editor.store.getGraph().edges.some((e) => e.target.nodeId === state.selectedNodeId);
-  const nodeDockVisible = !selectedNodeIsMedia || !selectedNodeHasContent || isPromptRunning || selectedHasIncoming;
+  // 图片节点生成完成后仍保留提示词/参数面板：用户要能回看、排查、微调后重生成；
+  // 视频/音频/文本素材节点仍按原规则隐藏。
+  const nodeDockVisible = !selectedNodeIsMedia
+    || !selectedNodeHasContent
+    || isPromptRunning
+    || selectedHasIncoming
+    || selectedNodeType === 'image';
   const handlers = useCanvasHandlers(refs, containerRef);
 
   // ===== 只读浏览手势 — 已提取到 ReadOnlyCanvasOverlay =====
