@@ -1262,8 +1262,9 @@ function StateEditPanel({
         use_llm_enhance: genParams.useLlmEnhance,
         transparent_background: genParams.transparent,
         seed: genParams.seed,
-        // 有参考图时输出跟随参考图尺寸（Qwen latent 要求）
-        sizeMode: referenceKey ? 'source' : 'custom',
+        // 用户选的比例/尺寸必须生效；不能因为有参考图就退回 “source” 跟随参考图，
+        // 否则面板显示 16:9、出图却是参考图的 4:3。
+        sizeMode: 'custom',
       };
   /** 参数一次写全，刷新后保留（不做「只存改过的键」的隐式合并） */
   const commitGenParams = (patch: Partial<typeof genParams>): void => {

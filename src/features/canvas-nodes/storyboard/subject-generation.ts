@@ -340,8 +340,9 @@ async function runJob(key: string, input: RunInput): Promise<void> {
           use_llm_enhance: params.useLlmEnhance,
           transparent_background: params.transparent,
           seed: params.seed,
-          // 有参考图时输出必须与输入同尺寸（Qwen latent 要求），否则走用户选的尺寸
-          sizeMode: source ? 'source' : 'custom',
+          // 用户选的比例/尺寸必须生效；不能因为有参考图就退回 source 跟随输入尺寸，
+          // 否则面板显示 16:9、出图却是参考图的 4:3。
+          sizeMode: 'custom',
         },
         onPreview, onProgress, onJobSubmitted,
         resume: input.resume,
