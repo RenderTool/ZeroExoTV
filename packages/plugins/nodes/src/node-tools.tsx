@@ -322,8 +322,8 @@ function createDetailTool(): ToolDefinition {
 function createDownloadTool(): ToolDefinition {
   return {
     id: 'download',
-    label: '',
-    title: '',
+    label: '下载',
+    title: '下载',
     icon: <Download size={14} />,
     group: 'basic',
     visible: (node: NodeRecord) => hasMediaContent(node.data as Record<string, unknown> | null | undefined),

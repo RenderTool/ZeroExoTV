@@ -505,8 +505,8 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
       // id 复用 download → 胶囊 TOOL_TITLE_I18N_KEY.download 自动提供多语 tooltip,零 i18n 新增
       tools.push({
         id: 'download',
-        label: '',
-        title: '',
+        label: '下载',
+        title: '下载',
         icon: <NODE_ICONS.download size={14} />,
         visible: () => data.cards.length > 0,
         run: (n) => {
