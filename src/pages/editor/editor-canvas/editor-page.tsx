@@ -84,6 +84,7 @@ import { useUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useEditorState } from './use-editor-state.js';
 import { useAuth } from '@/features/auth/auth-store.js';
+import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { CreationSyncBadge } from '@/shared/components/creation/CreationSyncBadge.js';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
 import { WORKSPACE_SURFACE_STYLE } from '@/shared/components/LAYOUT_CONSTANTS.js';
@@ -694,12 +695,46 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       });
       message.success('已添加到画布');
     });
+    const unsubSendMedia = nodeActionBus.on('subject:sendMediaToCanvas', (event) => {
+      const store = refs.store;
+      const cq = refs.commandQueue;
+      if (!store || !cq) return;
+      const detail = event as { name?: string; storageKey?: string };
+      const storageKey = detail.storageKey;
+      if (!storageKey) return;
+      const vp = store.getViewport();
+      const el = containerRef.current;
+      const viewW = el?.clientWidth ?? 800;
+      const viewH = el?.clientHeight ?? 600;
+      const k = vp.k > 0 ? vp.k : 1;
+      const size = { width: 320, height: 320 };
+      const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      cq.execute(new AddNodeCommand({
+        id: nodeId,
+        type: 'image',
+        position: {
+          x: (viewW / 2 - vp.x) / k - size.width / 2,
+          y: (viewH / 2 - vp.y) / k - size.height / 2,
+        },
+        size,
+        title: detail.name || '主体图片',
+        data: {
+          content: getResourceUrl(storageKey, 'preview') ?? storageKey,
+          storageKey,
+          status: 'idle',
+        },
+      } as NodeRecord));
+      store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
+      store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
+      navigateToView('canvas', { nodeId });
+      message.success('已发送到画布');
+    });
     const unsubOpen = nodeActionBus.on('canvas:subject:open', (event) => {
       const detail = event as { rootId?: string; stateId?: string };
       if (!detail.rootId) return;
       navigateToView('subject', { rootId: detail.rootId, stateId: detail.stateId });
     });
-    return () => { unsubSendState(); unsubOpen(); };
+    return () => { unsubSendState(); unsubSendMedia(); unsubOpen(); };
   }, [refs.store, refs.commandQueue]);
 
   return (

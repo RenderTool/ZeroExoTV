@@ -818,7 +818,7 @@ function StateJobMediaOverlay({ jobKey }: { jobKey: string }): React.ReactElemen
 function StateGridCard({
   stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, editMode, editPanel,
   onClick, onToggleCover, onDelete, onToggleEdit,
-  onRename, onCanvasGenerate, jobKey, persistedJob,
+  onRename, onCanvasGenerate, onSendMediaToCanvas, jobKey, persistedJob,
   onReplaceMedia, onRemoveMedia, hasMedia,
   onSwapMedia,
 }: {
@@ -847,6 +847,8 @@ function StateGridCard({
   /** 就地换图：打开媒体来源面板 */
   /** 画布生成：只建节点并挂提示词，不发起 API */
   onCanvasGenerate?: () => void;
+  /** 把当前状态图片直接发送到画布（不是生成节点） */
+  onSendMediaToCanvas?: () => void;
   /** 该状态的生成任务 key（进度层订阅用） */
   jobKey?: string;
   /** 树里持久化的任务（重挂载后显示进度/失败） */
@@ -873,17 +875,7 @@ function StateGridCard({
   };
   const actionButtons = (
     <>
-      {onCanvasGenerate && (editMode ? (
-        <Button
-          size="small"
-          type="text"
-          icon={<Wand2 size={13} />}
-          data-state-action="canvas-generate"
-          onClick={(e) => { e.stopPropagation(); onCanvasGenerate(); }}
-        >
-          {t('subject.canvasGenerate', '画布生成')}
-        </Button>
-      ) : (
+      {onCanvasGenerate && (
         <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
           <IconButton
             theme={theme}
@@ -895,45 +887,34 @@ function StateGridCard({
             <Wand2 size={13} />
           </IconButton>
         </Tooltip>
-      ))}
-      {editMode ? (
-        <Button
-          size="small"
-          type="text"
-          icon={<Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />}
+      )}
+      {onSendMediaToCanvas && hasMedia && (
+        <Tooltip title={t('subject.sendMediaToCanvas', '发送图片到画布')}>
+          <IconButton
+            theme={theme}
+            size="sm"
+            aria-label={t('subject.sendMediaToCanvas', '发送图片到画布')}
+            data-state-action="send-media-canvas"
+            onClick={(e) => { e.stopPropagation(); onSendMediaToCanvas(); }}
+          >
+            <ImagePlus size={13} />
+          </IconButton>
+        </Tooltip>
+      )}
+      <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
+        <IconButton
+          theme={theme}
+          size="sm"
+          aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
           data-state-action="cover"
           data-cover-active={isCover ? '1' : undefined}
           style={isCover ? { color: theme.toolbar.accent } : undefined}
           onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
         >
-          {isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
-        </Button>
-      ) : (
-        <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
-          <IconButton
-            theme={theme}
-            size="sm"
-            aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
-            data-state-action="cover"
-            data-cover-active={isCover ? '1' : undefined}
-            style={isCover ? { color: theme.toolbar.accent } : undefined}
-            onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
-          >
-            <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
-          </IconButton>
-        </Tooltip>
-      )}
-      {onDelete && (editMode ? (
-        <Button
-          size="small"
-          type="text"
-          icon={<Trash2 size={13} />}
-          data-state-action="delete"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        >
-          {t('subject.deleteThisState', '删除此状态')}
-        </Button>
-      ) : (
+          <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
+        </IconButton>
+      </Tooltip>
+      {onDelete && (
         <Tooltip title={t('subject.deleteThisState', '删除此状态')}>
           <IconButton
             theme={theme}
@@ -945,7 +926,7 @@ function StateGridCard({
             <Trash2 size={13} />
           </IconButton>
         </Tooltip>
-      ))}
+      )}
     </>
   );
   return (
@@ -1101,28 +1082,30 @@ function StateGridCard({
                 style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}
               >
                 {onReplaceMedia && (
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<ImagePlus size={13} />}
-                    aria-label={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
-                    data-media-action="replace"
-                    onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
-                  >
-                    {hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
-                  </Button>
+                  <Tooltip title={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}>
+                    <IconButton
+                      theme={theme}
+                      size="sm"
+                      aria-label={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
+                      data-media-action="replace"
+                      onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
+                    >
+                      <ImagePlus size={13} />
+                    </IconButton>
+                  </Tooltip>
                 )}
                 {hasMedia && onRemoveMedia && (
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<ImageOff size={13} />}
-                    aria-label={t('subject.removeMedia', '移除素材')}
-                    data-media-action="remove"
-                    onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
-                  >
-                    {t('subject.removeMedia', '移除素材')}
-                  </Button>
+                  <Tooltip title={t('subject.removeMedia', '移除素材')}>
+                    <IconButton
+                      theme={theme}
+                      size="sm"
+                      aria-label={t('subject.removeMedia', '移除素材')}
+                      data-media-action="remove"
+                      onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
+                    >
+                      <ImageOff size={13} />
+                    </IconButton>
+                  </Tooltip>
                 )}
                 {actionButtons}
                 <Button
@@ -1364,7 +1347,8 @@ function StateEditPanel({
             </div>
           </div>
         )}
-        {/* 参考素材：与导演台 / 画布同一套插槽 UI（48px 加号 + 缩略图 + 兼容徽标），不再自造大按钮 */}
+        {/* 参考素材仅 Qwen 图生图支持；MOSS/Krea 是纯文生图，不显示空插槽 */}
+        {model === LOCAL_IMAGE_MODEL_KEY && (
         <div data-form-section="reference" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div data-subject-ref-add>
             <ReferenceSlotBar
@@ -1374,8 +1358,7 @@ function StateEditPanel({
                   id: referenceKey,
                   storageKey: referenceKey,
                   title: t('subject.referenceMaterial', '参考素材'),
-                  // 画布多一层模型支持判断：非 Qwen 的参考图不生效，直接红叉提示
-                  compatible: model === LOCAL_IMAGE_MODEL_KEY,
+                  compatible: true,
                 }]
                 : []}
               onAdd={onAddReference}
@@ -1389,16 +1372,13 @@ function StateEditPanel({
                 size="small"
                 data-subject-baseref
                 checked={genParams.useBaseRef}
-                disabled={model !== LOCAL_IMAGE_MODEL_KEY}
                 onChange={(checked) => commitGenParams({ useBaseRef: checked })}
               />
               <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>{t('subject.genUseBaseRef', '引用基础状态')}</span>
-              {model !== LOCAL_IMAGE_MODEL_KEY && (
-                <span data-subject-baseref-hint style={hintStyle}>{t('subject.genBaseRefQwenOnly', '仅 Qwen 支持参考图')}</span>
-              )}
             </div>
           )}
         </div>
+        )}
 
         {/* 媒体工具：小预览 + 右上角换图 / 删除媒体 + 历史图恢复 */}
         <div
@@ -2785,6 +2765,14 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         prompt: node.fullPrompt || node.deltaPrompt || '',
                         storageKey: first?.key,
                         referenceStorageKey: resolveSubjectGenParams(node).referenceKeys[0],
+                      });
+                    }}
+                    onSendMediaToCanvas={() => {
+                      if (!first?.key) return;
+                      nodeActionBus.emit('subject:sendMediaToCanvas', {
+                        nodeId: '',
+                        name: isBase ? openTree.name : (node.state?.trim() || openTree.name),
+                        storageKey: first.key,
                       });
                     }}
                   />
