@@ -43,6 +43,8 @@ export function toInsertPayload(asset: Asset): InsertAssetPayload {
       width: data.width,
       height: data.height,
       durationMs: data.durationMs,
+      prompt: (data as { generation?: { prompt?: string }; prompt?: string }).generation?.prompt ?? (data as { prompt?: string }).prompt,
+      generation: (data as { generation?: Record<string, unknown> }).generation,
     };
   }
   if (data.kind === 'audio') {
@@ -62,6 +64,8 @@ export function toInsertPayload(asset: Asset): InsertAssetPayload {
     title: asset.title,
     width: data.width,
     height: data.height,
+    prompt: (data as { generation?: { prompt?: string }; prompt?: string }).generation?.prompt ?? (data as { prompt?: string }).prompt,
+    generation: (data as { generation?: Record<string, unknown> }).generation,
   };
 }
 

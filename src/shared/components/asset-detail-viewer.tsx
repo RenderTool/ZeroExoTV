@@ -448,7 +448,7 @@ function AssetDetailViewerInner({
     { label: t('resourceViewer.dimensions'), value: dim && dim.width ? `${dim.width} × ${dim.height}` : undefined },
     { label: t('resourceViewer.duration'), value: formatDuration(data.durationMs) },
     { label: t('assetLibrary.createdAt'), value: asset.createdAt ? new Date(asset.createdAt).toLocaleString() : undefined },
-    { label: t('resourceViewer.prompt'), value: data.prompt },
+    { label: t('resourceViewer.prompt'), value: data.prompt ?? (data as { generation?: { prompt?: string } }).generation?.prompt },
   ].filter(r => !!r.value);
 
   const overlayOpacity = hovering ? 1 : 0;

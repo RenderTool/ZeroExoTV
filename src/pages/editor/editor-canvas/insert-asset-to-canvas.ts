@@ -15,7 +15,7 @@
  * `features/asset-picker/services/asset-node-size.ts` 与拖拽链共用，本文件只保留
  * 「视口中心级联摆放 + 建节点 + 统一导航」的发送链路职责。
  */
-import { AddNodeCommand } from '@zeroexo/core';
+import { AddEdgeCommand, AddNodeCommand } from '@zeroexo/core';
 import type { CommandQueue } from '@zeroexo/core';
 import type { NodeRecord } from '@zeroexo/core';
 import type { AssetNodePayloadArg } from '@/features/asset-picker/services/asset-node-size.js';
@@ -42,6 +42,8 @@ const CASCADE_OFFSETS: ReadonlyArray<Readonly<{ x: number; y: number }>> = [
 export interface CanvasInsertStore {
   getViewport(): { x: number; y: number; k: number };
   setSelection(sel: { selectedNodeIds: Set<string>; selectedEdgeIds: Set<string> }): unknown;
+  /** 可选：发送历史图时恢复图生图引用链 */
+  getGraph?(): { nodes: Array<{ id: string }> };
 }
 
 export interface InsertAssetToCanvasArgs {
@@ -76,6 +78,16 @@ export async function insertAssetToCanvas(args: InsertAssetToCanvasArgs): Promis
     const node = await createSizedAssetNode(payload, pos, containerSize);
     if (!node) return { ok: false, reason: 'create-failed' };
     commandQueue.execute(new AddNodeCommand(node));
+    // 历史图生图资产：源节点仍在画布上时恢复引用链，而不是只落一张孤立结果
+    const generation = (payload as { generation?: { sourceNodeId?: string } }).generation;
+    const sourceNodeId = generation?.sourceNodeId;
+    if (sourceNodeId && store.getGraph?.().nodes.some((n) => n.id === sourceNodeId)) {
+      commandQueue.execute(new AddEdgeCommand({
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-history`,
+        source: { nodeId: sourceNodeId, pinId: 'image' },
+        target: { nodeId: node.id, pinId: 'prompt' },
+      }));
+    }
     store.setSelection({ selectedNodeIds: new Set([node.id]), selectedEdgeIds: new Set() });
 
     // 统一导航入口：切回画布页签并触发聚焦（画布侧接收端执行 focusOnNode）。

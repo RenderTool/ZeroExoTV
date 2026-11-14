@@ -43,9 +43,9 @@ import { fitContainSize } from './utils/media-fit.js';
  */
 export type AssetNodePayload =
   | { kind: 'text'; content: string; title: string }
-  | { kind: 'image'; dataUrl: string; title: string; storageKey?: string; width?: number; height?: number }
-  | { kind: 'video'; url: string; title: string; storageKey?: string; width?: number; height?: number; durationMs?: number }
-  | { kind: 'audio'; url: string; title: string; storageKey?: string; durationMs?: number };
+  | { kind: 'image'; dataUrl: string; title: string; storageKey?: string; width?: number; height?: number; prompt?: string; generation?: Record<string, unknown> }
+  | { kind: 'video'; url: string; title: string; storageKey?: string; width?: number; height?: number; durationMs?: number; prompt?: string; generation?: Record<string, unknown> }
+  | { kind: 'audio'; url: string; title: string; storageKey?: string; durationMs?: number; prompt?: string; generation?: Record<string, unknown> };
 
 // ===== 节点默认尺寸(与 createXxxExtension 的 defaultSize 同源: node-contracts.ts 单一事实源) =====
 // 禁止在此处自行声明尺寸 —— 改契约只改 node-contracts.ts,所有入口自动跟随
@@ -110,13 +110,14 @@ export async function createAssetNode(
         size,
         title: payload.title,
         data: {
-          prompt: payload.title,
+          prompt: payload.prompt ?? payload.title,
           content: contentUrl,
           storageKey,
           status: 'success',
           naturalWidth,
           naturalHeight,
           title: payload.title,
+          ...(payload.generation ? { generation: payload.generation } : {}),
         },
       };
     }

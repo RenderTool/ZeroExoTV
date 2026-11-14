@@ -272,6 +272,8 @@ export function useMcpImageJobs(opts: {
             jobId: result.generationId,
             model: modelKey,
             prompt: req.prompt,
+            sourceNodeId: req.sourceNodeId,
+            sourceStorageKey: req.sourceStorageKey,
           }).catch(() => null);
           cq.execute(new UpdateNodeDataCommand(nodeId, {
             content: url,
@@ -283,6 +285,7 @@ export function useMcpImageJobs(opts: {
             generationId: result.generationId,
             model: modelKey,
             prompt: req.prompt,
+            ...(req.sourceNodeId ? { generation: { prompt: req.prompt, model: modelKey, sourceNodeId: req.sourceNodeId, sourceStorageKey: req.sourceStorageKey } } : {}),
             ...(landed?.storageKey ? { storageKey: landed.storageKey } : {}),
           } as Record<string, unknown>));
           const fitted = fitImageNodeSize(300, result.width, result.height);

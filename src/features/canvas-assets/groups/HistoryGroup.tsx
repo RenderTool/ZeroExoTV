@@ -21,7 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Select, Tooltip } from 'antd';
-import { CheckSquare, Clapperboard, Download, Film, Image as ImageIcon, ImagePlus, FolderInput, LibraryBig, LocateFixed, MoreHorizontal, Pencil, Share2, Square, Trash2, Waypoints } from 'lucide-react';
+import { CheckSquare, Clapperboard, Download, FileText, Film, Image as ImageIcon, ImagePlus, FolderInput, LibraryBig, LocateFixed, MoreHorizontal, Pencil, Share2, Square, Trash2, Waypoints } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { usePreviewImage, nodeActionBus } from '@zeroexo/plugin-nodes';
@@ -166,6 +166,10 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   // 缩略图三档契约（与 asset-card 同款）：未进入视口时不解析（懒加载）
   const hydrated = usePreviewImage(visible ? data.storageKey : undefined, visible ? (data.dataUrl || data.url || '') : '');
   const duration = fmtDuration(data.durationMs);
+  const promptText = (data as { generation?: { prompt?: string }; prompt?: string }).generation?.prompt
+    ?? (data as { prompt?: string }).prompt
+    ?? '';
+  const { modal: cardModal } = App.useApp();
 
   // 视频悬停播放/暂停（asset-card 同款模式）
   useEffect(() => {
@@ -306,6 +310,24 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
                   disabled: !hasGuide,
                   onClick: () => onSendGuide?.(),
                 }] : []),
+                { type: 'divider' as const },
+                {
+                  key: 'prompt',
+                  icon: <FileText size={13} />,
+                  label: t('assetLibrary.viewPrompt', { defaultValue: '查看提示词' }),
+                  disabled: !promptText,
+                  onClick: () => {
+                    cardModal.info({
+                      title: t('assetLibrary.viewPrompt', { defaultValue: '查看提示词' }),
+                      width: 640,
+                      content: (
+                        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 360, overflow: 'auto', fontSize: 12, lineHeight: 1.7 }}>
+                          {promptText}
+                        </pre>
+                      ),
+                    });
+                  },
+                },
                 { type: 'divider' as const },
                 {
                   key: 'project',

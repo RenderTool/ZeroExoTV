@@ -35,6 +35,9 @@ export interface AutoLandInput {
   provider?: string;
   model?: string;
   prompt?: string;
+  /** 图生图来源：原节点 id / 原图 key，发送回画布时可恢复引用链 */
+  sourceNodeId?: string;
+  sourceStorageKey?: string;
   frames?: number;
   /** 本机 H3 引导数据（与视频一起落资产记录，供「视频+引导」导出/发送导演台） */
   guide?: GuideMeta;
@@ -83,6 +86,8 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
       provider: input.provider,
       model: input.model,
       prompt: input.prompt,
+      sourceNodeId: input.sourceNodeId,
+      sourceStorageKey: input.sourceStorageKey,
       durationSec: input.durationMs != null ? Math.round((input.durationMs / 1000) * 100) / 100 : undefined,
       frames: input.frames,
       createdAt: new Date().toISOString(),
