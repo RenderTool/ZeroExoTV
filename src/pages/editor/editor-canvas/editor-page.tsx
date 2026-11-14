@@ -594,7 +594,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     || !selectedNodeHasContent
     || isPromptRunning
     || selectedHasIncoming
-    || selectedNodeType === 'image';
+    || state.selectedNodeType === 'image';
   const handlers = useCanvasHandlers(refs, containerRef);
 
   // ===== 只读浏览手势 — 已提取到 ReadOnlyCanvasOverlay =====
