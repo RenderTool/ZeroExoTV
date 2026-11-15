@@ -515,7 +515,6 @@ async function runDirector(taskId: string, base: string): Promise<void> {
 
   const runBatchId = batchId;
   if (!runBatchId) throw new McpError("IO_ERROR", "批次 id 缺失，任务无法继续");
-  const startedAt = Date.now();
   let failures = 0;
   for (;;) {
     const cur = await readTask(taskId, root);
@@ -636,11 +635,8 @@ async function runDirector(taskId: string, base: string): Promise<void> {
       await finishTask(taskId, "failed", status.error || "批次执行失败");
       return;
     }
-    if (Date.now() - startedAt > MAX_WAIT_MS) {
-      await cancelComfyJob(base, batchId);
-      await finishTask(taskId, "failed", "等待批次超时");
-      return;
-    }
+    // 导演台批次不设硬超时：长视频/云端排队可能跑几小时，
+    // 只由用户取消或 ComfyUI 明确失败来结束。
     await sleep(POLL_MS);
   }
 }
