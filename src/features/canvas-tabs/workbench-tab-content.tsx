@@ -1244,6 +1244,15 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   };
   const selectedShotIndex = selectedShot ? visibleShots.findIndex((s) => s.id === selectedShot.id) : 0;
 
+  // 切片段/切版本时视频源会变：重新起播，避免停在新版本第一帧不动（loop 由播放器负责）
+  const lastAutoPlayVideoRef = useRef<string>('');
+  useEffect(() => {
+    const key = selectedShot?.media?.storageKey;
+    if (!key || key === lastAutoPlayVideoRef.current) return;
+    lastAutoPlayVideoRef.current = key;
+    setPreviewAutoPlayKey((k) => k + 1);
+  }, [selectedShot?.media?.storageKey]);
+
   /**
    * 引导插槽的自动投影（2026-11-15）：
    * - 本段有手动引导（shot.guide）→ 用它（手动优先，永远第一）；

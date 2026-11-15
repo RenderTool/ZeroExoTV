@@ -149,7 +149,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   const [playing, setPlaying] = useState(false);
   const [curTime, setCurTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
 
   // ===== 播放同步（时间轴主时钟驱动 / 候选卡片点击驱动 / 游标 scrub 驱动） =====
   // offset 每帧都在变，只在播放启动/切片段/源就绪/漂移校正时读取 → 用 ref 避免进依赖数组
@@ -325,6 +325,8 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
           // 约定：不用原生播放器 —— 自研控制条（下方独立渲染，占位黑幕卡下也要可见）
           controls={false}
           preload="metadata"
+          muted={muted}
+          loop
           // Plan#83 A 修正：hideControls 模式下禁用点击播放 / 双击全屏
           onClick={hideControls ? undefined : togglePlay}
           onPlay={() => setPlaying(true)}
