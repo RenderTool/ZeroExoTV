@@ -179,13 +179,20 @@ export function resolveClipStatus(
     return 'idle';
   }
   // 重跑已完成片段：运行态必须压过 workbench 里的旧 done，否则卡片一直显示「完成」
-  if (run.phase === 'canceled') return 'cancelled';
+  if (run.phase === 'canceled') {
+    return status === 'done' ? 'done' : 'cancelled';
+  }
   if (run.previewSegmentIndex && idx === run.previewSegmentIndex - 1) return 'generating';
   if (run.phase === 'submitting' || run.phase === 'queued') return 'queued';
   if (run.phase === 'running') {
-    return run.currentSegment !== null && idx === run.currentSegment - 1 ? 'generating' : 'queued';
+    const cur = run.currentSegment;
+    if (cur === null) return 'queued';
+    // 已经跑过的段（在当前段之前）保持完成；当前段生成中；后面的段排队。
+    if (idx < cur - 1) return status === 'failed' ? 'failed' : 'done';
+    if (idx === cur - 1) return 'generating';
+    return 'queued';
   }
-  return 'generating';
+  return status === 'done' || status === 'failed' ? status : 'generating';
 }
 
 /** WorkbenchShot → 时间轴 clip（与 workbench-multitrack.tsx byTrack 的转换逐项对齐，同一映射不两套） */
