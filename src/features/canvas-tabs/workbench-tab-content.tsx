@@ -748,9 +748,12 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   useEffect(() => {
     const onSetCover = (e: Event) => {
       const detail = (e as CustomEvent<WorkbenchSetCoverDetail>).detail;
-      if (!detail || detail.projectId !== (projectId ?? '')) return;
-      // 从哪个片段的历史里设封面，就落到哪个片段；不能落成当前选中的另一段
-      const shot = (detail.shotId ? shotsRef.current.find((s) => s.id === detail.shotId) : undefined)
+      if (!detail) return;
+      // 优先按目标片段 id 命中（历史抽屉里明确点的是哪一段就落哪一段）；
+      // 只有没有 shotId 时才用 projectId 过滤，避免宿主/画布 id 口径差异导致事件被静默丢弃。
+      const byId = detail.shotId ? shotsRef.current.find((s) => s.id === detail.shotId) : undefined;
+      if (!byId && detail.projectId !== (projectId ?? '')) return;
+      const shot = byId
         ?? shotsRef.current.find((s) => s.id === activeShotId)
         ?? shotsRef.current[0];
       if (!shot) return;

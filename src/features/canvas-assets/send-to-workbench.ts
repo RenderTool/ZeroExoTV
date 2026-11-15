@@ -18,6 +18,7 @@ import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-res
 import { computeSegmentInsert, emitWorkbenchAddRef, emitWorkbenchSetCover, emitWorkbenchSetGuide } from '@/features/canvas-tabs/workbench-slot-bus.js';
 import { navigateToView } from '@/features/canvas-tabs/navigate-to-view.js';
 import { getWorkbenchSendContext } from './workbench-send.js';
+import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 
 interface MessageLike {
   success: (c: string) => void;
@@ -91,7 +92,9 @@ export async function sendVideoAsSegmentCover(
   opts?: { shotId?: string },
 ): Promise<void> {
   const snap = getWorkbenchSendContext();
-  if (!snap || (!snap.activeShotId && !opts?.shotId)) {
+  const shotId = opts?.shotId ?? snap?.activeShotId ?? undefined;
+  const projectId = snap?.projectId ?? getCurrentCanvasId() ?? undefined;
+  if (!shotId || !projectId) {
     message.warning(t('workbench.noActiveShot', '请先在导演台选中一个片段'));
     return;
   }
@@ -108,12 +111,12 @@ export async function sendVideoAsSegmentCover(
     storageKey: data.storageKey,
     ...(guide ? { guide: { id: guide.id, frames: guide.frames, sha256: guide.sha256 } } : {}),
     prompt: data.generation?.prompt ?? data.prompt ?? '',
-    projectId: snap.projectId,
-    shotId: opts?.shotId ?? snap.activeShotId ?? undefined,
+    projectId,
+    shotId,
   });
   if (delivered) {
     message.success(t('workbench.coverSet', '已设为当前片段封面（最新缓存版本）'));
-    navigateToView('director', { shotId: opts?.shotId ?? snap.activeShotId ?? undefined, projectId: snap.projectId });
+    navigateToView('director', { shotId, projectId });
   } else {
     message.warning(t('workbench.noActiveShot', '请先在导演台选中一个片段'));
   }

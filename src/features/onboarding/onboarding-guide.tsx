@@ -327,14 +327,14 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const cloudListFor = (slot: keyof typeof RECOMMENDED_MODELS): string[] => (
     slot === 'unet' ? availableModels.unet : slot === 'clip' ? availableModels.clip : availableModels.vae
   );
-  /** 云端是否真的有推荐的这个文件（未连接 = 未核对） */
+  /** 当前连接里是否真的有推荐的这个文件（未连接 = 未核对） */
   const recommendedState = (slot: keyof typeof RECOMMENDED_MODELS): 'available' | 'missing' | 'unknown' => {
     const list = cloudListFor(slot);
     if (list.length === 0) return 'unknown';
     return list.includes(RECOMMENDED_MODELS[slot]) ? 'available' : 'missing';
   };
   const modelOptionLabel = (slot: keyof typeof RECOMMENDED_MODELS, name: string): string => (
-    name === RECOMMENDED_MODELS[slot] ? `${name}（推荐·云端已有）` : name
+    name === RECOMMENDED_MODELS[slot] ? `${name}（推荐）` : name
   );
 
   return (
@@ -510,9 +510,9 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
                   <div style={{ paddingLeft: 84, fontSize: 10.5, lineHeight: 1.5, color: theme.toolbar.textMuted }}>
                     {t('onboarding.recommendPrefix', '推荐：')}{RECOMMENDED_MODELS[slot]}{' '}
                     {recState === 'available' ? (
-                      <span style={{ color: '#16a34a' }}>{t('onboarding.recAvailable', '云端已有')}</span>
+                      <span style={{ color: '#16a34a' }}>{t('onboarding.recAvailable', '当前连接已有')}</span>
                     ) : recState === 'missing' ? (
-                      <span style={{ color: '#d97706' }}>{t('onboarding.recMissing', '云端缺少，请换同槽位其它 h3 版本')}</span>
+                      <span style={{ color: '#d97706' }}>{t('onboarding.recMissing', '非云端推荐版本')}</span>
                     ) : (
                       <span>{t('onboarding.recUnknown', '连接后核对')}</span>
                     )}
@@ -521,7 +521,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               );
             })}
             <span style={hintStyle(theme)}>
-              {t('onboarding.modelPickHint', '每个槽位只选一个。推荐项会标出云端是否已有；缺少就换同槽位其它 h3 版本，或手动输入模型名。视频/音频 VAE 必须是 MiniMax H3 专用版本，第三方量化只要文件名带 h3 也可以。')}
+              {t('onboarding.modelPickHint', '每个槽位只选一个。推荐项会标出当前连接是否已有；没有就换同槽位其它 h3 版本，或手动输入模型名。视频/音频 VAE 必须是 MiniMax H3 专用版本，第三方量化只要文件名带 h3 也可以。')}
             </span>
             {(vaeListEmpty || currentVaeUnsupported) ? (
               <span data-onboarding-vae-warning style={{ fontSize: 11, lineHeight: 1.65, color: '#d97706' }}>
