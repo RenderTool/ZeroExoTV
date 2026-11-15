@@ -301,11 +301,8 @@ export async function savePreviewImage(
   const prefix = `${taskId}-s${segmentIndex}-p`;
   const name = `${prefix}${seq}.${ext}`;
   await fs.writeFile(path.join(dirAbs, name), parsed.buf);
-  // 只清本段的旧帧，保留其它段的预览
-  const old = await fs.readdir(dirAbs).catch(() => [] as string[]);
-  await Promise.all(old
-    .filter((f) => f.startsWith(prefix) && f !== name)
-    .map((f) => fs.rm(path.join(dirAbs, f), { force: true }).catch(() => undefined)));
+  // 保留本段已经发出的帧：前端收到 SSE 后还要异步 resolve 这个 key，
+  // 立刻删旧帧会造成「只显示第一帧」（后续帧还没 fetch 就被下一帧删了）。
   return { storageKey: `image:${dirRel}/${name}`, mime: parsed.mime };
 }
 
@@ -328,6 +325,7 @@ interface RawWs {
 export class ComfyPreviewSocket {
   private ws: RawWs | null = null;
   private closed = false;
+  private retry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly base: string,
@@ -336,6 +334,7 @@ export class ComfyPreviewSocket {
   ) {}
 
   connect(): void {
+    if (this.closed) return;
     const Ctor = (globalThis as unknown as { WebSocket?: new (url: string) => RawWs }).WebSocket;
     if (!Ctor) return; // 运行环境没有 WebSocket：预览不可用但不阻断生成
     try {
@@ -345,8 +344,18 @@ export class ComfyPreviewSocket {
       this.ws = ws;
       ws.binaryType = "arraybuffer";
       ws.onmessage = (ev) => this.handle(ev.data);
-      ws.onclose = () => { this.ws = null; };
-      ws.onerror = () => { /* onclose 兜底 */ };
+      ws.onclose = () => {
+        this.ws = null;
+        // 云端/长时间作业的 WS 会被网关掐断；只要任务还在跑就自动重连，
+        // 否则采样预览会在前几帧后永远停住。
+        if (!this.closed && !this.retry) {
+          this.retry = setTimeout(() => {
+            this.retry = null;
+            this.connect();
+          }, 1000);
+        }
+      };
+      ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
     } catch {
       this.ws = null;
     }
@@ -406,6 +415,8 @@ export class ComfyPreviewSocket {
 
   close(): void {
     this.closed = true;
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = null;
     try { this.ws?.close(); } catch { /* 已关闭 */ }
     this.ws = null;
   }

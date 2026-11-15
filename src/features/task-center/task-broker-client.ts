@@ -213,6 +213,9 @@ export function subscribeBrokerTasks(
     startPolling();
   }
   void poll();
+  // SSE 可能被云端网关静默挂起（连接不断、但不再推消息），只靠 onerror 回退会永远停在旧状态。
+  // 这里始终叠加低频轮询，SSE 正常时只是多几次幂等列表请求。
+  startPolling();
 
   return () => {
     closed = true;
