@@ -36,7 +36,6 @@ import { MultiSelectCheckbox } from '@/features/asset-library/components/multi-s
 import { CapsuleTabs } from '@/features/asset-library/components/capsule-tabs.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
 import { sendAssetToWorkbench, sendGuideToWorkbench, sendVideoAsSegmentCover } from '../send-to-workbench.js';
-import { WORKBENCH_SET_COVER_EVENT } from '@/features/canvas-tabs/workbench-slot-bus.js';
 import { MasonryGrid } from '@/shared/components/masonry-grid.js';
 import { CategoryChips, EmptyState, PaginationBar, SCROLL_AREA_STYLE, ToolbarRow } from '../components/common.js';
 import { ThumbBadge } from '@/shared/ui/index.js';
@@ -481,14 +480,6 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       versions?: Array<{ id: string; storageKey: string; createdAt?: string }>;
     };
   }>>([]);
-  const [workbenchEpoch, setWorkbenchEpoch] = useState(0);
-  // 历史抽屉自己缓存了一份 workbench 快照（用于分组/封面角标）；
-  // 设封面改的是 live workbench，必须重新读一次，否则角标/当前版本看起来「没变化」。
-  useEffect(() => {
-    const onCover = () => { window.setTimeout(() => setWorkbenchEpoch((n) => n + 1), 500); };
-    window.addEventListener(WORKBENCH_SET_COVER_EVENT, onCover);
-    return () => window.removeEventListener(WORKBENCH_SET_COVER_EVENT, onCover);
-  }, []);
   const [scriptEpisodes, setScriptEpisodes] = useState<Array<{ id: string; number: number; title?: string }>>([]);
 
   const setHistorySource = (source: HistorySource): void => {
@@ -527,7 +518,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       })));
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [forcedSource, projectId, workbenchEpoch]);
+  }, [forcedSource, projectId]);
 
   const shotById = useMemo(
     () => new Map(workbenchShots.map((s) => [s.id, s])),
@@ -713,7 +704,20 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
             ? () => { void sendGuideToWorkbench(asset, antdMessage, t); }
             : undefined}
           onSetCover={(asset.data as { kind?: string }).kind === 'video'
-            ? () => { void sendVideoAsSegmentCover(asset, antdMessage, t, { shotId: opts?.shotId }); }
+            ? () => {
+              // 先就地更新抽屉里的封面角标（一次点击就有反馈），再通知导演台切版本。
+              // 不要再异步重读 workbench：持久化还没落盘时重读会把刚点的封面盖回去。
+              const shotId = opts?.shotId;
+              const storageKey = (asset.data as { storageKey?: string }).storageKey;
+              if (shotId && storageKey) {
+                setWorkbenchShots((prev) => prev.map((s) => {
+                  if (s.id !== shotId || !s.cache) return s;
+                  const v = s.cache.versions?.find((x) => x.storageKey === storageKey);
+                  return v ? { ...s, cache: { ...s.cache, selectedVersionId: v.id } } : s;
+                }));
+              }
+              void sendVideoAsSegmentCover(asset, antdMessage, t, { shotId });
+            }
             : undefined}
           onSendCanvas={() => store.sendToCanvas({ type: 'asset', id: asset.id, data: asset })}
           onRename={() => {
