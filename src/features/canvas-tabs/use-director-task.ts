@@ -106,6 +106,8 @@ export function useDirectorTask(args: UseDirectorTaskArgs): DirectorRunState & {
   const previewKeyRef = useRef<string | null>(null);
   /** reset 后不再回灌这条任务（否则订阅立刻把它捡回来） */
   const dismissedRef = useRef<Set<string>>(new Set());
+  /** 失败提示只弹一次：轮询/SSE 会反复送同一个 failed 快照，不能每 2.5s 弹一次 */
+  const errorNotifiedRef = useRef<string | null>(null);
 
   const applyTask = useCallback((task: BrokerTask) => {
     if (dismissedRef.current.has(task.taskId)) return;
@@ -194,7 +196,8 @@ export function useDirectorTask(args: UseDirectorTaskArgs): DirectorRunState & {
       startedAt: Date.parse(task.createdAt) || Date.now(),
       livePreviewSupported: true,
     }));
-    if (task.state === 'failed' && task.error) {
+    if (task.state === 'failed' && task.error && errorNotifiedRef.current !== task.taskId) {
+      errorNotifiedRef.current = task.taskId;
       cbRef.current.onNotice('error', `生成失败：${task.error}`);
     }
   }, []);
@@ -227,6 +230,7 @@ export function useDirectorTask(args: UseDirectorTaskArgs): DirectorRunState & {
     }
     segmentStateRef.current = new Map();
     previewKeyRef.current = null;
+    errorNotifiedRef.current = null;
     setState({
       ...INITIAL_STATE,
       phase: 'submitting',
@@ -273,6 +277,7 @@ export function useDirectorTask(args: UseDirectorTaskArgs): DirectorRunState & {
     taskRef.current = null;
     segmentStateRef.current = new Map();
     previewKeyRef.current = null;
+    errorNotifiedRef.current = null;
     setState(INITIAL_STATE);
   }, []);
 
