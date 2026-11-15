@@ -41,11 +41,22 @@ export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
     `.${path.basename(p)}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`,
   );
   await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  try {
-    await fs.rename(tmp, p);
-  } catch (err) {
-    await fs.rm(tmp, { force: true }).catch(() => undefined);
-    throw new McpError("IO_ERROR", `原子写失败: ${p}: ${(err as Error).message}`);
+  // Windows：目标被读句柄/杀软/索引器短暂占用时 rename 会 EPERM/EBUSY；
+  // 任务进度是高频写，不能因为一次瞬时占用就把整段任务判失败。
+  const transient = new Set(["EPERM", "EBUSY", "EACCES"]);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rename(tmp, p);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? "";
+      if (attempt < 6 && transient.has(code)) {
+        await new Promise((r) => setTimeout(r, 20 * (attempt + 1)));
+        continue;
+      }
+      await fs.rm(tmp, { force: true }).catch(() => undefined);
+      throw new McpError("IO_ERROR", `原子写失败: ${p}: ${(err as Error).message}`);
+    }
   }
 }
 

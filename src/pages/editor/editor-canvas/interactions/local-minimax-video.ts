@@ -190,7 +190,6 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
           seed,
           frame_rate: 24,
           guide_frames: 22,
-          use_prev_guide: false,
           use_low_vram: useLowVram,
           ...(req.guideId ? { guide_id: req.guideId } : {}),
           reference_image: referenceImage,

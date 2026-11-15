@@ -32,7 +32,7 @@ import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { isAuthorized } from '@/platform/fs.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
-import { countHistoryByKind, countHistoryBySourceAndKind, libraryCasHashes } from './history-utils.js';
+import { countHistoryByKind, countHistoryBySourceAndKind, getHistorySource, libraryCasHashes } from './history-utils.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -220,6 +220,8 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     );
     // 2026-11-04 约定：单段内不混排两种作用域（与资产库弹窗同一严格口径）
     result = filterAssetsStrictScope(result, { scopeTab: materialScopeTab, projectId: canvasId });
+    // 导演台生成的视频只落「导演台」类目，不在「画布」里重复出现
+    if (materialScopeTab === 'project') result = result.filter((a) => getHistorySource(a) !== 'director');
     if (materialKind !== 'all') {
       result = result.filter((a) => a.kind === materialKind);
     }
@@ -240,7 +242,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     const scoped = filterAssetsStrictScope(base, {
       scopeTab: materialScopeTab as 'project' | 'library',
       projectId: canvasProjectId,
-    });
+    }).filter((a) => materialScopeTab !== 'project' || getHistorySource(a) !== 'director');
     const q = search.trim().toLowerCase();
     const list = q ? scoped.filter((a) => a.title.toLowerCase().includes(q)) : scoped;
     return {
@@ -258,8 +260,11 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     const base = (Array.isArray(assets) ? assets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
-    return countAssetsByScope(base, canvasProjectId);
-  }, [assets, canvasProjectId]);
+    const counts = countAssetsByScope(base, canvasProjectId);
+    // 画布类目不含导演台产物（它们只归「导演台」）
+    if (counts.project != null) counts.project = Math.max(0, counts.project - directorCount);
+    return counts;
+  }, [assets, canvasProjectId, directorCount]);
 
   // ===== 历史分组派生（2026-11-04 本地版重建：图片 / 视频，scope='project' 的本项目资产） =====
   const historyProjectId = canvasProjectId;

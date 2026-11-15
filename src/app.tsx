@@ -53,7 +53,6 @@ import { publishMcpRequiredManifest } from '@/platform/mcp-manifest.js';
 import { purgeOrphanMedia } from '@/entities/orphan-media.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
 import { useComfyuiAutoConnect } from '@/features/canvas-tabs/comfyui-auto-connect.js';
-import { TaskQueueDock } from '@/features/task-center/task-queue-dock.js';
 
 type Route =
   | { name: 'canvas'; canvasId?: string }
@@ -472,8 +471,7 @@ export function App(): React.ReactElement {
           }}
         />
 
-        {/* 右下角任务队列（画布 / 导演台 / 图片编辑器共用，可收起） */}
-        <TaskQueueDock />
+        {/* 任务队列已移入资产抽屉的独立「任务」分组（2026-11-15 用户指令） */}
       </AntdApp>
     </AntdThemeProvider>
   );

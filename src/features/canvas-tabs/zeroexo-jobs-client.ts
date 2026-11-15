@@ -22,7 +22,6 @@ export interface ZeroexoJobParams {
   seed: number;
   frame_rate: number;
   guide_frames: number;
-  use_prev_guide: boolean;
   /** ComfyUI input 目录下的文件名（第一张，兼容单参考） */
   reference_image: string;
   /** 多参考图（最多 9 张；分镜图/站位锁定图等） */
@@ -95,8 +94,8 @@ export interface ZeroexoJobStatus {
   params?: Partial<ZeroexoJobParams>;
   outputs?: Array<{ kind: string; path: string }>;
   guide?: { id?: string; path?: string; frames?: number; sha256?: string } | null;
-  /** 插件回传：本段引导来源（explicit=显式 guide_id / prev=上一段 / none=未使用） */
-  guideSource?: 'explicit' | 'prev' | 'none' | null;
+  /** 插件回传：本段引导来源（explicit=显式 guide_id / chain=批次内上一段 / none=未使用） */
+  guideSource?: 'explicit' | 'chain' | 'none' | null;
   error?: string | null;
 }
 

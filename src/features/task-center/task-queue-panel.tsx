@@ -1,18 +1,20 @@
 /**
- * TaskQueueDock — 右下角任务队列窗口（2026-11-10 用户要求）
+ * TaskQueuePanel — 抽屉内的任务队列（2026-11-15 用户指令）
  *
- * 画布、导演台、图片编辑器发起的生成/上传都登记在 task-queue-store，
- * 这里只负责展示排队情况：可收起、显示进度、清空已完成。挂在 app 根节点，跨页签常驻。
+ * 任务队列不再浮在画布右下角，而是作为抽屉的独立按钮/分组：点开看排队、进度，
+ * 运行中/排队中可手动取消；数据仍来自 MCP 任务表（刷新/换浏览器不丢）。
  */
 import { useMemo } from 'react';
 import { Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
-  CheckCircle2, ChevronDown, ChevronUp, Clapperboard, Image as ImageIcon, ListChecks,
-  Loader2, Music, Upload, Video, XCircle, Ban,
+  CheckCircle2, Clapperboard, Image as ImageIcon, ListChecks, Loader2, Music, Upload, Video, X, XCircle, Ban,
 } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } from './task-queue-store.js';
+import { cancelBrokerTask } from './task-broker-client.js';
+import { useTaskBrokerSync } from './use-task-broker.js';
+import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 
 const KIND_ICON: Record<TaskKind, React.ReactNode> = {
   image: <ImageIcon size={13} />,
@@ -39,77 +41,39 @@ function StatusIcon({ status }: { status: QueuedTask['status'] }): React.ReactEl
   return <Loader2 size={13} color="#2563eb" />;
 }
 
-export function TaskQueueDock(): React.ReactElement | null {
+export function TaskQueuePanel({ projectId }: { projectId?: string | null }): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
+  const pid = projectId ?? getCurrentCanvasId();
+  // 面板挂载即同步一次 MCP 任务表；打开抽屉就能看到刷新/其它浏览器发起的最新任务
+  useTaskBrokerSync(pid);
   const tasks = useTaskQueueStore((s) => s.tasks);
-  const collapsed = useTaskQueueStore((s) => s.collapsed);
-  const setCollapsed = useTaskQueueStore((s) => s.setCollapsed);
   const clearFinished = useTaskQueueStore((s) => s.clearFinished);
   const active = useMemo(() => countActiveTasks(tasks), [tasks]);
-  if (tasks.length === 0) return null;
-
   const isDark = theme.mode === 'dark';
-  const bg = isDark ? theme.toolbar.panel : '#ffffff';
-  const border = isDark ? theme.toolbar.border : '#e7e5e4';
   const muted = theme.toolbar.textMuted ?? '#78716c';
-
-  if (collapsed) {
-    return (
-      <button
-        type="button"
-        data-task-queue-toggle
-        onClick={() => setCollapsed(false)}
-        title={t('taskQueue.open', '展开任务队列')}
-        style={{
-          position: 'fixed', right: 16, bottom: 16, zIndex: 9000,
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          height: 32, padding: '0 12px', borderRadius: 16,
-          border: `1px solid ${border}`, background: bg, color: theme.toolbar.text,
-          boxShadow: '0 4px 14px rgba(0,0,0,0.14)', cursor: 'pointer', fontSize: 12,
-        }}
-      >
-        <ListChecks size={14} />
-        {t('taskQueue.pill', '任务')}
-        {active > 0 ? <span style={{ color: '#2563eb', fontWeight: 600 }}>{active}</span> : null}
-        <ChevronUp size={13} />
-      </button>
-    );
-  }
+  const border = isDark ? theme.toolbar.border : '#e7e5e4';
 
   return (
-    <div
-      data-task-queue-panel
-      style={{
-        position: 'fixed', right: 16, bottom: 16, zIndex: 9000,
-        width: 300, maxHeight: 340, display: 'flex', flexDirection: 'column',
-        borderRadius: 12, border: `1px solid ${border}`, background: bg,
-        boxShadow: '0 10px 30px rgba(0,0,0,0.18)', overflow: 'hidden',
-      }}
-    >
+    <div data-task-queue-panel style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-        borderBottom: `1px solid ${border}`, fontSize: 12, color: theme.toolbar.text,
+        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+        borderBottom: `1px solid ${border}`, fontSize: 12, color: theme.toolbar.text, flexShrink: 0,
       }}>
         <ListChecks size={14} />
         <span style={{ fontWeight: 600 }}>{t('taskQueue.title', '任务队列')}</span>
         <span style={{ color: muted }}>{active > 0 ? active : tasks.length}</span>
         <span style={{ flex: 1 }} />
-        <Button size="small" type="text" onClick={clearFinished} style={{ fontSize: 11, paddingInline: 4 }}>
+        <Button size="small" type="text" onClick={clearFinished} disabled={tasks.length === 0} style={{ fontSize: 11, paddingInline: 4 }}>
           {t('taskQueue.clear', '清空已完成')}
         </Button>
-        <button
-          type="button"
-          data-task-queue-toggle
-          title={t('taskQueue.collapse', '收起')}
-          onClick={() => setCollapsed(true)}
-          style={{ border: 'none', background: 'transparent', color: muted, cursor: 'pointer', display: 'inline-flex', padding: 2 }}
-        >
-          <ChevronDown size={14} />
-        </button>
       </div>
-      <div style={{ overflowY: 'auto', padding: '4px 0' }}>
-        {tasks.map((task) => {
+      <div style={{ overflowY: 'auto', padding: '4px 0', flex: 1, minHeight: 0 }}>
+        {tasks.length === 0 ? (
+          <div style={{ padding: '32px 14px', textAlign: 'center', color: muted, fontSize: 12 }}>
+            {t('taskQueue.empty', '暂无任务')}
+          </div>
+        ) : tasks.map((task) => {
           const pct = task.progress && task.progress.totalSteps > 0
             ? Math.min(100, Math.round((task.progress.step / task.progress.totalSteps) * 100))
             : null;
@@ -117,19 +81,30 @@ export function TaskQueueDock(): React.ReactElement | null {
             <div
               key={task.id}
               data-task-row={task.id}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 10px', fontSize: 12, color: theme.toolbar.text }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 14px', fontSize: 12, color: theme.toolbar.text, borderBottom: `1px solid ${border}` }}
             >
               <span style={{ display: 'inline-flex', marginTop: 2, color: muted }}>{KIND_ICON[task.kind] ?? <ListChecks size={13} />}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={task.title}>
-                  {task.title}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={task.title}>
+                    {task.title}
+                  </div>
+                  {task.cancelable ? (
+                    <button
+                      type="button"
+                      data-task-cancel={task.id}
+                      title={t('taskQueue.cancel', '取消任务')}
+                      onClick={() => { void cancelBrokerTask(task.id).catch(() => undefined); }}
+                      style={{ border: 'none', background: 'transparent', color: muted, cursor: 'pointer', display: 'inline-flex', padding: 0, flexShrink: 0 }}
+                    >
+                      <X size={12} />
+                    </button>
+                  ) : null}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, color: muted, fontSize: 11 }}>
                   <StatusIcon status={task.status} />
                   <span>{t(STATUS_TEXT[task.status][0], STATUS_TEXT[task.status][1])}</span>
-                  {task.status === 'running' && task.progress ? (
-                    <span>· {task.progress.step}/{task.progress.totalSteps}</span>
-                  ) : null}
+                  {task.status === 'running' && task.progress ? <span>· {task.progress.step}/{task.progress.totalSteps}</span> : null}
                   {task.phase ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {task.phase}</span> : null}
                   {task.status === 'error' && task.error ? (
                     <span style={{ color: '#dc2626', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {task.error}</span>

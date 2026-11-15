@@ -15,7 +15,7 @@ import type { Asset } from '@/features/asset-picker/index.js';
 import type { GuideMeta } from '@/features/asset-picker/index.js';
 import { getGuideMeta } from '@/features/asset-picker/guide.js';
 import { resolveGuideForAsset } from '@/features/asset-picker/services/guide-resolve.js';
-import { computeSegmentInsert, emitWorkbenchAddRef, emitWorkbenchSetGuide } from '@/features/canvas-tabs/workbench-slot-bus.js';
+import { computeSegmentInsert, emitWorkbenchAddRef, emitWorkbenchSetCover, emitWorkbenchSetGuide } from '@/features/canvas-tabs/workbench-slot-bus.js';
 import { navigateToView } from '@/features/canvas-tabs/navigate-to-view.js';
 import { getWorkbenchSendContext } from './workbench-send.js';
 
@@ -74,6 +74,46 @@ export async function sendGuideToWorkbench(
   if (delivered) {
     message.success(t('workbench.guideSent', '已发送引导'));
     navigateToView('director', { shotId: snap.activeShotId ?? undefined, projectId: snap.projectId });
+  } else {
+    message.warning(t('workbench.noActiveShot', '请先在导演台选中一个片段'));
+  }
+}
+
+/**
+ * 历史视频设为当前片段封面（2026-11-15）：
+ * 片段是一个版本集合，最新版本默认占用；这里把这条历史视频追加/选中为当前版本。
+ * 版本里带它自己的 guide，下一段的引导引用（链接开着时）会立即跟着更新。
+ */
+export async function sendVideoAsSegmentCover(
+  asset: Asset,
+  message: MessageLike,
+  t: TFunction,
+  opts?: { shotId?: string },
+): Promise<void> {
+  const snap = getWorkbenchSendContext();
+  if (!snap || (!snap.activeShotId && !opts?.shotId)) {
+    message.warning(t('workbench.noActiveShot', '请先在导演台选中一个片段'));
+    return;
+  }
+  const data = asset.data as { storageKey?: string; kind?: string; generation?: { prompt?: string }; prompt?: string };
+  if (data.kind !== 'video' || !data.storageKey) {
+    message.warning(t('workbench.coverVideoOnly', '只有视频可以设为片段封面'));
+    return;
+  }
+  let guide = guideOf(asset);
+  if (!guide) guide = (await resolveGuideForAsset(asset)) ?? undefined;
+  const delivered = emitWorkbenchSetCover({
+    assetId: asset.id,
+    title: asset.title,
+    storageKey: data.storageKey,
+    ...(guide ? { guide: { id: guide.id, frames: guide.frames, sha256: guide.sha256 } } : {}),
+    prompt: data.generation?.prompt ?? data.prompt ?? '',
+    projectId: snap.projectId,
+    shotId: opts?.shotId ?? snap.activeShotId ?? undefined,
+  });
+  if (delivered) {
+    message.success(t('workbench.coverSet', '已设为当前片段封面（最新缓存版本）'));
+    navigateToView('director', { shotId: opts?.shotId ?? snap.activeShotId ?? undefined, projectId: snap.projectId });
   } else {
     message.warning(t('workbench.noActiveShot', '请先在导演台选中一个片段'));
   }

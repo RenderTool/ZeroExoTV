@@ -639,10 +639,13 @@ export function skillsPipelineText(): string {
 
 ## 3 分镜与提示词
 - 读 zeroexo://skills/shots-prompts。
-- **延续法（硬性）**：段长必须吸附 17k+5 帧、每段可见帧 + 22 引导帧 ≤ 736；第 2 段起吃上一段尾帧。
+- **延续法（硬性）**：段长必须吸附 17k+5 帧、每段可见帧 + 22 引导帧 ≤ 736。
   先 plan_continuity_edit 出整张「段/帧/秒/是否接上一段」表给用户确认（confirm:true + userConfirmed:true），
-  再逐段串行 **request_director_run**（投递给网页执行，网页是唯一运行入口；不要用 run_generation 直接提交），每段成功由网页自动落库。
-  照搬原稿段长、跳段、或只写「承上/接上一段」字样都算没做延续法，run_generation 会直接拒绝。
+  再 **request_director_run 提交 MCP 任务**（MCP 按连续段 run 提交：每个 run 只发起始 guide，run 内由插件
+  prevJobId 内循环续接，不逐段发送 guide；进度/最后一帧/结果都落盘，网页只订阅）。
+  分批选择时每个 run 的起始段各自取上一段当前缓存（3 吃 2、6 吃 5）；起始段没有可用 guide 会直接拒绝。
+  用 get_generation_task 查进度，不要用 run_generation 直接提交。
+  照搬原稿段长、跳段、或只写「承上/接上一段」字样都算没做延续法，request_director_run 会直接拒绝。
 - 没有现成提示词时：\`scaffold_episode({ style, durationSec, sharedParams })\` 直接从剧本产出占位主体 + 占位片段 + 提示词，并返回 missingAssets；**不要自己手写提示词，也不要抄别的项目**。
 - 有素材后：\`apply_shot_prompts({ style })\` 按 references 真实槽位把 <Subject N> 重写成 @PictureN。
 - 质量门 <7 分重写，不许交付。
@@ -656,6 +659,6 @@ export function skillsPipelineText(): string {
 
 ## 5 出片
 - 出片前检查：槽位、缺图、超时长、total_frames 一致性，报给用户。
-- 真实生成由用户在前端点运行（或明确授权后走 ComfyUI 的 /zeroexo/v1/jobs）；导入后把 open_project 的 URL 给用户核对。
+- 真实生成一律经 MCP 任务：request_director_run（导演台）/ generate_canvas_images（画布图片）；MCP 执行并落库，网页只订阅。导入后把 open_project 的 URL 给用户核对。
 `;
 }

@@ -17,11 +17,11 @@
  * 视频卡片 hover 播放预览（沿用 asset-card 的悬停播放模式，不新造播放器）。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Select, Tooltip } from 'antd';
-import { CheckSquare, Clapperboard, Download, FileText, Film, Image as ImageIcon, ImagePlus, FolderInput, LibraryBig, LocateFixed, MoreHorizontal, Pencil, Share2, Square, Trash2, Waypoints } from 'lucide-react';
+import { CheckSquare, Clapperboard, Download, FileText, Film, Image as ImageIcon, ImagePlus, FolderInput, LibraryBig, LocateFixed, MoreHorizontal, Pencil, Share2, Square, Star, Trash2, Waypoints } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { usePreviewImage, nodeActionBus } from '@zeroexo/plugin-nodes';
@@ -35,10 +35,11 @@ import { readScript, displayEpisodeTitle } from '@/entities/script-store.js';
 import { MultiSelectCheckbox } from '@/features/asset-library/components/multi-select-checkbox.js';
 import { CapsuleTabs } from '@/features/asset-library/components/capsule-tabs.js';
 import type { CanvasAssetsPanelStore } from '../store.js';
-import { sendAssetToWorkbench, sendGuideToWorkbench } from '../send-to-workbench.js';
+import { sendAssetToWorkbench, sendGuideToWorkbench, sendVideoAsSegmentCover } from '../send-to-workbench.js';
 import { MasonryGrid } from '@/shared/components/masonry-grid.js';
 import { CategoryChips, EmptyState, PaginationBar, SCROLL_AREA_STYLE, ToolbarRow } from '../components/common.js';
 import { ThumbBadge } from '@/shared/ui/index.js';
+import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 import {
   HISTORY_PAGE_SIZE,
   countHistoryBySourceAndKind,
@@ -121,7 +122,7 @@ function ActionButton({ title, onClick, theme, disabled = false, children }: {
   );
 }
 
-function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onLocate, onPromote, onDownload, onSendVideo, onSendGuide, onSendCanvas, onRename, onDelete, onEdit, theme, t }: {
+function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onLocate, onPromote, onDownload, onSendVideo, onSendGuide, onSetCover, onSendCanvas, onRename, onDelete, onEdit, cover, versionLabel, theme, t }: {
   asset: Asset;
   visible: boolean;
   /** 多选模式：是否选中 */
@@ -136,6 +137,12 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   onSendVideo?: () => void;
   /** 发送引导到导演台当前片段（仅视频自带 guide 时可用） */
   onSendGuide?: () => void;
+  /** 历史视频设为当前片段封面（= 选中该片段的当前缓存版本） */
+  onSetCover?: () => void;
+  /** 该版本是否是所属片段的当前封面（默认最新版本） */
+  cover?: boolean;
+  /** 版本序号文案（如「第 2 版」），导演台分组视图用 */
+  versionLabel?: string;
   /** 发送到当前画布 */
   onSendCanvas?: () => void;
   /** 重命名（更多菜单） */
@@ -184,7 +191,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
 
   const sizeText = data.width && data.height ? `${data.width}×${data.height}` : '';
   const absTime = new Date(asset.createdAt).toLocaleString();
-  const metaText = [fmtRelativeTime(asset.createdAt), sizeText, duration].filter(Boolean).join(' · ');
+  const metaText = [fmtRelativeTime(asset.createdAt), versionLabel, sizeText, duration].filter(Boolean).join(' · ');
 
   return (
     <div
@@ -252,6 +259,14 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
           {isVideo ? <Film size={10} /> : <ImageIcon size={10} />}
           {isVideo ? t('assetLibrary.filterVideo', { defaultValue: '视频' }) : t('assetLibrary.filterImage', { defaultValue: '图片' })}
         </ThumbBadge>
+        {cover && (
+          <span data-cover-badge={asset.id} style={{ position: 'absolute', left: 6, bottom: 6, zIndex: 3 }}>
+            <ThumbBadge>
+              <Star size={10} />
+              {t('assetLibrary.segmentCover', { defaultValue: '当前封面' })}
+            </ThumbBadge>
+          </span>
+        )}
         {hasGuide && (
           /* 2026-11-11 用户要求：这里只是「含引导」标签，不要做成下载入口（下载在 hover 菜单里） */
           <span
@@ -282,6 +297,18 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
               <LocateFixed size={14} />
             </ActionButton>
           )}
+          {/* 直接可见的封面按钮：设为该片段当前版本，导演台显示与下一段 guide 引用一起切换 */}
+          {onSetCover && !cover && (
+            <span data-history-set-cover onClick={(e) => e.stopPropagation()}>
+              <ActionButton
+                title={t('assetLibrary.setSegmentCoverHint', { defaultValue: '设为该片段封面（替换导演台显示并更新下一段引导）' })}
+                onClick={onSetCover}
+                theme={theme}
+              >
+                <Star size={14} />
+              </ActionButton>
+            </span>
+          )}
           {/* 发送统一收纳：发送到画布 / 导演台（源视频、引导）/ 本项目 / 公共资产 */}
           <Dropdown
             open={sendMenuOpen}
@@ -303,6 +330,12 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
                   disabled: !onSendVideo,
                   onClick: () => onSendVideo?.(),
                 },
+                ...(onSetCover ? [{
+                  key: 'cover',
+                  icon: <Clapperboard size={13} />,
+                  label: t('assetLibrary.setSegmentCover', { defaultValue: '设为片段封面' }),
+                  onClick: () => onSetCover?.(),
+                }] : []),
                 ...(onSendGuide ? [{
                   key: 'guide',
                   icon: <Waypoints size={13} />,
@@ -442,6 +475,10 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
   const [directorShot, setDirectorShot] = useState<string>('all');
   const [workbenchShots, setWorkbenchShots] = useState<Array<{
     id: string; number: number; duration?: number; episodeId?: string;
+    cache?: {
+      selectedVersionId?: string;
+      versions?: Array<{ id: string; storageKey: string; createdAt?: string }>;
+    };
   }>>([]);
   const [scriptEpisodes, setScriptEpisodes] = useState<Array<{ id: string; number: number; title?: string }>>([]);
 
@@ -474,8 +511,10 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       setScriptEpisodes((script?.episodes ?? []).map((ep) => ({ id: ep.id, number: ep.number, title: ep.title })));
       setWorkbenchShots(((Array.isArray(wb?.shots) ? wb.shots : []) as Array<{
         id?: string; number?: number; duration?: number; episodeId?: string;
+        cache?: { selectedVersionId?: string; versions?: Array<{ id: string; storageKey: string; createdAt?: string }> };
       }>).filter((s) => s?.id).map((s, i) => ({
         id: String(s.id), number: Number(s.number ?? i + 1), duration: s.duration, episodeId: s.episodeId,
+        cache: s.cache,
       })));
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -485,15 +524,34 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
     () => new Map(workbenchShots.map((s) => [s.id, s])),
     [workbenchShots],
   );
+
+  /**
+   * 资产 → 所属片段。旧记录可能没有 originNodeId（早期 MCP 回写只写标题），
+   * 依次回退：标题里的 seg-xxx / 标题「片段 N」→ 导演台片段。保证老片段的版本也能正确归组。
+   */
+  const shotOfAsset = useCallback((asset: Asset) => {
+    const origin = (asset.data as { originNodeId?: string }).originNodeId;
+    if (origin) return shotById.get(origin);
+    const title = asset.title ?? '';
+    const segId = /(seg-[A-Za-z0-9-]+)/.exec(title)?.[1];
+    if (segId) {
+      const hit = shotById.get(segId);
+      if (hit) return hit;
+    }
+    const num = /片段\s*(\d+)/.exec(title)?.[1];
+    if (num) return [...shotById.values()].find((s) => s.number === Number(num));
+    return undefined;
+  }, [shotById]);
+
   const visibleItems = useMemo(() => {
     if (forcedSource !== 'director') return items;
     return items.filter((a) => {
-      const shotId = (a.data as { originNodeId?: string })?.originNodeId;
-      if (directorShot !== 'all' && shotId !== directorShot) return false;
-      if (directorEpisode !== 'all') return Boolean(shotId && shotById.get(shotId)?.episodeId === directorEpisode);
+      const shot = shotOfAsset(a);
+      if (directorShot !== 'all' && shot?.id !== directorShot) return false;
+      if (directorEpisode !== 'all') return Boolean(shot?.episodeId === directorEpisode);
       return true;
     });
-  }, [items, forcedSource, directorShot, directorEpisode, shotById]);
+  }, [items, forcedSource, directorShot, directorEpisode, shotOfAsset]);
 
   const directorEpisodeOptions = useMemo(() => {
     if (forcedSource !== 'director') return [];
@@ -514,8 +572,8 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
     if (forcedSource !== 'director') return [];
     const counts = new Map<string, number>();
     for (const a of items) {
-      const shotId = (a.data as { originNodeId?: string })?.originNodeId;
-      if (shotId) counts.set(shotId, (counts.get(shotId) ?? 0) + 1);
+      const shot = shotOfAsset(a);
+      if (shot) counts.set(shot.id, (counts.get(shot.id) ?? 0) + 1);
     }
     return [
       { value: 'all', label: t('assetLibrary.filterAllSegments', '全部片段') },
@@ -529,10 +587,37 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
           };
         }),
     ];
-  }, [forcedSource, items, workbenchShots, directorEpisode, t]);
+  }, [forcedSource, items, workbenchShots, directorEpisode, t, shotOfAsset]);
   const { page: curPage, slice } = useMemo(() => paginate(visibleItems, page), [visibleItems, page]);
   const selectedAssets = useMemo(() => visibleItems.filter((a) => selectedIds.has(a.id)), [visibleItems, selectedIds]);
   const allSelected = visibleItems.length > 0 && selectedAssets.length === visibleItems.length;
+
+  /** 导演台按片段分组：一个片段 = 一个集合，内部 N 个版本，默认最新版本是封面/当前启用。 */
+  const isDirectorView = forcedSource === 'director' || historySource === 'director';
+  const directorGroups = useMemo(() => {
+    if (!isDirectorView) return [];
+    const map = new Map<string, Array<(typeof visibleItems)[number]>>();
+    for (const asset of visibleItems) {
+      const shot = shotOfAsset(asset);
+      const key = shot?.id ?? `__legacy__${asset.id}`;
+      const list = map.get(key);
+      if (list) list.push(asset); else map.set(key, [asset]);
+    }
+    const groups = [...map.entries()].map(([shotId, assets]) => {
+      const shot = shotById.get(shotId) ?? shotOfAsset(assets[0]!);
+      const versions = [...assets].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+      const cache = shot?.cache;
+      const selected = cache?.versions?.find((v: { id: string; storageKey: string; createdAt?: string }) => v.id === cache.selectedVersionId);
+      const coverKey = selected?.storageKey;
+      const coverId = (coverKey
+        ? versions.find((a) => (a.data as { storageKey?: string }).storageKey === coverKey)?.id
+        : undefined) ?? versions[0]?.id;
+      return { shotId, shot, versions, coverId };
+    });
+    groups.sort((a, b) => (a.shot?.number ?? Number.MAX_SAFE_INTEGER) - (b.shot?.number ?? Number.MAX_SAFE_INTEGER));
+    return groups;
+  }, [isDirectorView, visibleItems, shotById, shotOfAsset]);
+  const activeDirectorGroup = directorGroups.find((g) => g.shotId === directorShot);
 
   const toggleSelect = (id: string): void => {
     setSelectedIds((prev) => {
@@ -596,6 +681,60 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
     : effectiveKind === 'image'
       ? t('assetLibrary.historyEmptyImage', { defaultValue: '还没有图片生成记录，在画布上调用 API 生成图片后自动收录' })
       : t('assetLibrary.historyEmptyVideo', { defaultValue: '还没有视频生成记录，在画布上调用 API 生成视频后自动收录' });
+
+  /** 单张历史卡（网格与导演台分组共用同一套操作/权限判定，不写两份） */
+  const renderCard = (asset: (typeof visibleItems)[number], opts?: { cover?: boolean; versionLabel?: string; shotId?: string }): React.ReactElement => (
+    <LazyVisible key={asset.id}>
+      {(visible) => (
+        <HistoryCard
+          asset={asset}
+          visible={visible}
+          selected={selectedIds.has(asset.id)}
+          selectMode={selectMode}
+          onToggleSelect={() => toggleSelect(asset.id)}
+          onLocate={historySource === 'canvas' ? () => handleLocate(asset) : undefined}
+          onPromote={(target) => handlePromote(asset, target)}
+          onDownload={(downloadOpts) => void store.handleDownloadItem({ type: 'asset', data: asset }, downloadOpts)}
+          onSendVideo={(() => {
+            const kind = (asset.data as { kind?: string }).kind;
+            const sendable = kind === 'image' || kind === 'video' || kind === 'audio';
+            return sendable ? () => sendAssetToWorkbench(asset, antdMessage, t) : undefined;
+          })()}
+          onSendGuide={(asset.data as { kind?: string }).kind === 'video'
+            ? () => { void sendGuideToWorkbench(asset, antdMessage, t); }
+            : undefined}
+          onSetCover={(asset.data as { kind?: string }).kind === 'video'
+            ? () => { void sendVideoAsSegmentCover(asset, antdMessage, t, { shotId: opts?.shotId }); }
+            : undefined}
+          onSendCanvas={() => store.sendToCanvas({ type: 'asset', id: asset.id, data: asset })}
+          onRename={() => {
+            store.setRenameItemTarget({ type: 'asset', id: asset.id, name: asset.title });
+            store.setRenameItemName(asset.title);
+            store.setRenameItemOpen(true);
+          }}
+          onDelete={() => void store.handleDeleteAsset(asset)}
+          onEdit={(asset.data as { kind?: string }).kind === 'image'
+            ? () => {
+              const d = asset.data as { storageKey?: string; dataUrl?: string; url?: string; width?: number; height?: number };
+              nodeActionBus.emit('imageEditAsset', {
+                nodeId: '',
+                assetId: asset.id,
+                title: asset.title,
+                storageKey: d.storageKey,
+                content: d.dataUrl || d.url,
+                naturalWidth: d.width,
+                naturalHeight: d.height,
+              });
+            }
+            : undefined}
+          cover={opts?.cover}
+          versionLabel={opts?.versionLabel}
+          theme={theme}
+          t={t}
+        />
+      )}
+    </LazyVisible>
+  );
 
   return (
     <>
@@ -731,63 +870,122 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       <div style={SCROLL_AREA_STYLE}>
         {visibleItems.length === 0 ? (
           <EmptyState text={emptyText} theme={theme} />
+        ) : isDirectorView ? (
+          /* 导演台：第一级=片段集合；点开片段进第二级看它的 N 个版本（面包屑返回「全部片段」） */
+          <div style={{ padding: '4px 20px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 12, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                data-director-crumb-all
+                onClick={() => { setDirectorShot('all'); setPage(1); }}
+                style={{
+                  border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+                  fontSize: activeDirectorGroup ? 11 : 15, fontWeight: activeDirectorGroup ? 500 : 600,
+                  color: activeDirectorGroup ? theme.toolbar.textMuted : theme.toolbar.text, fontFamily: 'inherit',
+                }}
+              >
+                {t('assetLibrary.allSegments', '全部片段')}
+              </button>
+              {activeDirectorGroup && (
+                <>
+                  <span style={{ color: theme.toolbar.textMuted }}>/</span>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: theme.toolbar.text }}>
+                    {t('director.segmentTitle', '镜头 {{num}}', { num: activeDirectorGroup.shot?.number ?? '?' })}
+                  </span>
+                  <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
+                    {t('assetLibrary.segmentVersionCount', '{{n}} 个版本', { n: activeDirectorGroup.versions.length })}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
+                    {t('assetLibrary.segmentCoverHint', '默认最新版本为封面，可手动启用旧版本')}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {!activeDirectorGroup ? (
+              <>
+                {/* 无法归属到片段的旧记录（比如早期没有 originNodeId、标题也对不上）：就地展开，不强行造片段 */}
+                {directorGroups.filter((g) => !g.shot).map((group) => (
+                  <div key={group.shotId} data-director-group={group.shotId} style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text, marginBottom: 6 }}>
+                      {t('assetLibrary.unlinkedSegments', '未关联片段')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
+                      {group.versions.map((asset, i) => (
+                        <div key={asset.id} style={{ width: 240, flexShrink: 0 }}>
+                          {renderCard(asset, {
+                            cover: asset.id === group.coverId,
+                            versionLabel: t('assetLibrary.versionLabel', '第 {{n}} 版', { n: group.versions.length - i }),
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
+                  {directorGroups.filter((g) => g.shot).map((group) => {
+                    const cover = group.versions.find((a) => a.id === group.coverId) ?? group.versions[0];
+                    const coverKey = (cover?.data as { storageKey?: string } | undefined)?.storageKey;
+                    return (
+                      <button
+                        key={group.shotId}
+                        type="button"
+                        data-director-segment={group.shotId}
+                        onClick={() => { setDirectorShot(group.shotId); setPage(1); }}
+                        style={{
+                          display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left',
+                          padding: 8, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+                          border: `1px solid ${theme.toolbar.border}`, background: 'transparent',
+                        }}
+                      >
+                        <ThumbImage
+                          storageKey={coverKey}
+                          kind="video"
+                          width="100%"
+                          height={118}
+                          radius={8}
+                          title={t('director.segmentTitle', '镜头 {{num}}', { num: group.shot?.number ?? '?' })}
+                          icon={<Film size={22} />}
+                        />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text }}>
+                          {t('director.segmentTitle', '镜头 {{num}}', { num: group.shot?.number ?? '?' })}
+                          {group.shot?.duration ? ` · ${group.shot.duration}s` : ''}
+                        </span>
+                        <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
+                          {t('assetLibrary.segmentVersionCount', '{{n}} 个版本', { n: group.versions.length })}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div data-director-group={activeDirectorGroup.shotId}>
+                <div style={{ fontSize: 11, color: theme.toolbar.textMuted, marginBottom: 6 }}>
+                  {t('assetLibrary.segmentCoverHint', '默认最新版本为封面，可手动启用旧版本')}
+                </div>
+                {/* 抽屉里按瀑布流铺版本，不再横向挤压/横向滚动 */}
+                <MasonryGrid paddingX={0} paddingBottom={0}>
+                  {activeDirectorGroup.versions.map((asset, i) => renderCard(asset, {
+                    cover: asset.id === activeDirectorGroup.coverId,
+                    versionLabel: t('assetLibrary.versionLabel', '第 {{n}} 版', { n: activeDirectorGroup.versions.length - i }),
+                    shotId: activeDirectorGroup.shot?.id,
+                  }))}
+                </MasonryGrid>
+              </div>
+            )}
+          </div>
         ) : (
           <MasonryGrid paddingX={20} paddingBottom={16}>
-            {slice.map((asset) => (
-              <LazyVisible key={asset.id}>
-                {(visible) => (
-                  <HistoryCard
-                    asset={asset}
-                    visible={visible}
-                    selected={selectedIds.has(asset.id)}
-                    selectMode={selectMode}
-                    onToggleSelect={() => toggleSelect(asset.id)}
-                    onLocate={historySource === 'canvas' ? () => handleLocate(asset) : undefined}
-                    onPromote={(target) => handlePromote(asset, target)}
-                    onDownload={(opts) => void store.handleDownloadItem({ type: 'asset', data: asset }, opts)}
-                    onSendVideo={(() => {
-                      // 2026-11-11 用户反馈：画布生成的图片也应该能发到导演台（图片槽），
-                      // 之前只给 video 开放，菜单项对图片是灰的。图片/音频/视频都走同一执行器。
-                      const kind = (asset.data as { kind?: string }).kind;
-                      const sendable = kind === 'image' || kind === 'video' || kind === 'audio';
-                      return sendable ? () => sendAssetToWorkbench(asset, antdMessage, t) : undefined;
-                    })()}
-                    onSendGuide={(asset.data as { kind?: string }).kind === 'video'
-                      ? () => { void sendGuideToWorkbench(asset, antdMessage, t); }
-                      : undefined}
-                    onSendCanvas={() => store.sendToCanvas({ type: 'asset', id: asset.id, data: asset })}
-                    onRename={() => {
-                      store.setRenameItemTarget({ type: 'asset', id: asset.id, name: asset.title });
-                      store.setRenameItemName(asset.title);
-                      store.setRenameItemOpen(true);
-                    }}
-                    onDelete={() => void store.handleDeleteAsset(asset)}
-                    onEdit={(asset.data as { kind?: string }).kind === 'image'
-                      ? () => {
-                        // 历史图片「编辑」：与素材抽屉同一入口（宿主建节点 + 开图片编辑页签）
-                        const d = asset.data as { storageKey?: string; dataUrl?: string; url?: string; width?: number; height?: number };
-                        nodeActionBus.emit('imageEditAsset', {
-                          nodeId: '',
-                          assetId: asset.id,
-                          title: asset.title,
-                          storageKey: d.storageKey,
-                          content: d.dataUrl || d.url,
-                          naturalWidth: d.width,
-                          naturalHeight: d.height,
-                        });
-                      }
-                      : undefined}
-                    theme={theme}
-                    t={t}
-                  />
-                )}
-              </LazyVisible>
-            ))}
+            {slice.map((asset) => renderCard(asset))}
           </MasonryGrid>
         )}
       </div>
 
-      <PaginationBar page={curPage} total={visibleItems.length} pageSize={HISTORY_PAGE_SIZE} onChange={setPage} />
+      {!isDirectorView && (
+        <PaginationBar page={curPage} total={visibleItems.length} pageSize={HISTORY_PAGE_SIZE} onChange={setPage} />
+      )}
     </>
   );
 }

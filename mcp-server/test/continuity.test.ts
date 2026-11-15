@@ -76,6 +76,7 @@ describe("hasContinuityPlan", () => {
 describe("MCP 闸门（源码契约）", () => {
   const ops = read("../src/tools/director-ops.ts");
   const tool = read("../src/tools/continuity.ts");
+  const executor = read("../src/broker/executor.ts");
 
   it("plan_continuity_edit：真实写入必须 userConfirmed，且写入计划标记与 continuityEnabled", () => {
     expect(tool).toContain('name: "plan_continuity_edit"');
@@ -84,11 +85,25 @@ describe("MCP 闸门（源码契约）", () => {
     expect(tool).toContain("continuityEnabled: true");
   });
 
-  it("run_generation：未计划 / 跳段 / 从中间开始 三类硬拒绝 + 串行等待", () => {
+  it("request_director_run：只强制延续法计划；起始 guide 缺失不拒绝（分段选择合法）", () => {
     expect(ops).toContain("CONTINUITY_NOT_PLANNED");
-    expect(ops).toContain("CONTINUITY_ORDER");
-    expect(ops).toContain("waitForJobTerminal");
-    expect(ops).toMatch(/if \(continuityOn\) \{\s*\n\s*const ordered/);
+    expect(ops).toContain('name: "request_director_run"');
+    // 旧直连入口保持停用：执行权只在 MCP Task Broker
+    expect(ops).toContain("run_generation 已停用");
+    // 不再有「跳段/从中间开始」硬拒绝：分段选择由连续 run/批次承接
+    expect(ops).not.toContain("CONTINUITY_ORDER");
+  });
+
+  it("Broker 执行器：一个任务提交一个批次，只发起始 guide，run 内由插件自链", () => {
+    expect(executor).toContain("contiguousRuns");
+    expect(executor).toContain("submitComfyBatch");
+    expect(executor).toContain('mode: "chain"');
+    // 只解析每个 run 起始段的 guide；批次内不再逐段解析
+    expect(executor).toMatch(/resolveGuide\(all, headIdx\)/);
+    // 旧 LAST_GUIDE / use_prev_guide / prevJobId 兜底全部不得出现
+    expect(executor).not.toContain("use_prev_guide");
+    expect(executor).not.toContain("prevJobId");
+    expect(executor).not.toMatch(/LAST_GUIDE\s*(\[|\.get|\.set)/);
   });
 
   it("说明文档写明「禁止照搬原稿段长/跳段/只做一半」", () => {

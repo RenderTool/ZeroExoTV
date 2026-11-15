@@ -21,6 +21,35 @@ import { readJsonIfExists, updateVersionedJson, type UpdateResult } from "./fs-n
 import { DIRECTOR_PRESET_IDS, DIRECTOR_SHARED_DEFAULTS, type DirectorPresetId } from "./director-params.js";
 import type { SegmentDraft } from "./script.js";
 
+/** 引导文件元数据（插件产物 gd_xxx.safetensors） */
+export interface WorkbenchGuideFile {
+  id: string;
+  path?: string;
+  frames?: number;
+  sha256?: string;
+  /** 本地缓存键 `guide:<id>.safetensors`（云端产物跨重启追溯用） */
+  localKey?: string;
+}
+
+/** 片段缓存版本（与前端 workbench-types.ts 的 WorkbenchShotVersion 同形） */
+export interface WorkbenchShotVersion {
+  id: string;
+  storageKey: string;
+  /** 最后一帧/首帧预览（broker 落盘图片键） */
+  previewKey?: string;
+  guide?: WorkbenchGuideFile | null;
+  prompt?: string;
+  params?: Record<string, unknown>;
+  sourceVersionId?: string;
+  createdAt: string;
+  status: "done" | "failed" | "archived";
+}
+
+export interface WorkbenchShotCache {
+  selectedVersionId: string;
+  versions: WorkbenchShotVersion[];
+}
+
 export interface WorkbenchShot {
   id: string;
   number: number;
@@ -38,7 +67,11 @@ export interface WorkbenchShot {
   continuation?: { enabled: boolean };
   /** 2026-11-09：与前端 workbench-types.ts 对齐，MCP 侧新增可读写字段（旧数据缺省兼容） */
   guide?: { id: string; title?: string; frames?: number; sha256?: string; fromAssetId?: string; createdAt?: string } | null;
-  media?: { storageKey?: string; guide?: { id?: string; path?: string; frames?: number; sha256?: string; localKey?: string } | null; [k: string]: unknown } | null;
+  media?: { storageKey?: string; guide?: WorkbenchGuideFile | null; [k: string]: unknown } | null;
+  /** 片段缓存（2026-11-15）：版本历史 + 当前选中版本；media 是它的投影 */
+  cache?: WorkbenchShotCache;
+  /** 缩略图（生成完成时的最后一帧/首帧） */
+  firstFrameKey?: string;
   negativePrompt?: string;
 }
 

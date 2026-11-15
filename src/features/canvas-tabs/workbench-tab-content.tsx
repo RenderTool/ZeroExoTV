@@ -32,7 +32,6 @@ import { History, Link2, Link2Off, Palette, Star, Trash2, Play, Square } from 'l
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { useCanvasTabStore } from './canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
-import { useMcpDirectorJobs } from '@/features/mcp-director-jobs/use-mcp-director-jobs.js';
 import {
   UNASSIGNED_EPISODE_KEY, groupShotsByEpisode, orderEpisodeKeys,
 } from '@/features/canvas-nodes/storyboard/workbench-episodes.js';
@@ -67,7 +66,6 @@ import {
   type DirectorAssetRef,
   type RunShotLike,
 } from '@/entities/director-params.js';
-import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { StoryboardMergedTab } from '@/features/canvas-nodes/storyboard/storyboard-merged-tab.js';
 /* 2026-11-04 批量复用 dry-run 预检：DirectorBatchPanel（独立简化勾选页）已删除——
    勾选在轨道行、确认/运行收敛到 dry-run 预检，不留两套并行 UI */
@@ -82,12 +80,13 @@ import type {
   WorkbenchShotReference,
   WorkbenchTrack,
 } from '@/features/canvas-nodes/storyboard/workbench-types.js';
-import { WORKBENCH_ADD_REF_EVENT, WORKBENCH_SET_GUIDE_EVENT, type WorkbenchAddRefDetail, type WorkbenchSetGuideDetail } from './workbench-slot-bus.js';
+import { WORKBENCH_ADD_REF_EVENT, WORKBENCH_SET_COVER_EVENT, WORKBENCH_SET_GUIDE_EVENT, type WorkbenchAddRefDetail, type WorkbenchSetCoverDetail, type WorkbenchSetGuideDetail } from './workbench-slot-bus.js';
 import { syncWorkbenchSendContext } from '@/features/canvas-assets/workbench-send.js';
 import { DirectorPromptPanel } from './director-prompt-panel.jsx';
 import { DirectorParamsButton, DirectorRunButton } from './director-run-params-row.js';
-import { useDirectorRun } from './use-director-run.js';
-import { getRunConfigFromEndpoint, useComfyuiEndpointStore } from './comfyui-endpoint.js';
+import { useDirectorTask } from './use-director-task.js';
+import { mergeShotVersion, selectShotVersion, selectedShotVersion, shotVersions } from './shot-cache.js';
+import { useComfyuiEndpointStore } from './comfyui-endpoint.js';
 import { normalizeBaseUrl } from './comfyui-bridge-client.js';
 import { reconcileStaleGenerating } from './workbench-stale-generating.js';
 import { NAVIGATE_FOCUS_SHOT_EVENT, takePendingNavigateFocus, type NavigateFocusPayload } from './navigate-to-view.js';
@@ -137,6 +136,27 @@ function createSegment(number: number, episodeId?: string): WorkbenchShot {
   };
 }
 
+/** 单轨镜像（渲染与落盘共用同一份映射，避免两套时间轴） */
+function buildMainTrack(shots: WorkbenchShot[]): WorkbenchTrack {
+  let start = 0;
+  return {
+    id: 'track-main',
+    name: '主轨',
+    sourceChain: { origin: 'workbench-container' },
+    status: 'active',
+    order: 0,
+    clips: shots.map((s) => {
+      const durationMs = Math.round(s.duration * 1000);
+      const clip = {
+        ref: { sourceShotId: s.id, kind: 'shot' as const },
+        timeline: { startMs: start, durationMs },
+      };
+      start += durationMs;
+      return clip;
+    }),
+  };
+}
+
 /**
  * WorkbenchShot.status → 卡片六态徽标（2026-11-05 220px 卡片规格）：
  * 排队/已取消由运行态派生——排队 = 提交中/在队/运行中未轮到本段；已取消 = 运行取消且本段未完成。
@@ -147,13 +167,19 @@ export function resolveClipStatus(
   run: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null } | undefined,
   shotId: string,
 ): NonNullable<TimelineClipData['status']> {
-  if (status === 'pending') return 'idle';
-  if (status === 'done' || status === 'failed') return status;
-  if (!run) return 'generating';
+  if (!run) {
+    if (status === 'pending') return 'idle';
+    if (status === 'done' || status === 'failed') return status;
+    return 'generating';
+  }
   const idx = run.segmentShotIds.indexOf(shotId);
-  if (idx < 0) return 'idle';
+  if (idx < 0) {
+    // 不在本次运行序列：旧 done/failed 保留；残留的 pending/generating 视为未运行
+    if (status === 'done' || status === 'failed') return status;
+    return 'idle';
+  }
+  // 重跑已完成片段：运行态必须压过 workbench 里的旧 done，否则卡片一直显示「完成」
   if (run.phase === 'canceled') return 'cancelled';
-  // 插件已开始推实时帧，但作业状态可能还停在 queued：以帧的段号为准
   if (run.previewSegmentIndex && idx === run.previewSegmentIndex - 1) return 'generating';
   if (run.phase === 'submitting' || run.phase === 'queued') return 'queued';
   if (run.phase === 'running') {
@@ -545,29 +571,26 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (!pid || !dirtyRef.current) return;
     dirtyRef.current = false;
     const current = shotsRef.current;
-    let start = 0;
-    const track: WorkbenchTrack = {
-      id: 'track-main',
-      name: '主轨',
-      sourceChain: { origin: 'workbench-container' },
-      status: 'active',
-      order: 0,
-      clips: current.map((s) => {
-        const durationMs = Math.round(s.duration * 1000);
-        const clip = {
-          ref: { sourceShotId: s.id, kind: 'shot' as const },
-          timeline: { startMs: start, durationMs },
-        };
-        start += durationMs;
-        return clip;
-      }),
-    };
     updateWorkbenchContainer(pid, {
       shots: current,
-      tracks: [track],
+      tracks: [buildMainTrack(current)],
       totalDuration: current.reduce((sum, s) => sum + s.duration, 0),
       sharedParams: sharedParamsRef.current,
     }).catch((err: unknown) => console.error('[WorkbenchTabContent] write container failed:', err));
+  }, [projectId]);
+
+  /** 提交生成任务前立即落盘：MCP 执行时读容器文件，不读网页内存 */
+  const persistNow = useCallback(async (): Promise<void> => {
+    const pid = projectId;
+    if (!pid) return;
+    dirtyRef.current = false;
+    const current = shotsRef.current;
+    await updateWorkbenchContainer(pid, {
+      shots: current,
+      tracks: [buildMainTrack(current)],
+      totalDuration: current.reduce((sum, s) => sum + s.duration, 0),
+      sharedParams: sharedParamsRef.current,
+    });
   }, [projectId]);
 
   const markDirty = useCallback(() => {
@@ -708,11 +731,48 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       const references = detail.guide.fromAssetId
         ? (shot.references ?? []).filter((r) => r.id !== detail.guide.fromAssetId)
         : shot.references;
-      updateShot(shot.id, { guide: { ...detail.guide }, ...(references ? { references } : {}) });
+      updateShot(shot.id, {
+        guide: { ...detail.guide },
+        // 引导插槽 = 开关：放入引导数据强制打开（之后可点图标关闭；关闭会一并清掉手动引导）
+        continuation: { enabled: true },
+        ...(references ? { references } : {}),
+      });
       message.success(t('workbench.guideSent', '已送入当前片段引导槽（重复发送会替换）'));
     };
     window.addEventListener(WORKBENCH_SET_GUIDE_EVENT, onSetGuide);
     return () => window.removeEventListener(WORKBENCH_SET_GUIDE_EVENT, onSetGuide);
+  }, [projectId, activeShotId, updateShot, message, t]);
+
+  // ===== 历史视频设为片段封面（2026-11-15）：片段是版本集合，选中该版本即「封面」 =====
+  // 版本里带的 guide 会成为下一段引导引用的来源（链接开着时自动投影）。
+  useEffect(() => {
+    const onSetCover = (e: Event) => {
+      const detail = (e as CustomEvent<WorkbenchSetCoverDetail>).detail;
+      if (!detail || detail.projectId !== (projectId ?? '')) return;
+      // 从哪个片段的历史里设封面，就落到哪个片段；不能落成当前选中的另一段
+      const shot = (detail.shotId ? shotsRef.current.find((s) => s.id === detail.shotId) : undefined)
+        ?? shotsRef.current.find((s) => s.id === activeShotId)
+        ?? shotsRef.current[0];
+      if (!shot) return;
+      const existing = shotVersions(shot).find((v) => v.storageKey === detail.storageKey);
+      if (existing) {
+        const patch = selectShotVersion(shot, existing.id);
+        if (patch) updateShot(shot.id, patch);
+      } else {
+        const version = {
+          id: `ver-cover-${detail.assetId}-${Date.now().toString(36)}`,
+          storageKey: detail.storageKey,
+          guide: detail.guide ?? null,
+          prompt: detail.prompt ?? shot.imagePrompt ?? '',
+          createdAt: new Date().toISOString(),
+          status: 'done' as const,
+        };
+        updateShot(shot.id, mergeShotVersion(shot, version));
+      }
+      message.success(t('workbench.coverSet', '已设为当前片段封面（最新缓存版本）'));
+    };
+    window.addEventListener(WORKBENCH_SET_COVER_EVENT, onSetCover);
+    return () => window.removeEventListener(WORKBENCH_SET_COVER_EVENT, onSetCover);
   }, [projectId, activeShotId, updateShot, message, t]);
 
   const toggleRunSelection = useCallback((shotId: string) => {
@@ -760,8 +820,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
      勾选来源 = 轨道行（批量模式下点片段/勾选块 → toggleRunSelection），
      最终确认与运行收敛到同一个 dry-run 预检页（与「运行选中」同一组件、同一渲染）。 */
 
-  /** 段间衔接：草稿态生效值（链接模式内读草稿；模式外读持久值） */
+  /** 段间衔接：草稿态生效值（链接模式内读草稿；模式外读持久值）。手动引导 = 强制打开。 */
   const continuityOn = useCallback((shot: WorkbenchShot, idx: number): boolean => {
+    if (shot.guide?.id) return true;
     if (idx === 0) return false;
     if (continuityDraft) return continuityDraft[shot.id] ?? segmentContinuityEnabled(toRunShot(shot), idx);
     return segmentContinuityEnabled(toRunShot(shot), idx);
@@ -792,10 +853,19 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     }
     const idx = shotsRef.current.findIndex((s) => s.id === shotId);
     const shot = idx >= 0 ? shotsRef.current[idx] : undefined;
-    if (idx <= 0 || !shot) return;
-    const next = !segmentContinuityEnabled(toRunShot(shot), idx);
-    updateShot(shot.id, { continuation: { enabled: next } });
-  }, [continuityDraft, toggleShotContinuity, updateShot]);
+    if (idx < 0 || !shot) return;
+    const cur = Boolean(shot.guide?.id) || (idx > 0 && segmentContinuityEnabled(toRunShot(shot), idx));
+    if (cur) {
+      // 关闭 = 不用引导：手动引导一并清掉，自动投影随之消失
+      updateShot(shot.id, { guide: undefined, continuation: { enabled: false } });
+      return;
+    }
+    if (idx === 0) {
+      message.info(t('director.firstSegmentNoPrev', '首段没有上一段可跟随：请把历史引导数据放进插槽'));
+      return;
+    }
+    updateShot(shot.id, { continuation: { enabled: true } });
+  }, [continuityDraft, toggleShotContinuity, updateShot, message, t]);
 
   /** 进入链接模式：快照草稿（段 2..N 的前侧交界当前持久值） */
   const enterContinuityMode = useCallback(() => {
@@ -873,17 +943,13 @@ export function WorkbenchTabContent(): React.ReactElement | null {
 
 
 
-  /** ===== ComfyUI 真实运行（2026-11-05 极简化单地址）=====
-   * 连接配置来自右上角「ComfyUI」弹层（comfyui-connect-button，单地址 + 自动判定后端）；
-   * 运行配置推导统一在 comfyui-endpoint.getRunConfigFromEndpoint：
-   * 直连（/zeroexo/h3/* zip 包契约）或 OpenAI 兼容口（POST /v1/videos，导演参数映射唯一表）；
-   * 运行 = 3s 轮询 /status，每段 done 立即下载落库（video storageKey + 首帧缩略，复用 platform/media CAS 机制）；
+  /** ===== 导演台运行（2026-11-15：MCP Task Broker 执行，网页只订阅）=====
+   * 提交只带「项目 + 选中片段」，MCP 串行执行、逐段解析上一段当前缓存 guide、落库与预览都在 MCP；
+   * 刷新/关闭/换浏览器/多开都从持久化任务表恢复进度与最后一帧。
    * 段状态经 updateShot 直接写回片段实体（导轨卡片三态 + 预览区跟随）。 */
   const [firstFrameUrls, setFirstFrameUrls] = useState<Record<string, string>>({});
-  const comfyRun = useDirectorRun({
-    getBridgeConfig: () => getRunConfigFromEndpoint(),
-    // 单段完成要尽快回到卡片/预览，不等到 3 秒轮询
-    pollIntervalMs: 1000,
+  const comfyRun = useDirectorTask({
+    projectId,
     callbacks: {
       onSegmentState: (shotId, state) => {
         const shot = shotsRef.current.find((s) => s.id === shotId);
@@ -892,21 +958,37 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         updateShot(shotId, { status: state });
         // 发起生成任务时自动存一份版本快照（2026-11-07：版本=任务记录，而非编辑记录）
         if (state === 'generating' && projectId) {
-          const shot = shotsRef.current.find((s) => s.id === shotId);
-          void snapshotWorkbenchForRun(projectId, shot?.number ?? 0).catch(() => undefined);
+          const current = shotsRef.current.find((s) => s.id === shotId);
+          void snapshotWorkbenchForRun(projectId, current?.number ?? 0).catch(() => undefined);
         }
       },
       onSegmentDone: (shotId, payload) => {
+        const shot = shotsRef.current.find((s) => s.id === shotId);
+        // 任务恢复（刷新后重新订阅到已结束任务）时，若版本已经落过，绝不能把用户后来手动
+        // 切换的缓存版本改回任务当时那一版：只补首帧展示，不重写版本/选中态。
+        const already = payload.version && shot
+          ? shotVersions(shot).find((v) => v.id === payload.version!.id)
+          : null;
+        if (already) {
+          if (payload.firstFrameUrl) {
+            const url = payload.firstFrameUrl;
+            setFirstFrameUrls((m) => ({ ...m, [shotId]: url }));
+          }
+          return;
+        }
         const media: NonNullable<WorkbenchShot['media']> = {
           storageKey: payload.videoStorageKey,
           source: 'generated',
           ...(payload.guide ? { guide: payload.guide } : {}),
         };
+        // 合并 MCP 落库的缓存版本：本地落盘时不会把服务端 cache 覆盖掉
+        const cachePatch = payload.version && shot ? mergeShotVersion(shot, payload.version) : {};
         updateShot(shotId, {
           status: 'done',
           clipState: 'completed',
           media,
           firstFrameKey: payload.firstFrameKey,
+          ...cachePatch,
         });
         if (payload.firstFrameUrl) {
           const url = payload.firstFrameUrl;
@@ -933,10 +1015,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         message.warning(t('director.runEmpty', '请先勾选要运行的片段'));
         return;
       }
-      const size = resolveVideoSize(
-        String(sharedParamsRef.current.params['aspect'] ?? '16:9'),
-        Number(sharedParamsRef.current.params['scaleFactor'] ?? 1),
-      );
       // 上一轮残留的「生成中/排队」不属于本次勾选：先归零，避免未选片段亮状态
       const selected = new Set(selectedIds);
       for (const s of shotsRef.current) {
@@ -944,32 +1022,20 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           updateShot(s.id, { status: 'pending' });
         }
       }
+      // continuationOff（缺口自动断开）是本次运行态：落盘为段级开关，MCP 执行时按这份数据取 guide
+      if (continuationOff.size > 0) {
+        for (const id of continuationOff) updateShot(id, { continuation: { enabled: false } });
+      }
       void comfyRun.startRun({
-        selectedIds,
-        shots: shotsRef.current.map(toRunShot).map((s) =>
-          continuationOff.has(s.id) ? { ...s, continuation: { enabled: false } } : s,
-        ),
-        shared: sharedParamsRef.current,
-        tier: sharedParamsRef.current.presetId,
-        width: size.width,
-        height: size.height,
         projectId: projectId ?? 'workbench',
+        selectedIds,
         episode: `${projectId ?? 'workbench'}-E01`,
-        subjectCoverOf: (subjectId: string) => {
-          const subject = subjects.find((s) => s.id === subjectId);
-          return subject ? resolveSubjectCover(subject).key : null;
-        },
+        beforeSubmit: persistNow,
       });
       if (trackMode === 'batch') exitBatchMode();
     },
-    [comfyRun, subjects, projectId, trackMode, exitBatchMode, message, t],
+    [comfyRun, projectId, trackMode, exitBatchMode, message, t, updateShot, persistNow],
   );
-
-  // MCP 只投递请求；真正运行必须由当前网页执行（预览/进度/落库都归网页）
-  useMcpDirectorJobs({
-    projectId,
-    onRequest: (req) => startRunNow(req.selectedIds ?? []),
-  });
 
   /** 批量导轨「生成」：确认勾选后直接开始。 */
   const openBatchPreflight = useCallback(() => {
@@ -1111,25 +1177,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   );
 
   // 单轨镜像（渲染用；持久化镜像在 persist 内重建）
-  const track = useMemo<WorkbenchTrack>(() => {
-    let start = 0;
-    return {
-      id: 'track-main',
-      name: '主轨',
-      sourceChain: { origin: 'workbench-container' },
-      status: 'active',
-      order: 0,
-      clips: shots.map((s) => {
-        const durationMs = Math.round(s.duration * 1000);
-        const clip = {
-          ref: { sourceShotId: s.id, kind: 'shot' as const },
-          timeline: { startMs: start, durationMs },
-        };
-        start += durationMs;
-        return clip;
-      }),
-    };
-  }, [shots]);
+  const track = useMemo<WorkbenchTrack>(() => buildMainTrack(shots), [shots]);
 
   const data = useMemo<WorkbenchNodeData>(
     () => ({
@@ -1170,13 +1218,12 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (loadState !== 'ready') return;
     if (!['submitting', 'queued', 'running'].includes(comfyRun.phase)) return;
     if (visibleShots.length === 0) return;
-    const allDone = visibleShots.every((s) =>
-      s.status === 'done' && s.clipState === 'completed' && Boolean(s.media?.storageKey));
-    // 提交/轮询回包丢失时 startedAt 会一直停在那里；超过 10 分钟且每段都已有成片，
-    // 说明这是死运行态，必须让位给视频，而不是永远显示「取消」。
+    // 2026-11-15 修复：重跑已完成片段时，旧版本本来就全是 done+completed；
+    // 不能用 allDone 把刚提交的 comfyRun 重置掉（会立刻退回「完成」，生成中永远不显示）。
+    // 只有提交/轮询真正失联（超过 10 分钟且每段都已有成片）才让位。
     const stale = comfyRun.startedAt > 0 && Date.now() - comfyRun.startedAt > 10 * 60 * 1000;
     const allHaveVideo = visibleShots.every((s) => Boolean(s.media?.storageKey));
-    if (allDone || (stale && allHaveVideo)) comfyRun.reset();
+    if (stale && allHaveVideo) comfyRun.reset();
   }, [loadState, comfyRun.phase, comfyRun.reset, comfyRun.startedAt, visibleShots]);
 
   const selectedShot: WorkbenchShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0] ?? {
@@ -1193,6 +1240,38 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     paramValues: {},
   };
   const selectedShotIndex = selectedShot ? visibleShots.findIndex((s) => s.id === selectedShot.id) : 0;
+
+  /**
+   * 引导插槽的自动投影（2026-11-15）：
+   * - 本段有手动引导（shot.guide）→ 用它（手动优先，永远第一）；
+   * - 否则：开关开（continuation.enabled，缺省看总开关）且有时间线上一段 → 显示上一段当前缓存版本的 guide；
+   * - 第 1 段没有上一段，只显示手动引导。
+   * 投影只用于显示/生成时解析，不写回 shot.guide；生成的视频与 guide 本身已落在项目文件里。
+   */
+  const projectedGuide = useMemo<WorkbenchShot['guide'] | undefined>(() => {
+    if (!selectedShot || selectedShot.guide) return undefined;
+    const fullIdx = shots.findIndex((s) => s.id === selectedShot.id);
+    if (fullIdx <= 0) return undefined;
+    const autoOn = selectedShot.continuation
+      ? selectedShot.continuation.enabled === true
+      : true; // 与链接图标默认开启一致；关闭 = 段级 continuation.enabled=false
+    if (!autoOn) return undefined;
+    const prev = shots[fullIdx - 1];
+    const version = prev ? selectedShotVersion(prev) : null;
+    if (!version?.guide?.id) return undefined;
+    return {
+      id: version.guide.id,
+      title: `片段 ${prev!.number} · 自动跟随`,
+      frames: version.guide.frames,
+      sha256: version.guide.sha256,
+      storageKey: version.previewKey ?? prev!.firstFrameKey,
+      createdAt: version.createdAt,
+    };
+  }, [selectedShot, shots]);
+  const shotForPanel = useMemo(
+    () => (projectedGuide && selectedShot ? { ...selectedShot, guide: projectedGuide } : selectedShot),
+    [selectedShot, projectedGuide],
+  );
 
   /**
    * 2026-11-07 修复（运行中点选「没运行到的片段」串帧 + 假播放器进度条）：
@@ -1216,7 +1295,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const previewFrameShotId = previewSegment
     ? comfyRun.segmentShotIds[previewSegment - 1]
     : undefined;
-  const canShowLiveFrame = !completedVideoKey
+  /** 新一次运行期间，旧缓存版本还挂在 selectedShot 上——不能拿旧视频顶替实时预览。 */
+  const directorRunning = comfyRun.phase === 'running' || comfyRun.phase === 'queued';
+  const canShowLiveFrame = (directorRunning || !completedVideoKey)
     && !!previewFrame?.image
     && !!selectedShot
     && (previewFrameShotId ?? runningShotId ?? selectedShot.id) === selectedShot.id;
@@ -1387,23 +1468,25 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             // 导演台：无成片时隐藏播放控制条（播放/时间码/进度条只在生成完成后出现）
             hideControlBarWhenNoVideo: true,
             // 生成中/未运行/失败一律没有可播放视频；只有完成段才交给播放器
-            videoStorageKey: completedVideoKey,
-            videoStatus: completedVideoKey
-              ? 'done'
-              : selectedShot.status === 'generating' ? 'generating' : 'idle',
+            videoStorageKey: directorRunning ? undefined : completedVideoKey,
+            videoStatus: directorRunning
+              ? 'generating'
+              : completedVideoKey ? 'done' : selectedShot.status === 'generating' ? 'generating' : 'idle',
             // 点击片段/片段缩略播放键 → 预览区从 0 起播（2026-11-07 用户反馈修复）
             autoPlayKey: previewAutoPlayKey,
             /* 2026-11-04 第十二条：预览占位只显示状态（单行文案+小图标），不回显提示词；
                状态跟随当前激活片段（selectedShot 切换即联动）。
                未生成 / 生成中（·detail 预留，dry-run 阶段无真实进度）/ 已生成 · Ns / 生成失败（+原因一行）。 */
             placeholderStatus:
-              completedVideoKey
-                ? 'done'
-                : selectedShot.status === 'generating'
-                  ? 'generating'
-                  : selectedShot.status === 'failed'
-                    ? 'failed'
-                    : 'idle',
+              directorRunning
+                ? 'generating'
+                : completedVideoKey
+                  ? 'done'
+                  : selectedShot.status === 'generating'
+                    ? 'generating'
+                    : selectedShot.status === 'failed'
+                      ? 'failed'
+                      : 'idle',
             /* 2026-11-05 真实运行：detail 反映桥接作业进度（排队位置 / 第 N 段 / 取消保留 N 段），
                已完成段回落时长标签；错误时透传上游人话一行 */
             placeholderDetail: (() => {
@@ -1680,7 +1763,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
             <DirectorPromptPanel
               shared={sharedParams}
               onSharedChange={updateSharedParams}
-              shot={selectedShot}
+              shot={shotForPanel ?? selectedShot}
               shotIndex={selectedShotIndex}
               totalShots={visibleShots.length}
               // 2026-11-06 标题区镜头跳转胶囊：与导轨/预览共用 activeShotId 单一受控源，
@@ -1697,7 +1780,18 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                 if (target && target.id !== selectedShot.id) swapShots(selectedShot.id, target.id);
               }}
               shotLabels={visibleShots.map((s) => `${Math.round(s.duration)}s`)}
-              onShotChange={(patch) => updateShot(selectedShot.id, patch)}
+              onShotChange={(patch) => {
+                // 引导插槽 = 引导开关：放入引导数据强制打开；移除/停用则关闭（自动投影随之消失）
+                if ('guide' in patch) {
+                  if (patch.guide) {
+                    updateShot(selectedShot.id, { ...patch, continuation: { enabled: true } });
+                  } else {
+                    updateShot(selectedShot.id, { ...patch, continuation: { enabled: false } });
+                  }
+                  return;
+                }
+                updateShot(selectedShot.id, patch);
+              }}
               theme={theme}
               isDark={isDark}
               subjects={subjects}

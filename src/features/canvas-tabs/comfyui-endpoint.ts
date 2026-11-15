@@ -28,7 +28,14 @@ import { create } from 'zustand';
 import { DEFAULT_COMFYUI_BASE_URL, normalizeBaseUrl, probeTcp } from './comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from './comfyui-connection.js';
 import { publishComfyuiEndpoint } from '@/platform/comfyui-endpoint-broadcast.js';
-import type { DirectorBridgeConfig } from './use-director-run.js';
+import type { OpenaiChannelCredentials } from './openai-protocol-client.js';
+import type { BridgeRunModels } from './comfyui-bridge-client.js';
+
+/** 运行渠道配置（连接面板产物；MCP broker 通过网页广播的地址取 ComfyUI，不再由网页执行） */
+export type DirectorBridgeConfig =
+  | { mode: 'openai'; channel: OpenaiChannelCredentials }
+  | { mode: 'direct'; baseUrl: string; token?: string; models: BridgeRunModels }
+  | { mode: 'zeroexo'; baseUrl: string };
 
 export const COMFYUI_ENDPOINT_STORAGE_KEY = 'zeroexo.comfyuiEndpoint';
 export const COMFYUI_ENDPOINT_SCHEMA_VERSION = 1;

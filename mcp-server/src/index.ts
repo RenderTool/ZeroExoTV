@@ -32,12 +32,14 @@ import { registerContinuityTools } from "./tools/continuity.js";
 import { registerUpdateTools } from "./tools/update.js";
 import { registerCanvasTools } from "./tools/canvases.js";
 import { registerImageJobTools } from "./tools/image-jobs.js";
+import { registerTaskTools } from "./tools/tasks.js";
 import { registerPlanTools } from "./tools/plan.js";
 import { registerDirectorOpsTools } from "./tools/director-ops.js";
 import { registerStyleTools } from "./tools/style.js";
 import { registerUpgradeTools } from "./tools/upgrade.js";
 import { registerComfyuiTools } from "./tools/comfyui.js";
 import { registerReleaseTools } from "./tools/release.js";
+import { startBroker } from "./broker/executor.js";
 
 /**
  * 连接即概览：把「当前数据状态」拼进 initialize 的 instructions。
@@ -65,7 +67,7 @@ async function withOverview(): Promise<string> {
 async function buildServer(ctx: Ctx): Promise<McpServer> {
   // instructions 内置整套操作规则（零安装路径），细节规格经 guides 资源/prompts 按需取
   const server = new McpServer(
-    { name: "zeroexo-mcp-server", version: "0.2.0" },
+    { name: "zeroexo-mcp-server", version: await packageVersion() },
     { instructions: await withOverview() },
   );
   registerGuideResources(server);
@@ -82,6 +84,7 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerUpdateTools(server, ctx);
   registerCanvasTools(server, ctx);
   registerImageJobTools(server, ctx);
+  registerTaskTools(server, ctx);
   registerPlanTools(server, ctx);
   registerDirectorOpsTools(server, ctx);
   registerStyleTools(server, ctx);
@@ -96,14 +99,30 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
  * 浏览器 File System Access 拿不到目录绝对路径，前端 MCP 设置页靠本文件
  * 生成含真实路径的可复制配置块（stdio command/env、http url）。
  */
+/**
+ * MCP 自身版本：必须读 package.json（安装包与仓库都能取到），不能写死。
+ * 之前写死 "0.2.0" 导致网页「本地 MCP 版本」永远显示旧版，用户以为没更新。
+ */
+async function packageVersion(): Promise<string> {
+  try {
+    const entry = fileURLToPath(import.meta.url);
+    const pkgPath = path.join(path.dirname(path.dirname(entry)), "package.json");
+    const parsed = JSON.parse(await fs.readFile(pkgPath, "utf8")) as { version?: string };
+    return parsed.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 async function stampServerInfo(httpPort: number): Promise<void> {
   try {
     const entry = fileURLToPath(import.meta.url);
     // dist/index.js 的修改时间 = 这份代码的编译时间：前端拿它判断「服务跑的是不是最新代码」
     const builtAt = await fs.stat(entry).then((s) => s.mtime.toISOString()).catch(() => null);
+    const version = await packageVersion();
     const info = {
       app: "zeroexo-mcp-server",
-      version: "0.2.0",
+      version,
       dataRoot: dataRoot(),
       serverEntry: entry,
       tools: TOOL_REGISTRY.length,
@@ -183,6 +202,8 @@ async function main(): Promise<void> {
     const portIdx = argv.indexOf("--port");
     if (portIdx >= 0) process.env.ZEROEXO_FS_PORT = argv[portIdx + 1];
     await startFileServer();
+    // 数据服务进程同时是任务执行者：网页只负责提交/订阅（多进程靠 lease 互斥，只跑一份）
+    startBroker();
     return; // server 事件循环保活
   }
 
@@ -192,6 +213,7 @@ async function main(): Promise<void> {
     // 先注册工具再盖印章：否则 server-info 会写 tools:0/toolNames:[]，网页误报「缺 52 个工具」
     await buildServer({ getToken: () => process.env.ZEROEXO_MCP_TOKEN });
     await stampServerInfo(port);
+    startBroker();
     // 有会话态：initialize 建立 session，后续请求按 mcp-session-id 复用同一 server。
     const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
     const readBody = async (req: http.IncomingMessage): Promise<string> => {
@@ -276,6 +298,8 @@ async function main(): Promise<void> {
   const ctx: Ctx = { getToken: () => process.env.ZEROEXO_MCP_TOKEN };
   const server = await buildServer(ctx);
   await server.connect(new StdioServerTransport());
+  // stdio 模式下 MCP 进程同样执行任务（IDE 只开 MCP 不开网页也能推进排队任务）
+  startBroker();
   process.stderr.write(`[zeroexo-mcp-server] stdio ready, tools=${TOOL_REGISTRY.length}, dataRoot=${dataRoot()}\n`);
 }
 

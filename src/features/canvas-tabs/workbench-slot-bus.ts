@@ -29,6 +29,8 @@ import type { Asset } from '@/features/asset-picker/index.js';
 export const WORKBENCH_ADD_REF_EVENT = 'zeroexo:workbench-add-ref';
 /** 片段引导槽（独立槽位，不占参考图上限）：发送引导数据 → 替换该段唯一引导 */
 export const WORKBENCH_SET_GUIDE_EVENT = 'zeroexo:workbench-set-guide';
+/** 历史视频设为当前片段封面（= 选中该片段的最新缓存版本） */
+export const WORKBENCH_SET_COVER_EVENT = 'zeroexo:workbench-set-cover';
 
 /** 抽屉「发送到导演台」事件载荷 */
 export interface WorkbenchAddRefDetail {
@@ -50,6 +52,23 @@ export interface WorkbenchSetGuideDetail {
     createdAt?: string;
   };
   projectId: string;
+}
+
+/** 历史视频 → 当前片段封面（版本集合里的「选中版本」） */
+export interface WorkbenchSetCoverDetail {
+  assetId: string;
+  title: string;
+  storageKey: string;
+  guide?: {
+    id: string;
+    frames?: number;
+    sha256?: string;
+    localKey?: string;
+  };
+  prompt?: string;
+  projectId: string;
+  /** 目标片段 id：从某个片段的历史里设封面时必须落到该段，不能落到当前选中的别的段 */
+  shotId?: string;
 }
 
 /** 资产 → 片段独有素材引用（与 director-prompt-panel.assetToDirectorRef 同一映射，单一事实源） */
@@ -128,4 +147,10 @@ export function emitWorkbenchAddRef(detail: WorkbenchAddRefDetail): boolean {
 export function emitWorkbenchSetGuide(detail: WorkbenchSetGuideDetail): boolean {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return false;
   return window.dispatchEvent(new CustomEvent<WorkbenchSetGuideDetail>(WORKBENCH_SET_GUIDE_EVENT, { detail }));
+}
+
+/** 抽屉侧发布「历史视频设为片段封面」请求 */
+export function emitWorkbenchSetCover(detail: WorkbenchSetCoverDetail): boolean {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return false;
+  return window.dispatchEvent(new CustomEvent<WorkbenchSetCoverDetail>(WORKBENCH_SET_COVER_EVENT, { detail }));
 }

@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { bootstrapToken } from "../src/auth.js";
 import { createProject } from "../src/store/projects.js";
 import { handleFsRequest } from "../src/file-server.js";
+import { listTasks } from "../src/store/tasks.js";
 import { registerWorkbenchTools } from "../src/tools/workbench.js";
 import { registerDirectorOpsTools } from "../src/tools/director-ops.js";
 import { registerContinuityTools } from "../src/tools/continuity.js";
@@ -125,29 +126,21 @@ describe("批量时长与参数契约", () => {
 });
 
 describe("作业提交与引导优先级（fetch stub）", () => {
-  it("run_generation：派生 416×256 / 107 帧 / steps=3；重跑单段取上一段 media.guide", async () => {
+  it("run_generation 停用；request_director_run 只建持久化任务（guide 在执行时才解析）", async () => {
     const videoPath = path.join(root, "fake.mp4");
     const guidePath = path.join(root, "gd_prev1234.safetensors");
     await fs.writeFile(videoPath, "fake");
     await fs.writeFile(guidePath, "fake");
 
-    let submitted = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: { method?: string }) => {
-      const url = String(input);
-      if (init?.method === "POST" && url.endsWith("/zeroexo/v1/jobs")) {
-        submitted += 1;
-        return { ok: true, text: async () => JSON.stringify({ jobId: `job-${submitted}`, state: "queued" }) };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          ok: true, jobId: "job-1", state: "success",
-          outputs: [{ kind: "video", path: videoPath }],
-          guide: { id: "gd_prev1234", path: guidePath, frames: 22, sha256: "sha" },
-          guideSource: "none", guideInPath: "",
-        }),
-      };
-    }));
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true, jobId: "job-1", state: "success",
+        outputs: [{ kind: "video", path: videoPath }],
+        guide: { id: "gd_prev1234", path: guidePath, frames: 22, sha256: "sha" },
+        guideSource: "none", guideInPath: "",
+      }),
+    })));
 
     let v = await version();
     const sp = await call("set_shared_params", {
@@ -156,7 +149,7 @@ describe("作业提交与引导优先级（fetch stub）", () => {
     });
     v = sp.version as number;
 
-    // 延续法（2026-11-11）：开 continuityEnabled 后必须先做计划，run_generation 只认带计划的片段
+    // 延续法（2026-11-11）：开 continuityEnabled 后必须先做计划
     const plan = await call("plan_continuity_edit", {
       projectId, baseVersion: v, confirm: true, userConfirmed: true,
     });
@@ -178,32 +171,19 @@ describe("作业提交与引导优先级（fetch stub）", () => {
     const media = (wb1.shots as Array<{ id: string; media?: { guide?: { id?: string } } }>).find((s) => s.id === first)?.media;
     expect(media?.guide?.id).toBe("gd_prev1234");
 
-    // 只重跑第 2 段：必须拿到第 1 段的 guide 作为显式 guide_id
-    const run = await call("run_generation", {
-      projectId, episode: "1", confirm: true, selectedIds: [second],
-    });
-    expect(run.width).toBe(416);
-    expect(run.height).toBe(256); // 官方 MP 换算：×0.1 = 0.1MP，32 对齐且 ≥64
-    const jobs = run.jobs as Array<{ params: Record<string, unknown>; shotId: string }>;
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]!.params.frames).toBe(107); // 4s → 17k+5 吸附
-    expect(jobs[0]!.params.steps).toBe(3);
-    expect(jobs[0]!.params.guide_frames).toBe(22);
-    expect(jobs[0]!.params.guide_id).toBe("gd_prev1234");
-    expect(jobs[0]!.params.use_prev_guide).toBe(false);
+    // 直接提交 GPU 作业的旧入口已停用：执行权只在 MCP Task Broker
+    const run = await call("run_generation", { projectId, episode: "1", confirm: true, selectedIds: [second] });
+    expect(run.isError).toBe(true);
+    expect(JSON.stringify(run)).toContain("request_director_run");
 
-    // 显式槽优先于上一段产物
-    const v2 = await version();
-    await call("set_shot_guide", {
-      projectId, baseVersion: v2, shotId: second,
-      guide: { id: "gd_explicit99", frames: 22 },
-    });
-    const run2 = await call("run_generation", {
-      projectId, episode: "1", confirm: true, selectedIds: [second],
-    });
-    const jobs2 = run2.jobs as Array<{ params: Record<string, unknown> }>;
-    expect(jobs2[0]!.params.guide_id).toBe("gd_explicit99");
-    expect(jobs2[0]!.params.use_prev_guide).toBe(false);
+    // 提交任务：落进持久化任务表（刷新/换浏览器不丢），逐段 guide 由执行器在提交前解析
+    const queued = await call("request_director_run", { projectId, confirm: true, selectedIds: [second] });
+    expect(queued.queued).toBe(true);
+    expect(typeof queued.taskId).toBe("string");
+    const tasks = await listTasks(root, { projectId });
+    const task = tasks.find((t) => t.taskId === queued.taskId);
+    expect(task?.state).toBe("queued");
+    expect(task?.segments.map((s) => s.shotId)).toEqual([second]);
   });
 
   it("list_history：只读带 guide 的导演台产物", async () => {

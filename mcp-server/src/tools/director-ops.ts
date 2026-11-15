@@ -17,53 +17,13 @@ import { appendAssetRecord, assetsLibraryFile, type LibraryAsset } from "../stor
 import { mutateWorkbench, readWorkbench } from "../store/workbench.js";
 import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
 import { hasContinuityPlan } from "../lib/continuity.js";
+import { GUIDE_FRAME_OPTIONS, VIDEO_ASPECT } from "../broker/params.js";
+import { cacheGuideFile } from "../broker/comfy.js";
+import { submitDirectorTask } from "../broker/executor.js";
+import type { WorkbenchShot } from "../store/workbench.js";
 
 const COMFY_BASE = (): string => process.env.ZEROEXO_COMFY_BASE ?? "http://127.0.0.1:8188";
 const GUIDE_ID_RE = /^gd_[A-Za-z0-9_-]{4,64}$/;
-const GUIDE_FRAME_OPTIONS = [5, 22, 39, 56];
-const PIXELS_PER_MEGAPIXEL = 1024 * 1024;
-const ASPECT: Record<string, number> = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1, "4:3": 4 / 3, "3:4": 3 / 4, "21:9": 21 / 9 };
-
-const round32 = (n: number): number => Math.max(32, Math.round(n / 32) * 32);
-const clampScale = (n: unknown): number => {
-  const v = Number(n);
-  return Number.isFinite(v) ? Math.min(2, Math.max(0.1, v)) : 1;
-};
-/** 与前端 entities/director-params.ts 同口径：官方 Size Settings Reference（面积 = 0.4MP×系数×1024²，×32 对齐） */
-function resolveVideoSize(aspect: string, scaleFactor: number): { width: number; height: number } {
-  const r = ASPECT[aspect] ?? 16 / 9;
-  const f = clampScale(scaleFactor);
-  // 系数 = 目标 MP（官方 Size Settings Reference，2026-11-11 纠正）：2.0 → 2.0MP → 16:9 = 1920×1088
-  const total = f * PIXELS_PER_MEGAPIXEL;
-  // 插件 ZeroExoRefVideo 的 width/height 都是 min=64（ref_video.py:88-89），顺手钳到插件合法下限。
-  return {
-    width: Math.max(64, round32(Math.sqrt(total * r))),
-    height: Math.max(64, round32(Math.sqrt(total / r))),
-  };
-}
-/** 把片段第一张项目参考图上传到 ComfyUI input，返回节点可用文件名 */
-async function uploadShotReference(base: string, storageKey: string): Promise<string> {
-  if (!storageKey.startsWith("cas:")) return "";
-  const file = path.join(dataRoot(), "media", "cas", storageKey.slice(4));
-  let buf: Buffer;
-  try {
-    buf = await fs.readFile(file);
-  } catch {
-    return "";
-  }
-  const form = new FormData();
-  form.append("image", new Blob([new Uint8Array(buf)]), path.basename(file));
-  form.append("overwrite", "true");
-  try {
-    const res = await fetch(`${base}/upload/image`, { method: "POST", body: form });
-    if (!res.ok) return "";
-    const body = (await res.json()) as { name?: string; subfolder?: string };
-    if (!body.name) return "";
-    return body.subfolder ? `${body.subfolder}/${body.name}` : body.name;
-  } catch {
-    return "";
-  }
-}
 
 /** 从 ComfyUI 的 /view 下载云端产物（MCP 与云 ComfyUI 不在同一台机器时，不能直接读绝对路径） */
 async function downloadComfyOutput(base: string, outputPath: string): Promise<Buffer | null> {
@@ -82,17 +42,6 @@ async function downloadComfyOutput(base: string, outputPath: string): Promise<Bu
   } catch {
     return null;
   }
-}
-
-/** 与前端 director-params.ts:285-293 同口径（17k+5 吸附） */
-function durationToFrames(sec: number): number {
-  const f = Math.max(1, Math.round(sec * 24));
-  return f + ((((5 - f) % 17) + 17) % 17);
-}
-function snapGuide(n: unknown): number {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 22;
-  return GUIDE_FRAME_OPTIONS.reduce((best, g) => (Math.abs(g - v) < Math.abs(best - v) ? g : best), GUIDE_FRAME_OPTIONS[0]!);
 }
 
 interface GuideInfo { id?: string; path?: string; frames?: number; sha256?: string; localKey?: string }
@@ -164,61 +113,11 @@ async function fetchJob(jobId: string, base = COMFY_BASE()): Promise<JobStatus> 
 }
 
 /**
- * 延续法串行生成：等上一段真正成功拿到 guide 再提交下一段（每段吃上一段尾帧）。
- * 超时/失败都返回终态，由调用方决定是否继续——绝不并行提交。
- */
-async function waitForJobTerminal(
-  jobId: string,
-  base: string,
-  timeoutMs = 20 * 60 * 1000,
-  intervalMs = 3000,
-): Promise<JobStatus> {
-  const started = Date.now();
-  for (;;) {
-    let job: JobStatus;
-    try {
-      job = await fetchJob(jobId, base);
-    } catch (err) {
-      job = { state: "error", error: err instanceof Error ? err.message : String(err), jobId };
-    }
-    if (job.state && ["success", "error", "cancelled"].includes(job.state)) return job;
-    if (Date.now() - started > timeoutMs) {
-      return { ...job, state: "error", error: `等待作业超时（${Math.round(timeoutMs / 60000)} 分钟）: ${jobId}` };
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
-
-/**
  * 云端不会长期保存产物：同步作业结果时立刻把引导 .safetensors 拉到本地 media/guides。
  * 返回本地键（`guide:<id>.safetensors`），失败返回 null（不阻断视频落库）。
  */
-async function cacheGuideFromCloud(root: string, base: string, guide: GuideInfo | null | undefined): Promise<string | null> {
-  if (!guide?.id || !/^gd_[A-Za-z0-9_-]{4,64}$/.test(guide.id)) return null;
-  const dir = path.join(root, "media", "guides");
-  const file = path.join(dir, `${guide.id}.safetensors`);
-  try {
-    const s = await fs.stat(file);
-    if (s.size > 0) return `guide:${guide.id}.safetensors`;
-  } catch {
-    // 还没缓存，继续下载
-  }
-  try {
-    const qs = new URLSearchParams({
-      filename: `${guide.id}.safetensors`,
-      subfolder: "zeroexo/guides",
-      type: "output",
-    }).toString();
-    const res = await fetch(`${base}/view?${qs}`);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length === 0) return null;
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(file, buf);
-    return `guide:${guide.id}.safetensors`;
-  } catch {
-    return null;
-  }
+async function cacheGuideFromCloud(base: string, guide: GuideInfo | null | undefined): Promise<string | null> {
+  return cacheGuideFile(base, guide);
 }
 
 async function exists(p: string | undefined): Promise<boolean> {
@@ -363,33 +262,40 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       const selectedIds = args.selectedIds?.length ? args.selectedIds : wb.shots.map((s) => s.id);
       if (selectedIds.length === 0) throw new McpError("VALIDATION", "导演台没有片段");
       if (args.dryRun) return { written: false, dryRun: true, projectId: args.projectId, selectedIds };
-      const requestId = `zxrun_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-      const dir = path.join(dataRoot(), ".lf", "zeroexo", "app_meta", "director-jobs");
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(
-        path.join(dir, `${requestId}.json`),
-        JSON.stringify({
-          schemaVersion: 1,
-          requestId,
-          projectId: args.projectId,
-          selectedIds,
-          ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
-          requestedAt: new Date().toISOString(),
-        }, null, 2),
-        "utf8",
-      );
-      return {
-        queued: true,
-        requestId,
+      // 延续法准入（2026-11-11 用户事故；2026-11-15 改为批次模型）：
+      // 只要求「做过延续法计划」。起始段没有缓存 guide 不算错误（首次生成第一段本来就没有），
+      // 执行器会按 none 生成；run 内续接由插件批次内循环完成，不逐段发送 guide。
+      const continuityOn = wb.sharedParams?.params?.continuityEnabled === true;
+      if (continuityOn) {
+        const shots = wb.shots as unknown as WorkbenchShot[];
+        const selected = shots.filter((s) => selectedIds.includes(s.id));
+        const unplanned = selected.filter((s) => !hasContinuityPlan(s as never));
+        if (unplanned.length > 0) {
+          throw new McpError(
+            "CONTINUITY_NOT_PLANNED",
+            `延续法已开启，但 ${unplanned.length} 个片段没有延续法计划（段长没按 17k+5 重排、没有接缝标记）。`
+            + "先调 plan_continuity_edit：dryRun 出「段/帧/秒/是否吃上一段尾帧」表 → 用户确认 → confirm:true + userConfirmed:true。",
+          );
+        }
+      }
+      const task = await submitDirectorTask({
+        projectId: args.projectId,
         selectedIds,
-        hint: "请求已投递；网页打开同一项目后会自动开始。不要再用 run_generation 直接提交，否则会和网页运行态分叉。",
+        ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
+      });
+      return {
+        taskId: task.taskId,
+        queued: true,
+        selectedIds,
+        state: task.state,
+        hint: "任务已进 MCP 持久化任务表，由 MCP 串行执行；刷新/关闭/换浏览器/多开都只断开订阅。用 get_generation_task 查进度。",
       };
     },
   });
 
   defTool(server, ctx, {
     name: "run_generation",
-    description: "已停用：MCP 不再直接提交 GPU 作业。导演台运行请用 request_director_run 投递给网页，由网页执行并落库。",
+    description: "已停用：导演台运行统一走 request_director_run 提交 MCP 任务（MCP 执行、网页订阅），不要直接提交 GPU 作业。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -401,164 +307,12 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
     },
     handler: async (args) => {
       guardDryRunConfirm(args);
-      const root = dataRoot();
-      const wb = await readWorkbench(root, args.projectId);
+      const wb = await readWorkbench(dataRoot(), args.projectId);
       if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
-      // 硬闸门：MCP 直接提交会和网页运行态/预览/落库分叉，网页必须是唯一执行入口
       throw new McpError(
         "VALIDATION",
-        "run_generation 已停用：请用 request_director_run 投递请求，由打开同一项目的网页执行。",
+        "run_generation 已停用：请用 request_director_run 提交任务，由 MCP Task Broker 串行执行（执行时才解析上一段当前缓存 guide）。",
       );
-      const allShots = wb!.shots as unknown as Array<{ id: string; duration: number; imagePrompt?: string; videoPrompt?: string; negativePrompt?: string; guide?: { id?: string }; media?: { guide?: { id?: string } }; continuation?: { enabled: boolean }; references?: Array<{ kind?: string; storageKey?: string }>; paramValues?: Record<string, unknown> | null }>;
-      const selected = args.selectedIds?.length
-        ? allShots.filter((s) => args.selectedIds!.includes(s.id))
-        : allShots;
-      if (selected.length === 0) throw new McpError("NOT_FOUND", "没有匹配的片段");
-
-      const shared = (wb! as unknown as { sharedParams?: { params?: Record<string, unknown> } }).sharedParams;
-      const p = shared?.params ?? {};
-      const aspect = String(p.aspect ?? "16:9");
-      const { width, height } = resolveVideoSize(aspect, clampScale(p.scaleFactor ?? 1));
-      const steps = Number(p.steps ?? 8);
-      const cfg = Number(p.cfg ?? 1);
-      const seed = Number(p.seed ?? 0);
-      const guideFrames = snapGuide(p.continuityOverlapFrames);
-      const continuityOn = p.continuityEnabled === true;
-      const base = args.baseUrl ?? COMFY_BASE();
-      const episode = args.episode ?? "1";
-      // 显存策略属于服务层：MCP 也按机器自动选；读不到显存时保守走低显存
-      const useLowVram = await (async (): Promise<boolean> => {
-        try {
-          const res = await fetch(`${base}/system_stats`);
-          if (!res.ok) return true;
-          const body = (await res.json()) as { devices?: Array<{ vram_total?: number }> };
-          const vram = body.devices?.[0]?.vram_total;
-          if (typeof vram !== "number" || !Number.isFinite(vram) || vram <= 0) return true;
-          return vram < 16 * 1024 ** 3;
-        } catch {
-          return true;
-        }
-      })();
-
-      const buildSubmission = async (shot: typeof selected[number], overrideGuideId?: string) => {
-        const allIdx = allShots.findIndex((s) => s.id === shot.id);
-        const explicit = overrideGuideId ?? shot.guide?.id;
-        const segEnabled = shot.continuation ? shot.continuation.enabled === true : continuityOn;
-        let guideId: string | undefined = explicit;
-        let usePrev = false;
-        if (!explicit && segEnabled && allIdx > 0) {
-          const prevGuideId = allShots[allIdx - 1]?.media?.guide?.id;
-          if (prevGuideId) guideId = prevGuideId;
-          else usePrev = true;
-        }
-        const firstImage = (shot.references ?? []).find((r) => r.kind === "image" && r.storageKey);
-        const referenceImage = firstImage?.storageKey
-          ? await uploadShotReference(base, firstImage.storageKey)
-          : "";
-        const params: Record<string, unknown> = {
-          prompt: (shot.imagePrompt || shot.videoPrompt || `第 ${allIdx + 1} 段`).toString(),
-          negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ""),
-          width, height,
-          frames: durationToFrames(Number(shot.duration) || 5),
-          steps, cfg, seed, frame_rate: 24,
-          guide_frames: guideFrames,
-          use_prev_guide: usePrev,
-          use_low_vram: useLowVram,
-          ...(guideId ? { guide_id: guideId } : {}),
-          ...(referenceImage ? { reference_images: referenceImage, reference_image: referenceImage } : {}),
-        };
-        return { shotId: shot.id, clientJobId: `mcp_${args.projectId}_${shot.id}_${Date.now()}`, params };
-      };
-
-      // 延续法准入（2026-11-11 用户事故）：没做延续法计划的片段、跳段、从中间开始 —— 一律拒绝，
-      // 不允许 Agent「不知道为什么要这么做」就把原稿段长直接搬进去跑。
-      if (continuityOn) {
-        const unplanned = selected.filter((s) => !hasContinuityPlan(s));
-        if (unplanned.length > 0) {
-          throw new McpError(
-            "CONTINUITY_NOT_PLANNED",
-            `延续法已开启，但 ${unplanned.length} 个片段没有延续法计划（段长没按 17k+5 重排、没有接缝标记）。`
-            + "先调 plan_continuity_edit：dryRun 出「段/帧/秒/是否吃上一段尾帧」表 → 用户确认 → confirm:true + userConfirmed:true，"
-            + "再回来生成。禁止照搬原稿段长直接跑。",
-          );
-        }
-        const idxs = selected
-          .map((s) => allShots.findIndex((x) => x.id === s.id))
-          .sort((a, b) => a - b);
-        if (idxs.some((v, i) => i > 0 && v !== idxs[i - 1]! + 1)) {
-          throw new McpError(
-            "CONTINUITY_ORDER",
-            "开启延续法时必须按时间线连续选段：跳段会让被跳过的片段吃不到上一段尾帧，接缝就断了。",
-          );
-        }
-        const firstIdx = idxs[0] ?? 0;
-        if (firstIdx > 0 && !allShots[firstIdx - 1]?.media?.guide?.id) {
-          throw new McpError(
-            "CONTINUITY_ORDER",
-            `第 ${firstIdx + 1} 段之前还没有已生成的引导数据：延续法必须从第 1 段开始按顺序跑，`
-            + "不能从中间挑着生成（挑着跑等于放弃衔接）。",
-          );
-        }
-      }
-
-      const submissions: Awaited<ReturnType<typeof buildSubmission>>[] = [];
-      for (const shot of selected) submissions.push(await buildSubmission(shot));
-
-      const submit = async (params: Record<string, unknown>, clientJobId: string): Promise<string> => {
-        const body = { kind: "reference_video", clientJobId, project: args.projectId, episode, params };
-        const res = await fetch(`${base}/zeroexo/v1/jobs`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-        });
-        const text = await res.text();
-        if (!res.ok) throw new McpError("IO_ERROR", `提交作业失败 HTTP ${res.status}: ${text.slice(0, 300)}`);
-        const out = JSON.parse(text) as { jobId?: string };
-        if (!out.jobId) throw new McpError("IO_ERROR", `插件未返回 jobId: ${text.slice(0, 200)}`);
-        return out.jobId;
-      };
-
-      if (args.dryRun) {
-        return { written: false, dryRun: true, continuity: continuityOn, serial: continuityOn, submissions };
-      }
-
-      // 延续法：严格串行，上一段 success 且拿到 guide 才提交下一段
-      if (continuityOn) {
-        const ordered = [...selected].sort(
-          (a, b) => allShots.findIndex((x) => x.id === a.id) - allShots.findIndex((x) => x.id === b.id),
-        );
-        const jobs: Array<Record<string, unknown>> = [];
-        let lastGuideId: string | undefined;
-        for (const shot of ordered) {
-          const sub = (await buildSubmission(shot, lastGuideId)) as { params: Record<string, unknown>; clientJobId: string };
-          const jobId = await submit(sub.params, sub.clientJobId);
-          const terminal = await waitForJobTerminal(jobId, base);
-          jobs.push({
-            jobId, shotId: shot.id, state: terminal.state,
-            guideId: terminal.guide?.id ?? null, error: terminal.error ?? null,
-            params: sub.params,
-          });
-          if (terminal.state !== "success") {
-            return {
-              written: true, continuity: true, serial: true,
-              failedShotId: shot.id, jobs,
-              error: terminal.error ?? `第 ${jobs.length} 段生成失败（${terminal.state}）`,
-              next: "修好这一段后从这一段继续；禁止跳到后面的段",
-            };
-          }
-          lastGuideId = terminal.guide?.id ?? lastGuideId;
-        }
-        return {
-          written: true, continuity: true, serial: true,
-          projectId: args.projectId, episode, baseUrl: base, width, height, steps, guideFrames, jobs,
-          next: "用 sync_job_results 按同样顺序回写视频与引导（每段的 guide 会自动成为下一段的输入）",
-        };
-      }
-
-      const jobs: Array<{ jobId: string; shotId: string; params: Record<string, unknown> }> = [];
-      for (const sub of submissions) {
-        const jobId = await submit(sub.params, sub.clientJobId);
-        jobs.push({ jobId, shotId: sub.shotId, params: sub.params });
-      }
-      return { written: true, projectId: args.projectId, episode, baseUrl: base, width, height, steps, guideFrames, jobs };
     },
   });
 
@@ -624,7 +378,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       // 云端不持久化：回写前先把每段引导拉到本地 media/guides（失败不阻断视频落库）
       for (const r of rows) {
         if (r.skipped || !r.guide?.id) continue;
-        const localKey = await cacheGuideFromCloud(root, base, r.guide);
+        const localKey = await cacheGuideFromCloud(base, r.guide);
         if (localKey) r.guide = { ...r.guide, localKey };
       }
 
@@ -862,10 +616,10 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         steps: { type: "int", default: 8, min: 1, max: 200 },
         scaleFactor: { type: "float", default: 1, min: 0.1, max: 2, derives: "width/height" },
         refImageSize: { type: "enum", default: "match", options: ["match", "1024", "1280", "1536", "max"] },
-        continuityOverlapFrames: { type: "enum", default: 22, options: GUIDE_FRAME_OPTIONS },
+        continuityOverlapFrames: { type: "enum", default: 22, options: [...GUIDE_FRAME_OPTIONS] },
         continuityEnabled: { type: "bool", default: false },
         cfg: { type: "float", default: 1 }, seed: { type: "int", default: 0 },
-        aspect: { type: "enum", default: "16:9", options: Object.keys(ASPECT) },
+        aspect: { type: "enum", default: "16:9", options: Object.keys(VIDEO_ASPECT) },
       },
       segment: { duration: { type: "float", default: 5, min: 0.2, unit: "s", derives: "17k+5 frames @24fps" } },
       forbiddenKeys: ["resolution", "imageMatch", "prompt"],

@@ -1035,9 +1035,11 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
 
   it('resolveClipStatus 六态映射：排队、已取消、未选片段不误亮生成中', () => {
     const run = { phase: 'queued', segmentShotIds: ['a', 'b', 'c'], currentSegment: null };
-    expect(resolveClipStatus('pending', run, 'a')).toBe('idle');
-    expect(resolveClipStatus('done', run, 'a')).toBe('done');
-    expect(resolveClipStatus('failed', run, 'a')).toBe('failed');
+    // 重跑已完成片段：运行态必须压过旧 done/pending，显示排队/生成中，不能继续显示「完成」
+    expect(resolveClipStatus('pending', run, 'a')).toBe('queued');
+    expect(resolveClipStatus('done', run, 'a')).toBe('queued');
+    expect(resolveClipStatus('failed', run, 'a')).toBe('queued');
+    expect(resolveClipStatus('done', run, 'z')).toBe('done');
     expect(resolveClipStatus('generating', undefined, 'a')).toBe('generating');
     // 排队：提交中 / 在队 / 运行中未轮到本段
     expect(resolveClipStatus('generating', { ...run, phase: 'submitting' }, 'a')).toBe('queued');

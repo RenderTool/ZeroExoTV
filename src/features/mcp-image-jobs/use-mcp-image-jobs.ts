@@ -1,328 +1,153 @@
 /**
- * MCP 图片作业消费者（2026-11-11）：
- * MCP 把「生成什么图」写到 <数据根>/.lf/zeroexo/app_meta/image-jobs/<jobId>.json；
- * 网页画布打开着同一项目时，本 hook 每 2 秒轮询，建图片节点 → 调本机/云端 ComfyUI 生成 →
- * 写回节点与历史 → 把进度写到 <jobId>.status.json 供 MCP 查询。
+ * MCP 图片任务结果应用器（2026-11-15）。
  *
- * 这样 MCP 触发的图会出现在**用户正在看的实时画布**上（主画布由浏览器持有，外部不直接写 JSON）。
+ * 生成在 MCP 完成（任务表持久化）；网页只订阅任务，把成功产物幂等地写成画布节点：
+ * - 节点 id 由 MCP 给（`mcp_<taskId>_<i>`），同一任务在任何页面/刷新后都落到同一个节点；
+ * - 节点已存在（已有 storageKey）就跳过 —— 多开不会重复建节点，用户删掉的不会被同一页面重建；
+ * - 只应用最近 12 小时内的任务，避免重新打开旧项目时把历史产物全量灌进画布。
  */
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { AddEdgeCommand, AddNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand, type CommandQueue } from '@zeroexo/core';
-import { fitImageNodeSize } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import { listDir, readJson, writeJson, removeFile } from '@/platform/fs.js';
-import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
-import { resolveMediaBlob } from '@/shared/media/resolve-media-blob.js';
-import { contentToDataUrl } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
-import { generateMossImage } from '@/pages/editor/editor-canvas/interactions/local-moss-image.js';
-import { generateKrea2Image } from '@/pages/editor/editor-canvas/interactions/local-krea2-image.js';
-import { generateLocalQwenImage } from '@/pages/editor/editor-canvas/interactions/local-qwen-image.js';
-import { MOSS_MODEL_KEY, KREA2_MODEL_KEY, LOCAL_IMAGE_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
-import { clampQwenSize } from '@/features/canvas-tabs/qwen-limits.js';
+import { fitImageNodeSize } from '@/pages/editor/editor-canvas/use-editor-interactions/helpers.js';
+import { resolveMediaUrl } from '@/platform/media.js';
+import {
+  KREA2_MODEL_KEY,
+  LOCAL_IMAGE_MODEL_KEY,
+  MOSS_MODEL_KEY,
+} from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import {
+  subscribeBrokerTasks,
+  type BrokerImageRequest,
+  type BrokerSegment,
+  type BrokerTask,
+} from '@/features/task-center/task-broker-client.js';
 
-/** MCP 请求的最终尺寸：显式 width/height 优先；否则按 aspect + megapixels 计算；都没有则跟随源图 */
-function resolveRequestedSize(req: McpImageRequest): { width: number; height: number } | null {
-  if (req.width && req.height) return clampQwenSize(req.width, req.height);
-  if (!req.aspect) return null;
-  const parts = req.aspect.split(':');
-  const rw = Number(parts[0]);
-  const rh = Number(parts[1]);
-  if (!Number.isFinite(rw) || !Number.isFinite(rh) || rw <= 0 || rh <= 0) return null;
-  const pixels = Math.max(0.1, req.megapixels ?? 4) * 1024 * 1024;
-  const width = Math.sqrt(pixels * (rw / rh));
-  const height = width * (rh / rw);
-  return clampQwenSize(width, height);
-}
-
-export const MCP_IMAGE_JOB_DIR = '.lf/zeroexo/app_meta/image-jobs';
-
-interface McpImageRequest {
-  index?: number;
-  prompt: string;
-  model?: 'moss' | 'krea2' | 'qwen';
-  title?: string;
-  aspect?: string;
-  megapixels?: number;
-  steps?: number;
-  seed?: number;
-  width?: number;
-  height?: number;
-  negative_prompt?: string;
-  /** 改图：原图 storageKey / 节点 id / 遮罩（给了就走 Qwen 图生图，仍新建下游节点） */
-  sourceStorageKey?: string;
-  sourceNodeId?: string;
-  maskStorageKey?: string;
-}
-
-interface McpImageJob {
-  schemaVersion?: number;
-  jobId: string;
-  projectId: string;
-  requests: McpImageRequest[];
-}
-
-interface JobItemStatus {
-  index: number;
-  nodeId: string;
-  state: 'pending' | 'running' | 'done' | 'error';
-  model: string;
-  prompt: string;
-  storageKey?: string;
-  width?: number;
-  height?: number;
-  error?: string;
-}
-
-interface JobStatus {
-  jobId: string;
-  projectId: string;
-  state: 'running' | 'done' | 'error';
-  total: number;
-  completed: number;
-  items: JobItemStatus[];
-  updatedAt: string;
-}
+/** 只回灌最近 12 小时内的任务（更早的产物已由历史抽屉管理，避免把旧图重新塞回画布） */
+const APPLY_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 const MODEL_KEYS = { moss: MOSS_MODEL_KEY, krea2: KREA2_MODEL_KEY, qwen: LOCAL_IMAGE_MODEL_KEY } as const;
 
-async function generateOne(
-  req: McpImageRequest,
-  nodeId: string,
-  edit?: { sourceDataUrl?: string; maskDataUrl?: string },
-): Promise<{
-  blob: Blob; width: number; height: number; mimeType: string; bytes: number; generationId: string;
-}> {
-  const model = req.model ?? 'moss';
-  const targetSize = resolveRequestedSize(req);
-  const params = {
-    prompt: req.prompt,
-    negative_prompt: req.negative_prompt ?? '',
-    steps: req.steps,
-    seed: req.seed,
-    megapixels: req.megapixels,
-    width: targetSize?.width ?? req.width,
-    height: targetSize?.height ?? req.height,
-    // 显式尺寸必须压过「编辑跟随原图」的默认分支，否则宽高会被静默丢弃回落 4:3
-    ...(targetSize ? { sizeMode: 'custom' as const } : {}),
-  };
-  // 改图（图生图）：只有 Qwen 支持 image 输入；原图 + 可选遮罩，输出到新节点，不动原图
-  if (edit?.sourceDataUrl) {
-    return generateLocalQwenImage({
-      prompt: req.prompt,
-      width: targetSize?.width ?? req.width,
-      height: targetSize?.height ?? req.height,
-      referenceImages: [edit.sourceDataUrl],
-      maskDataUrl: edit.maskDataUrl,
-      params: { ...params, edit_mode: false },
-      nodeId,
-    });
-  }
-  if (model === 'moss') {
-    return generateMossImage({ prompt: req.prompt, aspect: req.aspect, params, nodeId });
-  }
-  if (model === 'krea2') {
-    return generateKrea2Image({ prompt: req.prompt, aspect: req.aspect, params, nodeId });
-  }
-  return generateLocalQwenImage({
-    prompt: req.prompt,
-    width: req.width,
-    height: req.height,
-    params: { ...params, edit_mode: false },
-    nodeId,
-  });
+function requestOf(task: BrokerTask, segmentIndex: number): BrokerImageRequest | null {
+  if (task.request?.kind !== 'canvas_image') return null;
+  return task.request.requests[segmentIndex - 1] ?? null;
+}
+
+function nodeTitle(req: BrokerImageRequest | null, index: number): string {
+  return req?.title?.trim()
+    || (req?.sourceNodeId || req?.sourceStorageKey ? `MCP 改图 ${index}` : `MCP 图片 ${index}`);
 }
 
 export function useMcpImageJobs(opts: {
   projectId: string | null | undefined;
   commandQueue: CommandQueue | null | undefined;
-  /** 画布 store：改图请求给 sourceNodeId 时用它解析节点 storageKey/content */
+  /** 画布 store：判断节点是否已落过（幂等） */
   store?: { getGraph(): { nodes: Array<{ id: string; data?: unknown }> } } | null;
   enabled?: boolean;
 }): void {
   const { projectId, commandQueue, store, enabled = true } = opts;
-  const busyRef = useRef(false);
 
   useEffect(() => {
     if (!enabled || !projectId || !commandQueue) return;
     const cq = commandQueue;
-    let disposed = false;
-    const timer = window.setInterval(() => { void tick(); }, 2000);
-    void tick();
+    const applying = new Set<string>();
 
-    async function tick(): Promise<void> {
-      if (disposed || busyRef.current) return;
-      busyRef.current = true;
-      try {
-        const entries = await listDir(MCP_IMAGE_JOB_DIR).catch(() => []);
-        for (const entry of entries) {
-          if (disposed) return;
-          if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name.endsWith('.status.json')) continue;
-          const rel = `${MCP_IMAGE_JOB_DIR}/${entry.name}`;
-          const job = await readJson<McpImageJob>(rel).catch(() => null);
-          if (!job?.jobId || job.projectId !== projectId || !Array.isArray(job.requests)) continue;
-          await runJob(job, rel);
-        }
-      } finally {
-        busyRef.current = false;
-      }
-    }
-
-    async function runJob(job: McpImageJob, jobRel: string): Promise<void> {
-      const statusRel = `${MCP_IMAGE_JOB_DIR}/${job.jobId}.status.json`;
-      const status: JobStatus = {
-        jobId: job.jobId,
-        projectId: job.projectId,
-        state: 'running',
-        total: job.requests.length,
-        completed: 0,
-        items: job.requests.map((req, i) => ({
-          index: i, nodeId: `mcp_${job.jobId}_${i}`, state: 'pending',
-          model: req.model ?? 'moss', prompt: req.prompt,
-        })),
-        updatedAt: new Date().toISOString(),
-      };
-      // 刷新/重进页面：已完成的条目直接沿用，避免把同一张图重复生成（作业文件要等全部完成才删）
-      const prior = await readJson<JobStatus>(statusRel).catch(() => null);
-      for (const it of status.items) {
-        const done = prior?.items?.find((x) => x.index === it.index && x.state === 'done');
-        if (done) Object.assign(it, done);
-      }
-      status.completed = status.items.filter((it) => it.state === 'done').length;
-      await writeJson(statusRel, status).catch(() => undefined);
-
-      for (let i = 0; i < job.requests.length; i += 1) {
-        if (disposed) return;
-        const req = job.requests[i]!;
-        const item = status.items[i]!;
-        if (item.state === 'done') continue;
-        const nodeId = item.nodeId;
-        // 改图：解析原图（sourceNodeId 从画布节点读，sourceStorageKey 直接给键），转 dataURL 交给 Qwen 编辑
-        const srcNode = req.sourceNodeId && store
-          ? store.getGraph().nodes.find((n) => n.id === req.sourceNodeId)
-          : undefined;
-        const srcData = (srcNode?.data ?? {}) as Record<string, unknown>;
-        let sourceKey = req.sourceStorageKey ?? String(srcData.storageKey ?? '');
-        const inlineSource = typeof srcData.content === 'string' ? srcData.content : '';
-        const blobToDataUrl = async (blob: Blob | null): Promise<string | undefined> => {
-          if (!blob) return undefined;
-          const url = URL.createObjectURL(blob);
-          try { return await contentToDataUrl(url); } finally { URL.revokeObjectURL(url); }
-        };
-        // 优先用节点内联内容（data:/blob:/http），其次按 storageKey 从本地媒体存储读原始字节
-        let sourceDataUrl = inlineSource && /^(data:|blob:|https?:)/.test(inlineSource)
-          ? await contentToDataUrl(inlineSource).catch(() => undefined)
-          : undefined;
-        if (!sourceDataUrl && sourceKey) {
-          sourceDataUrl = await blobToDataUrl(await resolveMediaBlob(sourceKey, 'image', 'orig').catch(() => null));
-        }
-        const maskDataUrl = req.maskStorageKey
-          ? await blobToDataUrl(await resolveMediaBlob(req.maskStorageKey, 'image', 'orig').catch(() => null))
-          : undefined;
-        const isEdit = Boolean(sourceDataUrl);
-        const modelKey = isEdit ? LOCAL_IMAGE_MODEL_KEY : MODEL_KEYS[req.model ?? 'moss'];
-        const displayTitle = req.title || (isEdit ? `MCP 改图 ${i + 1}` : `MCP 图片 ${i + 1}`);
-        const col = i % 5;
-        const row = Math.floor(i / 5);
-        const position = { x: 120 + col * 300, y: 120 + row * 320 };
-        const targetSize = resolveRequestedSize(req);
-        cq.execute(new AddNodeCommand({
-          id: nodeId,
-          type: 'image',
-          position,
-          size: { width: 300, height: 300 },
-          title: displayTitle,
-          data: {
-            content: '',
-            status: 'loading',
-            prompt: req.prompt,
-            model: modelKey,
-            paramValues: {
-              aspect: req.aspect ?? '1:1',
-              megapixels: req.megapixels ?? 4,
-              ...(targetSize ? { width: targetSize.width, height: targetSize.height, sizeMode: 'custom' } : {}),
-              steps: req.steps,
-              seed: req.seed ?? -1,
-              cfg: req.model === 'moss' ? 2.5 : undefined,
-              negative_prompt: req.negative_prompt ?? '',
-            },
-          },
-        } as never));
-        // 改图必须把源图节点真正连到新节点；否则画布上只有一张孤立结果。
-        if (isEdit && req.sourceNodeId) {
-          cq.execute(new AddEdgeCommand({
-            id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-mcp`,
-            source: { nodeId: req.sourceNodeId, pinId: 'image' },
-            target: { nodeId, pinId: 'prompt' },
-          }));
-        }
-        item.state = 'running';
-        await writeJson(statusRel, { ...status, updatedAt: new Date().toISOString() }).catch(() => undefined);
-        try {
-          const result = await generateOne(req, nodeId, isEdit ? { sourceDataUrl, maskDataUrl } : undefined);
-          const url = URL.createObjectURL(result.blob);
-          const landed = await autoLandGenerationBlob({
-            nodeId,
-            kind: 'image',
-            title: displayTitle,
-            blob: result.blob,
-            width: result.width,
-            height: result.height,
-            bytes: result.bytes,
-            mimeType: result.mimeType,
-            jobId: result.generationId,
-            model: modelKey,
-            prompt: req.prompt,
-            sourceNodeId: req.sourceNodeId,
-            sourceStorageKey: req.sourceStorageKey,
-          }).catch(() => null);
-          cq.execute(new UpdateNodeDataCommand(nodeId, {
-            content: url,
-            status: 'success',
-            naturalWidth: result.width,
-            naturalHeight: result.height,
-            mimeType: result.mimeType,
-            bytes: result.bytes,
-            generationId: result.generationId,
-            model: modelKey,
-            prompt: req.prompt,
-            ...(req.sourceNodeId ? { generation: { prompt: req.prompt, model: modelKey, sourceNodeId: req.sourceNodeId, sourceStorageKey: req.sourceStorageKey } } : {}),
-            ...(landed?.storageKey ? { storageKey: landed.storageKey } : {}),
-          } as Record<string, unknown>));
-          const fitted = fitImageNodeSize(300, result.width, result.height);
-          cq.execute(new ResizeNodeCommand(nodeId, { ...position, width: 300, height: 300 }, { ...position, width: fitted.width, height: fitted.height }));
-          item.state = 'done';
-          item.storageKey = landed?.storageKey;
-          item.width = result.width;
-          item.height = result.height;
-          status.completed += 1;
-          nodeActionBus.emit('canvas:history:created', {
-            kind: 'image',
-            title: displayTitle,
-            generationId: result.generationId,
-            prompt: req.prompt,
-            nodeId,
-          });
-        } catch (err) {
-          item.state = 'error';
-          item.error = err instanceof Error ? err.message : String(err);
-          cq.execute(new UpdateNodeDataCommand(nodeId, {
-            status: 'error',
-            errorDetails: item.error,
-          } as Record<string, unknown>));
-        }
-        status.state = status.completed === status.total ? 'done' : 'running';
-        status.updatedAt = new Date().toISOString();
-        await writeJson(statusRel, status).catch(() => undefined);
-      }
-      status.state = status.items.every((it) => it.state === 'error') ? 'error' : 'done';
-      status.updatedAt = new Date().toISOString();
-      await writeJson(statusRel, status).catch(() => undefined);
-      await removeFile(jobRel).catch(() => undefined);
-    }
-
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
+    const hasApplied = (nodeId: string): boolean => {
+      const nodes = store?.getGraph().nodes ?? [];
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return false;
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      return typeof data.storageKey === 'string' && Boolean(data.storageKey);
     };
-  }, [enabled, projectId, commandQueue]);
+
+    const applySegment = async (task: BrokerTask, seg: BrokerSegment): Promise<void> => {
+      const output = seg.output;
+      if (!output) return;
+      const nodeId = output.nodeId ?? `mcp_${task.taskId}_${seg.index - 1}`;
+      if (hasApplied(nodeId)) return;
+      const req = requestOf(task, seg.index);
+      const modelKey = req?.model ? MODEL_KEYS[req.model] : MODEL_KEYS.moss;
+      const isEdit = Boolean(req?.sourceNodeId || req?.sourceStorageKey);
+      const title = nodeTitle(req, req ? seg.index : seg.index);
+      const url = await resolveMediaUrl(output.storageKey).catch(() => '');
+      if (!url) return;
+      const col = (seg.index - 1) % 5;
+      const row = Math.floor((seg.index - 1) / 5);
+      const position = { x: 120 + col * 300, y: 120 + row * 320 };
+      const width = output.width ?? 1024;
+      const height = output.height ?? 1024;
+      cq.execute(new AddNodeCommand({
+        id: nodeId,
+        type: 'image',
+        position,
+        size: { width: 300, height: 300 },
+        title,
+        data: {
+          content: '',
+          status: 'loading',
+          prompt: req?.prompt ?? seg.prompt ?? '',
+          model: isEdit ? LOCAL_IMAGE_MODEL_KEY : modelKey,
+          paramValues: {
+            aspect: req?.aspect ?? '1:1',
+            megapixels: req?.megapixels ?? 4,
+            ...(output.width && output.height ? { width: output.width, height: output.height, sizeMode: 'custom' } : {}),
+            steps: req?.steps,
+            seed: req?.seed ?? -1,
+            cfg: req?.model === 'moss' ? 2.5 : undefined,
+            negative_prompt: req?.negative_prompt ?? '',
+          },
+        },
+      } as never));
+      if (isEdit && req?.sourceNodeId) {
+        cq.execute(new AddEdgeCommand({
+          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-mcp`,
+          source: { nodeId: req.sourceNodeId, pinId: 'image' },
+          target: { nodeId, pinId: 'prompt' },
+        }));
+      }
+      cq.execute(new UpdateNodeDataCommand(nodeId, {
+        content: url,
+        status: 'success',
+        naturalWidth: width,
+        naturalHeight: height,
+        mimeType: output.mime,
+        storageKey: output.storageKey,
+        generationId: task.taskId,
+        model: isEdit ? LOCAL_IMAGE_MODEL_KEY : modelKey,
+        prompt: req?.prompt ?? seg.prompt ?? '',
+        ...(req?.sourceNodeId
+          ? { generation: { prompt: req.prompt, model: isEdit ? LOCAL_IMAGE_MODEL_KEY : modelKey, sourceNodeId: req.sourceNodeId, sourceStorageKey: req.sourceStorageKey } }
+          : {}),
+      } as Record<string, unknown>));
+      const fitted = fitImageNodeSize(300, width, height);
+      cq.execute(new ResizeNodeCommand(nodeId, { ...position, width: 300, height: 300 }, { ...position, width: fitted.width, height: fitted.height }));
+      nodeActionBus.emit('canvas:history:created', {
+        kind: 'image',
+        title,
+        generationId: task.taskId,
+        prompt: req?.prompt ?? seg.prompt ?? '',
+        nodeId,
+      });
+    };
+
+    const unsubscribe = subscribeBrokerTasks(projectId, (tasks) => {
+      const now = Date.now();
+      for (const task of tasks) {
+        if (task.kind !== 'canvas_image') continue;
+        const updated = Date.parse(task.updatedAt) || 0;
+        if (updated && now - updated > APPLY_WINDOW_MS) continue;
+        for (const seg of task.segments) {
+          if (seg.state !== 'success' || !seg.output) continue;
+          const key = `${task.taskId}:${seg.index}:${seg.output.storageKey}`;
+          if (applying.has(key)) continue;
+          applying.add(key);
+          void applySegment(task, seg).catch(() => {
+            applying.delete(key); // 失败允许下次快照重试
+          });
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [enabled, projectId, commandQueue, store]);
 }

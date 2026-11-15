@@ -17,6 +17,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import { dataRoot, setDataRoot } from "./config.js";
+import { handleBrokerRequest } from "./broker/http.js";
 
 export function fsServerPort(): number {
   const n = Number(process.env.ZEROEXO_FS_PORT ?? "");
@@ -80,6 +81,8 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
  * `--http` 模式用它把数据服务并入 MCP 同一进程，避免多起一个 fs-server 服务。
  */
 export async function handleFsRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  // 任务中转服务（/tasks*）先接管：与数据服务同端口，网页无需第二个地址
+  if (await handleBrokerRequest(req, res)) return;
   const url = new URL(req.url ?? "/", "http://localhost");
   const p = url.searchParams.get("p") ?? "";
 

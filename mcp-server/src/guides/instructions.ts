@@ -24,7 +24,7 @@ ${STAGES}
 
 【MCP 自身版本（2026-11-11）】工具返回里出现 _mcpOutdated（例如旧版缺少 plan_continuity_edit）时，不要当成普通数据忽略：先调 mcp_update_status 把「缺哪些工具 / 仓库落后多少」告诉用户，用户同意后调 update_mcp_server（userConfirmed:true）自动快进并重新编译，最后提醒用户重启 MCP 服务。不要等用户来问「MCP 更新了吗」。
 
-【ComfyUI 连接状态（2026-11-14）】诊断「ComfyUI 未连接 / 作业 pending」前先调 get_comfyui_status：它读网页广播的地址（云端也走这里），不要假设 127.0.0.1:8188。地址可达但作业 pending，多半是网页没打开当前项目（作业由网页消费）；地址不可达再查云端服务，禁止退回 localhost 猜。
+【ComfyUI 连接状态（2026-11-14）】诊断「ComfyUI 未连接 / 作业 pending」前先调 get_comfyui_status：它读网页广播的地址（云端也走这里），不要假设 127.0.0.1:8188。生成任务由 MCP Task Broker 执行并落盘（.lf/zeroexo/app_meta/tasks/），网页只订阅；任务停在 queued 说明 MCP worker 没在跑（重启 MCP / fs-server）或 ComfyUI 不可达，用 get_generation_task 看 state 与 error，不要再说「网页没打开所以不执行」。
 
 【升级 / 连上后先查漏补缺（2026-11-13 用户要求，硬性）】
 - 每次连上、或用户提到「更新了 / 升级了 MCP」时：先调 get_upgrade_guide 读说明，再调 audit_upgrade({projectId})（只读，不改文件）。
@@ -36,8 +36,8 @@ ${STAGES}
 - 背景：H3 引擎按 17 帧块组织 latent，所以每段可见帧必须吸附成 17k+5；段与段之间靠「上一段尾帧 22 帧」衔接。
   照搬原稿段落时长、或不接尾帧，出来的是「看起来连着的碎段」，不是可交付的片子；外行客户看不出问题，所以更不能由 Agent 自行决定跳过。
 - 分集/片段纠错：已有片段改集用「move_segments」，删重复片段用「delete_segments」，删整集用「delete_episode」；**禁止用重建来“移动”**，那会留下旧集重复片段。
-- 顺序：split_script_to_shots / add_segment 对齐段数 → plan_continuity_edit（dryRun）把「段号 / 帧数 / 秒数 / 是否吃上一段尾帧」整张表给用户 → 用户确认 → confirm:true + userConfirmed:true 落盘 → **request_director_run 投递给网页执行**（网页是唯一执行入口；不要用 run_generation 直接提交）→ 网页逐段串行生成并自动落库。
-- 硬约束：每段可见帧（17k+5）＋引导帧（22）≤ 736；第 2 段起必须有上一段 guide；run_generation 对「没有延续法计划 / 跳段选片 / 从中间开始」三类情况直接报 CONTINUITY_* 拒绝，不要尝试绕过。
+- 顺序：split_script_to_shots / add_segment 对齐段数 → plan_continuity_edit（dryRun）把「段号 / 帧数 / 秒数 / 是否吃上一段尾帧」整张表给用户 → 用户确认 → confirm:true + userConfirmed:true 落盘 → **request_director_run 提交 MCP 任务**（MCP 串行执行；网页只订阅进度/预览/结果，不执行）→ 用 get_generation_task 查进度。
+- 硬约束：每段可见帧（17k+5）＋引导帧（22）≤ 736。批量生成按**连续段（run）**提交：每个 run 只取「起始段前一段当前缓存版本」的 guide 作为起点，run 内由插件用 prevJobId 内循环续接，**不逐段发送 guide**；分段选择（如 3,4 + 6,7）时每段 run 的起始段各自取上一段缓存（3 吃 2、6 吃 5）。起始段没有可用 guide 时 request_director_run 直接拒绝，绝不回退插件 LAST_GUIDE。
 - 禁止：把原稿段长直接当段长、只写「承上/接上一段」这类调度词冒充延续法、只做一半就交付。
 
 【导入前强制预检（2026-11-10 弱模型事故后加，必须遵守）】
@@ -57,11 +57,11 @@ ${STAGES}
 - **成片**：\`scaleFactor=1.7–1.8\`。
 - **图片**：以原图为参考，尺寸按官方 2K 口径（最长边 2048、16 对齐）写进参数；注意 **2K 只是参数层面**，不承诺最终像素一定达到 2K；尺寸系数取 1.7–1.8。
 - 以上只是推荐值，仍须用户确认；不要替用户拍板，也不要把预览参数当正式成片参数。
-- **批量图片/改图**：同一批每个 request 的 seed 必须不同（要多张不同结果用 seed:-1，或逐张给不同 seed）；同一个 seed + 同一 prompt/参数在 ComfyUI 会命中缓存、返回同一张图，编辑时看起来就像“原图”。**每次批量必须用新的 jobId**，复用会命中旧 status 的 done 条目并跳过生成。
+- **批量图片/改图**：同一批每个 request 的 seed 必须不同（要多张不同结果用 seed:-1，或逐张给不同 seed）；同一个 seed + 同一 prompt/参数在 ComfyUI 会命中缓存、返回同一张图，编辑时看起来就像“原图”。**每次批量用 get_generation_task 查同一个 taskId 的进度**，不要复用 taskId 重复提交。
 - **片段编号按集重置**：每集从 1 开始编号（第1集 1–5、第2集重新 1–4…），**禁止全剧连续编号**；episodeId 必须归到正确剧集，不得把全剧场次都挂在第1集。
 
 【最少需要问用户的问题——缺哪个问哪个，禁止模型替用户决定格式、集数、策略】项目确认（当前打开的那个是不是要操作的项目）；剧本原文；mode 选择（standard|raw，用户的决定）；主体外观与清单确认；是否拆分镜（用户明确说「可以拆」才拆）；出片参数逐项确认。
 
-【禁止事项】不擅自替用户决定 mode/strategy/presetId 等枚举选项；不覆盖用户数据（写前 dryRun 预览，用户确认才 confirm，overwrite 须用户明示）；不静默默认参数（缺 baseVersion/mode/duration 就报错或就问）；不提交真实 GPU 生成任务；遇 VERSION_CONFLICT 重读再写。
+【禁止事项】不擅自替用户决定 mode/strategy/presetId 等枚举选项；不覆盖用户数据（写前 dryRun 预览，用户确认才 confirm，overwrite 须用户明示）；不静默默认参数（缺 baseVersion/mode/duration 就报错或就问）；生成只经 request_director_run / generate_canvas_images 提交 MCP 任务，不自己拼 /prompt 或绕开任务表；遇 VERSION_CONFLICT 重读再写。
 
 ${SKILLS_POINTER}`;

@@ -2413,11 +2413,18 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
   );
   /** 批量条：多选时才出现；未选中时动作置灰（不留「点了没反应」的按钮） */
   const noneSelected = selectedCards.length === 0;
+  const allCardsSelected = cards.length > 0 && selectedCards.length === cards.length;
+  const toggleSelectAllCards = (): void => {
+    setSelectedIds(allCardsSelected ? new Set() : new Set(cards.map((c) => c.id)));
+  };
   const batchActions = (
     <>
       <span style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text, flexShrink: 0 }}>
         {t('common.batchSelected', { n: selectedCards.length, defaultValue: `已选 ${selectedCards.length} 项` })}
       </span>
+      <Button size="small" data-batch-select-all onClick={toggleSelectAllCards} disabled={cards.length === 0}>
+        {allCardsSelected ? t('common.batchSelectNone', '取消全选') : t('common.batchSelectAll', '全选')}
+      </Button>
       <Dropdown
         trigger={['click']}
         disabled={noneSelected}

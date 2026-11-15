@@ -36,6 +36,38 @@ export interface WorkbenchShotGuide {
   createdAt?: string;
 }
 
+/**
+ * 片段缓存版本（2026-11-15）：每次生成成功追加一个版本，`media` 只是「当前选中版本」的投影。
+ * 重生成第 N 段时固定取时间线上一段当前选中版本的 guide（执行时才解析）。
+ */
+export interface WorkbenchShotVersionGuide {
+  /** 插件 guide id（gd_xxx） */
+  id: string;
+  frames?: number;
+  sha256?: string;
+  /** 本地缓存键 `guide:<id>.safetensors` */
+  localKey?: string;
+  path?: string;
+}
+
+export interface WorkbenchShotVersion {
+  id: string;
+  storageKey: string;
+  /** 最后一帧预览（MCP 落盘的图片 storageKey） */
+  previewKey?: string;
+  guide?: WorkbenchShotVersionGuide | null;
+  prompt?: string;
+  params?: Record<string, unknown>;
+  sourceVersionId?: string;
+  createdAt: string;
+  status: 'done' | 'failed' | 'archived';
+}
+
+export interface WorkbenchShotCache {
+  selectedVersionId: string;
+  versions: WorkbenchShotVersion[];
+}
+
 export interface WorkbenchShot {
   id: string;
   number: number;
@@ -107,6 +139,8 @@ export interface WorkbenchShot {
    * 每段至多一个，重复发送 = 替换。
    */
   guide?: WorkbenchShotGuide;
+  /** 片段缓存：版本历史 + 当前选中版本（2026-11-15）；`media` 是选中版本的投影 */
+  cache?: WorkbenchShotCache;
   /** 用户手动改过 */
   manualEdit?: boolean;
   /**

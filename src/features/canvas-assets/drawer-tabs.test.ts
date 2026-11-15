@@ -16,28 +16,28 @@ import { DRAWER_TAB_DEFS, DRAWER_MODULE_GROUPS, resolveDrawerModule } from './ta
 const readSrc = (rel: string): string => readFileSync(resolve(process.cwd(), rel), 'utf-8');
 
 describe('抽屉页签顺序（资产置顶）', () => {
-  it('历史入口已移除：资产 → 画布（层级/子画布合并）→ 本剧信息', () => {
-    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'canvasStructure', 'scriptMeta']);
+  it('历史入口已移除：资产 → 画布（层级/子画布合并）→ 本剧信息 → 任务队列', () => {
+    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'canvasStructure', 'scriptMeta', 'tasks']);
   });
 });
 
 describe('按模块独立挂载（层级/子画布只在画布模块）', () => {
   it('画布模块含画布专属分组，不含本剧信息', () => {
-    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['material', 'canvasStructure']);
+    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['material', 'canvasStructure', 'tasks']);
     expect(resolveDrawerModule('canvas')).toBe('canvas');
     expect(resolveDrawerModule('canvas:sc123')).toBe('canvas');
   });
 
-  it('剧本/导演台模块 = 资产/本剧信息（不再有独立历史入口）', () => {
+  it('剧本/导演台模块 = 资产/本剧信息/任务队列（不再有独立历史入口）', () => {
     for (const key of ['script:p1', 'script', 'workbench:node-2', 'workbench']) {
       const module = resolveDrawerModule(key);
-      expect([...DRAWER_MODULE_GROUPS[module]]).toEqual(['material', 'scriptMeta']);
+      expect([...DRAWER_MODULE_GROUPS[module]]).toEqual(['material', 'scriptMeta', 'tasks']);
     }
   });
 
-  it('主体库（storyboard）模块只有资产（不挂本剧信息、不挂历史）', () => {
+  it('主体库（storyboard）模块只有资产/任务队列（不挂本剧信息、不挂历史）', () => {
     for (const key of ['storyboard:node-1', 'storyboard']) {
-      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['material']);
+      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['material', 'tasks']);
     }
   });
 

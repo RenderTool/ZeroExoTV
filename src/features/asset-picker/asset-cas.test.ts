@@ -72,19 +72,18 @@ describe('asset-store × CAS 删除语义', () => {
     registerCasRefMock.mockClear();
   });
 
-  it('删除一个 cas 资产：releaseCas 被调一次；同内容另一资产不被级联删除', async () => {
+  it('删除一个 cas 资产：只删元数据，不 release/删除物理文件；同内容另一资产不被级联删除', async () => {
     seedAssets([casImageAsset('a1'), casImageAsset('a2')]);
     const deleted = await removeAssets(['a1']);
 
     expect(deleted.map((a) => a.id)).toEqual(['a1']);
-    expect(releaseCasMock).toHaveBeenCalledTimes(1);
-    expect(releaseCasMock).toHaveBeenCalledWith(HASH_X, { assetId: 'a1', projectId: 'proj-test' });
+    expect(releaseCasMock).not.toHaveBeenCalled();
 
     const rest = await listAssets();
     expect(rest.map((a) => a.id)).toEqual(['a2']); // cas 键不按 storageKey 级联
   });
 
-  it('删除公共库副本时，仍引用同一 CAS 的存量历史记录会被补挂 ref（不误删视频文件）', async () => {
+  it('删除公共库副本时，物理文件绝不能被释放（画布/导演台/主体可能仍在引用）', async () => {
     // 历史产物形态：只有 storageKey=cas:<hash>.<ext>，没有 cas 字段（存量/节点保存链路）
     const legacyHistory: Asset = {
       id: 'history-v1',
@@ -109,25 +108,23 @@ describe('asset-store × CAS 删除语义', () => {
 
     await removeAssets(['lib-copy']);
 
-    // 删除前先给仍在引用同一内容的记录补 ref，再释放被删记录 → 文件不会因 refCount=0 被删
-    expect(registerCasRefMock).toHaveBeenCalledWith(HASH_X, { assetId: 'history-v1', projectId: 'proj-test', kind: 'video' });
-    expect(releaseCasMock).toHaveBeenCalledWith(HASH_X, { assetId: 'lib-copy', projectId: undefined });
+    expect(releaseCasMock).not.toHaveBeenCalled();
+    expect(registerCasRefMock).not.toHaveBeenCalled();
     const rest = await listAssets();
     expect(rest.map((a) => a.id)).toEqual(['history-v1']);
   });
 
-  it('两个 cas 引用都删完：releaseCas 各调一次（到 0 由 cas-store 删文件，本层不重复调）', async () => {
+  it('两个 cas 引用都删完：记录清空，但都不 release（物理文件留给孤儿清理）', async () => {
     seedAssets([casImageAsset('a1'), casImageAsset('a2')]);
     await removeAssets(['a1']);
     await removeAssets(['a2']);
-    expect(releaseCasMock).toHaveBeenCalledTimes(2);
+    expect(releaseCasMock).not.toHaveBeenCalled();
     expect(await listAssets()).toHaveLength(0);
   });
 
-  it('重复删除幂等：第二次删同 id 不再调 releaseCas、不报错', async () => {
+  it('重复删除幂等：第二次删同 id 不报错', async () => {
     seedAssets([casImageAsset('a1')]);
     await removeAssets(['a1']);
-    releaseCasMock.mockClear();
     const again = await removeAssets(['a1']);
     expect(again).toEqual([]);
     expect(releaseCasMock).not.toHaveBeenCalled();

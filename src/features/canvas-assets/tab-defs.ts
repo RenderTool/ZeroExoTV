@@ -19,6 +19,8 @@ export const DRAWER_TAB_DEFS = [
   { key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab' },
   // 2026-11-07 用户指令：剧本页的「本剧信息」放进资产抽屉，作为独立分组（整部剧一句话概述 + 标签）
   { key: 'scriptMeta', labelKey: 'assetLibrary.filterScriptMeta' },
+  // 2026-11-15 用户指令：任务队列从右下角浮层移进抽屉，独立按钮点开；运行/排队中可手动取消
+  { key: 'tasks', labelKey: 'taskQueue.title' },
 ] as const;
 
 /** 抽屉分组键（由页签定义直接推导，避免第二份拷贝） */
@@ -29,11 +31,11 @@ export type DrawerModule = 'canvas' | 'script' | 'storyboard' | 'workbench';
 
 /** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在 */
 export const DRAWER_MODULE_GROUPS: Record<DrawerModule, readonly DrawerGroup[]> = {
-  canvas: ['material', 'canvasStructure'],
+  canvas: ['material', 'canvasStructure', 'tasks'],
   // 剧本 / 导演台：本剧信息是这两个阶段共用的项目级信息，只在这两个模块挂载
-  script: ['material', 'scriptMeta'],
-  storyboard: ['material'],
-  workbench: ['material', 'scriptMeta'],
+  script: ['material', 'scriptMeta', 'tasks'],
+  storyboard: ['material', 'tasks'],
+  workbench: ['material', 'scriptMeta', 'tasks'],
 };
 
 /**

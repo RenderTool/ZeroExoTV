@@ -13,7 +13,7 @@ import localforage from 'localforage';
 import { nanoid } from 'nanoid';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
-import { casStorageKey, hasCasEntry, isCasStorageKey, registerCasRef, releaseCas } from '@/entities/cas-store.js';
+import { hasCasEntry, isCasStorageKey, registerCasRef, releaseCas } from '@/entities/cas-store.js';
 import { readFile as fsReadFile, writeFile as fsWriteFile, removeFile as fsRemoveFile } from '@/platform/fs.js';
 import type { Asset, AssetKind, AssetScope } from './index.js';
 
@@ -600,25 +600,10 @@ export async function removeAssets(ids: string[]): Promise<Asset[]> {
     else remaining.push(a);
   }
   await writeAll(remaining);
-  // 释放 CAS 引用：refCount-1，到 0 由 cas-store 删物理文件并摘索引；两端幂等，重复删除不报错。
-  // 2026-11-07 数据安全：先给「仍引用同一 CAS 内容」的存活记录补挂 ref（幂等），再释放被删记录。
-  // 原因：存量记录可能只有 storageKey=cas:... 而没有 cas 字段/没登记 ref —— 直接 release 到 0
-  // 会把仍在历史里使用的视频物理文件删掉（表现为「在资产里删一条，视频历史全没了」）。
-  for (const a of deleted) {
-    if (!a.cas) continue;
-    const hash = a.cas.hash;
-    const key = casStorageKey(hash, a.cas.ext);
-    for (const s of remaining) {
-      const sameContent = s.cas?.hash === hash || getStorageKeyOfAsset(s) === key;
-      if (!sameContent) continue;
-      await registerCasRef(hash, { assetId: s.id, projectId: s.projectId ?? 'library', kind: s.kind }).catch((err) => {
-        console.warn('[asset-store] 存活记录补挂 CAS ref 失败（不阻断删除）:', s.id, err);
-      });
-    }
-    await releaseCas(hash, { assetId: a.id, projectId: a.projectId }).catch((err) => {
-      console.warn('[asset-store] 释放 CAS ref 失败（索引不受影响时可由迁移脚本收敛）:', a.id, err);
-    });
-  }
+  // 2026-11-15 数据安全（用户现场事故）：删除素材记录**绝不释放/删除 CAS 物理文件**。
+  // 同一份 CAS 还可能被画布节点、导演台 shot.cache/media、主体库引用，而那些引用不在
+  // asset refs 里；release 到 0 会把文件删掉，表现为「删一条画布历史，画布节点/导演台全失效」。
+  // 物理文件只由独立的孤儿清理（扫描全量引用后）回收；这里与函数注释的「仅删元数据」保持一致。
   return deleted;
 }
 
