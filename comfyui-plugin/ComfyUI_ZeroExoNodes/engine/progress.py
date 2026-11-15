@@ -94,10 +94,11 @@ def report_director_progress(
 
     try:
         from server import PromptServer
+        from .runtime_context import get_client_id
 
         srv = PromptServer.instance
         if srv:
-            srv.send_sync("minimax_director_progress", payload, srv.client_id)
+            srv.send_sync("minimax_director_progress", payload, get_client_id() or srv.client_id)
             srv.send_progress_text("", str(node_id))
     except Exception as exc:
         log.debug("Director progress send skipped: %s", exc)
@@ -147,10 +148,11 @@ def report_director_segment_preview(
         payload["total_steps"] = int(total_steps)
     try:
         from server import PromptServer
+        from .runtime_context import get_client_id
 
         srv = PromptServer.instance
         if srv:
-            srv.send_sync("minimax_director_preview", payload, srv.client_id)
+            srv.send_sync("minimax_director_preview", payload, get_client_id() or srv.client_id)
     except Exception as exc:
         log.debug("Director preview send skipped: %s", exc)
 

@@ -184,13 +184,20 @@ export function useAgentBridgeHooks(
             finish({
               content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height,
               mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
+              title: promptTitleSummary(String(data.prompt ?? '')) || (data.title as string) || '',
               errorDetails: undefined, errorType: undefined,
             });
+            void refs.persistence?.save().catch(() => undefined);
             void autoLandGenerationOutput({
-              nodeId, kind: 'image', title: (data.title as string) || '',
+              nodeId, kind: 'image', title: promptTitleSummary(String(data.prompt ?? '')) || (data.title as string) || '',
               content: url, width: result.width, height: result.height, bytes: result.bytes,
               mimeType: result.mimeType, jobId: result.generationId,
               model: isMoss ? MOSS_MODEL_KEY : isKrea2 ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY, prompt: String(data.prompt ?? ''),
+            }).then((landed) => {
+              if (landed?.storageKey) {
+                finish({ storageKey: landed.storageKey } as Record<string, unknown>);
+                void refs.persistence?.save().catch(() => undefined);
+              }
             }).catch(() => undefined);
           }).catch(fail);
         }
@@ -505,9 +512,12 @@ export function useAgentBridgeHooks(
             applyResult({
               content: url, status: 'success',
               naturalWidth: result.width, naturalHeight: result.height,
+              title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
               mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
               errorDetails: undefined, errorType: undefined, localJob: undefined,
             } as any, { width: result.width, height: result.height, fallbackWidth: 340, fallbackHeight: 240 });
+            // 生成结果立即落盘：刷新发生在防抖保存前也不会丢掉节点新图
+            void refs.persistence?.save().catch(() => undefined);
             nodeActionBus.emit('canvas:history:created', {
               kind: 'image',
               title: promptTitleSummary(prompt) || nodeData?.title || '',
@@ -520,7 +530,10 @@ export function useAgentBridgeHooks(
               content: url, width: result.width, height: result.height, bytes: result.bytes, mimeType: result.mimeType,
               jobId: result.generationId, model: modelKey, prompt: effectivePrompt,
             }).then((landed) => {
-              if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
+              if (landed?.storageKey) {
+                applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
+                void refs.persistence?.save().catch(() => undefined);
+              }
             }).catch((err) => console.warn('[history] 图片产出落库失败:', err));
             return;
           }

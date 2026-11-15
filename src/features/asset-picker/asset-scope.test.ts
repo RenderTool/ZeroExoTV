@@ -264,8 +264,8 @@ describe('公共库四类白名单（LIBRARY_ALLOWED_KINDS / assertLibraryKind�
     expect(() => assertLibraryKind('video')).not.toThrow();
     expect(() => assertLibraryKind('audio')).not.toThrow();
     expect(() => assertLibraryKind('text')).not.toThrow();
-    expect(() => assertLibraryKind('script' as Asset['kind'])).toThrow(/全局资产库只收图片、视频、音频、文本/);
-    expect(() => assertLibraryKind('plan' as Asset['kind'])).toThrow(/全局资产库只收图片、视频、音频、文本/);
+    expect(() => assertLibraryKind('script' as Asset['kind'])).toThrow(/公共资产只收图片、视频、音频、文本/);
+    expect(() => assertLibraryKind('plan' as Asset['kind'])).toThrow(/公共资产只收图片、视频、音频、文本/);
   });
 
   it("addAsset 公共库创建路径：scope='library' + 业务 kind 被拒（抛错，不落库）", async () => {
@@ -277,7 +277,7 @@ describe('公共库四类白名单（LIBRARY_ALLOWED_KINDS / assertLibraryKind�
         data: { kind: 'script', content: '{}', storageKey: '' } as Asset['data'],
         scope: 'library',
       }),
-    ).rejects.toThrow(/全局资产库只收图片、视频、音频、文本/);
+    ).rejects.toThrow(/公共资产只收图片、视频、音频、文本/);
     expect(appStateBucket().has(ASSETS_KEY)).toBe(false);
   });
 

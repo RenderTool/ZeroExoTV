@@ -1,29 +1,44 @@
 /**
- * 任务中转服务查询/取消（MCP Task Broker，2026-11-15）。
- *
- * 所有 AI 任务由 MCP 执行并落盘：Agent 用本组工具查进度、取消、看最后一帧预览。
- * 提交入口仍按任务类型分：request_director_run（导演台）/ generate_canvas_images（图片）。
+ * 生成任务查询/取消：代理 ComfyUI 插件的持久任务表（MCP 不执行、不落任务状态）。
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
-import {
-  cancelTask,
-  listTasks,
-  readTask,
-  taskSnapshot,
-  taskSummary,
-} from "../store/tasks.js";
+import { cancelPluginTask, getPluginTask, listPluginTasks } from "../broker/plugin-client.js";
 import { defTool, type Ctx } from "./_register.js";
+
+function summary(task: Awaited<ReturnType<typeof getPluginTask>>) {
+  if (!task) return null;
+  return {
+    taskId: task.taskId,
+    projectId: task.projectId,
+    state: task.state,
+    title: task.title,
+    totalCount: task.totalCount ?? task.segments.length,
+    doneCount: task.doneCount ?? task.segments.filter((s) => s.state === "success").length,
+    currentSegment: task.currentSegment ?? null,
+    error: task.error ?? null,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    segments: task.segments.map((s) => ({
+      index: s.index,
+      shotId: s.shotId,
+      state: s.state,
+      guide: s.guide,
+      progress: s.progress,
+      previewPath: s.previewPath,
+      outputs: s.outputs,
+      error: s.error,
+    })),
+  };
+}
 
 export function registerTaskTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
     name: "list_generation_tasks",
     description:
-      "列出持久化生成任务（导演台出片 / 画布图片）。刷新、关闭、换浏览器都不丢；activeOnly=true 只看排队与运行中。" +
-      "任务由 MCP 执行，网页只订阅。",
+      "列出 ComfyUI 插件持有的生成任务（导演台出片 / 画布图片）。任务事实源在插件 output/zeroexo/tasks，MCP 只代理查询。",
     bits: ["project.read"],
     schema: {
       projectId: z.string().optional(),
@@ -31,39 +46,36 @@ export function registerTaskTools(server: McpServer, ctx: Ctx): void {
       limit: z.number().int().min(1).max(100).optional(),
     },
     handler: async (args) => {
-      const tasks = await listTasks(dataRoot(), {
-        projectId: args.projectId,
-        activeOnly: args.activeOnly,
-        limit: args.limit ?? 20,
-      });
-      return { total: tasks.length, tasks: tasks.map(taskSummary) };
+      const tasks = await listPluginTasks(args.projectId);
+      const filtered = args.activeOnly
+        ? tasks.filter((t) => t.state === "queued" || t.state === "running")
+        : tasks;
+      const limited = filtered.slice(0, args.limit ?? 20);
+      return { total: limited.length, tasks: limited.map(summary).filter(Boolean) };
     },
   });
 
   defTool(server, ctx, {
     name: "get_generation_task",
     description:
-      "查单个生成任务：状态、逐段进度、每段 guide 来源（cache=上一段当前缓存 / slot=显式引导槽 / none）、" +
-      "产物 storageKey、最后一帧预览键 previewKey。进度与预览都在 MCP 侧持久化。",
+      "查单个生成任务：状态、逐段进度、guide、每段产物和成品末帧路径。任务由 ComfyUI 插件持久化，关网页/关 MCP 都不会中断。",
     bits: ["project.read"],
     schema: { taskId: z.string() },
     handler: async (args) => {
-      const task = await readTask(args.taskId, dataRoot());
+      const task = await getPluginTask(args.taskId);
       if (!task) throw new McpError("NOT_FOUND", `任务不存在: ${args.taskId}`);
-      return taskSnapshot(task);
+      return summary(task);
     },
   });
 
   defTool(server, ctx, {
     name: "cancel_generation_task",
-    description: "取消生成任务：排队中立即取消；运行中由 MCP 在安全点中断当前 ComfyUI 作业并保留已完成段。",
+    description: "取消插件任务：排队中立即取消；运行中由插件在安全点中断，已完成段保留。",
     bits: ["workbench.write"],
     schema: { taskId: z.string() },
     handler: async (args) => {
-      const task = await readTask(args.taskId, dataRoot());
-      if (!task) throw new McpError("NOT_FOUND", `任务不存在: ${args.taskId}`);
-      const canceled = await cancelTask(args.taskId, dataRoot());
-      return { ...taskSnapshot(canceled), hint: "已请求取消；进度会由执行器在安全点收尾。" };
+      const task = await cancelPluginTask(args.taskId);
+      return { ...summary(task), hint: "已请求取消；已完成段保留。" };
     },
   });
 }

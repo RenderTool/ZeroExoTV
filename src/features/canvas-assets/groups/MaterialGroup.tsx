@@ -42,9 +42,11 @@ const KIND_OPTIONS = [
   { key: 'text', labelKey: 'assetLibrary.filterText' },
 ];
 
-export function MaterialGroup({ store, theme }: {
+export function MaterialGroup({ store, theme, lockedScope }: {
   store: CanvasAssetsPanelStore;
   theme: ThemeConfig;
+  /** 独立入口锁定的作用域：全局资产 / 主体；不再显示混合胶囊 */
+  lockedScope?: 'library' | 'subject';
 }): React.ReactElement {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -98,7 +100,7 @@ export function MaterialGroup({ store, theme }: {
       kind,
       storageKey: d.storageKey,
       content: d.kind === 'text' ? (d.content ?? '') : undefined,
-      source: '全局资产库',
+      source: '公共资产',
     };
   };
   const openCard = (asset: Asset) => {
@@ -158,6 +160,11 @@ export function MaterialGroup({ store, theme }: {
     if (saved && saved !== store.materialScopeTab) store.setMaterialScopeTab(saved);
   }, [projectId, store.materialScopeTab, store.setMaterialScopeTab]);
 
+  // 独立入口：锁定为全局资产/主体，不再展示混合分段
+  useEffect(() => {
+    if (lockedScope && store.materialScopeTab !== lockedScope) store.setMaterialScopeTab(lockedScope);
+  }, [lockedScope, store.materialScopeTab, store.setMaterialScopeTab]);
+
   /** 图片资产「编辑」：交给编辑器页在画布建节点并打开图片编辑页签（结果落回画布） */
   const editImageAsset = useCallback((asset: Asset) => {
     const d = (asset.data ?? {}) as { storageKey?: string; content?: string; naturalWidth?: number; naturalHeight?: number };
@@ -173,7 +180,13 @@ export function MaterialGroup({ store, theme }: {
     });
   }, []);
 
-  const capsuleBar = (
+  const capsuleBar = lockedScope ? (
+    <div style={{ padding: '10px 20px 0', fontSize: 13, fontWeight: 600, color: theme.toolbar.text, flexShrink: 0 }}>
+      {lockedScope === 'subject'
+        ? t('assetLibrary.scopeCapsuleSubject', '主体')
+        : t('assetLibrary.scopeCapsuleLibrary', '公共资产')}
+    </div>
+  ) : (
     // 2026-11-04 约定（口径翻案）：「公共资产 N / 本项目 N」胶囊只放在这里——
     // 抽屉素材分组顶部、类型筛选行之上。资产库工具栏/主页/项目弹窗一律不出现。复用同一 ScopeCapsuleTabs。
     // 2026-11-05 开源库接入：胶囊扩为三段「公共 / 本项目 / 开源库」，开源库只读展示不与用户数据混排。

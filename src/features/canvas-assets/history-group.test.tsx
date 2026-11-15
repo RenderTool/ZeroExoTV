@@ -6,7 +6,7 @@
  * 2) 两分类数据分区：filterHistoryAssets / countHistoryByKind（project 作用域 + kind 分区 + 时间倒序）
  * 3) 空态：图片/视频两分类各自独立空态文案
  * 4) 分页/懒加载：>50 条分页（paginate 切片）+ LazyVisible 进入视口才渲染内容
- * 附带：findAssetNodeId 定位（originNodeId 优先 / storageKey 兜底 / 未命中 null）
+ * 2026-11-16 用户指令：「定位到画布节点」功能移除（graphStore/onFocusNode 未接线失效），相关用例一并删除
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
@@ -44,6 +44,8 @@ vi.mock('antd', () => ({
   ),
   Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   Dropdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  // 导演台分组「关联到片段」等下拉：桩为空渲染（断言不依赖 Select 交互）
+  Select: () => null,
 }));
 
 // i18n: 复用 zh.json 资源
@@ -69,7 +71,6 @@ import {
   countHistoryBySourceAndKind,
   dedupeGenerationAssets,
   filterHistoryAssets,
-  findAssetNodeId,
   fmtRelativeTime,
   getHistorySource,
   isGenerationAsset,
@@ -135,11 +136,14 @@ afterEach(() => {
 });
 
 describe('抽屉历史入口', () => {
-  it('独立 history 页签已移除（画布产物进「画布」/ 导演台产物进「导演台」），剧本页签也不存在', () => {
+  it('独立 history 页签已移除（画布产物进 canvasHistory / 导演台产物进 directorHistory），剧本页签也不存在', () => {
     const keys = DRAWER_TAB_DEFS.map((d) => d.key);
     expect(keys).not.toContain('history');
-    expect(keys).toContain('canvasStructure');
-    expect(keys).toContain('material');
+    expect(keys).toContain('canvasHistory');
+    expect(keys).toContain('directorHistory');
+    // 2026-11-16 挂载顺序重排：模块独有页签（canvasStructure/scriptMeta）垫底
+    expect(keys[keys.length - 2]).toBe('canvasStructure');
+    expect(keys[keys.length - 1]).toBe('scriptMeta');
     // 2026-11-05 用户指令（征集 #174）：抽屉不再重复「剧本」入口，
     // 剧本正文唯一入口 = 顶部固定槽位页签（一个项目 = 1 剧本）。
     expect(keys).not.toContain('script');
@@ -153,11 +157,13 @@ describe('抽屉历史入口', () => {
 });
 
 describe('真实抽屉渲染链结构断言（无浏览器）', () => {
-  it('CanvasAssetsPanel 不再挂独立历史；导演台类目由 MaterialGroup 锁来源渲染 HistoryGroup', () => {
+  it('CanvasAssetsPanel 直挂画布/导演台历史（moduleOnly 页签垫底）；导演台类目由 MaterialGroup 锁来源渲染 HistoryGroup', () => {
     const src = readSrc('src/features/canvas-assets/CanvasAssetsPanel.tsx');
     expect(src).toContain('DRAWER_TAB_DEFS.map');
     expect(src).not.toContain("activeGroup === 'history'");
-    expect(src).not.toContain('<HistoryGroup');
+    // 2026-11-16：画布历史/导演台历史由 CanvasAssetsPanel 直挂（forcedSource 锁来源）
+    expect(src).toContain('forcedSource="canvas"');
+    expect(src).toContain('forcedSource="director"');
     const material = readSrc('src/features/canvas-assets/groups/MaterialGroup.tsx');
     expect(material).toContain('forcedSource="director"');
     expect(material).toContain('<HistoryGroup');
@@ -252,7 +258,7 @@ describe('分页与懒加载', () => {
     const store = mkStore(assets);
     render(<HistoryGroup store={store} theme={theme} />);
     // jsdom 无 IntersectionObserver → LazyVisible 回退直接可见；卡片按页切片 50 张
-    expect(screen.getAllByTitle(/定位到画布节点/)).toHaveLength(HISTORY_PAGE_SIZE);
+    expect(screen.getAllByTitle('发送')).toHaveLength(HISTORY_PAGE_SIZE);
     const pager = screen.getByTestId('pagination');
     expect(pager.getAttribute('data-total')).toBe('55');
   });
@@ -273,25 +279,6 @@ describe('分页与懒加载', () => {
     } finally {
       vi.unstubAllGlobals();
     }
-  });
-});
-
-describe('定位画布节点', () => {
-  const graph = {
-    nodes: [
-      { id: 'node-1', data: { storageKey: 'cas:x2.png' } },
-      { id: 'node-2', data: {} },
-    ],
-  };
-
-  it('originNodeId 优先；节点已删则退回 storageKey 扫描；都未命中返回 null', () => {
-    const byOrigin = mkAsset({ id: 'x1', data: { kind: 'image', dataUrl: '', storageKey: 'cas:none.png', originNodeId: 'node-2' } as never });
-    expect(findAssetNodeId(graph, byOrigin)).toBe('node-2');
-    const byKey = mkAsset({ id: 'x2' });
-    expect(findAssetNodeId(graph, byKey)).toBe('node-1');
-    const miss = mkAsset({ id: 'x3', data: { kind: 'image', dataUrl: '', storageKey: 'cas:zzz.png', originNodeId: 'gone' } as never });
-    expect(findAssetNodeId(graph, miss)).toBeNull();
-    expect(findAssetNodeId(null, miss)).toBeNull();
   });
 });
 
@@ -427,13 +414,6 @@ describe('历史「全部」与导演台免分类（2026-11-08）', () => {
 });
 
 describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', () => {
-  const directorVideo = mkAsset({
-    id: 'btn-director', kind: 'video', mimeType: 'video/mp4', title: '片段 2 · 13.8s',
-    data: {
-      kind: 'video', url: '', storageKey: 'cas:d.mp4',
-      origin: 'generation', originSource: 'director', generation: GEN_META,
-    } as never,
-  });
   const guideVideo = mkAsset({
     id: 'btn-guide', kind: 'video', mimeType: 'video/mp4', title: '片段 1 · 15s',
     data: {
@@ -442,19 +422,7 @@ describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', 
       guide: { id: 'gd_btn12345', frames: 22 }, generation: GEN_META,
     } as never,
   });
-  const canvasImg = mkAsset({ id: 'btn-canvas' });
-  const LOCATE = '[title="定位到画布节点"]';
   const SEND_GUIDE = '[aria-label*="发送"]';
-
-  it('「从画布生成」有定位到画布；切到「从导演台」后不显示（导演台产物没有画布节点）', () => {
-    const { container } = render(<HistoryGroup store={mkStore([canvasImg, directorVideo])} theme={theme} />);
-    expect(container.querySelector('[data-history-card="btn-canvas"]')).toBeTruthy();
-    expect(container.querySelectorAll(LOCATE).length).toBe(1);
-
-    fireEvent.click(container.querySelector('[data-scope="director"]') as Element);
-    expect(container.querySelector('[data-history-card="btn-director"]')).toBeTruthy();
-    expect(container.querySelectorAll(LOCATE).length).toBe(0);
-  });
 
   it('导演台视频卡显示「发送到导演台」入口（下拉含源视频 / 引导）', () => {
     const { container } = render(<HistoryGroup store={mkStore([guideVideo])} theme={theme} />);
@@ -467,7 +435,9 @@ describe('历史卡片按钮按来源 / 引导可用性分派（2026-11-09）', 
     const src = readSrc('src/features/canvas-assets/groups/HistoryGroup.tsx');
     expect(src).toContain("(asset.data as { kind?: string }).kind === 'video'");
     expect(src).toContain('sendGuideToWorkbench');
-    expect(src).toContain("historySource === 'canvas' ? () => handleLocate(asset) : undefined");
+    // 2026-11-16 用户指令：定位到画布节点已整块移除（graphStore/onFocusNode 未接线，功能失效）
+    expect(src).not.toContain('handleLocate');
+    expect(src).not.toContain('findAssetNodeId');
   });
 
   it('画布生成的图片/音频也能发到导演台（2026-11-11 反馈：之前图片菜单项是灰的）', () => {

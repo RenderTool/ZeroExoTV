@@ -1,11 +1,13 @@
 /**
- * 抽屉分组页签 + 模块挂载规则（2026-11-06 用户指令回归）
+ * 抽屉分组页签 + 模块挂载规则（2026-11-16 用户指令回归）
  *
- * 验收三条：
- * 1) sidebar 按钮顺序 = 资产 → 历史 → 层级 → 画布（资产置顶）；
- * 2) 层级 / 画布只在**画布模块**（含副本画布页签）挂载，剧本 / 主体库 / 导演台模块只有资产 / 历史，
+ * 验收四条：
+ * 1) sidebar 按钮顺序 = 全局分组（公共资产/主体/画布历史/导演台/任务队列）置顶，
+ *    模块独有分组（画布结构/本剧信息）垫底，面板给首个独有分组上方画分割线；
+ * 2) 画布结构只在画布模块挂载、本剧信息只在剧本/导演台模块挂载，
  *    避免用户在这些模块里误选画布层级与子画布；
- * 3) 挂载接线：面板按 visibleGroups 过滤按钮，层级树数据 hook 只在层级分组组件内部挂载。
+ * 3) 挂载接线：面板按 visibleGroups 过滤按钮，层级树数据 hook 只在层级分组组件内部挂载；
+ * 4) 「全局/全局资产库」改名「公共资产」（2026-11-16 用户指令）。
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -15,34 +17,49 @@ import { DRAWER_TAB_DEFS, DRAWER_MODULE_GROUPS, resolveDrawerModule } from './ta
 /** 读仓库源码（结构断言用；vitest cwd = 仓库根） */
 const readSrc = (rel: string): string => readFileSync(resolve(process.cwd(), rel), 'utf-8');
 
-describe('抽屉页签顺序（资产置顶）', () => {
-  it('历史入口已移除：资产 → 画布（层级/子画布合并）→ 本剧信息 → 任务队列', () => {
-    expect(DRAWER_TAB_DEFS.map((d) => d.key)).toEqual(['material', 'canvasStructure', 'scriptMeta', 'tasks']);
+describe('抽屉页签顺序（全局置顶、模块独有垫底）', () => {
+  it('全局分组在前：公共资产 → 主体 → 画布历史 → 导演台 → 任务队列', () => {
+    expect(DRAWER_TAB_DEFS.filter((d) => !d.moduleOnly).map((d) => d.key))
+      .toEqual(['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks']);
+  });
+
+  it('模块独有分组垫底：画布结构 / 本剧信息', () => {
+    expect(DRAWER_TAB_DEFS.filter((d) => d.moduleOnly).map((d) => d.key))
+      .toEqual(['canvasStructure', 'scriptMeta']);
+    expect(DRAWER_TAB_DEFS.slice(-2).every((d) => d.moduleOnly)).toBe(true);
   });
 });
 
 describe('按模块独立挂载（层级/子画布只在画布模块）', () => {
   it('画布模块含画布专属分组，不含本剧信息', () => {
-    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['material', 'canvasStructure', 'tasks']);
+    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'canvasStructure']);
     expect(resolveDrawerModule('canvas')).toBe('canvas');
     expect(resolveDrawerModule('canvas:sc123')).toBe('canvas');
   });
 
-  it('剧本/导演台模块 = 资产/本剧信息/任务队列（不再有独立历史入口）', () => {
-    for (const key of ['script:p1', 'script', 'workbench:node-2', 'workbench']) {
-      const module = resolveDrawerModule(key);
-      expect([...DRAWER_MODULE_GROUPS[module]]).toEqual(['material', 'scriptMeta', 'tasks']);
-    }
+  it('剧本/导演台模块挂本剧信息（垫底），画布模块不挂', () => {
+    expect(DRAWER_MODULE_GROUPS.script).toEqual(['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'scriptMeta']);
+    expect(DRAWER_MODULE_GROUPS.workbench).toEqual(['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'scriptMeta']);
+    expect(DRAWER_MODULE_GROUPS.canvas).not.toContain('scriptMeta');
   });
 
-  it('主体库（storyboard）模块只有资产/任务队列（不挂本剧信息、不挂历史）', () => {
+  it('主体库（storyboard）模块只有全局分组（不挂本剧信息、不挂画布结构）', () => {
     for (const key of ['storyboard:node-1', 'storyboard']) {
-      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['material', 'tasks']);
+      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks']);
     }
   });
 
   it('未知 key 回落画布模块（不产生空 sidebar）', () => {
     expect(resolveDrawerModule('whatever')).toBe('canvas');
+  });
+});
+
+describe('分割线接线（模块独有分组上方）', () => {
+  it('面板给首个 moduleOnly 按钮设置 dividerBefore，SidebarNav 支持渲染分割线', () => {
+    const panel = readSrc('src/features/canvas-assets/CanvasAssetsPanel.tsx');
+    expect(panel).toContain('dividerBefore');
+    const common = readSrc('src/features/canvas-assets/components/common.tsx');
+    expect(common).toContain('dividerBefore');
   });
 });
 

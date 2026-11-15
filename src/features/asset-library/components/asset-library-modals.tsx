@@ -97,7 +97,7 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
       kind,
       storageKey: d.storageKey,
       content: kind === 'text' ? (d.content ?? '') : undefined,
-      source: '全局资产库',
+      source: '公共资产',
     };
   }, [props.assetDetail]);
 

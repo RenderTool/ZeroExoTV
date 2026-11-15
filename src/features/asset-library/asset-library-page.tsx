@@ -190,7 +190,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     // 2026-11-05 约定：发送目标扩展为「画布 / 导演台当前片段」——原入口语义不动，
     // 追加导演台入口（复用唯一槽位分配；满员拒绝提示、无选中片段提示、同资产复用槽号）。
     if (props.embeddedInCanvas && ((item.data as any)?.kind !== 'script')) {
-      items.push({ key: 'send-to-director', label: t('assetLibrary.sendToDirector', '发送到导演台当前片段'), icon: null, onClick: () => void sendAssetToWorkbench(item.data, antdMessage, t) });
+      items.push({ key: 'send-to-director', label: t('assetLibrary.sendToDirector', '发送到分镜当前片段'), icon: null, onClick: () => void sendAssetToWorkbench(item.data, antdMessage, t) });
     }
     setCtxMenuItems(items);
   }, [setCtxMenuPosition, setCtxMenuItems, ctx.handleOpenItem, ctx.setRenameItemTarget, ctx.setRenameItemName, ctx.setRenameItemOpen, ctx.handleDownloadItem, ctx.setConfirmDelete, t, props.onSendToCanvas, props.embeddedInCanvas, antdMessage]);
@@ -278,7 +278,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
           kind: d.kind as MediaLightboxKind,
           storageKey: pd.storageKey,
           content: d.kind === 'text' ? (pd.content ?? '') : undefined,
-          source: '全局资产库',
+          source: '公共资产',
         };
       })
       .filter((i) => i.kind === 'text' || !!i.storageKey);
@@ -431,7 +431,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
               ? t('assetLibrary.emptyProjectTitle', '本项目还没有资产')
               : t('assetLibrary.emptyLibraryTitle', '还没有资产')}
             emptyHint={ctx.scopeTab === 'project'
-              ? t('assetLibrary.emptyProjectHint', '可以从全局资产库引用或直接上传')
+              ? t('assetLibrary.emptyProjectHint', '可以从公共资产引用或直接上传')
               : t('assetLibrary.emptyLibraryHint', '点击上方按钮添加你的第一个资产')}
             onToggleSelect={ctx.handleToggleSelect}
             onOpenItem={handleOpenCard}

@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { resolveImageUrl, resolveMediaUrl, resolveThumbnailUrl, resolvePreviewUrl, acquireMediaObjectUrl, releaseMediaObjectUrl } from '@zeroexo/plugin-persistence';
 import { getToken } from '@/services/api-client.js';
+import { resolveMediaBlobChain } from '@/shared/media/resolve-media-blob.js';
 import { useMediaObjectUrl } from '@/shared/hooks/use-media-object-url.js';
 
 /** 后端媒体 URL 内存缓存(key = 原始 URL, value = 认证后的 blob URL),避免同一资源重复 fetch */
@@ -337,6 +338,24 @@ export async function resolveAnyThumbUrl(
     const thumbUrl = buildBackendUrl(storageKey, 'sm');
     return thumbUrl ? authorizeMediaUrl(thumbUrl) : null;
   }
+  // CAS 键（2026-11-16 修复「提示词插槽/@ 列表缩略图裂图」）：旧实现走 resolveThumbnailUrl，
+  // 它只认 image: 键派生 ':thumb' 后缀，cas: 键永远未命中 → 芯片只剩绿点。
+  // 改走统一媒体档位链（thumb>preview>orig，与画布节点 useMediaObjectUrl 同链）。
+  if (storageKey.startsWith('cas:')) {
+    try {
+      const providerKey = `media|image|thumb>preview>orig|${storageKey}`;
+      const res = await acquireMediaObjectUrl(providerKey, async () => {
+        try {
+          return await resolveMediaBlobChain(storageKey, 'image', ['thumb', 'preview', 'orig']);
+        } catch {
+          return null;
+        }
+      });
+      return res.ok ? res.url : null;
+    } catch {
+      return null;
+    }
+  }
   try {
     return await resolveThumbnailUrl(storageKey);
   } catch {
@@ -436,8 +455,11 @@ export function useProgressiveImage(
   budgetPx: number | null = null,
 ): string {
   // 非 image: 前缀且非 resources/ 前缀(后端图片) → 回退到普通 hydrate 行为(视频/音频等)
-const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('resources/'));
+  const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('resources/'));
+  const isCasKey = !!storageKey && storageKey.startsWith('cas:');
   const fallbackHydrated = useHydratedContent(isImage ? undefined : storageKey, content);
+  // CAS 内容寻址键：优先原图，透明 PNG 的 preview/thumb 是压平 JPEG，会把 alpha 变成黑底
+  const casPreview = useMediaObjectUrl(isCasKey ? storageKey : undefined, 'image', ['orig', 'preview', 'thumb']);
 
   // 后端键直接构造 URL(带 ?size= 参数),不经过 localforage;
   // 画布节点档永不主动拉 full(征集 #77),仅 thumb/preview 两档
@@ -639,6 +661,7 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isImage, storageKey, thumbState, previewState, content]);
 
+  if (isCasKey) return casPreview.url || fallbackHydrated;
   if (!isImage) return fallbackHydrated;
 
   // 档位优先级链(Plan#48 像素预算):预算越小的节点用越小的源图,

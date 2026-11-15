@@ -98,7 +98,7 @@ export async function sendVideoAsSegmentCover(
     message.warning(t('workbench.noActiveShot', '请先在导演台选中一个片段'));
     return;
   }
-  const data = asset.data as { storageKey?: string; kind?: string; generation?: { prompt?: string }; prompt?: string };
+  const data = asset.data as { storageKey?: string; kind?: string; generation?: { prompt?: string; params?: Record<string, unknown> }; prompt?: string };
   if (data.kind !== 'video' || !data.storageKey) {
     message.warning(t('workbench.coverVideoOnly', '只有视频可以设为片段封面'));
     return;
@@ -111,6 +111,7 @@ export async function sendVideoAsSegmentCover(
     storageKey: data.storageKey,
     ...(guide ? { guide: { id: guide.id, frames: guide.frames, sha256: guide.sha256 } } : {}),
     prompt: data.generation?.prompt ?? data.prompt ?? '',
+    params: data.generation?.params,
     projectId,
     shotId,
   });

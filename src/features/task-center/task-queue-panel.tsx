@@ -12,7 +12,8 @@ import {
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } from './task-queue-store.js';
 import { cancelBrokerTask } from './task-broker-client.js';
-import { useTaskBrokerSync } from './use-task-broker.js';
+import { cancelPluginTask } from './plugin-task-client.js';
+import { usePluginTaskQueue } from './use-plugin-task-queue.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 
 const KIND_ICON: Record<TaskKind, React.ReactNode> = {
@@ -66,7 +67,7 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
   const { theme } = useTheme();
   const { t } = useTranslation();
   const pid = projectId ?? getCurrentCanvasId();
-  useTaskBrokerSync(pid);
+  usePluginTaskQueue(pid);
   const tasks = useTaskQueueStore((s) => s.tasks);
   const clearFinished = useTaskQueueStore((s) => s.clearFinished);
   const active = useMemo(() => countActiveTasks(tasks), [tasks]);
@@ -114,7 +115,10 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
                 type="button"
                 data-task-cancel={task.id}
                 title={t('taskQueue.cancel', '取消任务')}
-                onClick={() => { void cancelBrokerTask(task.id).catch(() => undefined); }}
+                onClick={() => {
+                  const cancel = task.source === 'plugin' ? cancelPluginTask : cancelBrokerTask;
+                  void cancel(task.id).catch(() => undefined);
+                }}
                 style={{ border: 'none', background: 'transparent', color: muted, cursor: 'pointer', display: 'inline-flex', padding: 0, flexShrink: 0 }}
               >
                 <X size={12} />
@@ -151,7 +155,7 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
         display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 8px',
         borderBottom: `1px solid ${border}`, fontSize: 12, color: theme.toolbar.text, flexShrink: 0,
       }}>
-        <ListChecks size={14} />
+
         <span style={{ fontWeight: 600 }}>{t('taskQueue.title', '任务队列')}</span>
         {active > 0 ? (
           <span style={{

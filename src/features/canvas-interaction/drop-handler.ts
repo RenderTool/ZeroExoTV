@@ -22,6 +22,8 @@ import { uploadAsset, UnsupportedFileTypeError, FileTooLargeError } from '../ass
 // 本文件四个建节点调用点以前裸调 createAssetNode，落到 620×348 宽幅容器→黑边。
 // 现统一走尺寸契约单一入口 createSizedAssetNode（与 insertAssetToCanvas 同一函数）。
 import { createSizedAssetNode, type CanvasContainerSize } from '../asset-picker/services/asset-node-size.js';
+// 2026-11-16 用户指令：拖拽落图与「发送到画布」行为一致——历史图生图引用链同样恢复（同一函数，不再各写一份）
+import { restoreGenerationEdge } from '@/pages/editor/editor-canvas/insert-asset-to-canvas.js';
 import type { CreateAssetInput } from '../asset-picker/asset-store.js';
 import { toInsertPayload } from '../asset-picker/components/picker-card.js';
 import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
@@ -147,6 +149,15 @@ export function useDropHandler({
           const node = await buildNodeFromLibraryItem(item, pos, (msg) => onError?.(msg), containerSize());
           if (node) {
             insertNodeAt(node);
+            // 与「发送到画布」同链路：历史图生图源节点在画布上时恢复引用边
+            if (item.type === 'asset' && refs.commandQueue && refs.store) {
+              restoreGenerationEdge({
+                commandQueue: refs.commandQueue,
+                store: refs.store,
+                payload: toInsertPayload(item.data as Asset) as Parameters<typeof restoreGenerationEdge>[0]['payload'],
+                targetNodeId: node.id,
+              });
+            }
             refs.store?.setSelection({
               selectedNodeIds: new Set([node.id]),
               selectedEdgeIds: new Set(),
@@ -167,6 +178,15 @@ export function useDropHandler({
           const node = await createSizedAssetNode(payload, pos, containerSize());
           if (node) {
             insertNodeAt(node);
+            // 与「发送到画布」同链路：历史图生图源节点在画布上时恢复引用边
+            if (refs.commandQueue && refs.store) {
+              restoreGenerationEdge({
+                commandQueue: refs.commandQueue,
+                store: refs.store,
+                payload: payload as Parameters<typeof restoreGenerationEdge>[0]['payload'],
+                targetNodeId: node.id,
+              });
+            }
           }
           return;
         } catch (err) {
@@ -212,7 +232,7 @@ export function useDropHandler({
         }
       }
     },
-    [screenToWorld, insertNodeAt, containerSize, onFileUploaded, processFiles, onError],
+    [screenToWorld, insertNodeAt, containerSize, refs, onFileUploaded, processFiles, onError],
   );
 
   return { onDrop, onDragOver };

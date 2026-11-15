@@ -119,6 +119,10 @@ function resolveInitialRoute(): Route {
   return parseHash(window.location.hash);
 }
 
+// 静态 message（import { message } from 'antd'）同样下移到顶栏之下，
+// 与 <AntdApp message={{ top }}> 保持一致，避免 toast 盖住顶栏按钮（2026-11-16 用户反馈）
+message.config({ top: 64, maxCount: 3 });
+
 export function App(): React.ReactElement {
   // 刷新页面后自动拿已保存地址探测一次 ComfyUI（不再要求用户每次重连）
   useComfyuiAutoConnect();
@@ -329,7 +333,8 @@ export function App(): React.ReactElement {
 
   return (
     <AntdThemeProvider>
-      <AntdApp>
+      {/* message 弹出位置下移到顶栏之下（top 默认 8px 会盖住顶栏按钮，2026-11-16 用户反馈） */}
+      <AntdApp message={{ top: 64, maxCount: 3 }}>
         {/* 全局图标 hover 动画样式 */}
         <style>{`
           .zeroexo-icon-btn {

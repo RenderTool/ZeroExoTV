@@ -57,6 +57,8 @@ interface TimelineClipRenderProps {
   onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
   onContextMenu: (e: ReactMouseEvent, shotId: string) => void;
   onDoubleClick: (shotId: string) => void;
+  /** 单击卡片直接激活片段（拖拽外的兜底；生成中也能切到已完成段查看） */
+  onActivate?: (shotId: string) => void;
   onTrimStart?: (e: ReactMouseEvent<HTMLDivElement>, id: string, side: 'left' | 'right') => void;
   t: (key: string, options?: Record<string, unknown>) => string;
   isDark: boolean;
@@ -201,6 +203,7 @@ export const TimelineClip = memo(function TimelineClip({
   onPointerUp,
   onContextMenu,
   onDoubleClick,
+  onActivate,
   onTrimStart,
   t,
   isDark,
@@ -282,6 +285,7 @@ export const TimelineClip = memo(function TimelineClip({
       onMouseLeave={director ? () => setHovered(false) : undefined}
       onContextMenu={(e) => onContextMenu(e, clip.id)}
       onDoubleClick={() => onDoubleClick(clip.id)}
+      onClick={() => onActivate?.(clip.id)}
       title={director
         ? labelText
         : `#${clip.data.number} ${clip.data.label ?? ''} (${clip.data.duration}s)${!hasMedia ? ' - 待生成' : ''}`}

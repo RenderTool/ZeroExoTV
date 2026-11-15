@@ -387,10 +387,10 @@ function AssetCardGrid({
             {asset.title}
           </span>
         </div>
-        {/* 资产项目化：全局资产库资产中性小标签「全局」——仅标识来源，不带操作限制（scopeView 缺省时不显示） */}
+        {/* 资产项目化：公共资产中性小标签「公共资产」——仅标识来源，不带操作限制（scopeView 缺省时不显示） */}
         {fromLibrary && (
           <div style={{ fontSize: 10, color: theme.toolbar.textMuted, lineHeight: '16px' }}>
-            {t('assetLibrary.scopeTagLibrary', '全局')}
+            {t('assetLibrary.scopeTagLibrary', '公共资产')}
           </div>
         )}
         <div style={{

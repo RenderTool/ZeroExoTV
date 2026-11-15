@@ -18,7 +18,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { bootstrapToken } from "../src/auth.js";
 import { createProject } from "../src/store/projects.js";
 import { handleFsRequest } from "../src/file-server.js";
-import { listTasks } from "../src/store/tasks.js";
 import { registerWorkbenchTools } from "../src/tools/workbench.js";
 import { registerDirectorOpsTools } from "../src/tools/director-ops.js";
 import { registerContinuityTools } from "../src/tools/continuity.js";
@@ -171,19 +170,15 @@ describe("作业提交与引导优先级（fetch stub）", () => {
     const media = (wb1.shots as Array<{ id: string; media?: { guide?: { id?: string } } }>).find((s) => s.id === first)?.media;
     expect(media?.guide?.id).toBe("gd_prev1234");
 
-    // 直接提交 GPU 作业的旧入口已停用：执行权只在 MCP Task Broker
+    // 直接提交 GPU 作业的旧入口已停用：生成执行已交给 ComfyUI 插件
     const run = await call("run_generation", { projectId, episode: "1", confirm: true, selectedIds: [second] });
     expect(run.isError).toBe(true);
-    expect(JSON.stringify(run)).toContain("request_director_run");
+    expect(JSON.stringify(run)).toContain("ComfyUI 插件");
 
-    // 提交任务：落进持久化任务表（刷新/换浏览器不丢），逐段 guide 由执行器在提交前解析
+    // MCP 不再创建/执行生成任务：request_director_run 明确要求由网页发起
     const queued = await call("request_director_run", { projectId, confirm: true, selectedIds: [second] });
-    expect(queued.queued).toBe(true);
-    expect(typeof queued.taskId).toBe("string");
-    const tasks = await listTasks(root, { projectId });
-    const task = tasks.find((t) => t.taskId === queued.taskId);
-    expect(task?.state).toBe("queued");
-    expect(task?.segments.map((s) => s.shotId)).toEqual([second]);
+    expect(queued.isError).toBe(true);
+    expect(JSON.stringify(queued)).toContain("ComfyUI 插件");
   });
 
   it("list_history：只读带 guide 的导演台产物", async () => {

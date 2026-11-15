@@ -35,6 +35,8 @@ export interface AutoLandInput {
   provider?: string;
   model?: string;
   prompt?: string;
+  /** 生成参数（比例/尺寸/步数/种子等），设回片段封面时一并恢复 */
+  params?: Record<string, unknown>;
   /** 图生图来源：原节点 id / 原图 key，发送回画布时可恢复引用链 */
   sourceNodeId?: string;
   sourceStorageKey?: string;
@@ -86,6 +88,7 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
       provider: input.provider,
       model: input.model,
       prompt: input.prompt,
+      params: input.params,
       sourceNodeId: input.sourceNodeId,
       sourceStorageKey: input.sourceStorageKey,
       durationSec: input.durationMs != null ? Math.round((input.durationMs / 1000) * 100) / 100 : undefined,

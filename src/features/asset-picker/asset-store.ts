@@ -123,7 +123,7 @@ export function isLibraryAllowedKind(kind: AssetKind): boolean {
  */
 export function assertLibraryKind(kind: AssetKind): void {
   if (!isLibraryAllowedKind(kind)) {
-    throw new Error(`全局资产库只收图片、视频、音频、文本四类资产，收到业务类型: ${String(kind)}`);
+    throw new Error(`公共资产只收图片、视频、音频、文本四类资产，收到业务类型: ${String(kind)}`);
   }
 }
 

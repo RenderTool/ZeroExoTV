@@ -40,6 +40,7 @@ import {
   releaseSubjectStateMediaRefs,
   type SubjectStateMediaAsset,
 } from './subject-state-media';
+import { removeSubjectReferences } from './subject-reference-cleanup';
 import { SubjectMediaSourcePanel } from './subject-media-source-panel';
 
 // ===== 设计 token =====
@@ -679,6 +680,7 @@ export const StoryboardSubjectTree = memo(function StoryboardSubjectTree({
   const deleteNode = useCallback((rootId: string, nodeId: string) => {
     if (projectId) {
       void releaseSubjectStateMediaRefs({ trees, projectId, rootId, stateId: nodeId });
+      void removeSubjectReferences(projectId, rootId, nodeId);
     }
     onChange(trees.map((tr) => {
       if (tr.rootId !== rootId) return tr;

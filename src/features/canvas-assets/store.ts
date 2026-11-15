@@ -107,11 +107,11 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   const drawerModule = module ?? 'canvas';
   const visibleGroups = DRAWER_MODULE_GROUPS[drawerModule];
   const [groupByModule, setGroupByModule] = useState<Record<DrawerModule, DrawerGroup>>({
-    canvas: 'material', script: 'material', storyboard: 'material', workbench: 'material',
+    canvas: 'assets', script: 'assets', storyboard: 'assets', workbench: 'assets',
   });
   const activeGroup: DrawerGroup = visibleGroups.includes(groupByModule[drawerModule])
     ? groupByModule[drawerModule]
-    : 'material';
+    : 'assets';
   const setGroupForModule = useCallback((group: DrawerGroup) => {
     setGroupByModule((prev) => (prev[drawerModule] === group ? prev : { ...prev, [drawerModule]: group }));
   }, [drawerModule]);
@@ -142,7 +142,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       // 不再切分组/不抢焦点（剧本正文唯一入口 = 顶部「剧本」页签）。
       if (pending.kind === 'script') return;
       setFocusAssetId(pending.assetId);
-      setGroupForModule('material');
+      setGroupForModule('assets');
       if (['video', 'image', 'audio', 'text'].includes(pending.kind as string)) {
         setMaterialKind(pending.kind as 'all' | 'image' | 'video' | 'audio' | 'text');
       }
@@ -198,7 +198,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       if (kind === 'script') {
         // 本地版（2026-11-02）：剧本为画布强关联资产（建项目即自带），创建不再抢焦点分组
       } else {
-        setGroupForModule('material');
+        setGroupForModule('assets');
         if (['video', 'image', 'audio', 'text'].includes(kind)) {
           setMaterialKind(kind as 'all' | 'image' | 'video' | 'audio' | 'text');
         }
@@ -355,12 +355,12 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       const uploadScope = resolveUploadScope(uploadScopeTab, getCurrentCanvasId());
       const created = await storeAddAssets(inputs.map((i) => ({ ...i, ...uploadScope })));
       if (created.length === 0) {
-        antdMessage.warning('没有新增素材：文件可能已存在，或当前分组与上传归属不一致（试试切到「全局」查看）');
+        antdMessage.warning('没有新增素材：文件可能已存在，或当前分组与上传归属不一致（试试切到「公共资产」查看）');
         return;
       }
       for (const a of created) onAssetCreated(a.id);
       await refreshAssets();
-      setGroupForModule('material');
+      setGroupForModule('assets');
     } catch (err) {
       antdMessage.error(err instanceof Error ? err.message : t('asset.uploadFailed'));
     }

@@ -177,12 +177,12 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
               });
               sendChildren.push({
                 key: 'send-to-library',
-                label: t('send.toGlobalAssets', '全局资产'),
+                label: t('send.toGlobalAssets', '公共资产'),
                 icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }),
                 onClick: () => {
                   void sendNodeToAssets(node, 'library')
                     .then((created) => message.success(created.length > 0
-                      ? t('send.doneGlobal', '已发送到全局资产')
+                      ? t('send.doneGlobal', '已发送到公共资产')
                       : t('send.nothing', '没有可发送的内容')))
                     .catch((err) => console.error('send-to-library failed:', err));
                 },

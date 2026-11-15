@@ -101,7 +101,7 @@ def get_tae_decoder(name: str = _DEFAULT_TAE_NAME):
 
             path = folder_paths.get_full_path("vae_approx", name)
             if path is None:
-                log.info("TAE preview: %s not found in models/vae_approx — using Latent2RGB.", name)
+                log.info("TAE preview: %s not found in models/vae_approx 鈥?using Latent2RGB.", name)
                 _decoder_failed = True
                 return None
             sd = comfy.utils.load_torch_file(path, safe_load=True)
@@ -113,7 +113,7 @@ def get_tae_decoder(name: str = _DEFAULT_TAE_NAME):
             log.info("TAE preview: loaded %s (%d-ch).", name, _decoder.latent_channels)
             return _decoder
         except Exception as exc:
-            log.warning("TAE preview: failed to load %s (%s) — using Latent2RGB.", name, exc)
+            log.warning("TAE preview: failed to load %s (%s) 鈥?using Latent2RGB.", name, exc)
             _decoder_failed = True
             return None
 
@@ -121,7 +121,7 @@ def get_tae_decoder(name: str = _DEFAULT_TAE_NAME):
 def _video_latent_from_x0(x0: Any) -> torch.Tensor | None:
     """Return video stream as [B,C,T,H,W] from NestedTensor / plain tensor."""
     try:
-        # NestedTensor has unbind(); plain torch.Tensor also has unbind — do not use that.
+        # NestedTensor has unbind(); plain torch.Tensor also has unbind 鈥?do not use that.
         if not isinstance(x0, torch.Tensor) and hasattr(x0, "unbind"):
             parts = x0.unbind()
             if parts:
@@ -139,9 +139,9 @@ def _video_latent_from_x0(x0: Any) -> torch.Tensor | None:
     return None
 
 
-# Match KJNodes ModelPreviewOverride defaults for animated step previews.
-LIVE_PREVIEW_MAX_FRAMES = 16
-LIVE_PREVIEW_FPS = 12
+# 对齐 KJNodes ModelPreviewOverride：每步解码整段视频的采样帧（MP4/WebP 动态预览）。
+LIVE_PREVIEW_MAX_FRAMES = 48
+LIVE_PREVIEW_FPS = 8
 
 
 def _pick_temporal_indices(t_total: int, max_frames: int) -> list[int]:
@@ -225,62 +225,3 @@ def x0_to_preview_frames(
     frames = _tae_frames(video, indices) or _latent2rgb_frames(video, indices)
     return [_fit_preview_pil(frame, max_side) for frame in frames]
 
-
-def x0_to_preview_pil(x0: Any, *, max_side: int = 512) -> Image.Image | None:
-    frames = x0_to_preview_frames(x0, max_frames=LIVE_PREVIEW_MAX_FRAMES, max_side=max_side)
-    if not frames:
-        return None
-    return frames[len(frames) // 2]
-
-
-def pil_to_jpeg_b64(pil: Image.Image, *, quality: int = 80) -> str:
-    import base64
-    import io
-
-    buf = io.BytesIO()
-    pil.save(buf, format="JPEG", quality=int(quality))
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
-def encode_animated_webp(frames: list[Image.Image], *, fps: int = LIVE_PREVIEW_FPS, quality: int = 80) -> str:
-    import base64
-    import io
-
-    if not frames:
-        return ""
-    duration_ms = max(1, int(round(1000 / max(1, int(fps)))))
-    buf = io.BytesIO()
-    try:
-        frames[0].save(
-            buf,
-            format="WEBP",
-            save_all=True,
-            append_images=frames[1:],
-            duration=duration_ms,
-            loop=0,
-            quality=int(quality),
-            method=4,
-        )
-    except Exception as exc:
-        log.warning("Animated WebP encode failed: %s", exc)
-        return ""
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
-def encode_preview_payload(
-    frames: list[Image.Image],
-    *,
-    fps: int = LIVE_PREVIEW_FPS,
-    quality: int = 80,
-) -> tuple[str, str, int, int]:
-    """Return (b64, mime, width, height). Multi-frame → looping WebP like KJNodes."""
-    if not frames:
-        return "", "image/jpeg", 0, 0
-    first = frames[0]
-    if len(frames) == 1:
-        return pil_to_jpeg_b64(first, quality=quality), "image/jpeg", first.width, first.height
-    b64 = encode_animated_webp(frames, fps=fps, quality=quality)
-    if not b64:
-        mid = frames[len(frames) // 2]
-        return pil_to_jpeg_b64(mid, quality=quality), "image/jpeg", mid.width, mid.height
-    return b64, "image/webp", first.width, first.height

@@ -68,12 +68,31 @@ describe('ComfyuiPreviewSocket', () => {
     socket.close();
   });
 
-  it('非预览二进制（其它 BinaryEventTypes）忽略', () => {
+  it('二进制 PREVIEW_IMAGE_WITH_METADATA(4) → 解析 metadata 取 mime（新版 ComfyUI 协议）', () => {
     installFakeSocket();
     const onPreviewImage = vi.fn();
     const socket = new ComfyuiPreviewSocket('http://127.0.0.1:8188', 'cid-1', { onPreviewImage });
     socket.connect();
-    const bytes = new Uint8Array([0, 0, 0, 4, 0, 0, 0, 2, 1, 2, 3]);
+    const ws = FakeWebSocket.instances[0]!;
+    // 事件类型 4 + metadata 长度 18 + metadata JSON（image_type=image/png）+ PNG magic
+    const meta = new TextEncoder().encode('{"image_type":"image/png"}');
+    const bytes = new Uint8Array(8 + meta.length + 4);
+    new DataView(bytes.buffer).setUint32(0, 4);
+    new DataView(bytes.buffer).setUint32(4, meta.length);
+    bytes.set(meta, 8);
+    bytes.set([0x89, 0x50, 0x4e, 0x47], 8 + meta.length);
+    ws.onmessage?.({ data: bytes.buffer });
+    expect(onPreviewImage).toHaveBeenCalledTimes(1);
+    expect(onPreviewImage.mock.calls[0]![0]).toBe('data:image/png;base64,iVBORw==');
+    socket.close();
+  });
+
+  it('非预览二进制（未知 BinaryEventTypes）忽略', () => {
+    installFakeSocket();
+    const onPreviewImage = vi.fn();
+    const socket = new ComfyuiPreviewSocket('http://127.0.0.1:8188', 'cid-1', { onPreviewImage });
+    socket.connect();
+    const bytes = new Uint8Array([0, 0, 0, 99, 0, 0, 0, 2, 1, 2, 3]);
     FakeWebSocket.instances[0]!.onmessage?.({ data: bytes.buffer });
     expect(onPreviewImage).not.toHaveBeenCalled();
     socket.close();

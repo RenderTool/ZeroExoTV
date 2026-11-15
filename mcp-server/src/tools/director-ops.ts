@@ -19,7 +19,6 @@ import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
 import { hasContinuityPlan } from "../lib/continuity.js";
 import { GUIDE_FRAME_OPTIONS, VIDEO_ASPECT } from "../broker/params.js";
 import { cacheGuideFile } from "../broker/comfy.js";
-import { submitDirectorTask } from "../broker/executor.js";
 import type { WorkbenchShot } from "../store/workbench.js";
 
 const COMFY_BASE = (): string => process.env.ZEROEXO_COMFY_BASE ?? "http://127.0.0.1:8188";
@@ -246,7 +245,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
   // ===== T3：触发生成（核心） =====
   defTool(server, ctx, {
     name: "request_director_run",
-    description: "把导演台运行请求投递给网页执行（唯一执行入口）。MCP 不直接提交 GPU 作业、不改画布/导演台运行态；网页打开同一项目后自动开始，预览、进度、落库都在网页完成。",
+    description: "导演台生成已下沉到 ComfyUI 插件：本工具不再提交/执行生成，只做延续法校验；请在网页发起运行，MCP 只查询插件任务状态。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -278,24 +277,18 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           );
         }
       }
-      const task = await submitDirectorTask({
-        projectId: args.projectId,
-        selectedIds,
-        ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
-      });
-      return {
-        taskId: task.taskId,
-        queued: true,
-        selectedIds,
-        state: task.state,
-        hint: "任务已进 MCP 持久化任务表，由 MCP 串行执行；刷新/关闭/换浏览器/多开都只断开订阅。用 get_generation_task 查进度。",
-      };
+      // 生成执行已下沉到 ComfyUI 插件；MCP 只保留项目操作与任务状态查询。
+      // 这里不再创建 MCP 任务（broker 已停用），避免提交后无人执行。
+      throw new McpError(
+        "VALIDATION",
+        "导演台生成已交给 ComfyUI 插件：请由网页发起运行；MCP 只负责查询插件任务状态（list_generation_tasks / get_generation_task）。",
+      );
     },
   });
 
   defTool(server, ctx, {
     name: "run_generation",
-    description: "已停用：导演台运行统一走 request_director_run 提交 MCP 任务（MCP 执行、网页订阅），不要直接提交 GPU 作业。",
+    description: "已停用：导演台生成由 ComfyUI 插件执行，请在网页发起运行；MCP 只查询任务状态。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -311,7 +304,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
       throw new McpError(
         "VALIDATION",
-        "run_generation 已停用：请用 request_director_run 提交任务，由 MCP Task Broker 串行执行（执行时才解析上一段当前缓存 guide）。",
+        "run_generation 已停用：导演台生成由 ComfyUI 插件执行，请由网页发起运行。",
       );
     },
   });

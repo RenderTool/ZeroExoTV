@@ -29,6 +29,7 @@ import { DockReferencesSection, getReferenceConfigByMode, type VideoReferenceBou
 import { DockFooterBar } from './dock-footer-bar.js';
 import {
   GeneratorPromptEditor,
+  type GeneratorPromptEditorHandle,
   type ReferenceItem,
   nodeActionBus,
   deriveIncomingReferences,
@@ -213,12 +214,21 @@ export const DockInputSection = memo(function DockInputSection({
   references,
   placeholder,
   mentionTypeFilter,
+  editorRef,
+  anchorRef,
+  onMentionPanelChange,
 }: {
   value: string;
   onChange: (value: string) => void;
   references: ReferenceItem[];
   placeholder: string;
   mentionTypeFilter?: (ref: ReferenceItem) => boolean;
+  /** 编辑器命令句柄（宿主接管 @ 面板时用 insertReference/closeMentionPanel） */
+  editorRef?: React.Ref<GeneratorPromptEditorHandle>;
+  /** 编辑器锚点（@ 面板弹出定位） */
+  anchorRef?: React.Ref<HTMLDivElement>;
+  /** 宿主接管 @ 弹层（true → 编辑器不渲染内置弹层，改为回调开关） */
+  onMentionPanelChange?: (open: boolean, filter: string) => void;
 }) {
   const { theme } = useTheme();
   // @ 弹窗主题色:亮色白底/暗色 toolbar.panel(不依赖 textColor 亮度推断,暗色主题下 textColor 是亮色会误判)
@@ -226,8 +236,9 @@ export const DockInputSection = memo(function DockInputSection({
   const popupBg = isDark ? (theme.toolbar.panel ?? '#26262b') : '#ffffff';
   const popupBorder = isDark ? (theme.toolbar.border ?? 'rgba(255,255,255,0.14)') : '#e7e5e4';
   return (
-    <>
+    <div ref={anchorRef} style={{ position: 'relative' }}>
       <GeneratorPromptEditor
+        ref={editorRef}
         value={value}
         onChange={onChange}
         references={references}
@@ -240,10 +251,12 @@ export const DockInputSection = memo(function DockInputSection({
         minHeight={96}
         maxHeight={240}
         mentionTypeFilter={mentionTypeFilter}
+        externalMentionPanel={!!onMentionPanelChange}
+        onMentionPanelChange={onMentionPanelChange}
         popupBackground={popupBg}
         popupBorderColor={popupBorder}
       />
-    </>
+    </div>
   );
 });
 
@@ -535,12 +548,12 @@ export function NodeGenerateDock({
         if (!seen.has(n.id)) { seen.add(n.id); resolveNodes.push(n); }
       }
       for (const n of graph.nodes) {
-        if (n.type === 'image' && !seen.has(n.id)) {
+        if ((n.type === 'image' || n.type === 'video' || n.type === 'audio') && !seen.has(n.id)) {
           const d = (n.data ?? {}) as Record<string, unknown>;
           seen.add(n.id);
           resolveNodes.push({
             id: n.id,
-            type: 'image',
+            type: n.type,
             content: typeof d.content === 'string' ? d.content : undefined,
             storageKey: typeof d.storageKey === 'string' ? d.storageKey : undefined,
           });
@@ -618,13 +631,15 @@ export function NodeGenerateDock({
   }, [incomingNodes, refUrlMap, store]);
 
   /**
-   * @ 图片：除了连入素材，画布上所有图片节点也应能 @。
-   * 这些图片只在“被 @ 到”时才作为输入源，避免没连线的图被静默塞进生成。
+   * @ 图片：除了连入素材，画布上所有媒体节点也应能 @。
+   * 这些素材只在“被 @ 到”时才作为输入源，避免没连线的图被静默塞进生成。
+   * 类型范围与 @ 选择面板(pickerKinds)一致：节点模型支持什么类型，@ 就能引用什么类型。
    */
   const canvasMentionRefs: ReferenceItem[] = useMemo(() => {
     const graph = store.getGraph();
     const incomingIds = new Set(incomingNodes.map((n) => n.id));
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const mentionKinds = new Set(pickerKinds);
     const hiddenByAncestor = (n: NodeRecord): boolean => {
       let cur: NodeRecord | undefined = n;
       while (cur) {
@@ -634,7 +649,8 @@ export function NodeGenerateDock({
       return false;
     };
     return graph.nodes
-      .filter((n) => n.type === 'image'
+      .filter((n) => (n.type === 'image' || n.type === 'video' || n.type === 'audio')
+        && mentionKinds.has(n.type as AssetSlotKind)
         && !incomingIds.has(n.id)
         && isVisibleNode(n)
         && !hiddenByAncestor(n))
@@ -642,7 +658,7 @@ export function NodeGenerateDock({
         const d = (n.data ?? {}) as Record<string, unknown>;
         return {
           id: n.id,
-          type: 'image' as const,
+          type: n.type as ReferenceItem['type'],
           name: n.title || (typeof d.title === 'string' ? d.title : undefined) || n.id.slice(0, 8),
           url: refUrlMap[n.id] || (typeof d.content === 'string' ? d.content : undefined),
           asset: {
@@ -651,12 +667,74 @@ export function NodeGenerateDock({
           },
         };
       });
-  }, [incomingNodes, nodeId, refUrlMap, store, graphVersion]);
+  }, [incomingNodes, nodeId, refUrlMap, store, graphVersion, pickerKinds]);
 
   const mentionReferences = useMemo(
     () => [...references, ...canvasMentionRefs],
     [references, canvasMentionRefs],
   );
+
+  // ===== @ 输入统一为分镜同款选择面板（画布/资产/主体，2026-11-16）=====
+  // 面板选中：画布节点 → 插入 @ 引用 chip（保持“被 @ 到才作为输入源”的画布语义，不静默连线）；
+  // 资产库/主体库 → 动态补进引用列表（media:<storageKey>），同样 chip 化，生成时按 @ 名称匹配作为输入源。
+  const [extraMentionRefs, setExtraMentionRefs] = useState<ReferenceItem[]>([]);
+  const [extraRefUrls, setExtraRefUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, string> = {};
+      await Promise.all(extraMentionRefs.map(async (r) => {
+        if (!r.asset?.storageKey) return;
+        try {
+          const u = await resolveAnyThumbUrl(r.asset.storageKey);
+          if (u) next[r.id] = u;
+        } catch { /* 缩略图解析失败 → 图标回退 */ }
+      }));
+      if (!cancelled) setExtraRefUrls(next);
+    })();
+    return () => { cancelled = true; };
+  }, [extraMentionRefs]);
+
+  const referencesForMention = useMemo(
+    () => [...mentionReferences, ...extraMentionRefs.map((r) => ({ ...r, url: extraRefUrls[r.id] ?? r.url }))],
+    [mentionReferences, extraMentionRefs, extraRefUrls],
+  );
+
+  const editorRef = useRef<GeneratorPromptEditorHandle>(null);
+  const inputAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [mentionPanelAnchor, setMentionPanelAnchor] = useState<HTMLElement | null>(null);
+  const handleMentionPanelChange = useCallback((open: boolean): void => {
+    setMentionPanelAnchor(open ? inputAnchorRef.current : null);
+  }, []);
+
+  /** @ 选择面板选中 → 插入 @ 引用 chip（与「+」面板共用数据源，但不连线：@ 的语义是“按名引用”） */
+  const handleMentionPick = useCallback((pick: AssetSlotPick): void => {
+    if (pick.fromNodeId) {
+      // 画布已有节点：优先复用 canvasMentionRefs 同款条目（名称/缩略图口径一致，提交按名称匹配）
+      const existing = canvasMentionRefs.find((r) => r.id === pick.fromNodeId);
+      if (existing) {
+        editorRef.current?.insertReference(existing.id, existing);
+        return;
+      }
+      const n = pickerCanvasNodes.find((c) => c.id === pick.fromNodeId);
+      editorRef.current?.insertReference(pick.fromNodeId, {
+        id: pick.fromNodeId,
+        type: pick.kind as ReferenceItem['type'],
+        name: pick.title || n?.title || pick.fromNodeId.slice(0, 8),
+        asset: { storageKey: n?.storageKey, content: n?.content },
+      });
+      return;
+    }
+    const id = `media:${pick.storageKey}`;
+    const item: ReferenceItem = {
+      id,
+      type: pick.kind,
+      name: pick.title,
+      asset: { storageKey: pick.storageKey },
+    };
+    setExtraMentionRefs((prev) => (prev.some((r) => r.id === id) ? prev : [...prev, item]));
+    editorRef.current?.insertReference(id, item);
+  }, [canvasMentionRefs, pickerCanvasNodes]);
 
   // ===== Plan#79 T2：预设标签（原胶囊动作下沉）=====
   // 上游名取自已连入的参考素材（堆叠内部卡片以 `::` 分隔，此处只认整体连入的节点），
@@ -866,12 +944,14 @@ export function NodeGenerateDock({
     // + @ 到的堆叠内部卡片(堆叠整体不发送,内部资源需显式 @ 才会作为输入源)
     const mentionedStacked = references.filter((r) => r.id.includes('::') && text.includes(`@${r.name}`));
     const nonStacked = references.filter((r) => !r.id.includes('::'));
-    // 画布上的图片可 @，但只有真的 @ 到才作为输入源（不连线不自动塞）
+    // 画布上的媒体可 @，但只有真的 @ 到才作为输入源（不连线不自动塞）
     const mentionedCanvas = canvasMentionRefs.filter((r) => text.includes(`@${r.name}`));
-    onGenerate(nodeId, mode, text, [...nonStacked, ...mentionedCanvas, ...mentionedStacked]);
+    // @ 选择面板引入的资产库/主体库条目（media:<storageKey>）：同样只有 @ 到才作为输入源
+    const mentionedExtra = extraMentionRefs.filter((r) => text.includes(`@${r.name}`));
+    onGenerate(nodeId, mode, text, [...nonStacked, ...mentionedCanvas, ...mentionedStacked, ...mentionedExtra]);
     // 2026-11-13 用户要求：点生成后提示词必须留在面板里，不能瞬间清空消失。
     // 提示词由节点数据持有；这里只发起任务，不清输入框。
-  }, [isRunning, onGenerate, nodeId, mode, references, canvasMentionRefs]);
+  }, [isRunning, onGenerate, nodeId, mode, references, canvasMentionRefs, extraMentionRefs]);
 
   const handleAction = useCallback(() => {
     if (isRunning) onStop(nodeId);
@@ -1089,9 +1169,12 @@ export function NodeGenerateDock({
         <DockInputSection
           value={prompt}
           onChange={updatePrompt}
-          references={mentionReferences}
+          references={referencesForMention}
           placeholder={t('nodeDock.placeholder', '输入提示词... 连入的素材会自动作为输入源(堆叠节点需 @ 内部资源)')}
           mentionTypeFilter={mentionTypeFilter}
+          editorRef={editorRef}
+          anchorRef={inputAnchorRef}
+          onMentionPanelChange={canOpenPicker ? handleMentionPanelChange : undefined}
         />
       </div>
 
@@ -1136,6 +1219,20 @@ export function NodeGenerateDock({
           tabs={['canvas', 'asset', 'subject']}
           initialTab="canvas"
           onPick={handleSlotPick}
+        />
+      )}
+      {/* @ 触发的分镜同款选择面板：与「+」共用 AssetPickPanel UI，选中走 @ 引用语义 */}
+      {mentionPanelAnchor && canOpenPicker && (
+        <AssetSlotPicker
+          open
+          onClose={() => { editorRef.current?.closeMentionPanel(); setMentionPanelAnchor(null); }}
+          theme={theme}
+          anchorEl={mentionPanelAnchor}
+          acceptKinds={pickerKinds}
+          canvasNodes={pickerCanvasNodes}
+          tabs={['canvas', 'asset', 'subject']}
+          initialTab="canvas"
+          onPick={handleMentionPick}
         />
       )}
     </div>

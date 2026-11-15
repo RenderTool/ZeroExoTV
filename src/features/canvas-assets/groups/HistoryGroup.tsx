@@ -21,13 +21,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Select, Tooltip } from 'antd';
-import { CheckSquare, Clapperboard, Download, FileText, Film, Image as ImageIcon, ImagePlus, FolderInput, LibraryBig, LocateFixed, MoreHorizontal, Pencil, Share2, Square, Star, Trash2, Waypoints } from 'lucide-react';
+import { CheckSquare, Clapperboard, Copy, Download, FileText, Film, Image as ImageIcon, ImagePlus, LibraryBig, MoreHorizontal, Pencil, Share2, Square, Star, Trash2, Waypoints } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
-import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { usePreviewImage, nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { downloadAssetsAsZip } from '@/features/asset-picker/services/download-asset.js';
 import { deleteAssetsWithUndo } from '@/features/asset-library/delete-with-undo.jsx';
+import { updateAsset } from '@/features/asset-picker/asset-store.js';
+import { isShotLocked } from '@/features/canvas-assets/director-run-lock.js';
 import { assetMayHaveGuide } from '@/features/asset-picker/services/guide-resolve.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 import { readWorkbenchContainer } from '@/entities/slot-containers.js';
@@ -44,7 +45,6 @@ import {
   HISTORY_PAGE_SIZE,
   countHistoryBySourceAndKind,
   filterHistoryAssets,
-  findAssetNodeId,
   fmtDuration,
   fmtRelativeTime,
   paginate,
@@ -122,15 +122,13 @@ function ActionButton({ title, onClick, theme, disabled = false, children }: {
   );
 }
 
-function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onLocate, onPromote, onDownload, onSendVideo, onSendGuide, onSetCover, onSendCanvas, onRename, onDelete, onEdit, cover, versionLabel, theme, t }: {
+function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onPromote, onDownload, onSendVideo, onSendGuide, onSetCover, onSendCanvas, onRename, onDelete, onEdit, cover, versionLabel, theme, t }: {
   asset: Asset;
   visible: boolean;
   /** 多选模式：是否选中 */
   selected?: boolean;
   selectMode?: boolean;
   onToggleSelect?: () => void;
-  /** 仅「从画布生成」的产物有对应画布节点；导演台产物不传（不显示定位按钮） */
-  onLocate?: () => void;
   onPromote: (target: 'project' | 'library') => void;
   onDownload: (opts?: { withGuide?: boolean }) => void;
   /** 发送源视频到导演台当前片段 */
@@ -176,7 +174,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   const promptText = (data as { generation?: { prompt?: string }; prompt?: string }).generation?.prompt
     ?? (data as { prompt?: string }).prompt
     ?? '';
-  const { modal: cardModal } = App.useApp();
+  const { modal: cardModal, message: cardMessage } = App.useApp();
 
   // 视频悬停播放/暂停（asset-card 同款模式）
   useEffect(() => {
@@ -279,6 +277,22 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
             </ThumbBadge>
           </span>
         )}
+        {/* 直接可见的封面按钮：不用 hover 才出现，任何非当前封面版本都能一键设回 */}
+        {onSetCover && !cover && (
+          <span
+            data-history-set-cover
+            style={{ position: 'absolute', left: 6, bottom: 6, zIndex: 4 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ActionButton
+              title={t('assetLibrary.setSegmentCoverHint', { defaultValue: '设为该片段封面（替换分镜显示并更新下一段引导）' })}
+              onClick={onSetCover}
+              theme={theme}
+            >
+              <Star size={14} />
+            </ActionButton>
+          </span>
+        )}
         {/* hover 操作（右下角）：定位 / 加入资产库 / 下载。
             2026-11-10：整条操作区吞掉 click —— 否则点空白处会冒泡到封面「打开大图」，
             表现为「发送到导演台后顺手打开一次视频」。 */}
@@ -292,23 +306,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
             transition: 'opacity 0.2s',
           }}
         >
-          {onLocate && (
-            <ActionButton title={t('assetLibrary.historyLocate', { defaultValue: '定位到画布节点' })} onClick={onLocate} theme={theme}>
-              <LocateFixed size={14} />
-            </ActionButton>
-          )}
-          {/* 直接可见的封面按钮：设为该片段当前版本，导演台显示与下一段 guide 引用一起切换 */}
-          {onSetCover && !cover && (
-            <span data-history-set-cover onClick={(e) => e.stopPropagation()}>
-              <ActionButton
-                title={t('assetLibrary.setSegmentCoverHint', { defaultValue: '设为该片段封面（替换导演台显示并更新下一段引导）' })}
-                onClick={onSetCover}
-                theme={theme}
-              >
-                <Star size={14} />
-              </ActionButton>
-            </span>
-          )}
+          {/* 2026-11-16 用户指令：删除「定位到画布节点」——抽屉重构后 graphStore/onFocusNode 未接线，功能失效无意义 */}
           {/* 发送统一收纳：发送到画布 / 导演台（源视频、引导）/ 本项目 / 公共资产 */}
           <Dropdown
             open={sendMenuOpen}
@@ -326,16 +324,10 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
                 {
                   key: 'director',
                   icon: <Clapperboard size={13} />,
-                  label: t('assetLibrary.sendToDirector', { defaultValue: '发送到导演台' }),
+                  label: t('assetLibrary.sendToDirector', { defaultValue: '发送到分镜' }),
                   disabled: !onSendVideo,
                   onClick: () => onSendVideo?.(),
                 },
-                ...(onSetCover ? [{
-                  key: 'cover',
-                  icon: <Clapperboard size={13} />,
-                  label: t('assetLibrary.setSegmentCover', { defaultValue: '设为片段封面' }),
-                  onClick: () => onSetCover?.(),
-                }] : []),
                 ...(onSendGuide ? [{
                   key: 'guide',
                   icon: <Waypoints size={13} />,
@@ -344,6 +336,13 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
                   onClick: () => onSendGuide?.(),
                 }] : []),
                 { type: 'divider' as const },
+                // 2026-11-16 用户指令：设为片段封面不属于「发送」类动作，移到分割线下独立分类 + 独立图标
+                ...(onSetCover ? [{
+                  key: 'cover',
+                  icon: <Star size={13} />,
+                  label: t('assetLibrary.setSegmentCover', { defaultValue: '设为片段封面' }),
+                  onClick: () => onSetCover?.(),
+                }] : []),
                 {
                   key: 'prompt',
                   icon: <FileText size={13} />,
@@ -352,22 +351,34 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
                   onClick: () => {
                     cardModal.info({
                       title: t('assetLibrary.viewPrompt', { defaultValue: '查看提示词' }),
+                      centered: true,
                       width: 640,
+                      icon: null,
+                      okText: t('common.close', { defaultValue: '关闭' }),
                       content: (
-                        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 360, overflow: 'auto', fontSize: 12, lineHeight: 1.7 }}>
-                          {promptText}
-                        </pre>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                            <Button
+                              size="small"
+                              icon={<Copy size={13} />}
+                              onClick={() => {
+                                void navigator.clipboard.writeText(promptText)
+                                  .then(() => cardMessage.success(t('common.copied', { defaultValue: '已复制' })))
+                                  .catch(() => cardMessage.error(t('common.copyFailed', { defaultValue: '复制失败' })));
+                              }}
+                            >
+                              {t('common.copy', { defaultValue: '复制' })}
+                            </Button>
+                          </div>
+                          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 360, overflow: 'auto', fontSize: 13, lineHeight: 1.7, margin: 0, padding: 12, borderRadius: 8, background: 'rgba(0,0,0,0.04)' }}>
+                            {promptText}
+                          </pre>
+                        </div>
                       ),
                     });
                   },
                 },
                 { type: 'divider' as const },
-                {
-                  key: 'project',
-                  icon: <FolderInput size={13} />,
-                  label: t('assetLibrary.addToProject', { defaultValue: '发送到本项目' }),
-                  onClick: () => onPromote('project'),
-                },
                 {
                   key: 'library',
                   icon: <LibraryBig size={13} />,
@@ -451,12 +462,9 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onL
   );
 }
 
-export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSource }: {
+export function HistoryGroup({ store, theme, forcedSource }: {
   store: CanvasAssetsPanelStore;
   theme: ThemeConfig;
-  /** 画布 graph store（定位节点用；缺省时定位按钮点击给出提示） */
-  graphStore?: ReactGraphStore;
-  onFocusNode?: (nodeId: string) => void;
   /** 锁定来源（导演台类目只显示导演台历史） */
   forcedSource?: HistorySource;
 }): React.ReactElement {
@@ -464,6 +472,10 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
   const { message: antdMessage, modal: antdModal } = App.useApp();
   /** 第一层：来源 Tab（从画布生成 / 从导演台） */
   const [historySource, setHistorySourceState] = useState<HistorySource>(() => forcedSource ?? readInitialHistorySource());
+  // 独立入口切换时强制来源，避免同一组件实例保留上一个 tab 的 source 状态（画布历史/导演台串台）
+  useEffect(() => {
+    if (forcedSource) setHistorySourceState(forcedSource);
+  }, [forcedSource]);
   /** 第二层：类型 chips（图片 / 视频） */
   const [historyKind, setHistoryKind] = useState<HistoryKind>('image');
   const [page, setPage] = useState(1);
@@ -473,8 +485,12 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
   /** 导演台类目筛选（2026-11-13 用户指令）：按集数 / 按片段（一个片段可有 N 个备用版本） */
   const [directorEpisode, setDirectorEpisode] = useState<string>('all');
   const [directorShot, setDirectorShot] = useState<string>('all');
+  /** 未关联历史片段手动关联（只影响本次抽屉归组，落盘仍写 asset.data.originNodeId） */
+  const [manualLinks, setManualLinks] = useState<Record<string, string>>({});
+  /** 手动切封面后的本地覆盖（shotId → assetId），保证角标立刻跟着切，不等重读 workbench */
+  const [coverOverrides, setCoverOverrides] = useState<Record<string, string>>({});
   const [workbenchShots, setWorkbenchShots] = useState<Array<{
-    id: string; number: number; duration?: number; episodeId?: string;
+    id: string; number: number; duration?: number; episodeId?: string; status?: string;
     cache?: {
       selectedVersionId?: string;
       versions?: Array<{ id: string; storageKey: string; createdAt?: string }>;
@@ -510,11 +526,11 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       if (cancelled) return;
       setScriptEpisodes((script?.episodes ?? []).map((ep) => ({ id: ep.id, number: ep.number, title: ep.title })));
       setWorkbenchShots(((Array.isArray(wb?.shots) ? wb.shots : []) as Array<{
-        id?: string; number?: number; duration?: number; episodeId?: string;
+        id?: string; number?: number; duration?: number; episodeId?: string; status?: string;
         cache?: { selectedVersionId?: string; versions?: Array<{ id: string; storageKey: string; createdAt?: string }> };
       }>).filter((s) => s?.id).map((s, i) => ({
         id: String(s.id), number: Number(s.number ?? i + 1), duration: s.duration, episodeId: s.episodeId,
-        cache: s.cache,
+        status: s.status, cache: s.cache,
       })));
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -530,8 +546,13 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
    * 依次回退：标题里的 seg-xxx / 标题「片段 N」→ 导演台片段。保证老片段的版本也能正确归组。
    */
   const shotOfAsset = useCallback((asset: Asset) => {
+    const manual = manualLinks[asset.id];
+    if (manual) return shotById.get(manual);
     const origin = (asset.data as { originNodeId?: string }).originNodeId;
-    if (origin) return shotById.get(origin);
+    if (origin) {
+      const hit = shotById.get(origin);
+      if (hit) return hit;
+    }
     const title = asset.title ?? '';
     const segId = /(seg-[A-Za-z0-9-]+)/.exec(title)?.[1];
     if (segId) {
@@ -541,7 +562,7 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
     const num = /片段\s*(\d+)/.exec(title)?.[1];
     if (num) return [...shotById.values()].find((s) => s.number === Number(num));
     return undefined;
-  }, [shotById]);
+  }, [shotById, manualLinks]);
 
   const visibleItems = useMemo(() => {
     if (forcedSource !== 'director') return items;
@@ -609,15 +630,40 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
       const cache = shot?.cache;
       const selected = cache?.versions?.find((v: { id: string; storageKey: string; createdAt?: string }) => v.id === cache.selectedVersionId);
       const coverKey = selected?.storageKey;
-      const coverId = (coverKey
-        ? versions.find((a) => (a.data as { storageKey?: string }).storageKey === coverKey)?.id
-        : undefined) ?? versions[0]?.id;
+      const coverId = coverOverrides[shotId]
+        ?? ((coverKey
+          ? versions.find((a) => (a.data as { storageKey?: string }).storageKey === coverKey)?.id
+          : undefined) ?? versions[0]?.id);
       return { shotId, shot, versions, coverId };
     });
     groups.sort((a, b) => (a.shot?.number ?? Number.MAX_SAFE_INTEGER) - (b.shot?.number ?? Number.MAX_SAFE_INTEGER));
     return groups;
-  }, [isDirectorView, visibleItems, shotById, shotOfAsset]);
+  }, [isDirectorView, visibleItems, shotById, shotOfAsset, coverOverrides]);
   const activeDirectorGroup = directorGroups.find((g) => g.shotId === directorShot);
+
+  /** 未关联片段手动关联到某个镜头：写回 originNodeId（历史归组/后续封面/引导都按它走） */
+  const linkGroupToShot = useCallback(async (assetIds: string[], shotId: string) => {
+    const shot = shotById.get(shotId);
+    if (!shot || assetIds.length === 0) return;
+    if (shot.status === 'generating' || isShotLocked(shotId)) {
+      antdMessage.warning(t('assetLibrary.segmentGeneratingNoReplace', '该片段正在生成，完成后再替换'));
+      return;
+    }
+    setManualLinks((prev) => {
+      const next = { ...prev };
+      for (const id of assetIds) next[id] = shotId;
+      return next;
+    });
+    await Promise.all(assetIds.map(async (id) => {
+      const asset = visibleItems.find((a) => a.id === id);
+      if (!asset) return;
+      await updateAsset(id, {
+        data: { ...(asset.data as Record<string, unknown>), originNodeId: shotId } as Asset['data'],
+      });
+    }));
+    setDirectorShot(shotId);
+    antdMessage.success(t('assetLibrary.linkedToSegment', '已关联到镜头 {{num}}', { num: shot.number }));
+  }, [antdMessage, visibleItems, shotById, t]);
 
   const toggleSelect = (id: string): void => {
     setSelectedIds((prev) => {
@@ -660,15 +706,6 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
     { key: 'video', label: t('assetLibrary.historyTabVideo', { defaultValue: '视频' }), count: sourceCounts[historySource].video },
   ];
 
-  const handleLocate = (asset: Asset): void => {
-    const nodeId = findAssetNodeId(graphStore?.getGraph?.() as { nodes: Array<{ id: string; data?: unknown }> } | undefined, asset);
-    if (nodeId && onFocusNode) {
-      onFocusNode(nodeId);
-    } else {
-      antdMessage.info(t('assetLibrary.historyNodeGone', { defaultValue: '未找到对应画布节点（可能已删除）' }));
-    }
-  };
-
   const handlePromote = (asset: Asset, target: 'project' | 'library'): void => {
     void store.promoteToScope(asset, target);
   };
@@ -692,7 +729,6 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
           selected={selectedIds.has(asset.id)}
           selectMode={selectMode}
           onToggleSelect={() => toggleSelect(asset.id)}
-          onLocate={historySource === 'canvas' ? () => handleLocate(asset) : undefined}
           onPromote={(target) => handlePromote(asset, target)}
           onDownload={(downloadOpts) => void store.handleDownloadItem({ type: 'asset', data: asset }, downloadOpts)}
           onSendVideo={(() => {
@@ -709,7 +745,13 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
               // 不要再异步重读 workbench：持久化还没落盘时重读会把刚点的封面盖回去。
               const shotId = opts?.shotId;
               const storageKey = (asset.data as { storageKey?: string }).storageKey;
+              // 该片段正在生成：不允许从抽屉替换封面，避免生成结果回来时版本错乱
+              if (shotId && (shotById.get(shotId)?.status === 'generating' || isShotLocked(shotId))) {
+                antdMessage.warning(t('assetLibrary.segmentGeneratingNoReplace', '该片段正在生成，完成后再替换'));
+                return;
+              }
               if (shotId && storageKey) {
+                setCoverOverrides((prev) => ({ ...prev, [shotId]: asset.id }));
                 setWorkbenchShots((prev) => prev.map((s) => {
                   if (s.id !== shotId || !s.cache) return s;
                   const v = s.cache.versions?.find((x) => x.storageKey === storageKey);
@@ -751,6 +793,13 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
 
   return (
     <>
+      {forcedSource && (
+        <div style={{ padding: '10px 20px 0', fontSize: 13, fontWeight: 600, color: theme.toolbar.text, flexShrink: 0 }}>
+          {forcedSource === 'director'
+            ? t('assetLibrary.directorHistoryTitle', '分镜历史')
+            : t('assetLibrary.canvasHistoryTitle', '画布历史')}
+        </div>
+      )}
       {/* 第一层：来源 Tab —— 仅独立历史入口需要；
           被「导演台」类目锁死来源时直接展示导演台视频，不再出现「从画布生成 / 从导演台」子页签 */}
       {!forcedSource && (
@@ -848,24 +897,17 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
             >
               {t('assetLibrary.batchDownload', '打包下载')}
             </Button>
-            <Dropdown
-              trigger={['click']}
+            <Button
+              size="small"
+              data-history-batch-export
               disabled={selectedAssets.length === 0}
-              menu={{
-                items: [
-                  { key: 'project', label: t('assetLibrary.addToProject', { defaultValue: '加入本项目' }) },
-                  { key: 'library', label: t('assetLibrary.addToPublicLibrary', { defaultValue: '加入公共资产' }) },
-                ],
-                onClick: ({ key }) => {
-                  void store.promoteAssetsTo(selectedAssets, key === 'project' ? 'project' : 'library');
-                  exitSelect();
-                },
+              onClick={() => {
+                void store.promoteAssetsTo(selectedAssets, 'library');
+                exitSelect();
               }}
             >
-              <Button size="small" data-history-batch-export disabled={selectedAssets.length === 0}>
-                {t('assetLibrary.addToScope', { defaultValue: '加入资产库' })}
-              </Button>
-            </Dropdown>
+              {t('assetLibrary.addToPublicLibrary', { defaultValue: '加入公共资产' })}
+            </Button>
             <Button
               size="small"
               danger
@@ -917,8 +959,22 @@ export function HistoryGroup({ store, theme, graphStore, onFocusNode, forcedSour
                 {/* 无法归属到片段的旧记录（比如早期没有 originNodeId、标题也对不上）：就地展开，不强行造片段 */}
                 {directorGroups.filter((g) => !g.shot).map((group) => (
                   <div key={group.shotId} data-director-group={group.shotId} style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text, marginBottom: 6 }}>
-                      {t('assetLibrary.unlinkedSegments', '未关联片段')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: theme.toolbar.text }}>
+                        {t('assetLibrary.unlinkedSegments', '未关联片段')}
+                      </span>
+                      <Select
+                        size="small"
+                        data-director-link-shot
+                        placeholder={t('assetLibrary.linkToSegment', '关联到片段')}
+                        value={undefined}
+                        style={{ width: 150 }}
+                        options={workbenchShots.map((s) => ({
+                          value: s.id,
+                          label: t('director.segmentTitle', '镜头 {{num}}', { num: s.number }),
+                        }))}
+                        onChange={(shotId: string) => { void linkGroupToShot(group.versions.map((a) => a.id), shotId); }}
+                      />
                     </div>
                     <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
                       {group.versions.map((asset, i) => (

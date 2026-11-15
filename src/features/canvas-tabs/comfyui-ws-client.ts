@@ -115,6 +115,16 @@ export class DirectorPreviewSocket {
     this.ws = ws;
     ws.binaryType = 'arraybuffer';
     ws.onmessage = (ev) => this.handleMessage(ev.data);
+    ws.onopen = () => {
+      // ComfyUI 新版二进制采样预览（PREVIEW_IMAGE_WITH_METADATA）只发给声明了
+      // feature_flags 的客户端；首条 TEXT 消息声明能力。旧版服务端把未知类型
+      // 消息忽略，导演台 minimax_director_* 事件不受影响。
+      try {
+        ws.send(JSON.stringify({ type: 'feature_flags', data: { supports_preview_metadata: true } }));
+      } catch {
+        /* 连接刚建立即关闭的竞态：忽略，交给 onclose 重连 */
+      }
+    };
     ws.onclose = () => {
       this.ws = null;
       if (!this.closedByUser) this.scheduleReconnect(); // 断线自动重连（作业仍在跑时帧不中断）
@@ -242,8 +252,11 @@ export class DirectorPreviewSocket {
  * 与导演台 socket 共用同一套连接生命周期（同 clientId / 断线重连 / close），
  * 只解析 ComfyUI 原生事件：
  * - 文本 `progress`：{ value, max } → step/totalSteps（任何 KSampler 都会发）；
- * - 二进制 `PREVIEW_IMAGE`：4 字节事件类型 + 4 字节图片格式（1=jpeg 2=png）+ 图像字节。
- * 注意：`--preview-method none` 时没有二进制预览帧，但步数 progress 不受影响。
+ * - 二进制 `PREVIEW_IMAGE`(1)：4 字节事件类型 + 4 字节图片格式（1=jpeg 2=png）+ 图像字节；
+ * - 二进制 `PREVIEW_IMAGE_WITH_METADATA`(4)：新版 ComfyUI 只给声明 feature_flags 的客户端发，
+ *   布局为 4 字节事件类型 + 4 字节 metadata 长度 + metadata JSON（image_type 字段带 mime）+ 图像字节。
+ * 注意：服务端 `--preview-method none` 时没有二进制预览帧，但步数 progress 不受影响
+ * （插件提交 /prompt 时已带 extra_data.preview_method=auto 打开预览）。
  */
 export class ComfyuiPreviewSocket extends DirectorPreviewSocket {
   private lastPreviewAt = 0;
@@ -297,11 +310,29 @@ export function mapStepProgress(
   return { step: Math.min(value, max), totalSteps: max };
 }
 
-/** ComfyUI BinaryEventTypes：1=PREVIEW_IMAGE；图片格式 1=JPEG 2=PNG */
+/**
+ * ComfyUI BinaryEventTypes 解码：
+ * - 1=PREVIEW_IMAGE：4B 事件 + 4B 图片格式（1=JPEG 2=PNG）+ 图像字节；
+ * - 4=PREVIEW_IMAGE_WITH_METADATA：4B 事件 + 4B metadata 长度 + metadata JSON（image_type 带 mime）+ 图像字节。
+ */
 function decodePreviewFrame(raw: ArrayBuffer): string | null {
   if (!(raw instanceof ArrayBuffer) || raw.byteLength <= 8) return null;
   const view = new DataView(raw);
-  if (view.getUint32(0) !== 1) return null;
+  const event = view.getUint32(0);
+  if (event === 4) {
+    const metaLen = view.getUint32(4);
+    const metaEnd = 8 + metaLen;
+    if (metaEnd >= raw.byteLength) return null;
+    let mime = 'image/jpeg';
+    try {
+      const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(raw, 8, metaLen))) as { image_type?: string };
+      if (meta.image_type === 'image/png') mime = 'image/png';
+    } catch {
+      /* metadata 解析失败按 jpeg 兜底 */
+    }
+    return `data:${mime};base64,${bytesToBase64(new Uint8Array(raw, metaEnd))}`;
+  }
+  if (event !== 1) return null;
   const imageType = view.getUint32(4);
   const mime = imageType === 2 ? 'image/png' : 'image/jpeg';
   return `data:${mime};base64,${bytesToBase64(new Uint8Array(raw, 8))}`;

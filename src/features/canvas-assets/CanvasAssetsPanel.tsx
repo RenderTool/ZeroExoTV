@@ -6,13 +6,13 @@
  * 展示组件：分组内复用 shared 组件；层级分组复用 HierarchyGroup（内部接 HierarchyListView）。
  *
  * 2026-11-06 用户指令（抽屉两处收敛）：
- * - sidebar 按钮顺序 = DRAWER_TAB_DEFS 顺序（资产 → 历史 → 层级 → 画布）；
+ * - sidebar 按钮顺序 = DRAWER_TAB_DEFS 顺序（全局分组置顶，模块独有分组垫底 + 分割线）；
  * - 层级/画布只在**画布模块**（顶部页签 = 画布/画布副本）被激活时挂载，
  *   剧本/主体库/导演台模块下按钮与内容都不出现，杜绝在这些模块误选画布层级与子画布。
  */
 
 import { useTranslation } from 'react-i18next';
-import { Layers, FileText, ListChecks } from 'lucide-react';
+import { Layers, FileText, ListChecks, UserRound, History, Clapperboard } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { GroupPlugin } from '@zeroexo/plugin-group';
@@ -21,6 +21,7 @@ import { useCanvasAssetsPanel } from './store.js';
 import type { DrawerGroup } from './tab-defs.js';
 import { SidebarNav, type GroupTabItem } from './components/common.js';
 import { MaterialGroup } from './groups/MaterialGroup.js';
+import { HistoryGroup } from './groups/HistoryGroup.js';
 import { CanvasStructureGroup } from './groups/CanvasStructureGroup.js';
 import { ScriptMetaGroup } from './groups/ScriptMetaGroup.js';
 import { TaskQueuePanel } from '@/features/task-center/task-queue-panel.js';
@@ -46,10 +47,13 @@ import { DRAWER_TAB_DEFS, resolveDrawerModule } from './tab-defs.js';
 
 const TAB_ICONS: Record<(typeof DRAWER_TAB_DEFS)[number]['key'], { icon: React.ReactNode; activeIcon?: React.ReactNode }> = {
   // 素材分组两态图标：激活 PackageOpen / 未激活 Package（仅视觉切换，不收起抽屉）
-  material: {
+  assets: {
     icon: <SidebarAnimatedIcon type="assets" size={18} active={false} hovered={false} mode="inline" />,
     activeIcon: <SidebarAnimatedIcon type="assets" size={18} active hovered={false} mode="inline" />,
   },
+  subjects: { icon: <UserRound size={18} /> },
+  canvasHistory: { icon: <History size={18} /> },
+  directorHistory: { icon: <Clapperboard size={18} /> },
   // 画布相关合并入口：层级 / 子画布在组内 Tab 切换
   canvasStructure: { icon: <Layers size={18} /> },
   // 本剧信息（2026-11-07）：整部剧的一句话概述 + 标签，仅剧本/导演台模块挂载
@@ -67,19 +71,31 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
   // 2026-11-13 用户指令：删除独立「历史」入口——画布生成进「画布」、导演台生成进「导演台」。
   // 2026-11-05 用户指令（征集 #174）：「剧本」页签与剧本分组组件从抽屉全删（只留顶部「剧本」页签）
   // 2026-11-06 用户指令：顺序 = 资产 → 层级 → 画布；非画布模块只留资产（+本剧信息）
-  const tabItems: GroupTabItem[] = DRAWER_TAB_DEFS.map((d) => ({
+  // 2026-11-16 用户指令：模块独有分组（层级/子画布、本剧信息）统一垫底，
+  // 首个独有分组上方画分割线，与全局分组（资产/主体/画布历史/导演台/任务队列）隔开
+  const visibleItems = DRAWER_TAB_DEFS.map((d) => ({
     key: d.key,
     label: t(d.labelKey),
     ...TAB_ICONS[d.key],
   })).filter((item) => store.visibleGroups.includes(item.key as DrawerGroup));
+  const firstModuleOnlyIdx = visibleItems.findIndex((item) =>
+    DRAWER_TAB_DEFS.find((d) => d.key === item.key)?.moduleOnly === true);
+  const tabItems: GroupTabItem[] = visibleItems.map((item, i) =>
+    firstModuleOnlyIdx > 0 && i === firstModuleOnlyIdx ? { ...item, dividerBefore: true } : item);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0 }}>
       <SidebarNav items={tabItems} active={store.activeGroup} onChange={(k) => store.changeGroup(k as DrawerGroup)} theme={theme} />
 
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
-        {store.activeGroup === 'material' ? (
-          <MaterialGroup store={store} theme={theme} />
+        {store.activeGroup === 'assets' ? (
+          <MaterialGroup store={store} theme={theme} lockedScope="library" />
+        ) : store.activeGroup === 'subjects' ? (
+          <MaterialGroup store={store} theme={theme} lockedScope="subject" />
+        ) : store.activeGroup === 'canvasHistory' ? (
+          <HistoryGroup key="canvas-history" store={store} theme={theme} forcedSource="canvas" />
+        ) : store.activeGroup === 'directorHistory' ? (
+          <HistoryGroup key="director-history" store={store} theme={theme} forcedSource="director" />
         ) : store.activeGroup === 'canvasStructure' ? (
           // 层级 / 子画布合并为一个「画布」入口，组内 Tab 切换
           <CanvasStructureGroup store={store} theme={theme} hierarchy={hierarchy} />

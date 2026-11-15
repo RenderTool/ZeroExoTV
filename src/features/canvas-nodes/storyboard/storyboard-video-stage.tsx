@@ -72,10 +72,13 @@ export interface StoryboardVideoStageProps {
   placeholderDetail?: string;
   /** 失败原因（允许跟一行，超长截断） */
   placeholderReason?: string;
-  /* 实时预览帧（2026-11-05）：直连 ComfyUI /ws 推流，生成中在占位卡上按帧刷新（≤10fps，宿主节流）；
-     image 为 dataURL；step/totalSteps/segmentIndex 可缺省（progress-only 事件） */
+  /* 实时采样预览（2026-11-16 对齐 KJNodes）：插件每步推整段采样片段，
+     mime=video/mp4 → src 在 video（<video> 自动循环播放）；webp/jpeg → src 在 image（<img>）；
+     step/totalSteps/segmentIndex 可缺省（progress-only 事件） */
   livePreview?: {
     image: string;
+    video?: string;
+    mime?: string;
     step?: number | null;
     totalSteps?: number | null;
     segmentIndex?: number | null;
@@ -116,6 +119,37 @@ const formatTime = (s: number): string => {
   const sec = Math.floor(s % 60);
   return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
 };
+
+/**
+ * 实时采样预览渲染：mime=video/mp4 → <video> 循环播放整段采样片段（浏览器原生解码，
+ * 不做前端定时器逐帧替换）；webp/jpeg → <img>（animated WebP 由浏览器原生循环）。
+ */
+function LivePreviewMedia({ preview }: {
+  preview: { image: string; video?: string };
+}): ReactElement {
+  const mediaStyle = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' } as const;
+  if (preview.video) {
+    return (
+      <video
+        data-live-preview-frame
+        src={preview.video}
+        autoPlay
+        muted
+        loop
+        playsInline
+        style={mediaStyle}
+      />
+    );
+  }
+  return (
+    <img
+      data-live-preview-frame
+      src={preview.image}
+      alt=""
+      style={mediaStyle}
+    />
+  );
+}
 
 export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   videoStorageKey, videoStatus = 'idle', videoError, emptyLabel,
@@ -296,7 +330,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   const showPlaceholder = !hasVideo && (!!placeholderPrompt || !!placeholderTitle);
   // 第十二条：状态型占位（优先于旧 prompt 卡）——仅单行状态文案 + 小图标，不回显提示词
   // 实时帧到达时即使宿主状态还没翻到 generating，也必须优先显示帧（否则右侧永远停在占位）
-  const showStatusPlaceholder = !hasVideo && (!!placeholderStatus || !!livePreview?.image);
+  const showStatusPlaceholder = !hasVideo && (!!placeholderStatus || !!livePreview?.image || !!livePreview?.video);
   const statusLabel = placeholderStatus === 'generating'
     ? t('storyboard.statusGenerating', '生成中')
     : placeholderStatus === 'done'
@@ -352,16 +386,11 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
             gap: 6, padding: '28px 32px', textAlign: 'center',
           }}
         >
-          {livePreview?.image ? (
-            /* 实时预览帧（/ws 推流）：黑幕上按帧刷新，状态信息不压画面（见下方左下角角标） */
-            <img
-              data-live-preview-frame
-              src={livePreview.image}
-              alt=""
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
-            />
+          {livePreview?.image || livePreview?.video ? (
+            /* 实时采样预览（/ws 推流）：MP4 循环播放 / WebP-JPEG 静图，状态信息不压画面（见下方左下角角标） */
+            <LivePreviewMedia preview={livePreview} />
           ) : null}
-          {livePreview?.image ? (
+          {livePreview?.image || livePreview?.video ? (
             /* 2026-11-05 修复（生成中时文本标签挡画面）：两块居中 chip 合并为左下角紧凑角标 ——
                脉冲小点表示跑着 + 「2/25 · 段1」；小字半透明底、pointer-events:none 不拦截交互；
                完整文案（实时预览中 · 2/25 · 第 1 段）走 title 悬停；完成/失败后本角标随条件消失 */

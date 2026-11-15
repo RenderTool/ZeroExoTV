@@ -39,7 +39,6 @@ import { registerStyleTools } from "./tools/style.js";
 import { registerUpgradeTools } from "./tools/upgrade.js";
 import { registerComfyuiTools } from "./tools/comfyui.js";
 import { registerReleaseTools } from "./tools/release.js";
-import { startBroker } from "./broker/executor.js";
 
 /**
  * 连接即概览：把「当前数据状态」拼进 initialize 的 instructions。
@@ -202,8 +201,7 @@ async function main(): Promise<void> {
     const portIdx = argv.indexOf("--port");
     if (portIdx >= 0) process.env.ZEROEXO_FS_PORT = argv[portIdx + 1];
     await startFileServer();
-    // 数据服务进程同时是任务执行者：网页只负责提交/订阅（多进程靠 lease 互斥，只跑一份）
-    startBroker();
+    // 生成任务由 ComfyUI 插件持有/执行；MCP 不再启动 broker 执行器。
     return; // server 事件循环保活
   }
 
@@ -213,7 +211,6 @@ async function main(): Promise<void> {
     // 先注册工具再盖印章：否则 server-info 会写 tools:0/toolNames:[]，网页误报「缺 52 个工具」
     await buildServer({ getToken: () => process.env.ZEROEXO_MCP_TOKEN });
     await stampServerInfo(port);
-    startBroker();
     // 有会话态：initialize 建立 session，后续请求按 mcp-session-id 复用同一 server。
     const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
     const readBody = async (req: http.IncomingMessage): Promise<string> => {
@@ -298,8 +295,7 @@ async function main(): Promise<void> {
   const ctx: Ctx = { getToken: () => process.env.ZEROEXO_MCP_TOKEN };
   const server = await buildServer(ctx);
   await server.connect(new StdioServerTransport());
-  // stdio 模式下 MCP 进程同样执行任务（IDE 只开 MCP 不开网页也能推进排队任务）
-  startBroker();
+  // 生成任务由 ComfyUI 插件执行；stdio MCP 不再接管任务推进。
   process.stderr.write(`[zeroexo-mcp-server] stdio ready, tools=${TOOL_REGISTRY.length}, dataRoot=${dataRoot()}\n`);
 }
 

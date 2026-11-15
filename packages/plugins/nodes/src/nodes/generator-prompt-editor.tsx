@@ -34,14 +34,16 @@ export interface ReferenceItem {
 
 /** 暴露给父组件的命令式 API */
 export interface GeneratorPromptEditorHandle {
-  /** 通过 @ 选择素材后，插入 badge 到当前光标位置 */
-  insertReference: (refId: string) => void;
+  /** 通过 @ 选择素材后，插入 badge 到当前光标位置（item 可直接传入，不必先出现在 references 里） */
+  insertReference: (refId: string, item?: ReferenceItem) => void;
   /** 全量同步 DOM：将文本中的 @name 替换为 badge HTML */
   syncDOM: (text: string, refs: { id: string; name: string; url?: string; type: string }[]) => void;
   /** 将指定素材对应的 badge 降级为纯文本 */
   downgradeReferenceToText: (ref: { id: string; name: string }) => string | null;
   /** 提取输入框纯文本（badge span 转换为 @name） */
   getPlainText: () => string | null;
+  /** 关闭 @ 弹层状态（外部面板自关时同步编辑器内部状态） */
+  closeMentionPanel: () => void;
 }
 
 
@@ -104,6 +106,10 @@ export interface GeneratorPromptEditorProps {
   maxHeight?: number;
   /** @ 弹窗类型过滤(先按类型过滤,再做名称匹配;参考区展示不受影响) */
   mentionTypeFilter?: (ref: ReferenceItem) => boolean;
+  /** 外部接管 @ 弹层（画布 dock 复用分镜同款选择面板）：true 时不渲染内置弹层，仅回调开关 */
+  externalMentionPanel?: boolean;
+  /** @ 弹层开关变化（外部面板模式）：open + 当前过滤词 */
+  onMentionPanelChange?: (open: boolean, filter: string) => void;
   /** @ 弹窗背景色/边框色(不传时按 textColor 亮度自动推断;明暗主题下应由宿主传入主题色) */
   popupBackground?: string;
   popupBorderColor?: string;
@@ -198,6 +204,8 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       minHeight = 60,
       maxHeight,
       mentionTypeFilter,
+      externalMentionPanel,
+      onMentionPanelChange,
       popupBackground,
       popupBorderColor,
     },
@@ -227,11 +235,22 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       el.style.bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
     }, []);
     const showMentionPopup = useCallback(() => {
+      mentionOpenRef.current = true;
+      onMentionPanelChangeRef.current?.(true, mentionFilterRef.current);
       const el = mentionPopupRef.current;
       if (!el) return;
       positionMentionPopup();
       el.style.display = 'flex';
     }, [positionMentionPopup]);
+
+    /** 统一关闭：内部状态 + 内置弹层隐藏 + 过滤词清空 + 通知外部面板关闭 */
+    const hideMentionPanel = useCallback(() => {
+      mentionOpenRef.current = false;
+      if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
+      mentionFilterRef.current = '';
+      setMentionFilter('');
+      onMentionPanelChangeRef.current?.(false, '');
+    }, []);
     useEffect(() => {
       const reflow = (): void => positionMentionPopup();
       window.addEventListener('resize', reflow);
@@ -247,6 +266,11 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
     referencesRef.current = references;
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
+    // 外部面板模式（ref 模式规避闭包过期）
+    const onMentionPanelChangeRef = useRef(onMentionPanelChange);
+    onMentionPanelChangeRef.current = onMentionPanelChange;
+    const externalMentionPanelRef = useRef(externalMentionPanel);
+    externalMentionPanelRef.current = externalMentionPanel;
 
     // 光标保持在最后
     const keepCursorEnd = useCallback((): Selection | undefined => {
@@ -330,21 +354,18 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       [keepCursorEnd, removeMentionText, onLengthChange],
     );
 
-    /** 通过 @ 选择素材后，插入 badge */
+    /** 通过 @ 选择素材后，插入 badge（item 可直传：外部面板选中的资产不必先进 references） */
     const insertReference = useCallback(
-      (refId: string) => {
-        const target = referencesRef.current.find((r) => r.id === refId);
+      (refId: string, item?: ReferenceItem) => {
+        const target = item ?? referencesRef.current.find((r) => r.id === refId);
         if (!target) return;
         // 先保存当前搜索词再清空:removeMentionText 需要整段删除 "@搜索词",
         // 若清空后传入,只会删 "@" 导致搜索词残留进正文(复现:选完 @ 失焦重开面板出现乱字/空行)
         const searchStr = mentionFilterRef.current;
-        mentionOpenRef.current = false;
-        if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
-        mentionFilterRef.current = '';
-        setMentionFilter('');
+        hideMentionPanel();
         insertContent(buildBadgeHtml(target), searchStr);
       },
-      [insertContent],
+      [insertContent, hideMentionPanel],
     );
 
     /** 全量同步 contentEditable 内容 */
@@ -442,8 +463,9 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         syncDOM,
         downgradeReferenceToText,
         getPlainText,
+        closeMentionPanel: hideMentionPanel,
       }),
-      [insertReference, syncDOM, downgradeReferenceToText, getPlainText],
+      [insertReference, syncDOM, downgradeReferenceToText, getPlainText, hideMentionPanel],
     );
 
     // 初始化内容
@@ -528,17 +550,11 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
               onLengthChange?.(text.length);
             }
             if (s.references.length === 0) {
-              if (mentionOpenRef.current) {
-                mentionOpenRef.current = false;
-                if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
-              }
+              if (mentionOpenRef.current) hideMentionPanel();
               return;
             }
             if (inputE.data !== null && !inputE.data.trim()) {
-              if (mentionOpenRef.current) {
-                mentionOpenRef.current = false;
-                if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
-              }
+              if (mentionOpenRef.current) hideMentionPanel();
               return;
             }
             let searchStr = '';
@@ -576,10 +592,8 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                 );
                 const shouldOpen = !!searchStr && filtered.length > 0;
                 if (shouldOpen !== mentionOpenRef.current) {
-                  mentionOpenRef.current = shouldOpen;
-                  if (mentionPopupRef.current)
-                    if (shouldOpen) showMentionPopup();
-                    else mentionPopupRef.current.style.display = 'none';
+                  if (shouldOpen) showMentionPopup();
+                  else hideMentionPanel();
                 }
               }
             } else if (inputE.inputType === 'deleteContentBackward') {
@@ -602,9 +616,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
               );
               const shouldOpen = !!searchStr && filtered.length > 0;
               if (shouldOpen !== mentionOpenRef.current) {
-                mentionOpenRef.current = shouldOpen;
-                if (mentionPopupRef.current)
-                  if (shouldOpen) showMentionPopup(); else mentionPopupRef.current.style.display = 'none';
+                if (shouldOpen) showMentionPopup(); else hideMentionPanel();
               }
             }
           }}
@@ -666,9 +678,14 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
     }, [mentionFilter]);
 
     // 键盘导航(@ 弹窗打开时):上下选择、Enter 确认、Esc 关闭(与 Agent MentionPopover 一致)
+    // 外部面板模式下不抢键盘(面板有自己的搜索输入),仅保留 Esc 关闭
     useEffect(() => {
       const handleKey = (e: KeyboardEvent) => {
         if (!mentionOpenRef.current) return;
+        if (externalMentionPanelRef.current) {
+          if (e.key === 'Escape') hideMentionPanel();
+          return;
+        }
         if (e.key === 'ArrowDown') {
           e.preventDefault();
           setSelectedIndex((i) => Math.min(i + 1, filteredMentions.length - 1));
@@ -677,17 +694,14 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           setSelectedIndex((i) => Math.max(i - 1, 0));
         } else if (e.key === 'Enter' && filteredMentions[selectedIndex]) {
           e.preventDefault();
-          insertReference(filteredMentions[selectedIndex].id);
+          insertReference(filteredMentions[selectedIndex]!.id);
         } else if (e.key === 'Escape') {
-          mentionOpenRef.current = false;
-          if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
-          mentionFilterRef.current = '';
-          setMentionFilter('');
+          hideMentionPanel();
         }
       };
       document.addEventListener('keydown', handleKey);
       return () => document.removeEventListener('keydown', handleKey);
-    }, [filteredMentions, selectedIndex, insertReference]);
+    }, [filteredMentions, selectedIndex, insertReference, hideMentionPanel]);
 
     // 点击 @ 弹窗/输入框之外关闭
     useEffect(() => {
@@ -697,15 +711,12 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         const editor = promptInputRef.current;
         if (!popup || !editor) return;
         if (!popup.contains(e.target as Node) && !editor.contains(e.target as Node)) {
-          mentionOpenRef.current = false;
-          popup.style.display = 'none';
-          mentionFilterRef.current = '';
-          setMentionFilter('');
+          hideMentionPanel();
         }
       };
       document.addEventListener('mousedown', handleClick);
       return () => document.removeEventListener('mousedown', handleClick);
-    }, []);
+    }, [hideMentionPanel]);
 
     // 弹窗行配色(中性表面,与 Agent MentionPopover 的 surface-2 观感一致)
     const rowHoverBg = isLightTheme ? 'rgba(15,23,42,0.06)' : 'rgba(255,255,255,0.08)';
@@ -740,8 +751,9 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         )}
         {contentEditableEl}
 
-        {/* @ 提及弹出菜单 — Agent MentionPopover 同款(2026-08-25 用户拍板):投影无边框 + 搜索头 + 两行列表行 */}
-        {!readOnly && references.length > 0 && createPortal(
+        {/* @ 提及弹出菜单 — Agent MentionPopover 同款(2026-08-25 用户拍板):投影无边框 + 搜索头 + 两行列表行
+            外部面板模式(externalMentionPanel)不渲染:宿主用分镜同款选择面板接管 */}
+        {!readOnly && references.length > 0 && !externalMentionPanel && createPortal(
           <div
             ref={mentionPopupRef}
             style={{

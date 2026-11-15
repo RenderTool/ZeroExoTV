@@ -299,7 +299,7 @@ export function AssetPickPanel({
     const g: Array<{ name: string; items: DirectorAssetRef[] }> = [];
     if (pooled.length > 0) g.push({ name: t('director.groupPooled', '已入槽'), items: pooled });
     if (project.length > 0) g.push({ name: t('director.groupProject', '项目资产'), items: project });
-    if (library.length > 0) g.push({ name: t('director.groupLibrary', '全局'), items: library });
+    if (library.length > 0) g.push({ name: t('director.groupLibrary', '公共资产'), items: library });
     return g;
   }, [candidates, pooledOrder, query, t]);
 

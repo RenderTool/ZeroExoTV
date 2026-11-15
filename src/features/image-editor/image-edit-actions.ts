@@ -9,6 +9,8 @@ import { AddEdgeCommand, AddNodeCommand, type CommandQueue, type NodeRecord } fr
 import { uploadImage } from '@zeroexo/plugin-persistence';
 import { cropDataUrl, splitDataUrl, MAX_SPLIT_PIECES } from '@zeroexo/plugin-image-editor';
 import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
+import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
+import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 
 interface BaseInput {
   node: NodeRecord;
@@ -36,17 +38,31 @@ export async function applyMaskEdit({ node, commandQueue, blob, prompt, onGetNod
   const newWidth = Math.min(origWidth, Math.max(220, img.width ?? origWidth));
   const newHeight = Math.round(newWidth * ((img.height || 1) / (img.width || 1)));
   const childId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const title = onGetNodeTitle?.('image') ?? '';
+  // 局部生成产物也进画布历史/CAS，而不是只留在 localforage 桶里
+  const landed = await autoLandGenerationBlob({
+    nodeId: childId,
+    kind: 'image',
+    title,
+    blob,
+    width: img.width,
+    height: img.height,
+    bytes: img.bytes,
+    mimeType: img.mimeType,
+    prompt,
+    projectId: getCurrentCanvasId() ?? undefined,
+  }).catch(() => null);
   commandQueue.execute(
     new AddNodeCommand({
       id: childId,
       type: 'image',
-      title: onGetNodeTitle?.('image') ?? '',
+      title,
       position: { x: node.position.x + origWidth + 96, y: node.position.y },
       size: { width: newWidth, height: newHeight },
       data: {
         prompt,
         content: img.url,
-        storageKey: img.storageKey,
+        storageKey: landed?.storageKey ?? img.storageKey,
         status: 'success',
         naturalWidth: img.width,
         naturalHeight: img.height,

@@ -19,6 +19,8 @@ export interface GroupTabItem {
   /** 激活态替换图标（如素材 Package→PackageOpen，与顶栏资产库按钮同款两态） */
   activeIcon?: ReactNode;
   count?: number;
+  /** 2026-11-16 用户指令：该按钮上方画一条分割线，用于隔开全局分组与模块独有分组 */
+  dividerBefore?: boolean;
 }
 
 /** 侧边栏导航（纯图标，无文字 label，无数字角标） */
@@ -42,6 +44,16 @@ export function SidebarNav({ items, active, onChange, theme }: {
       {items.map((item) => {
         const isActive = active === item.key;
         return (
+          <div key={item.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            {item.dividerBefore && (
+              <div style={{
+                width: 24,
+                height: 1,
+                margin: '4px 0',
+                flexShrink: 0,
+                background: theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)',
+              }} />
+            )}
           <div
             key={item.key}
             onClick={() => onChange(item.key)}
@@ -74,6 +86,7 @@ export function SidebarNav({ items, active, onChange, theme }: {
             }}
           >
             {isActive && item.activeIcon ? item.activeIcon : item.icon}
+          </div>
           </div>
         );
       })}

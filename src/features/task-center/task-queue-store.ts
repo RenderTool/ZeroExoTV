@@ -24,8 +24,8 @@ export interface QueuedTask {
   startedAt: number;
   finishedAt?: number;
   error?: string;
-  /** 事实源：broker=MCP 持久化任务；local=仅前端任务（上传） */
-  source?: 'local' | 'broker';
+  /** 事实源：broker=MCP 旧任务；plugin=ComfyUI 插件持久任务；local=仅前端任务 */
+  source?: 'local' | 'broker' | 'plugin';
   /** broker 任务可取消（排队/运行中） */
   cancelable?: boolean;
   /** 最后一帧预览（broker 落盘的图片 storageKey） */
@@ -36,6 +36,8 @@ export interface QueuedTask {
 interface TaskQueueState {
   tasks: QueuedTask[];
   collapsed: boolean;
+  /** 用户已「清空已完成」的任务 id：插件历史再次同步时不再冒出来 */
+  dismissed: Set<string>;
   /** 开始/续跑一个本地任务（同 id 幂等：已存在则更新为 running） */
   start: (task: { id: string; kind: TaskKind; title: string; phase?: string }) => void;
   update: (id: string, patch: Partial<Pick<QueuedTask, 'title' | 'phase' | 'progress'>>) => void;
@@ -45,6 +47,8 @@ interface TaskQueueState {
   setCollapsed: (collapsed: boolean) => void;
   /** 用 broker 全量列表替换展示列表（本地上传任务保留） */
   applyBrokerTasks: (tasks: QueuedTask[]) => void;
+  /** 用插件持久任务列表替换展示列表（本地上传任务保留） */
+  applyPluginTasks: (tasks: QueuedTask[]) => void;
 }
 
 /** 最多保留的条目数（连跑几十个作业时只留最近的，防止面板无限长） */
@@ -86,9 +90,25 @@ export function toQueuedTask(task: BrokerTask): QueuedTask {
   };
 }
 
+const DISMISS_KEY = 'zeroexo.taskQueue.dismissed';
+function readDismissed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DISMISS_KEY);
+    return new Set<string>(raw ? JSON.parse(raw) as string[] : []);
+  } catch {
+    return new Set();
+  }
+}
+function writeDismissed(ids: Set<string>): void {
+  try {
+    localStorage.setItem(DISMISS_KEY, JSON.stringify([...ids].slice(-200)));
+  } catch { /* ignore */ }
+}
+
 export const useTaskQueueStore = create<TaskQueueState>((set) => ({
   tasks: [],
   collapsed: false,
+  dismissed: readDismissed(),
 
   start: (task) => set((s) => {
     const existing = s.tasks.find((t) => t.id === task.id);
@@ -99,6 +119,8 @@ export const useTaskQueueStore = create<TaskQueueState>((set) => ({
           : t)),
       };
     }
+    // 用户已「清空已完成」的任务（如刷新后从插件任务表恢复的旧任务）不再冒出来（2026-11-16 用户反馈）
+    if (s.dismissed.has(task.id)) return {};
     const next: QueuedTask = {
       id: task.id,
       kind: task.kind,
@@ -123,15 +145,32 @@ export const useTaskQueueStore = create<TaskQueueState>((set) => ({
 
   remove: (id) => set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
 
-  clearFinished: () => set((s) => ({
-    tasks: s.tasks.filter((t) => t.status === 'queued' || t.status === 'running'),
-  })),
+  clearFinished: () => set((s) => {
+    const terminal = s.tasks.filter((t) => t.status !== 'queued' && t.status !== 'running');
+    const dismissed = new Set(s.dismissed);
+    for (const t of terminal) dismissed.add(t.id);
+    writeDismissed(dismissed);
+    return {
+      tasks: s.tasks.filter((t) => t.status === 'queued' || t.status === 'running'),
+      dismissed,
+    };
+  }),
 
   setCollapsed: (collapsed) => set({ collapsed }),
 
   applyBrokerTasks: (tasks) => set((s) => {
+    // 已清空的终态任务不再随 broker 全量同步回来（与 applyPluginTasks 同口径）
     const locals = s.tasks.filter((t) => t.source !== 'broker');
-    const merged = [...tasks, ...locals].sort((a, b) => b.startedAt - a.startedAt);
+    const visible = tasks.filter((t) => !s.dismissed.has(t.id));
+    const merged = [...visible, ...locals].sort((a, b) => b.startedAt - a.startedAt);
+    return { tasks: merged.slice(0, MAX_TASKS) };
+  }),
+
+  applyPluginTasks: (tasks) => set((s) => {
+    // 插件是生成任务事实源；保留本地非生成任务（上传等）；已清空的终态不再回来
+    const locals = s.tasks.filter((t) => t.source === 'local' && t.kind === 'upload');
+    const visible = tasks.filter((t) => !s.dismissed.has(t.id));
+    const merged = [...visible, ...locals].sort((a, b) => b.startedAt - a.startedAt);
     return { tasks: merged.slice(0, MAX_TASKS) };
   }),
 }));

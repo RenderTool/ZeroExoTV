@@ -269,7 +269,7 @@ export const WorkbenchPromptDock = memo(function WorkbenchPromptDock({
         <span style={{ display: 'inline-flex', flexShrink: 0 }}><Film size={14} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
           {/* 2026-11-04：出片页改名导演台（Director 概念）—— 页签一路落地 key 为 canvasTab.director（zh/en/ja 已就绪） */}
-          {t('canvasTab.director', '导演台')} · {t('nodeDock.generate', '生成')}
+          {t('canvasTab.director', '分镜')} · {t('nodeDock.generate', '生成')}
         </span>
         <ChevronUp size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
       </div>

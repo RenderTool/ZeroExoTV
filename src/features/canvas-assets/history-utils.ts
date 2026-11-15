@@ -153,24 +153,3 @@ export function fmtDuration(ms: number | undefined): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-/**
- * 资产 → 画布节点定位：
- * 1) data.originNodeId（生成落库时写入）且节点仍在图中 → 命中；
- * 2) 兜底按 storageKey 扫节点（资产拖回画布建的节点带 data.storageKey）；
- * 3) 都没有 → null（调用方提示「未找到对应节点」）。
- */
-export function findAssetNodeId(
-  graph: { nodes: Array<{ id: string; data?: unknown }> } | null | undefined,
-  asset: Asset,
-): string | null {
-  if (!graph) return null;
-  const d = asset.data as { originNodeId?: string; storageKey?: string };
-  if (d.originNodeId && graph.nodes.some((n) => n.id === d.originNodeId)) return d.originNodeId;
-  if (d.storageKey) {
-    const hit = graph.nodes.find(
-      (n) => (n.data as { storageKey?: string } | undefined)?.storageKey === d.storageKey,
-    );
-    if (hit) return hit.id;
-  }
-  return null;
-}

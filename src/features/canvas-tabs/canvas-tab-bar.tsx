@@ -43,7 +43,7 @@ const SLOT_LABEL_KEY: Record<FixedSlotKind, string> = {
 const SLOT_FALLBACK_LABEL: Record<FixedSlotKind, string> = {
   script: '剧本',
   storyboard: '主体库',
-  workbench: '导演台',
+  workbench: '分镜',
   canvas: '画布',
 };
 

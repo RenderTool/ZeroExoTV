@@ -15,7 +15,8 @@ import { useTranslation } from 'react-i18next';
 import { Tooltip } from 'antd';
 import { FileText, ImageIcon, CheckSquare, Square, Download } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/plugin-theme';
-import { useHydratedContent } from '@zeroexo/plugin-nodes';
+import { usePreviewImage } from '@zeroexo/plugin-nodes';
+import { useMediaObjectUrl } from '@/shared/hooks/use-media-object-url.js';
 import type { Asset, InsertAssetPayload } from '../index.js';
 import { downloadAsset } from '../services/download-asset.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
@@ -100,7 +101,18 @@ export function PickerCard({ asset, theme, onClick, onDragStart, selectMode = fa
   const coverStorageKey =
     data.kind === 'image' || data.kind === 'video' || data.kind === 'audio' ? data.storageKey : undefined;
   const rawCover = asset.coverUrl;
-  const hydratedCover = useHydratedContent(coverStorageKey, rawCover ?? '');
+  // 2026-11-16 修复：cas: 键旧走 useHydratedContent → resolveMediaUrl（只认 video:/audio:/file:），
+  // cas: 永远解析不到 → 选择器卡片裂图。改走统一媒体档位链（与画布节点同契约）：
+  // 图片 preview>orig>thumb；视频/音频 orig（无尺寸变体概念）。
+  const isCasCover = !!coverStorageKey?.startsWith('cas:');
+  const casMediaKind = data.kind === 'video' ? 'video' : data.kind === 'audio' ? 'audio' : 'image';
+  const casCover = useMediaObjectUrl(
+    isCasCover ? coverStorageKey : undefined,
+    casMediaKind,
+    casMediaKind === 'video' || casMediaKind === 'audio' ? ['orig', 'videothumb'] : ['preview', 'orig', 'thumb'],
+  );
+  const nonCasCover = usePreviewImage(isCasCover ? undefined : coverStorageKey, rawCover ?? '');
+  const hydratedCover = isCasCover ? (casCover.url || nonCasCover) : nonCasCover;
   // useHydratedContent 不处理 resources/ 前缀（后端键），手动构建后端 URL(不拼接 token,由 AuthorizedImage/AuthorizedVideo 携带 Authorization header)
   const cover = ((): string | undefined => {
     if (hydratedCover && !hydratedCover.startsWith('resources/')) return hydratedCover;

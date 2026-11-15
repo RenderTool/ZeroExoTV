@@ -1188,6 +1188,7 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
                 onPointerDown={handleClipPointerDown}
                 onPointerMove={handleClipPointerMove}
                 onPointerUp={handleClipPointerUp}
+                onActivate={(id) => onSelectShot?.(id)}
                 onContextMenu={handleClipContextMenu}
                 onDoubleClick={(id) => onClipDoubleClick?.(id)}
                 onTrimStart={trimEnabled ? handleTrimStart : undefined}

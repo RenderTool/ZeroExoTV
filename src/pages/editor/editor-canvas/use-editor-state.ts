@@ -132,6 +132,8 @@ export interface EditorRefs {
   layoutController: ReturnType<DefaultEditor['plugins']['layout']['getController']> | null;
   nodesPlugin: DefaultEditor['plugins']['nodes'] | null;
   groupPlugin: DefaultEditor['plugins']['group'] | null;
+  /** 持久化插件（生成完成等关键写入后可立即 save，避免刷新丢失节点新图） */
+  persistence: { save(): Promise<void> } | null;
   /** AI Provider 引用(P3.4: PromptPanel onGenerate 通过此调用生成) */
   aiProvider: AIProvider | null;
   /** 右键菜单控制器(占位:实际菜单由 editor-page 的 contextMenuItems 渲染,此处保留空实现兼容引用) */
@@ -1187,6 +1189,7 @@ export function useEditorState(canvasId: string): {
     layoutController: editor?.plugins.layout.getController() ?? null,
     nodesPlugin: editor?.plugins.nodes ?? null,
     groupPlugin: editor?.plugins.group ?? null,
+    persistence: editor?.plugins.persistence ?? null,
     aiProvider: editor?.plugins.aiProvider ?? null,
     // 右键菜单控制器占位(实际菜单由 editor-page 的 contextMenuItems 渲染,此处保留 null 兼容引用)
     contextMenuController: null,

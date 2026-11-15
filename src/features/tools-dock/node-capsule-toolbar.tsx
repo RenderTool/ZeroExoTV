@@ -33,12 +33,13 @@ import {
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   Maximize2, Zap,
   Layers, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, Scaling,
-  Compass, PictureInPicture2, Send, Copy, UserRound,
+  Compass, PictureInPicture2, Send, Copy, UserRound, History, Clapperboard,
   } from 'lucide-react';
 import { DOCK_ICONS } from './icons.js';
 import { NodeJoystickNav } from './node-joystick-nav.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import { canSendNode, sendNodeToAssets } from '@/features/canvas-assets/node-send.js';
+import { sendAssetToWorkbench } from '@/features/canvas-assets/send-to-workbench.js';
 import { openSubjectLinkDialog } from '@/features/canvas-nodes/storyboard/subject-link-dialog.js';
 
 export interface NodeCapsuleToolbarProps {
@@ -244,10 +245,34 @@ export function NodeCapsuleToolbar({
       if (created.length > 0) {
         message.success(destination === 'project'
           ? t('send.doneProject', '已发送到本项目资产')
-          : t('send.doneGlobal', '已发送到全局资产'));
+          : t('send.doneGlobal', '已发送到公共资产'));
       } else {
         message.warning(t('send.nothing', '没有可发送的内容'));
       }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : t('send.failed', '发送失败'));
+    }
+  }, [node, message, t]);
+
+  /** 发送到画布历史：写入当前项目的生成资产（origin=generation，进历史） */
+  const handleSendToCanvasHistory = useCallback(async () => {
+    if (!node) return;
+    try {
+      const created = await sendNodeToAssets(node, 'project');
+      if (created.length > 0) message.success(t('send.doneCanvasHistory', '已发送到画布历史'));
+      else message.warning(t('send.nothing', '没有可发送的内容'));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : t('send.failed', '发送失败'));
+    }
+  }, [node, message, t]);
+
+  /** 发送到导演台：先落画布历史资产，再投递到导演台当前片段 */
+  const handleSendToDirector = useCallback(async () => {
+    if (!node) return;
+    try {
+      const created = await sendNodeToAssets(node, 'project');
+      if (created[0]) sendAssetToWorkbench(created[0], message, t);
+      else message.warning(t('send.nothing', '没有可发送的内容'));
     } catch (err) {
       message.error(err instanceof Error ? err.message : t('send.failed', '发送失败'));
     }
@@ -290,7 +315,13 @@ export function NodeCapsuleToolbar({
   }, [node]);
 
   const sendMenuItems: MenuProps['items'] = node ? [
-    { key: 'send-library', label: t('send.toGlobalAssets', '发送到全局'), icon: <Copy size={14} /> },
+    { key: 'send-library', label: t('send.toGlobalAssets', '发送到公共资产'), icon: <Copy size={14} /> },
+    ...(node.type === 'image' || node.type === 'video'
+      ? [
+          { key: 'send-history', label: t('send.toCanvasHistory', '发送到画布历史'), icon: <History size={14} /> },
+          { key: 'send-director', label: t('send.toDirector', '发送到分镜'), icon: <Clapperboard size={14} /> },
+        ]
+      : []),
     ...(node.type === 'image' || node.type === 'audio' || node.type === 'video'
       ? [{
           key: 'send-subject',
@@ -658,6 +689,8 @@ export function NodeCapsuleToolbar({
               items: sendMenuItems,
               onClick: ({ key }) => {
                 if (key === 'send-library') void handleSendToAssets('library');
+                else if (key === 'send-history') void handleSendToCanvasHistory();
+                else if (key === 'send-director') void handleSendToDirector();
                 else if (key === 'send-as') handleSaveAsAsset();
                 else if (key === 'send-subject') handleSendToSubject();
                 else if (key === 'canvas-copy') onCreateCanvasCopy?.();

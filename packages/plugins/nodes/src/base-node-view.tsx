@@ -430,16 +430,16 @@ export function AIStateView({
             }}
           />
         ) : null}
-        {/* 半透明遮罩,弱化旧内容,强调生成中 */}
+        {/* 半透明遮罩：有实时采样帧时只轻微压暗，不再模糊/深色遮死（2026-11-16 用户要求看清采样细节） */}
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'rgba(0,0,0,0.35)',
-            backdropFilter: 'blur(1px)',
+            background: previewImage ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.35)',
+            backdropFilter: previewImage ? undefined : 'blur(1px)',
           }}
         />
-        {skeleton ? (
+        {!previewImage && (skeleton ? (
           <AISkeleton type={skeleton} accentColor={accentColor} kind={skeletonKind ?? 'image'} />
         ) : (
           <>
@@ -480,7 +480,7 @@ export function AIStateView({
               {t('nodes.generating')}
             </span>
           </>
-        )}
+        ))}
         {taskLabel ? (
           <span
             style={{
@@ -500,9 +500,17 @@ export function AIStateView({
         {progress ? (
           <div
             data-generating-progress
-            style={{ position: 'relative', width: '80%', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}
+            style={previewImage
+              ? {
+                  // 有采样帧时:进度条贴底,带渐变暗底,不遮挡画面主体
+                  position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3,
+                  display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center',
+                  padding: '14px 0 8px',
+                  background: 'linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0))',
+                }
+              : { position: 'relative', width: '80%', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}
           >
-            <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
+            <div style={{ width: previewImage ? '70%' : '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
               <div
                 data-generating-progress-bar
                 style={{ height: '100%', width: `${progressPct}%`, background: accentColor, transition: 'width 0.2s linear' }}
@@ -510,7 +518,7 @@ export function AIStateView({
             </div>
             <span
               data-generating-progress-text
-              style={{ fontSize: 10, color: 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums' }}
+              style={{ fontSize: 10, color: 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
             >
               {progress.step != null && progress.totalSteps != null
                 ? t('nodes.sampling', { defaultValue: '采样 {{step}} / {{total}}', step: progress.step, total: progress.totalSteps })
@@ -527,7 +535,11 @@ export function AIStateView({
             onClick={(e) => { e.stopPropagation(); onCancel(); }}
             onPointerDown={(e) => e.stopPropagation()}
             style={{
-              position: 'relative', zIndex: 3, marginTop: 2, height: 24, padding: '0 12px',
+              // 有采样帧时:右下角小按钮,不挡画面;无帧时保持居中流程
+              ...(previewImage
+                ? { position: 'absolute', right: 8, bottom: 8, zIndex: 4 }
+                : { position: 'relative', zIndex: 3, marginTop: 2 }),
+              height: 24, padding: '0 12px',
               borderRadius: 999, fontSize: 11, cursor: 'pointer',
               border: '1px solid rgba(255,255,255,0.28)',
               background: 'rgba(0,0,0,0.45)', color: '#fff',

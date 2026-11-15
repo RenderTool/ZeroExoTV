@@ -25,6 +25,7 @@ from typing import Any
 
 from .lib.guide_options import GUIDE_FRAME_OPTIONS, snap_guide_frames
 from .engine.graph_ops import prune_model_chain
+from . import task_store
 
 import aiohttp
 import folder_paths
@@ -583,9 +584,19 @@ async def capabilities(_request):
 
 async def _post_prompt(job: dict[str, Any], template: dict[str, Any], client_id: str) -> None:
     server = PromptServer.instance
+    # 引擎预览/进度按 clientId 定向；插件内部 HTTP 提交前必须显式设置，
+    # 否则 PromptServer.client_id 是别的连接，网页永远收不到采样帧。
+    try:
+        from .engine.runtime_context import set_client_id
+        set_client_id(client_id)
+    except Exception:  # noqa: BLE001
+        pass
     await server.send_json("zeroexo.v1.job", {"jobId": job["jobId"], "state": "queued"})
     url = f"http://127.0.0.1:{server.port}/prompt"
-    payload: dict[str, Any] = {"prompt": template}
+    # 2026-11-16：服务端默认 preview_method=NoPreviews，不显式打开就没有采样预览帧；
+    # auto → Latent2RGB（Qwen latent 带 latent_rgb_factors），新版服务端只会把预览发给
+    # 声明了 feature_flags 的 ws 客户端，网页 socket 已声明 supports_preview_metadata。
+    payload: dict[str, Any] = {"prompt": template, "extra_data": {"preview_method": "auto"}}
     if client_id:
         payload["client_id"] = client_id
     async with aiohttp.ClientSession() as sess:
@@ -737,6 +748,8 @@ async def submit_job(request):
             if isinstance(node, dict) and node.get("class_type") == "ZeroExoRefVideo":
                 node["inputs"]["guide_path"] = guide_path
     job: dict[str, Any] = {
+        # taskId：插件任务表主键；单作业与批次共用同一条持久化路径，缺了 save_task 会 KeyError
+        "taskId": job_id,
         "jobId": job_id, "promptId": None, "kind": kind, "state": "queued",
         "params": params, "outputs": [], "guide": None, "guidePath": guide_path or None,
         # 输入引导来源（explicit=起始段显式引导 / chain=批内上一段 / prev=旧兜底 / none）
@@ -745,6 +758,8 @@ async def submit_job(request):
         "runId": run_id or None,
     }
     JOBS[job_id] = job
+    # 图片/单段作业也进入插件持久任务表，网页任务队列可查历史
+    _save_job(job)
     # 2026-11-07：先落盘再提交，队列校验失败时也能查本次完整 prompt
     _save_last_prompt(job_id, "", template, params)
     if kind == "reference_video":
@@ -755,7 +770,8 @@ async def submit_job(request):
     try:
         await server.send_json("zeroexo.v1.job", {"jobId": job_id, "state": "queued"})
         url = f"http://127.0.0.1:{server.port}/prompt"
-        payload: dict[str, Any] = {"prompt": template}
+        # extra_data.preview_method=auto：打开采样预览帧（见 _post_prompt 注释）
+        payload: dict[str, Any] = {"prompt": template, "extra_data": {"preview_method": "auto"}}
         if client_id:
             payload["client_id"] = client_id
         async with aiohttp.ClientSession() as sess:
@@ -785,6 +801,7 @@ async def job_status(request):
     # 会把「某个子段成功」误判成整批 success，进度/取消全乱）。
     if job.get("kind") != "reference_video_batch":
         refresh_job(job)
+        _save_job(job)
     return web.json_response({"ok": True, **job})
 
 
@@ -882,6 +899,14 @@ def _normalize_seed(params: dict[str, Any]) -> None:
         params["seed"] = random.randint(0, 2**31 - 1)
 
 
+def _save_job(job: dict[str, Any]) -> None:
+    """任务事实源持久化：网页/MCP 关闭不影响，插件重启可恢复。"""
+    try:
+        task_store.save_task(output_root(), job)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ZeroExo] persist task failed: {exc}", flush=True)
+
+
 def _extract_last_frame(video_path: str, out_path: str) -> str:
     """从成品视频抽最后一帧作为片段封面（WS 预览帧常是低清/早期帧，会显得糊）。"""
     try:
@@ -951,20 +976,24 @@ async def _batch_worker() -> None:
             if job.get("cancelRequested"):
                 job["state"] = "cancelled"
                 _batch_mark_remaining(job, "cancelled")
+                _save_job(job)
                 continue
             job["state"] = "running"
+            _save_job(job)
             failed = False
             for seg in job.get("segments") or []:
                 if job.get("cancelRequested"):
                     job["state"] = "cancelled"
                     _batch_mark_remaining(job, "cancelled", int(seg.get("index") or 1) - 1)
                     failed = True
+                    _save_job(job)
                     break
                 try:
                     index = int(seg.get("index") or 1)
                 except (TypeError, ValueError):
                     index = 1
                 job["currentSegment"] = index
+                _save_job(job)
                 guide = seg.get("guide") if isinstance(seg.get("guide"), dict) else {}
                 mode = str(guide.get("mode") or "none")
                 guide_in = ""
@@ -994,6 +1023,12 @@ async def _batch_worker() -> None:
                 seg["state"] = "running"
                 seg["guideInPath"] = guide_in
                 seg["startedAt"] = time.time()
+                try:
+                    from .engine.runtime_context import set_current_task
+                    set_current_task(job.get("taskId") or job.get("jobId"), index)
+                except Exception:  # noqa: BLE001
+                    pass
+                _save_job(job)
                 try:
                     params, template, out_guide = _prepare_batch_segment(seg, job.get("models"), guide_in)
                 except Exception as exc:  # noqa: BLE001
@@ -1047,6 +1082,11 @@ async def _batch_worker() -> None:
                     else "cancelled" if child.get("state") == "cancelled"
                     else "error"
                 )
+                try:
+                    from .engine.runtime_context import set_current_task
+                    set_current_task(None)
+                except Exception:  # noqa: BLE001
+                    pass
                 if seg["state"] != "success":
                     job["state"] = "cancelled" if seg["state"] == "cancelled" else "error"
                     job["error"] = seg.get("error") or "生成失败"
@@ -1067,6 +1107,7 @@ async def _batch_worker() -> None:
                         out_path,
                         os.path.join(output_root(), "previews", f"{job['jobId']}-s{index}.png"),
                     )
+                _save_job(job)
                 if _truthy(params.get("clear_vram_between_segments")):
                     try:
                         from .engine.vram_cleanup import cleanup_segment_vram
@@ -1078,6 +1119,7 @@ async def _batch_worker() -> None:
                 job["currentSegment"] = None
             job["currentJobId"] = None
             job["cancelRequested"] = False
+            _save_job(job)
     finally:
         BATCH_WORKER = None
 
@@ -1125,6 +1167,9 @@ async def submit_batch(body: dict[str, Any]) -> web.Response:
         })
     job: dict[str, Any] = {
         "jobId": batch_id,
+        "taskId": batch_id,
+        "projectId": str(body.get("projectId") or ""),
+        "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "promptId": None,
         "kind": "reference_video_batch",
         "state": "queued",
@@ -1142,9 +1187,82 @@ async def submit_batch(body: dict[str, Any]) -> web.Response:
         "runId": batch_id,
     }
     JOBS[batch_id] = job
+    _save_job(job)
     BATCH_QUEUE.append({"job": job})
     _ensure_batch_worker()
     return web.json_response({"ok": True, "jobId": batch_id, "state": "queued", "segments": len(segments), "error": None})
+
+
+# ===== 任务表（插件持有，网页/MCP 只读/提交） =====
+
+_RESTORED = False
+
+
+def _restore_tasks() -> None:
+    """插件启动/首次访问时恢复任务：queued 重新入队，running 标中断但保留已完成段。"""
+    global _RESTORED
+    if _RESTORED:
+        return
+    _RESTORED = True
+    for task in task_store.list_tasks(output_root()):
+        task_id = str(task.get("taskId") or "")
+        if not task_id or task_id in JOBS:
+            continue
+        task.setdefault("jobId", task_id)
+        if task.get("state") == "running":
+            task_store.mark_interrupted(task)
+            _save_job(task)
+        JOBS[task_id] = task
+        if task.get("state") == "queued":
+            BATCH_QUEUE.append({"job": task})
+    if BATCH_QUEUE:
+        _ensure_batch_worker()
+
+
+@routes.post("/zeroexo/v1/tasks")
+async def task_create(request):
+    _restore_tasks()
+    body = await request.json()
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "error": "body 必须是对象"}, status=400)
+    if not body.get("clientJobId"):
+        body["clientJobId"] = body.get("taskId") or task_store.new_task_id()
+    return await submit_batch(body)
+
+
+@routes.get("/zeroexo/v1/tasks")
+async def task_list(request):
+    _restore_tasks()
+    project_id = request.query.get("projectId")
+    return web.json_response({"ok": True, "tasks": task_store.list_tasks(output_root(), project_id)})
+
+
+@routes.get("/zeroexo/v1/tasks/{task_id}")
+async def task_get(request):
+    task_id = request.match_info["task_id"]
+    task = JOBS.get(task_id) or task_store.load_task(output_root(), task_id)
+    if not task:
+        return web.json_response({"ok": False, "error": "task 不存在"}, status=404)
+    return web.json_response({"ok": True, "task": task})
+
+
+@routes.post("/zeroexo/v1/tasks/{task_id}/cancel")
+async def task_cancel(request):
+    task_id = request.match_info["task_id"]
+    job = JOBS.get(task_id) or task_store.load_task(output_root(), task_id)
+    if not job:
+        return web.json_response({"ok": False, "error": "task 不存在"}, status=404)
+    job["cancelRequested"] = True
+    if job.get("state") == "queued":
+        job["state"] = "cancelled"
+        _batch_mark_remaining(job, "cancelled")
+        _save_job(job)
+    elif job.get("currentJobId") and JOBS.get(str(job["currentJobId"])):
+        child = JOBS[str(job["currentJobId"])]
+        if child.get("promptId"):
+            _interrupt_prompt(str(child["promptId"]))
+    _save_job(job)
+    return web.json_response({"ok": True, "task": job})
 
 
 from .ref_video import (

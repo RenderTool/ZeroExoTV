@@ -60,6 +60,27 @@ export type InsertAssetToCanvasResult =
   | { ok: true; nodeId: string; node: NodeRecord; position: { x: number; y: number } }
   | { ok: false; reason: 'canvas-not-ready' | 'create-failed' | 'navigate-failed'; error?: unknown };
 
+/**
+ * 历史图生图引用链恢复（2026-11-16 用户指令：拖拽落图与「发送到画布」行为一致）：
+ * 源节点仍在画布上时连一条 source.image → 新节点.prompt 的边，否则历史图落画布是孤立节点。
+ * 发送链与拖拽链共用，避免两处各写一份。
+ */
+export function restoreGenerationEdge(args: {
+  commandQueue: CommandQueue;
+  store: CanvasInsertStore;
+  payload: AssetNodePayloadArg;
+  targetNodeId: string;
+}): void {
+  const generation = (args.payload as { generation?: { sourceNodeId?: string } }).generation;
+  const sourceNodeId = generation?.sourceNodeId;
+  if (!sourceNodeId || !args.store.getGraph?.().nodes.some((n) => n.id === sourceNodeId)) return;
+  args.commandQueue.execute(new AddEdgeCommand({
+    id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-history`,
+    source: { nodeId: sourceNodeId, pinId: 'image' },
+    target: { nodeId: args.targetNodeId, pinId: 'prompt' },
+  }));
+}
+
 export async function insertAssetToCanvas(args: InsertAssetToCanvasArgs): Promise<InsertAssetToCanvasResult> {
   const { commandQueue, store, containerSize, payload, seq } = args;
   if (!commandQueue || !store) return { ok: false, reason: 'canvas-not-ready' };
@@ -79,15 +100,7 @@ export async function insertAssetToCanvas(args: InsertAssetToCanvasArgs): Promis
     if (!node) return { ok: false, reason: 'create-failed' };
     commandQueue.execute(new AddNodeCommand(node));
     // 历史图生图资产：源节点仍在画布上时恢复引用链，而不是只落一张孤立结果
-    const generation = (payload as { generation?: { sourceNodeId?: string } }).generation;
-    const sourceNodeId = generation?.sourceNodeId;
-    if (sourceNodeId && store.getGraph?.().nodes.some((n) => n.id === sourceNodeId)) {
-      commandQueue.execute(new AddEdgeCommand({
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-history`,
-        source: { nodeId: sourceNodeId, pinId: 'image' },
-        target: { nodeId: node.id, pinId: 'prompt' },
-      }));
-    }
+    restoreGenerationEdge({ commandQueue, store, payload: payload as AssetNodePayloadArg, targetNodeId: node.id });
     store.setSelection({ selectedNodeIds: new Set([node.id]), selectedEdgeIds: new Set() });
 
     // 统一导航入口：切回画布页签并触发聚焦（画布侧接收端执行 focusOnNode）。

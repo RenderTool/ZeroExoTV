@@ -99,6 +99,7 @@ import {
   useSubjectMediaLinkEventStore,
   type SubjectStateMediaAsset,
 } from './subject-state-media';
+import { removeSubjectReferences } from './subject-reference-cleanup';
 import { SubjectMediaSourcePanel } from './subject-media-source-panel';
 import { AssetSlotPicker, type AssetSlotPick } from '@/shared/components/asset-slot-picker.js';
 import { ReferenceSlotBar } from '@/shared/components/reference-slot-bar.js';
@@ -2019,6 +2020,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         const pid = projectId ?? undefined;
         const tr = treesRef.current.find((x) => x.rootId === rootId);
         if (pid && tr) void releaseSubjectStateMediaRefs({ trees: [tr], projectId: pid, rootId, stateId: node.id });
+        if (pid) void removeSubjectReferences(pid, rootId, node.id);
         commitTrees(treesRef.current.map((x) => (
           x.rootId === rootId ? { ...x, states: (x.states ?? []).filter((n) => n.id !== node.id) } : x
         )));
@@ -2044,6 +2046,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           for (const st of tree.states ?? []) {
             void releaseSubjectStateMediaRefs({ trees: [tree], projectId: pid, rootId: tree.rootId, stateId: st.id });
           }
+          void removeSubjectReferences(pid, tree.rootId);
         }
         commitTrees(treesRef.current.filter((x) => x.rootId !== tree.rootId));
         if (item) onDeleteItem?.(item.id);
@@ -2338,6 +2341,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             rootId, stateId, key: ref.key,
           });
           commitTrees(linked);
+          if (projectId) void removeSubjectReferences(projectId, rootId, stateId, ref.key);
           antdMessage.success(t('subject.deleteHistoryDone', '已永久删除'));
         } catch (err) {
           antdMessage.error(err instanceof Error ? err.message : t('subjectCreate.saveFailed', '保存失败'));

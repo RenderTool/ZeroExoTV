@@ -66,6 +66,8 @@ export interface WorkbenchSetCoverDetail {
     localKey?: string;
   };
   prompt?: string;
+  /** 该历史版本的生成参数，设回封面时恢复片段参数 */
+  params?: Record<string, unknown>;
   projectId: string;
   /** 目标片段 id：从某个片段的历史里设封面时必须落到该段，不能落到当前选中的别的段 */
   shotId?: string;

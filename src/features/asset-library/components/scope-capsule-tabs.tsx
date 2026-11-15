@@ -59,17 +59,17 @@ export function ScopeCapsuleTabs({
   const { t } = useTranslation();
 
   const segments: CapsuleSegment[] = [
-    { key: 'library', label: t('assetLibrary.scopeCapsuleLibrary', '全局'), count: libraryCount, disabled: false },
+    { key: 'library', label: t('assetLibrary.scopeCapsuleLibrary', '公共资产'), count: libraryCount, disabled: false },
     {
       key: 'project',
-      label: t('assetLibrary.scopeCapsuleProject', '画布'),
+      label: t('assetLibrary.scopeCapsuleProject', '画布历史'),
       count: projectCount,
       disabled: projectCount === null,
       disabledHint: t('assetLibrary.scopeCapsuleProjectDisabled', '进入项目后可用'),
     },
   ];
   if (showDirector) {
-    segments.push({ key: 'director', label: t('assetLibrary.scopeCapsuleDirector', '导演台'), count: directorCount ?? null, disabled: false });
+    segments.push({ key: 'director', label: t('assetLibrary.scopeCapsuleDirector', '分镜'), count: directorCount ?? null, disabled: false });
   }
   // 分段顺序（2026-11-06 用户指令：「开源库应该放 Tab 的最后」）：
   // 全局 / 本项目 / 主体 / 开源库——开源库是只读外部资源，排到末尾不与用户数据段夹在一起。

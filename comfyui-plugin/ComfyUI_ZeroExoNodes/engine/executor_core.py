@@ -1169,38 +1169,125 @@ def execute_director_plan_core(
                 phase=phase, phase_value=value, phase_max=1, **meta,
             )
 
+        # 预览编码器（每段一个生命周期）：采样线程只解码，编码/发送/落盘全在独立线程。
+        _preview_enc_cell: list = []
+
+        def _shutdown_step_preview_encoder() -> None:
+            enc = _preview_enc_cell[0] if _preview_enc_cell else None
+            if enc is not None:
+                _preview_enc_cell[0] = None
+                try:
+                    enc.shutdown(timeout=5.0)
+                except Exception:  # noqa: BLE001
+                    pass
+
         def _report_step_preview(step: int, total_steps: int, x0) -> None:
-            # Live clip for the batch-card / 采样预览 slot (KJNodes-style looping WebP).
+            # Live clip for the batch-card / 采样预览 slot（对齐 KJNodes ModelPreviewOverride）：
+            # 采样线程只做 TAE/Latent2RGB 解码得到 PIL 帧，MP4/WebP/JPEG 编码、WS 发送、
+            # 落盘与任务写回全部提交给 PreviewEncoder 独立线程（有界队列满则丢帧），
+            # 绝不在采样线程同步编码 —— 48 帧×1024 同步编码会阻塞采样导致任务被取消。
             try:
                 from .tae_preview import (
                     LIVE_PREVIEW_FPS,
                     LIVE_PREVIEW_MAX_FRAMES,
-                    encode_preview_payload,
                     x0_to_preview_frames,
                 )
+                from .preview_encoder import PreviewEncoder, encode_preview
 
-                frames = x0_to_preview_frames(x0, max_frames=LIVE_PREVIEW_MAX_FRAMES, max_side=512)
+                # 采样预览帧数/尺寸由 timeline 显式给出，避免只出 1 帧或糊成一小块
+                raw_preview = plan.raw or {}
+                try:
+                    preview_frames = int(raw_preview.get("livePreviewFrames") or 0)
+                except (TypeError, ValueError):
+                    preview_frames = 0
+                try:
+                    preview_side = int(raw_preview.get("livePreviewSize") or 0)
+                except (TypeError, ValueError):
+                    preview_side = 0
+                frames = x0_to_preview_frames(
+                    x0,
+                    max_frames=preview_frames or LIVE_PREVIEW_MAX_FRAMES,
+                    max_side=preview_side or 480,
+                )
                 if not frames:
                     return
-                image_b64, mime, width, height = encode_preview_payload(
-                    frames, fps=LIVE_PREVIEW_FPS
-                )
-                if not image_b64:
+
+                if not _preview_enc_cell:
+                    _preview_enc_cell.append(PreviewEncoder(max_in_flight=2))
+                enc = _preview_enc_cell[0]
+                if enc is None:
                     return
-                report_director_segment_preview(
-                    progress_node_id,
-                    segment_index=ui_idx,
-                    image_b64=image_b64,
-                    width=width,
-                    height=height,
-                    live=True,
-                    step=step + 1,
-                    total_steps=total_steps,
-                    mime=mime,
-                    fps=float(LIVE_PREVIEW_FPS),
-                )
+
+                # 提交时就固定任务/段/步数：编码线程执行时 runtime_context 可能已切换
+                try:
+                    from .runtime_context import get_current_task
+
+                    ctx_snapshot = dict(get_current_task() or {})
+                except Exception:  # noqa: BLE001
+                    ctx_snapshot = {}
+
+                def _encode_send_save(
+                    _frames=frames,
+                    _step=int(step),
+                    _total=int(total_steps),
+                    _ctx=ctx_snapshot,
+                ) -> None:
+                    try:
+                        encoded = encode_preview(_frames, fps=LIVE_PREVIEW_FPS)
+                        if not encoded:
+                            return
+                        mime, raw = encoded
+                        import base64 as _b64
+
+                        report_director_segment_preview(
+                            progress_node_id,
+                            segment_index=ui_idx,
+                            image_b64=_b64.b64encode(raw).decode("ascii"),
+                            width=_frames[0].width,
+                            height=_frames[0].height,
+                            live=True,
+                            step=_step + 1,
+                            total_steps=_total,
+                            mime=mime,
+                            fps=float(LIVE_PREVIEW_FPS),
+                        )
+                        # 落盘最新预览 + 写回任务段 previewPath：刷新网页后可恢复最近预览
+                        try:
+                            import os as _os
+                            import folder_paths as _fp
+                            from .. import task_store as _ts
+
+                            task_id = str(_ctx.get("taskId") or "")
+                            seg_index = int(_ctx.get("segmentIndex") or 1)
+                            if not task_id:
+                                return
+                            root = _os.environ.get("ZEROEXO_OUTPUT_ROOT") or _fp.get_output_directory()
+                            prev_dir = _os.path.join(root, "zeroexo", "previews")
+                            _os.makedirs(prev_dir, exist_ok=True)
+                            ext = {"video/mp4": "mp4", "image/webp": "webp"}.get(mime, "jpg")
+                            prev_path = _os.path.join(prev_dir, f"{task_id}-s{seg_index}-live.{ext}")
+                            with open(prev_path, "wb") as fh:
+                                fh.write(raw)
+                            task_root = _os.path.join(root, "zeroexo")
+                            job = _ts.load_task(task_root, task_id)
+                            if job:
+                                for s in job.get("segments") or []:
+                                    if int(s.get("index") or 0) == seg_index:
+                                        s["previewPath"] = prev_path
+                                        s["progress"] = {"step": _step + 1, "totalSteps": _total}
+                                        break
+                                # 只对仍在运行的任务写回，避免异步编码复活已取消/已完成的任务
+                                if job.get("state") in ("running", "queued"):
+                                    _ts.save_task(task_root, job)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("Preview encode skipped at step %s: %s", _step, exc)
+
+                # 队列满直接丢弃这一步的预览，绝不阻塞采样线程
+                enc.submit(_encode_send_save)
             except Exception as exc:
-                log.debug("Live TAE preview skipped: %s", exc)
+                log.warning("Live TAE preview skipped at step %s: %s", step, exc)
 
         t_sample = time.perf_counter()
         if skip_first_sample:
@@ -1422,6 +1509,8 @@ def execute_director_plan_core(
             )
         else:
             refine_note = ""
+        # 本段所有采样结束：排空预览编码线程，不残留（下一段采样重新懒创建）
+        _shutdown_step_preview_encoder()
         samples = first_pass_samples if not run_refine else samples
         del upscale_frames
         if first_pass_gpu is not None:

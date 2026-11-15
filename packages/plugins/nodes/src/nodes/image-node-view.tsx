@@ -255,7 +255,7 @@ export function ImageNodeView({
         >
           <div
             ref={mediaRef}
-            style={{ ...mediaContainerStyle, background: 'transparent' }}
+            style={{ ...mediaContainerStyle, backgroundColor: 'transparent' }}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
           >
@@ -322,7 +322,7 @@ export function ImageNodeView({
       >
         <div
           ref={mediaRef}
-          style={{ ...mediaContainerStyle, background: 'transparent' }}
+          style={{ ...mediaContainerStyle, backgroundColor: 'transparent' }}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >

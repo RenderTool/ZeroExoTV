@@ -68,8 +68,11 @@ def _build_timeline(prompt: str, width: int, height: int, frames: int, frame_rat
         "output": {"mode": "fixed", "aspectRatio": "custom", "megapixels": 0.0, "multiple": 32,
                    "longEdge": max(width, height), "width": width, "height": height,
                    "maxExportFrames": 0, "exportMode": "all", "audioMode": "generate"},
-        # 实时预览：引擎按步解码并经 minimax_director_preview 推给提交时的 /ws clientId
+        # 实时预览：引擎每步 TAE 解码整段采样帧，独立线程编码 MP4/WebP 后推给 /ws clientId
         "liveTaePreview": True,
+        # 采样预览：每步 48 帧 / 480 长边 / 8fps（对齐 KJNodes ModelPreviewOverride）
+        "livePreviewFrames": 48,
+        "livePreviewSize": 480,
     }
 
 

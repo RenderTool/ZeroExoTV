@@ -14,13 +14,19 @@
 
 /** 抽屉分组页签定义（数组顺序 = sidebar 按钮顺序） */
 export const DRAWER_TAB_DEFS = [
-  { key: 'material', labelKey: 'assetLibrary.filterMaterial' },
+  // 全局分组（所有模块共用）置顶：
+  // 2026-11-16 用户要求：全局资产 / 主体 / 画布历史 / 导演台历史各自独立入口，不再混在一个资产分组里
+  { key: 'assets', labelKey: 'assetLibrary.scopeCapsuleLibrary', moduleOnly: false },
+  { key: 'subjects', labelKey: 'assetLibrary.scopeCapsuleSubject', moduleOnly: false },
+  { key: 'canvasHistory', labelKey: 'assetLibrary.scopeCapsuleCanvasHistory', moduleOnly: false },
+  { key: 'directorHistory', labelKey: 'assetLibrary.scopeCapsuleDirector', moduleOnly: false },
+  { key: 'tasks', labelKey: 'taskQueue.title', moduleOnly: false },
+  // 2026-11-16 用户指令：模块独有分组（画布结构 / 本剧信息）统一垫底，
+  // sidebar 渲染时在首个独有分组上方画分割线，与全局分组隔开
   // 画布相关合并为一个入口：层级 / 子画布在组内用 Tab 切换
-  { key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab' },
+  { key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab', moduleOnly: true },
   // 2026-11-07 用户指令：剧本页的「本剧信息」放进资产抽屉，作为独立分组（整部剧一句话概述 + 标签）
-  { key: 'scriptMeta', labelKey: 'assetLibrary.filterScriptMeta' },
-  // 2026-11-15 用户指令：任务队列从右下角浮层移进抽屉，独立按钮点开；运行/排队中可手动取消
-  { key: 'tasks', labelKey: 'taskQueue.title' },
+  { key: 'scriptMeta', labelKey: 'assetLibrary.filterScriptMeta', moduleOnly: true },
 ] as const;
 
 /** 抽屉分组键（由页签定义直接推导，避免第二份拷贝） */
@@ -29,13 +35,13 @@ export type DrawerGroup = (typeof DRAWER_TAB_DEFS)[number]['key'];
 /** 抽屉所属模块（= 顶部固定槽位页签；画布副本页签归画布模块） */
 export type DrawerModule = 'canvas' | 'script' | 'storyboard' | 'workbench';
 
-/** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在 */
+/** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在（顺序与 DRAWER_TAB_DEFS 一致） */
 export const DRAWER_MODULE_GROUPS: Record<DrawerModule, readonly DrawerGroup[]> = {
-  canvas: ['material', 'canvasStructure', 'tasks'],
+  canvas: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'canvasStructure'],
   // 剧本 / 导演台：本剧信息是这两个阶段共用的项目级信息，只在这两个模块挂载
-  script: ['material', 'scriptMeta', 'tasks'],
-  storyboard: ['material', 'tasks'],
-  workbench: ['material', 'scriptMeta', 'tasks'],
+  script: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'scriptMeta'],
+  storyboard: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks'],
+  workbench: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'scriptMeta'],
 };
 
 /**
