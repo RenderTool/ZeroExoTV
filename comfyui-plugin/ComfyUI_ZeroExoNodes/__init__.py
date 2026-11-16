@@ -13,10 +13,19 @@ ComfyUI_ZeroExoNodes - ZeroExo 纯参数生成节点（参考生视频 / 引导�
   GET  jobs/{id}       状态 + 产物（video / guide）
   POST jobs/{id}/cancel
 """
+import os
+
+# 自更新必须在任何插件模块导入之前运行：覆盖到的新文件本次启动直接生效。
+try:
+    from . import self_update
+
+    self_update.bootstrap()
+except Exception as _exc:  # 更新失败绝不阻断加载
+    print("[ZeroExo] self-update skipped:", _exc)
+
 import asyncio
 import hashlib
 import json
-import os
 import random
 import re
 import time
