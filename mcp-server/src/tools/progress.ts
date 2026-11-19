@@ -13,6 +13,7 @@ import { readJsonIfExists } from "../store/fs-node.js";
 import { readStoryboard } from "../store/storyboard.js";
 import { readWorkbench } from "../store/workbench.js";
 import { listClaims } from "../store/claims.js";
+import { readProjectLog } from "../store/project-log.js";
 import { defTool, type Ctx } from "./_register.js";
 
 type StageStatus = "missing" | "partial" | "ready";
@@ -133,6 +134,10 @@ export function registerProgressTools(server: McpServer, ctx: Ctx): void {
           .slice(0, 30);
       } catch { /* 目录不存在 */ }
 
+      const log = await readProjectLog(root, args.projectId);
+      const openRequirements = log.entries.filter((e) => e.kind === "requirement" && e.status === "open");
+      const latestProgress = log.entries.filter((e) => e.kind === "progress").slice(-3).reverse();
+
       const stages = [scriptStage, subjectStage, shotStage, genStage];
       const nextActions = userAdded.length
         ? ["发现项目资产目录里有未关联的新文件，先问用户这些素材的用途（主体图/场景图/参考图/最终交付），不要自行归类"]
@@ -152,6 +157,12 @@ export function registerProgressTools(server: McpServer, ctx: Ctx): void {
         blockers: stages.filter((s) => s.status !== "ready").flatMap((s) => s.missing),
         nextActions: [...nextActions, ...stages.flatMap((s) => s.nextActions)],
         userAddedAssets: userAdded,
+        projectLog: {
+          version: log.version,
+          updatedAt: log.updatedAt,
+          openRequirements,
+          latestProgress,
+        },
         askUser: userAdded.length
           ? ["你在项目资产里新增了素材，想用作主体图、场景图还是参考图？要挂到哪个主体/片段？"]
           : [],

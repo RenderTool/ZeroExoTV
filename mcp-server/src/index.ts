@@ -39,6 +39,7 @@ import { registerStyleTools } from "./tools/style.js";
 import { registerUpgradeTools } from "./tools/upgrade.js";
 import { registerComfyuiTools } from "./tools/comfyui.js";
 import { registerProgressTools } from "./tools/progress.js";
+import { registerProjectLogTools } from "./tools/project-log.js";
 import { registerReleaseTools } from "./tools/release.js";
 import { registerDataRootTools } from "./tools/data-root.js";
 import { startBroker } from "./broker/executor.js";
@@ -94,6 +95,7 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerUpgradeTools(server, ctx);
   registerComfyuiTools(server, ctx);
   registerProgressTools(server, ctx);
+  registerProjectLogTools(server, ctx);
   registerReleaseTools(server, ctx);
   registerDataRootTools(server, ctx);
   return server;

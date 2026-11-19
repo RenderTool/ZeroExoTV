@@ -1,6 +1,6 @@
 {
   "name": "zeroextv",
-  "version": "0.4.6",
+  "version": "0.4.8",
   "private": true,
   "type": "module",
   "description": "ZeroExo Canvas - Visual node editor",

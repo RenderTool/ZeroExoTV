@@ -7,6 +7,8 @@
 - 按返回的 `nextActions` 推进；不要为了「看看有什么」去翻 projects/、assets/、workbench.json。
 - 返回 `userAddedAssets` 非空时，**先把 `askUser` 的问题原样问用户**（想当主体图/场景图/参考图、挂到哪个主体或片段），不得自行归类、也不得忽略。
 - 每次阶段完成后（补图、拆段、提示词、提交生成）重新调用一次，用返回的 `blockers` 向用户汇报「本轮还缺什么」，不要凭记忆复述进度。
+- `get_project_progress` 已内联 `projectLog`（未完成需求 + 最近进度）；需要完整历史时再调 `get_project_log({ projectId })`。新会话不得再向用户重复索要已写在项目档案里的需求。
+- 用户每提出一条新要求，先 `append_project_log({ kind:'requirement', text })`；确认一个口径写 `decision`；完成一个阶段写 `progress`，并把对应 requirement 用 `update_project_log_entry` 标 done。这是跨会话唯一的上下文，不要只在聊天里说完成。
 
 ## 0 收料与偏好（必须问，缺哪问哪）
 - 资料：项目名、剧本原文、已有素材（图片/视频目录）。

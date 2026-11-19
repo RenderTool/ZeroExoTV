@@ -28,6 +28,8 @@ import type { ShortcutEntry } from '@zeroexo/plugin-keyboard';
 import { TitleEditor } from './title-editor.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { CanvasTabBar } from '@/features/canvas-tabs/canvas-tab-bar.js';
+import { ProjectLogPanel } from '@/features/project-log/project-log-panel.js';
+import { useProjectLogView } from '@/features/project-log/project-log-store.js';
 import { openServiceCenter } from '@/features/service-center/service-center-events.js';
 import { ComfyuiConnectButton } from '@/features/canvas-tabs/comfyui-connect-button.js';
 
@@ -159,6 +161,8 @@ export function TopBar({
       onCancelTitleEditing={onCancelTitleEditing}
     />
   );
+
+  const logActive = useProjectLogView((s) => s.active);
 
   return (
     <>
@@ -295,6 +299,8 @@ export function TopBar({
       </div>
 
     </div>
+
+    {logActive ? <ProjectLogPanel /> : null}
 
     {/* 外观设置弹窗(高频操作,2026-08-29 移回顶栏) */}
     {appearanceOpen ? (

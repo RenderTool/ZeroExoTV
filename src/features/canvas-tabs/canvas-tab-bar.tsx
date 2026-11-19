@@ -15,6 +15,8 @@
  */
 
 import { useState } from 'react';
+import { NotebookPen } from 'lucide-react';
+import { useProjectLogView } from '@/features/project-log/project-log-store.js';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -58,6 +60,8 @@ export function CanvasTabBar(): React.ReactElement {
   // 画布副本页签已移到画布区顶部的第二层页签条（CanvasDocumentTabs），本组件只负责固定槽位
   // 拖拽中的槽位下标（四个固定槽位整体参与排序）
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const logActive = useCanvasTabStore((s) => s.activeTabKey) === 'projectLog';
+  const setLogActive = useProjectLogView((s) => s.setActive);
 
   const dark = mode === 'dark';
   // 胶囊分段控件色板：深色=浮层灰块（参考图），浅色=白底块+轻投影（经典 segmented control）
@@ -75,6 +79,7 @@ export function CanvasTabBar(): React.ReactElement {
   } as CSSProperties;
 
   const handleActivate = (kind: FixedSlotKind): void => {
+    setLogActive(false);
     // 2026-11-04 供应下线：有绑定 → kind:id（节点 portal 供内容）；无绑定 → 裸 kind（页级组件空态）。
     // 纯读指针切换，绝不创建节点/写图。
     const key = slotTabKey(kind, slotBindings) ?? kind;
@@ -133,6 +138,20 @@ export function CanvasTabBar(): React.ReactElement {
           </button>
         );
       })}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={logActive}
+        className={['zx-canvas-tab', logActive ? 'is-active' : ''].filter(Boolean).join(' ')}
+        onClick={() => {
+          setLogActive(true);
+          activateTab('projectLog');
+        }}
+        title="需求：需求 / 决策 / 进度记录"
+      >
+        <NotebookPen size={13} strokeWidth={logActive ? 2.2 : 1.8} />
+        需求
+      </button>
     </div>
   );
 }
