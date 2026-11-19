@@ -28,6 +28,8 @@ export interface ClaimRecord {
   /** 上游参考图 storageKey（没有节点时用于先落参考图节点） */
   sourceStorageKey?: string;
   prompt: string;
+  /** 发起时指定的节点标题；网页认领建节点时优先用它，避免标题被 prompt 截断成半截人名 */
+  title?: string;
   model: "qwen" | "krea2" | "moss";
   params: Record<string, unknown>;
   /** 主体发起生成时带上，结果回挂该主体状态图 */

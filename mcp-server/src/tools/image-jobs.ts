@@ -15,7 +15,7 @@ import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 import { submitProxyImage, type ProxyImageRequest, type ProxyImageResult } from "../broker/image-proxy.js";
 import { cancelImageJob, getImageJob } from "../broker/plugin-client.js";
-import { findClaimByJob } from "../store/claims.js";
+import { findClaimByJob, listClaims } from "../store/claims.js";
 import { defTool, type Ctx } from "./_register.js";
 
 const requestSchema = z.object({
@@ -139,6 +139,40 @@ export function registerImageJobTools(server: McpServer, ctx: Ctx): void {
         width: args.width,
         height: args.height,
       }]);
+    },
+  });
+
+  defTool(server, ctx, {
+    name: "wait_generation_tasks",
+    description:
+      "阻塞等待本项目一批生成作业推进（最多 45 秒一轮，避免 MCP 请求超时），返回当前状态与剩余数量。" +
+      "Agent 发起生成后必须反复调用本工具直到 pending=0，不得提交完就结束回合；" +
+      "超时只代表本轮等待结束，作业仍会在云端继续跑，可再次调用。",
+    bits: ["project.read"],
+    schema: {
+      projectId: z.string(),
+      taskIds: z.array(z.string()).optional().describe("只等这些 jobId；不传则等本项目所有 pending 作业"),
+      timeoutSeconds: z.number().int().min(5).max(50).default(45),
+    },
+    handler: async (args) => {
+      const deadline = Date.now() + args.timeoutSeconds * 1000;
+      const wanted = args.taskIds?.length ? new Set(args.taskIds) : null;
+      let last: Array<{ jobId: string; state: string; storageKey?: string; error?: string }> = [];
+      while (true) {
+        const claims = (await listClaims()).filter(
+          (c) => c.projectId === args.projectId && (!wanted || wanted.has(c.jobId)),
+        );
+        last = claims.map((c) => ({
+          jobId: c.jobId,
+          state: c.status,
+          storageKey: c.result?.storageKey,
+          error: c.error,
+        }));
+        const pending = last.filter((x) => x.state === "pending").length;
+        if (pending === 0) return { done: true, pending: 0, tasks: last };
+        if (Date.now() >= deadline) return { done: false, pending, tasks: last };
+        await new Promise((r) => setTimeout(r, 4000));
+      }
     },
   });
 

@@ -1,0 +1,161 @@
+{
+  "total": 13,
+  "tasks": [
+    {
+      "taskId": "mp_mwnbie0f_4dg13c",
+      "claimId": "clm_mwnbie1m_fqeyqr",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbie0f_4dg13c",
+      "model": "moss",
+      "prompt": "迪士尼动画电影风格场景概念图，山坡灯塔，黄昏，草坡上一个白红条纹灯塔，光柱扫过小镇，远处屋顶，温暖夕光，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.698Z",
+      "updatedAt": "2026-11-19T09:04:50.899Z"
+    },
+    {
+      "taskId": "mp_mwnbidz6_bskrok",
+      "claimId": "clm_mwnbie09_jyn2yw",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbidz6_bskrok",
+      "model": "qwen",
+      "prompt": "迪士尼动画电影风格场景概念图，小镇河桥，夜晚，石拱桥横跨小河，桥下流水，岸边暖灯，安静童话氛围，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.649Z",
+      "updatedAt": "2026-11-19T09:04:17.329Z"
+    },
+    {
+      "taskId": "mp_mwnbidxi_c4nal2",
+      "claimId": "clm_mwnbidyz_bbuo35",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbidxi_c4nal2",
+      "model": "krea2",
+      "prompt": "迪士尼动画电影风格场景概念图，老磨坊，黄昏，巨大风车叶片停在半空，石砌磨坊，门前堆着麦袋，橙色夕光，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.603Z",
+      "updatedAt": "2026-11-19T09:03:27.447Z"
+    },
+    {
+      "taskId": "mp_mwnbidw9_ekrvhu",
+      "claimId": "clm_mwnbidxb_keue6t",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbidw9_ekrvhu",
+      "model": "moss",
+      "prompt": "迪士尼动画电影风格场景概念图，蘑菇集市，白天，圆形蘑菇摊位像小伞，彩色布篷，木箱与发条零件，热闹集市，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.543Z",
+      "updatedAt": "2026-11-19T09:01:55.982Z"
+    },
+    {
+      "taskId": "mp_mwnbiduu_qog2yx",
+      "claimId": "clm_mwnbidw3_suppz0",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbiduu_qog2yx",
+      "model": "qwen",
+      "prompt": "迪士尼动画电影风格场景概念图，地下齿轮室，夜晚，巨大铜色齿轮与管道交错，暖橙烛光，木梯通向齿轮平台，神秘温馨，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.499Z",
+      "updatedAt": "2026-11-19T09:01:31.033Z"
+    },
+    {
+      "taskId": "mp_mwnbidtn_re2etr",
+      "claimId": "clm_mwnbidup_7i4t0z",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbidtn_re2etr",
+      "model": "krea2",
+      "prompt": "迪士尼动画电影风格场景概念图，雨棚小巷，傍晚，窄巷两侧晾着布棚，地面湿润反光，暖黄灯串，安静街巷，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.449Z",
+      "updatedAt": "2026-11-19T09:00:51.585Z"
+    },
+    {
+      "taskId": "mp_mwnbids1_p8cmeu",
+      "claimId": "clm_mwnbidtg_51y2oo",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbids1_p8cmeu",
+      "model": "moss",
+      "prompt": "迪士尼动画电影风格场景概念图，老钟表铺内景，白天，木质柜台摆满各式钟表，阳光斜射进窗，暖棕色调，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.404Z",
+      "updatedAt": "2026-11-19T08:59:25.930Z"
+    },
+    {
+      "taskId": "mp_mwnbid3c_s1zjo1",
+      "claimId": "clm_mwnbid4t_7kxg1p",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbid3c_s1zjo1",
+      "model": "qwen",
+      "prompt": "迪士尼三维动画电影风格角色定妆照，老钟，六十岁钟表匠，白色大胡子，圆框眼镜，棕色马甲，白衬衫卷袖，背微驼，温和睿智的表情，全身站立，纯白背景，柔和棚拍光，85mm人像镜头，干净细腻，无文字无UI",
+      "createdAt": "2026-11-19T08:58:19.517Z",
+      "updatedAt": "2026-11-19T08:58:50.836Z"
+    },
+    {
+      "taskId": "mp_mwnbid1l_zu3gjs",
+      "claimId": "clm_mwnbid36_jv5r74",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbid1l_zu3gjs",
+      "model": "qwen",
+      "prompt": "迪士尼三维动画电影风格角色定妆照，布布，圆滚滚的青绿色毛绒小生物，短手短脚，大耳朵，嘴里叼着一枚黄色齿轮，圆眼睛，憨厚可爱，全身站立，纯白背景，柔和棚拍光，85mm人像镜头，干净细腻，无文字无UI",
+      "createdAt": "2026-11-19T08:58:19.458Z",
+      "updatedAt": "2026-11-19T08:58:45.916Z"
+    },
+    {
+      "taskId": "mp_mwnbiczw_asi93o",
+      "claimId": "clm_mwnbid1c_cb0q7f",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbiczw_asi93o",
+      "model": "qwen",
+      "prompt": "迪士尼三维动画电影风格角色定妆照，米拉，八岁女孩，红棕色双麻花辫，蓝色背带裤，白色衬衫，圆脸雀斑，明亮大眼睛，善良好奇的表情，全身站立，纯白背景，柔和棚拍光，85mm人像镜头，干净细腻，无文字无UI",
+      "createdAt": "2026-11-19T08:58:19.392Z",
+      "updatedAt": "2026-11-19T08:58:41.026Z"
+    },
+    {
+      "taskId": "mp_mwnbhs2t_g3ss3z",
+      "claimId": "clm_mwnbhs5v_789aco",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "landed",
+      "nodeId": "mcp_mp_mwnbhs2t_g3ss3z",
+      "model": "qwen",
+      "prompt": "迪士尼动画电影风格，钟楼广场概念图，白天，暖阳，石砌广场中央有停摆的大钟，卡通造型，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:57:52.339Z",
+      "updatedAt": "2026-11-19T08:58:31.586Z"
+    },
+    {
+      "taskId": "mp_mwnbie36_o6k4p0",
+      "claimId": "clm_mwnbie4i_jtzv4w",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "pending",
+      "nodeId": "mcp_mp_mwnbie36_o6k4p0",
+      "model": "qwen",
+      "prompt": "迪士尼动画电影风格场景概念图，星夜码头，夜晚，木桩码头伸入平静水面，岸边灯盏逐一亮起，深蓝星空，安静治愈，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.802Z",
+      "updatedAt": "2026-11-19T08:58:20.802Z"
+    },
+    {
+      "taskId": "mp_mwnbie1o_0szp9p",
+      "claimId": "clm_mwnbie2z_ftv3t2",
+      "projectId": "O6bLqGK02_Ff",
+      "kind": "canvas_image",
+      "state": "pending",
+      "nodeId": "mcp_mp_mwnbie1o_0szp9p",
+      "model": "krea2",
+      "prompt": "迪士尼动画电影风格场景概念图，钟楼内部，夜晚，木结构钟楼机械，巨大摆锤与齿轮，月光从窄窗照入，木质阶梯，干净扁平质感，无文字",
+      "createdAt": "2026-11-19T08:58:20.747Z",
+      "updatedAt": "2026-11-19T08:58:20.747Z"
+    }
+  ]
+}

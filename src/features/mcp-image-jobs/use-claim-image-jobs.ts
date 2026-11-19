@@ -36,6 +36,7 @@ interface ClaimRecord {
   sourceNodeId?: string;
   sourceStorageKey?: string;
   prompt: string;
+  title?: string;
   model: 'qwen' | 'krea2' | 'moss';
   params: Record<string, unknown>;
   status: 'pending' | 'landed' | 'failed';
@@ -87,7 +88,8 @@ function shortStamp(iso?: string): string {
 
 function nodeTitle(claim: ClaimRecord): string {
   const fallback = claim.kind === 'subject_image' ? '主体图片' : claim.sourceStorageKey ? '参考生图' : '图片';
-  return `${semanticName(claim.prompt, fallback)} · ${shortStamp(claim.createdAt)}`;
+  const base = claim.title?.trim() || semanticName(claim.prompt, fallback);
+  return `${base} · ${shortStamp(claim.createdAt)}`;
 }
 
 export function useClaimImageJobs(opts: {
@@ -180,8 +182,10 @@ export function useClaimImageJobs(opts: {
             prompt: claim.prompt,
             model: modelKey,
             paramValues: {
-              aspect: params.aspect ?? '1:1',
-              megapixels: params.megapixels ?? 4,
+              // 尺寸只认真实 width/height（custom）；不要再塞默认 1:1 / 4MP，
+              // 否则面板显示 2048×2048、实际却是 832×512，用户看到的就是“参数对不上”。
+              ...(params.aspect ? { aspect: params.aspect } : {}),
+              ...(typeof params.megapixels === 'number' ? { megapixels: params.megapixels } : {}),
               width,
               height,
               sizeMode: 'custom',

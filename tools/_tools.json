@@ -1,0 +1,342 @@
+[
+ {
+  "name": "list_projects",
+  "description": "列出 token 作用域内可见的全部项目（含更新时间、节点数）。"
+ },
+ {
+  "name": "get_current_project",
+  "description": "取用户此刻在网页里打开的项目（前端切项目时广播到数据根）。用户没点名项目时先调它，然后把项目名报给用户、问一句「是否操作这个项目」再继续；source=recent 表示只是最近修改过、没有打开记录，更要先确认。返回 null 时才用 list_projects 让用户挑。"
+ },
+ {
+  "name": "get_project",
+  "description": "获取项目详情与资产路径概览（entities 就绪状态、CAS 文件数、目录路径）。"
+ },
+ {
+  "name": "open_project",
+  "description": "返回项目在前端编辑器中的打开 URL（hash 路由 #/editor/<id>）。"
+ },
+ {
+  "name": "create_project",
+  "description": "新建项目：写 projects.json 信封 + 建 projects/<id>/entities 目录骨架（不写 graph，留前端首开自建）。"
+ },
+ {
+  "name": "update_project_meta",
+  "description": "更新项目元信息（标题、标签）。至少提供 title 或 tags 之一。"
+ },
+ {
+  "name": "list_episodes",
+  "description": "列出项目剧本的全部剧集（编号/标题/状态/片段数）。"
+ },
+ {
+  "name": "get_script",
+  "description": "读取剧集全文（HTML content）、可编辑块列表 blocks（index/kind/text）与当前 version（后续写操作的 baseVersion 来源）。"
+ },
+ {
+  "name": "set_script_meta",
+  "description": "写「本剧信息」（整部剧一句话概述 logline / 推荐标签 tags），剧本页资产抽屉「本剧信息」分组展示。合并语义：只覆盖传入字段。baseVersion = script.json 当前 version。"
+ },
+ {
+  "name": "create_episode",
+  "description": "新建剧集（number=max+1，标题缺省「第N集」）。写类：baseVersion 必填，0=剧本不存在时创建。"
+ },
+ {
+  "name": "update_episode",
+  "description": "编辑已有剧集：改标题 title / 整体替换正文 content（追加请用 import_script append）/ 改状态 status。不改变编号与顺序。baseVersion = script.json 当前 version。"
+ },
+ {
+  "name": "patch_episode",
+  "description": "局部改剧本正文：按块下标 append / insert / replace / delete，只传要改的块，不用回传整篇 HTML（一次调用一次写盘）。下标 = get_script 返回的 blocks[].index；多个 op 按顺序执行。baseVersion = script.json 当前 version。"
+ },
+ {
+  "name": "merge_episode",
+  "description": "合并到上一集：当前集正文拼到上一集尾部 → 删除当前集 → 其余集编号重排 1..N，activeEpisodeId 指向上一集。与前端「⋮ → 合并到上一集」同一语义。baseVersion = script.json 当前 version。"
+ },
+ {
+  "name": "delete_episode",
+  "description": "删除整集：剧本集删除、其余集编号重排 1..N，同时删除导演台里 episodeId 属于该集的片段。不会重建/复制片段。baseVersion = script.json version；confirm:true 必填。"
+ },
+ {
+  "name": "set_episode_meta",
+  "description": "写本集信息卡（一句话介绍 logline / 推荐标签 tags / 发布建议 publishNote）。合并语义：只覆盖传入字段（tags 整体替换）。baseVersion = script.json 当前 version；episodeId 缺省 = activeEpisodeId。"
+ },
+ {
+  "name": "normalize_script",
+  "description": "剧本原文 → 标准格式文本 + 报告。不写入项目。推荐在导入前调用（非强制）。识别规则：集标题行「第N集 / EPN」；场次行必须「第N场 / SN」开头（如「第1场 咖啡馆 夜 内」），「1-1」「场景一」这类编号不会被识别；对白行「角色：台词」；主体行「[主体 @名字]」或「@名字」。"
+ },
+ {
+  "name": "import_script",
+  "description": "导入剧本。mode 必填：standard 标准剧本直接入库；raw 原文导入（允许，建议先 normalize_script 整理）。strategy 决定落点。"
+ },
+ {
+  "name": "split_script_to_shots",
+  "description": "把剧集剧本按场景切分成导演台片段草案（number/description/duration 默认 5s）。dryRun:true 返回草案清单供确认；confirm:true 携带 workbench 的 baseVersion 落盘。草案只是骨架：落盘后必须按 zeroexo://skills/shots-prompts 的「镜头卡」重设 description（职责 / 来源场次 / 起点→唯一动作→终点 / 景别机位运镜 / 声音 / 视觉依据）与时长，不得直接出片。"
+ },
+ {
+  "name": "list_subjects",
+  "description": "列出主体库（角色/场景/道具 ProductionItem：名称、别名、状态图、关联剧集）。"
+ },
+ {
+  "name": "audit_subjects",
+  "description": "只读自检主体库：主体是否缺树、图是否没映射进状态（页面不显示）、基础状态是否没图、空主体、同名重复，以及 **cross_subject_image（同一张图挂在两个主体下，人像定妆禁止跨主体复用）**——全量扫描 entity.images 与状态 media。写主体后建议先跑它；有 images_not_in_tree / missing_tree 就调用 repair_subject_trees；有 cross_subject_image 必须先清理再继续。"
+ },
+ {
+  "name": "repair_subject_trees",
+  "description": "修复主体树：补齐缺失的树、把 entity.images 按 stateTag 映射进基础状态/对应状态（幂等，不删数据、不动已有提示词）。写类：先 dryRun 看 mediaFixed/statesCreated，再 userConfirmed:true 落盘。"
+ },
+ {
+  "name": "sync_subject_episodes",
+  "description": "把主体的集数关联同步到主体树：entity.episodeIds ↔ 基础状态 appearEpisodes（页面「出现集数」读的就是它）。空关联会按名字/别名在剧本里重新匹配。写类：先 dryRun 看 synced/appeared，再 userConfirmed:true。"
+ },
+ {
+  "name": "upsert_subject",
+  "description": "新建或更新主体（有 id 更新、无 id 新建 item-…）。写类：baseVersion 必填，0=主体库不存在时创建。新建时若未给 episodeIds，会**按名字/别名在剧本里自动关联出现过的集**（避免所有主演默认挂全部集）。**同一演员的不同状态/形态禁止新建主体**：同名/同别名会报 SUBJECT_EXISTS，请用 set_subject_image(stateTag=…) 挂到现有主体。"
+ },
+ {
+  "name": "set_subject_profile",
+  "description": "写主体人设模板（2026-11-13 强制约束）：按 kind 提交必填字段，服务端校验后拼出标准提示词——角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 单视角空场景轴图（21:9，默认；2×2 宫格仅用户明确要求）；道具 = 默认单张单视图（单品居中），结构复杂、需要交代多部件/工艺的道具才用 sheet 出「整体 + 1 个细节特写」。身份锚点句写 item.note，标准提示词写主体树基础状态 fullPrompt/deltaPrompt。字段不全直接拒绝并列出缺项。renderMode 可选：sheet（角色三视图 / 场景四视角宫格 / 复杂道具的整体+1细节）/ single（默认：单张，场景轴图或道具单视图）/ white-bg（白底快速图，道具主图或要抠像的角色）。有参考图时必须先 read_asset 看图、按图反推字段，再把 sourceImage 一起传；不要凭想象填。baseVersion = storyboard version。"
+ },
+ {
+  "name": "set_subject_image",
+  "description": "给主体挂状态图（写 ProductionItem.images[] 与 coverKey）。storageKey 来自 upload_asset 返回的 'cas:<hash>.<ext>'；stateTag=状态名（如「定妆」「美艳态」「恶鬼态」）。幂等：同 storageKey 已存在则原地更新。**门槛：角色必须先 set_subject_profile 写好人设/定妆提示词（基础提示词为空直接 SUBJECT_PROFILE_REQUIRED）；场景/道具如果已有可用概念分镜或概念图，可直接 read_asset 反推 prompt 后挂入，不强制再套模板生成新图。写入前必须先 read_asset 真正看过这张图（服务端只认本次会话读过的图），并把画面反推成 prompt 一起写（人数/同一张脸/服装/背景/构图）。**角色图必须单人、同一张脸；多人合照/模特合集/候选人群像/别的角色图一律不许挂；看不到图就停下问用户，不要瞎猜。防呆：同一张图已挂在其它主体下时直接拒绝（沈少误挂主演图事故），确需共享才传 allowCrossSubject:true。baseVersion = storyboard version。"
+ },
+ {
+  "name": "import_subject_from_project",
+  "description": "把另一个项目的主体**完整导入本项目**（新 itemId/rootId/状态 id；状态图重新挂本项目 CAS ref，同内容不复制文件；集数清空后由 sync_subject_episodes 按名字重关联）。跨项目引用纪律：禁止直接拿别的项目的 storageKey / 主体 id 在本项目里用；需要复用必须先调本工具导成本项目主体。当前项目已有同名主体会拒绝——请传 name 明确改名，或先 merge_subjects。写类：先 dryRun 看 imagesCopied/skippedKeys，再 userConfirmed:true。"
+ },
+ {
+  "name": "delete_subject",
+  "description": "删除主体（连同主体树状态）。破坏性写：先 dryRun 给用户看，真实删除必须 userConfirmed:true。只删主体库，不级联删画布/导演台引用。"
+ },
+ {
+  "name": "delete_subject_image",
+  "description": "删除主体的某张状态图（同步清理主体树 media）。破坏性写：需 userConfirmed:true；cover 被删会自动回落下一张。"
+ },
+ {
+  "name": "merge_subjects",
+  "description": "把重复主体并回本体：图片/别名/集数并入 target，状态并进 target 树，然后删除 source。破坏性写：需 userConfirmed:true；先 dryRun 核对数量。"
+ },
+ {
+  "name": "link_subject_to_shot",
+  "description": "把主体关联到导演台片段（写入 shot.references[]）。两种模式：matchByName 给出候选清单（不写盘）；或直接给 subjectId 直写（baseVersion = workbench version）。"
+ },
+ {
+  "name": "consolidate_scenes",
+  "description": "场景主体归并：同一地点/建筑下的多个场景主体（宴会厅/办公室/走廊/保安部）合并成一个场景主体，子区域变成它的状态（各自保留提示词与图）。**场景必须一个地点一个主体**；先 dryRun 把分组给用户看，确认后带 userConfirmed:true + storyboard baseVersion 才落盘。"
+ },
+ {
+  "name": "list_assets",
+  "description": "列出 CAS 资产。scope=project：refs 含本项目的条目；scope=library：全局去重视图。"
+ },
+ {
+  "name": "upload_asset",
+  "description": "上传资产（base64）到 CAS：SHA-256 去重（已存在仅 refCount+1），维护 cas_index 不变量，返回 storageKey='cas:<hash>.<ext>'。"
+ },
+ {
+  "name": "attach_asset_to_slot",
+  "description": "把 CAS 资产挂到导演台槽位：给 shotId → 片段槽（K+1 续排）；不给 → 公共槽（1..K）。超限返回 SLOT_OVERFLOW。baseVersion = workbench version。"
+ },
+ {
+  "name": "read_asset",
+  "description": "读取画布/资产文件内容：图片直接返回 MCP image 内容块（模型可见）；视频/音频返回元数据（大小、mime），不塞 base64。storageKey 来自 get_canvas 节点 data.storageKey / list_assets（image:/video:/audio:/cas:）。**给主体挂状态图之前必须先调用本工具真正看图**（set_subject_image 只认本次会话读过的图）。"
+ },
+ {
+  "name": "import_media_to_cas",
+  "description": "把画布里的文件（storageKey=image:/video:/audio:）导入 CAS，返回 cas:<hash>.<ext>；得到 CAS 键后即可 set_subject_image 挂成主体状态图。默认不进素材库。"
+ },
+ {
+  "name": "get_workbench",
+  "description": "读取导演台全量（tracks/shots/sharedParams/version）。不存在时返回 null（写工具可用 baseVersion=0 创建）。"
+ },
+ {
+  "name": "set_shared_params",
+  "description": "更新导演台公共参数（presetId 可选 h3/sd2.5，params 合并）。重复的公共内容直接写进每段提示词（set_shot_prompt）。baseVersion = workbench version。"
+ },
+ {
+  "name": "set_shot_prompt",
+  "description": "更新导演台片段的双轨提示词（imagePrompt / videoPrompt），可同时改 description/shotType/duration。baseVersion = workbench version。"
+ },
+ {
+  "name": "add_segment",
+  "description": "导演台新增片段（id=seg-<ts>-<rand>，duration 默认 5s，status=pending）。baseVersion = workbench version，0=创建。episodeId 可选：指定则该片段归入该集（同集内从 1 编号），不给 = 未分集。"
+ },
+ {
+  "name": "move_segments",
+  "description": "把已有片段移动到目标集（不重建、不复制）：可指定 beforeShotId 插到该片段之前，否则追加到目标集末尾。同集内自动重新编号。baseVersion = workbench version。"
+ },
+ {
+  "name": "delete_segments",
+  "description": "从导演台删除指定片段（按 id，不会重建/复制），同时移除主轨 clips 并重新编号。baseVersion = workbench version；confirm:true 必填防误删。"
+ },
+ {
+  "name": "ingest_storyboard_images",
+  "description": "提交分镜图片做智能比对。matchStrategy=hash：SHA-256 比对 CAS 索引返回候选；perceptual：M2 才支持（返回 NOT_IMPLEMENTED）；manual：仅登记待确认。M1 一律不落盘，返回 status=pending_confirm 清单。"
+ },
+ {
+  "name": "preflight_import",
+  "description": "批量导入前的强制预检（只读，不写盘）：判定源文本语言/是否为英文或外部平台格式、识别分集标记、统计主体库与导演台现状，返回必须逐条问用户的问题（来源格式 / 集数 / 主体资产 / 对已有片段的影响）。拿到 questions 后逐条问用户，用户回答后再写；import_script、split_script_to_shots 缺少 userConfirmed 会直接拒绝。"
+ },
+ {
+  "name": "plan_continuity_edit",
+  "description": "按 H3 延续法重排导演台段长与衔接（只改时长/引导开关，不改提示词正文）：每段时长吸附到 17k+5 帧、第 2 段起标记吃上一段尾帧（默认 22 帧）、并打开 sharedParams.continuityEnabled。dryRun:true 返回整张计划表给用户确认；confirm:true 需要 userConfirmed:true。没做过这一步的片段，run_generation 会直接拒绝（延续法不能靠 Agent 自觉）。"
+ },
+ {
+  "name": "mcp_update_status",
+  "description": "MCP 自身版本体检（只读）：对比网页要求的工具清单（.lf/zeroexo/app_meta/mcp-required.json）与本进程的工具，报告缺哪些工具、dist 是否比进程新、仓库落后多少提交，并给出下一步（更新 / 重启）。工具返回里出现 _mcpOutdated 时先调这个，把结论告诉用户。"
+ },
+ {
+  "name": "update_mcp_server",
+  "description": "更新 MCP 自身（写操作，必须用户同意）：git fetch → 工作区干净才 --ff-only 快进 → 重新编译 mcp-server。不会覆盖用户未提交的改动；更新后必须重启 MCP 服务（stdio 进程无法热替换已加载代码）。只允许用户明确同意后调用，参数 userConfirmed:true。"
+ },
+ {
+  "name": "list_canvases",
+  "description": "列出项目下的全部画布（1 号主画布 + N 份副本；均归属本项目，不在首页项目列表里）。返回标题、节点/连线数、更新时间、是否可写。数据源 = projects/<pid>/canvases/*.json 与 .lf 主 graph，与前端画布同源。"
+ },
+ {
+  "name": "get_canvas",
+  "description": "读取一份画布（canvasId 缺省 = 'main' 即 1 号主画布）。includeGraph=false 只返回标题与统计摘要。1 号也可读。"
+ },
+ {
+  "name": "patch_canvas_nodes",
+  "description": "给**副本画布**的既有节点打补丁（data 浅合并 / title 覆盖 / position 覆盖）。写纪律：size+mtime 双因子乐观锁 + version+1，与前端并发时后写者拿 VERSION_CONFLICT。任一 nodeId 不存在则整体不写并回 missingNodeIds。dryRun:true 只返回字段级 diff。**1 号主画布只读**（前端防抖自动保存，外部写会互相覆盖）；**不做结构性增删节点或连线**。要在画布上新增图/改图，用 generate_canvas_images / edit_canvas_image（网页在线时由网页在实时画布建下游节点），不要试图用本工具造节点。"
+ },
+ {
+  "name": "generate_canvas_images",
+  "description": "在**当前打开的画布**上批量生成/参考生图：MCP 只代理提交到 ComfyUI 插件，生成与采样预览在插件端运行、网页可见，网页关掉任务照常跑完，重开网页按认领记录接回进度与成品。纯文生图 model=moss/krea2/qwen；**带参考图传 sourceStorageKey 或 sourceNodeId**（参考图只做引导，不决定出图尺寸）。改图（原图重绘）走 maskStorageKey，出图尺寸跟随原图。提交后用 get_generation_task 轮询。**同一批 requests 的 seed 必须互不相同**（要多张不同结果用 seed:-1 或每张不同 seed）。"
+ },
+ {
+  "name": "edit_canvas_image",
+  "description": "修改画布上已有的一张图（改图/图生图）：传 sourceNodeId（画布节点 id）或 sourceStorageKey（cas:/image: 键）+ 编辑指令，MCP 代理提交到插件，**在画布上新建下游节点并连到原图**，原图不动。编辑指令必须写成「只改什么 + 其余保持不变 + 原图关键元素复述」，不要重新描述整张新图。"
+ },
+ {
+  "name": "get_canvas_image_job",
+  "description": "查询画布图片作业进度（读插件状态 + 认领记录；刷新/换浏览器都不丢），可取消。"
+ },
+ {
+  "name": "list_generation_tasks",
+  "description": "列出生成任务：导演台出片任务在 ComfyUI 插件 output/zeroexo/tasks，画布图片任务在数据根 .lf/zeroexo/app_meta/tasks，MCP 合并两边结果。"
+ },
+ {
+  "name": "get_generation_task",
+  "description": "查单个生成任务：状态、逐段进度、guide、每段产物和成品末帧路径。先查 ComfyUI 插件任务表，再回落数据根 MCP 任务表（画布图片）。"
+ },
+ {
+  "name": "cancel_generation_task",
+  "description": "取消任务：排队中立即取消；运行中由执行方在安全点中断，已完成段保留。插件任务与画布图片任务都支持。"
+ },
+ {
+  "name": "review_shots",
+  "description": "分镜/提示词质检（检查模式）：逐片段 0–10 分，检查结构完整、参考图槽位与 <Subject N> 锚定、外貌/服装描写、负面词范畴化、形容词汤、帧预算（≤736）、单镜运镜与动作终点态。返回 issues（error 必须修，warn 建议修）+ fix 建议。低于 7 分或存在 error 时，request_director_run / apply_shot_prompts 会直接拒绝（用户明确认可可传 userOverride:true）。"
+ },
+ {
+  "name": "validate_project",
+  "description": "交付前自检：剧本块/标题泄漏、主体缺图、片段缺提示词或悬空 @PictureN、参数键、帧预算。返回 ok + errors + warnings，红的不许交付。"
+ },
+ {
+  "name": "scaffold_episode",
+  "description": "从已入库剧本 + 用户偏好，产出占位主体（无图）与占位导演台片段（一场一段，提示词按引擎槽位约定生成），并返回缺哪些资产。素材到位后用 apply_shot_prompts 重写引用。"
+ },
+ {
+  "name": "apply_shot_prompts",
+  "description": "按当前片段 references 与主体库重写 imagePrompt/videoPrompt（引用写成 @PictureN，N = references 槽位序号）。素材变化后调用。"
+ },
+ {
+  "name": "set_segment_duration",
+  "description": "一次调用批量改导演台片段时长（秒）。all=true 改全部，或给 shotIds 指定子集；一次 mutate、version 只 +1。"
+ },
+ {
+  "name": "set_shot_guide",
+  "description": "写入/移除导演台片段的独立引导槽 shot.guide（不占参考图 9 格）。guide 传 null 表示移除。"
+ },
+ {
+  "name": "list_history",
+  "description": "列出生成产物历史（.lf 资产记录），可按来源 canvas/director 过滤、只看带引导数据的条目。"
+ },
+ {
+  "name": "get_guide",
+  "description": "取单条生成产物的引导元数据，并检查 ComfyUI 磁盘上的 gd_xxx.safetensors 是否存在。"
+ },
+ {
+  "name": "request_director_run",
+  "description": "提交导演台批次任务到 ComfyUI 插件：MCP 直接创建插件任务（任务表可被网页与 MCP 共同查询），按连续段提交，run 内 chain 续接；dryRun 先出段/帧/秒/guide 表，confirm 才提交。"
+ },
+ {
+  "name": "run_generation",
+  "description": "已停用：请改用 request_director_run（MCP 已支持直接提交导演台批次任务），本工具保留仅为兼容旧调用。"
+ },
+ {
+  "name": "get_job",
+  "description": "查询单个 ComfyUI 作业状态（state/outputs/guide/guideSource/guideInPath/error）。"
+ },
+ {
+  "name": "list_jobs",
+  "description": "批量查询作业状态，返回每项结果与汇总 doneCount/failedCount/allDone。"
+ },
+ {
+  "name": "sync_job_results",
+  "description": "作业成功后把视频与 guide 回写到 shots[].media.guide，并落一条带 guide 的历史资产记录（等价网页的 onSegmentDone + autoLandGenerationBlob）。部署后只有 MCP 时由本工具完成闭环。"
+ },
+ {
+  "name": "repair_asset_storage_keys",
+  "description": "把历史资产里误写成 ComfyUI 磁盘绝对路径的 storageKey 修成 CAS key（幂等）。修复后前端缩略图、播放、发送到导演台插槽恢复正常。dryRun 只返回待修清单。"
+ },
+ {
+  "name": "verify_output",
+  "description": "验收生成产物：作业成功、视频文件落盘、guide 元数据与 gd_xxx.safetensors 落盘、导演台 shots[].media.guide 回写、历史资产带 guide。"
+ },
+ {
+  "name": "get_param_schema",
+  "description": "返回导演台真实参数键与约束（steps/scaleFactor/refImageSize/duration 等），供 Agent 配参前核对。"
+ },
+ {
+  "name": "list_style_presets",
+  "description": "列出全剧风格预设库（39 套：9 导演 / 6 主流 / 8 动画 / 16 题材，含都市、基础写实、邵氏、经典港片），返回 id / 中文名 / 英文名 / 分类 / 风格片段。风格是全剧设定：先把候选 id 报给用户选，再用 set_global_style 落盘。"
+ },
+ {
+  "name": "get_global_style",
+  "description": "读取当前项目的全剧风格（script.meta.visualStyle：presetId / name / prompt / image）。未设置时返回 null。所有主体提示词都应继承这一套；主体提示词里不应各写一套风格。"
+ },
+ {
+  "name": "analyze_script_style",
+  "description": "读剧本（可按集）做风格分析：题材关键词打分、对白/动作密度、场次节奏 → 推断题材，给 2–3 个风格候选（含组合技）与「为什么/影响什么（构图·节奏·材质）」；有争议时明确要求先问用户。只读，不落盘。"
+ },
+ {
+  "name": "set_global_style",
+  "description": "选一套全剧风格：写 script.meta.visualStyle，并把所有主体/状态提示词的风格块统一改写为这套片段（删旧「风格/灯光/色彩/质感」行，末尾追加「风格：<片段>」；空提示词不动）。会改多个文件：必须先把 presetId 报给用户确认，再带 userConfirmed:true 与 script 的 baseVersion 落盘；dryRun 可先预览。"
+ },
+ {
+  "name": "get_upgrade_guide",
+  "description": "读「升级/连上后的查漏补缺」说明：为什么旧项目可能不合当前流程、应先跑 audit_upgrade、怎么把结果报给用户并询问是否修复。"
+ },
+ {
+  "name": "audit_upgrade",
+  "description": "升级后只读自查：按当前流程检查旧项目可能留下的洞（全剧风格未设、主体无提示词/图无 prompt、导演台片段未分集、提示词为空、指向已删集）。返回 findings（严重度/证据/修复工具）与 summary。**只读**；先把结果报给用户并问是否修复，不要擅自批量改。"
+ },
+ {
+  "name": "ensure_project_ready",
+  "description": "交付前自愈：给还没有提示词的主体补一条最小可用提示词、给没写简介的剧本补一句（从第一集正文提炼），并汇报还缺什么（主体没图 / 片段没提示词）。**只补缺，不覆盖已有内容**；默认直接生效，dryRun 可先看。Agent 在说「完成 / 可以出片」之前必须先调一次，把 repaired/remaining 用大白话告诉用户。"
+ },
+ {
+  "name": "get_comfyui_status",
+  "description": "读取网页当前连接的 ComfyUI 地址与状态（含云端地址），并探测 /system_stats。诊断「ComfyUI 未连接 / 作业 pending」前必须先调这个，禁止假设 127.0.0.1:8188；地址以网页广播的 .lf/zeroexo/app_meta/comfyui-endpoint.json 为准。"
+ },
+ {
+  "name": "set_comfyui_endpoint",
+  "description": "把网页/MCP 使用的 ComfyUI 地址切换为指定地址（含云端 https 地址），先探测 /system_stats 再写广播文件。写入前必须已拿到用户明确给出的地址；reachable=false 时仍然写入（用户可能只是暂时没开服务），但会返回警告。"
+ },
+ {
+  "name": "publish_fix",
+  "description": "提交已改好的工作区：mode=pr（默认）新分支+提交+推送+开 GitHub PR，绝不改 main；mode=main 仅本机维护者直推 main。会先 typecheck/build，再提交。必须 confirm:true；dryRun 只看计划。"
+ },
+ {
+  "name": "data_root_status",
+  "description": "数据根与 MCP 安装位置体检（只读）：当前数据根、本进程从哪个目录启动、安装目录是否在新数据根下、历史迁移留下的旧根是否还在、旧根里各目录占用多少。用户在网页换过数据目录后先调这个，把「旧目录还在、MCP 还装在旧目录、要不要搬/删」讲清楚再问用户。"
+ },
+ {
+  "name": "relocate_mcp_install",
+  "description": "把当前运行的 MCP 安装目录搬到当前数据根下的 .mcp-server\\next（写操作，必须用户同意）。只复制现有安装（含 node_modules），不改数据、不删旧目录；完成后必须从新入口重启 MCP 服务，重启后旧目录才可以删除。仓库里跑 dev 的入口（.../mcp-server/dist/index.js）无法搬迁，会直接报错。"
+ },
+ {
+  "name": "cleanup_old_data_root",
+  "description": "清理迁移后遗留的旧数据根（写操作，必须用户同意；删除不可恢复）。只删 ZeroExo 自己的目录（projects/assets/media/entities/.lf/.mcp/.mcp-server/.audit），同一层其它文件原样保留。当前数据根、盘根、用户主目录一律拒绝；MCP 还装在旧根里时也拒绝（必须先 relocate_mcp_install 并重启）。第一次必须 dryRun:true 给用户看清单，得到答复后才 confirm:true。"
+ }
+]

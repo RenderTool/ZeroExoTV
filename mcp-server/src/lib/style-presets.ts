@@ -26,11 +26,11 @@ export const STYLE_PRESETS: StylePreset[] = [
   },
   {
     id: "combo-anime-pbr",
-    nameZh: "动漫造型·PBR材质（皮克斯向）",
-    nameEn: "Anime Shapes + PBR (Pixar-like)",
+    nameZh: "三维卡通·PBR材质",
+    nameEn: "Stylized 3D Toon + PBR",
     category: "combo",
-    promptZh: "[主体], 皮克斯/迪士尼向 3D 动画造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深",
-    promptEn: "[subject], 皮克斯/迪士尼向 3D 动画造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深",
+    promptZh: "[主体], 原创三维卡通造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深, 原创角色设计, 不得与任何现有知名动画角色或 IP 形象相似",
+    promptEn: "[subject], original stylized 3D toon design, exaggerated but believable proportions, physically based PBR materials (soft subsurface scattering, fabric fuzz, clean reflections), soft global illumination, wide aperture shallow depth of field, original character design, must not resemble any existing well-known animation character or franchise",
   },
   {
     id: "combo-real-film",

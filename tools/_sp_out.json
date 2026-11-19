@@ -1,0 +1,79 @@
+{
+  "written": true,
+  "workbenchVersion": 3,
+  "addedCount": 4,
+  "shots": [
+    {
+      "id": "seg-mwncf2db-913fa8",
+      "number": 1,
+      "episodeId": "ep-9fba37610989",
+      "description": "场1 钟楼广场·白天·外景"
+    },
+    {
+      "id": "seg-mwncf2db-1dd7a6",
+      "number": 2,
+      "episodeId": "ep-9fba37610989",
+      "description": "场2 钟表铺·白天·内景"
+    },
+    {
+      "id": "seg-mwncf2db-8b5e9b",
+      "number": 3,
+      "episodeId": "ep-9fba37610989",
+      "description": "场3 雨棚小巷·傍晚·外景"
+    },
+    {
+      "id": "seg-mwncf2db-ac22e2",
+      "number": 4,
+      "episodeId": "ep-9fba37610989",
+      "description": "场4 地下齿轮室·夜·内景"
+    },
+    {
+      "id": "seg-mwncf30t-0a7240",
+      "number": 1,
+      "episodeId": "ep-0c2d402e2635",
+      "description": "场1 地下齿轮室·夜·内景"
+    },
+    {
+      "id": "seg-mwncf30t-2501cb",
+      "number": 2,
+      "episodeId": "ep-0c2d402e2635",
+      "description": "场2 蘑菇集市·白天·外景"
+    },
+    {
+      "id": "seg-mwncf30t-7152c1",
+      "number": 3,
+      "episodeId": "ep-0c2d402e2635",
+      "description": "场3 磨坊·黄昏·外景"
+    },
+    {
+      "id": "seg-mwncf30t-fe59fe",
+      "number": 4,
+      "episodeId": "ep-0c2d402e2635",
+      "description": "场4 河桥·夜·外景"
+    },
+    {
+      "id": "seg-mwncf3o4-7e68e7",
+      "number": 1,
+      "episodeId": "ep-95e21f8cd4cd",
+      "description": "场1 山坡灯塔·黄昏·外景"
+    },
+    {
+      "id": "seg-mwncf3o4-b70377",
+      "number": 2,
+      "episodeId": "ep-95e21f8cd4cd",
+      "description": "场2 钟楼广场·夜·外景"
+    },
+    {
+      "id": "seg-mwncf3o4-2eeb7c",
+      "number": 3,
+      "episodeId": "ep-95e21f8cd4cd",
+      "description": "场3 钟楼内部·夜·内景"
+    },
+    {
+      "id": "seg-mwncf3o4-d15c36",
+      "number": 4,
+      "episodeId": "ep-95e21f8cd4cd",
+      "description": "场4 星夜码头·夜·外景"
+    }
+  ]
+}

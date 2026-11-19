@@ -1,0 +1,35 @@
+{
+  "jobs": [
+    {
+      "jobId": "mp_mwnbiczw_asi93o",
+      "claimId": "clm_mwnbid1c_cb0q7f",
+      "nodeId": "mcp_mp_mwnbiczw_asi93o",
+      "model": "qwen",
+      "state": "running",
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "jobId": "mp_mwnbid1l_zu3gjs",
+      "claimId": "clm_mwnbid36_jv5r74",
+      "nodeId": "mcp_mp_mwnbid1l_zu3gjs",
+      "model": "qwen",
+      "state": "running",
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "jobId": "mp_mwnbid3c_s1zjo1",
+      "claimId": "clm_mwnbid4t_7kxg1p",
+      "nodeId": "mcp_mp_mwnbid3c_s1zjo1",
+      "model": "qwen",
+      "state": "running",
+      "width": 768,
+      "height": 1024
+    }
+  ],
+  "jobId": "mp_mwnbiczw_asi93o",
+  "taskId": "mp_mwnbiczw_asi93o",
+  "queued": 3,
+  "hint": "作业已代理提交到 ComfyUI 插件：生成与采样预览在插件端运行，网页打开或刷新同一项目会按认领记录接回进度与成品；用 get_generation_task 查询进度，网关切网页不需要重新提交。"
+}

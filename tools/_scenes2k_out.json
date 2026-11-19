@@ -1,0 +1,98 @@
+{
+  "jobs": [
+    {
+      "jobId": "mp_mwnbr8ee_cloglf",
+      "claimId": "clm_mwnbr8fg_fkkrl6",
+      "nodeId": "mcp_mp_mwnbr8ee_cloglf",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1152
+    },
+    {
+      "jobId": "mp_mwnbr8fh_i0s0oi",
+      "claimId": "clm_mwnbr8gw_jzifem",
+      "nodeId": "mcp_mp_mwnbr8fh_i0s0oi",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1152
+    },
+    {
+      "jobId": "mp_mwnbr8gx_t51ts0",
+      "claimId": "clm_mwnbr8i2_md4m1v",
+      "nodeId": "mcp_mp_mwnbr8gx_t51ts0",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1152
+    },
+    {
+      "jobId": "mp_mwnbr8i8_vtjvmi",
+      "claimId": "clm_mwnbr8jg_f0jyk8",
+      "nodeId": "mcp_mp_mwnbr8i8_vtjvmi",
+      "model": "qwen",
+      "state": "running",
+      "width": 1536,
+      "height": 2048
+    },
+    {
+      "jobId": "mp_mwnbr8jn_01uu0q",
+      "claimId": "clm_mwnbr8no_3d1lty",
+      "nodeId": "mcp_mp_mwnbr8jn_01uu0q",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1152
+    },
+    {
+      "jobId": "mp_mwnbr8nv_9hlcdr",
+      "claimId": "clm_mwnbr8p4_2mchri",
+      "nodeId": "mcp_mp_mwnbr8nv_9hlcdr",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1536
+    },
+    {
+      "jobId": "mp_mwnbr8p6_b1tuqq",
+      "claimId": "clm_mwnbr8qk_5untme",
+      "nodeId": "mcp_mp_mwnbr8p6_b1tuqq",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1152
+    },
+    {
+      "jobId": "mp_mwnbr8qq_hsvo7n",
+      "claimId": "clm_mwnbr8ru_0vdhq3",
+      "nodeId": "mcp_mp_mwnbr8qq_hsvo7n",
+      "model": "qwen",
+      "state": "running",
+      "width": 1152,
+      "height": 2048
+    },
+    {
+      "jobId": "mp_mwnbr8rw_zf5p1c",
+      "claimId": "clm_mwnbr8t4_5owuw6",
+      "nodeId": "mcp_mp_mwnbr8rw_zf5p1c",
+      "model": "qwen",
+      "state": "running",
+      "width": 1536,
+      "height": 2048
+    },
+    {
+      "jobId": "mp_mwnbr8t7_jv199d",
+      "claimId": "clm_mwnbr8uf_6rgyt0",
+      "nodeId": "mcp_mp_mwnbr8t7_jv199d",
+      "model": "qwen",
+      "state": "running",
+      "width": 2048,
+      "height": 1152
+    }
+  ],
+  "jobId": "mp_mwnbr8ee_cloglf",
+  "taskId": "mp_mwnbr8ee_cloglf",
+  "queued": 10,
+  "hint": "作业已代理提交到 ComfyUI 插件：生成与采样预览在插件端运行，网页打开或刷新同一项目会按认领记录接回进度与成品；用 get_generation_task 查询进度，网关切网页不需要重新提交。"
+}

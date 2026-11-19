@@ -1,0 +1,373 @@
+{
+  "schemaVersion": 1,
+  "version": 5,
+  "title": "导演台",
+  "tracks": [
+    {
+      "id": "track-main",
+      "name": "主轨",
+      "sourceChain": {
+        "origin": "workbench-container"
+      },
+      "status": "active",
+      "order": 0,
+      "clips": [
+        {
+          "ref": {
+            "sourceShotId": "seg-1795078160427-wd9v",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 0,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8tr7-ea2ede",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 5000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8tr7-032655",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 10000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8tr7-d32e18",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 15000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8tr7-e6e42d",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 20000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8uev-6fdeca",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 25000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8uev-1407d9",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 30000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8uev-47dc0d",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 35000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8uev-f78d66",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 40000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8v26-79b19f",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 45000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8v26-9d5204",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 50000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8v26-45f09a",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 55000,
+            "durationMs": 5000
+          }
+        },
+        {
+          "ref": {
+            "sourceShotId": "seg-mwnb8v26-0dcb7b",
+            "kind": "shot"
+          },
+          "timeline": {
+            "startMs": 60000,
+            "durationMs": 5000
+          }
+        }
+      ]
+    }
+  ],
+  "shots": [
+    {
+      "id": "seg-1795078160427-wd9v",
+      "number": 1,
+      "description": "",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-92d8367bc898"
+    },
+    {
+      "id": "seg-mwnb8tr7-ea2ede",
+      "number": 2,
+      "description": "场1 钟楼广场·白天·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-92d8367bc898"
+    },
+    {
+      "id": "seg-mwnb8tr7-032655",
+      "number": 3,
+      "description": "场2 钟表铺·白天·内景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-92d8367bc898"
+    },
+    {
+      "id": "seg-mwnb8tr7-d32e18",
+      "number": 4,
+      "description": "场3 雨棚小巷·傍晚·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-92d8367bc898"
+    },
+    {
+      "id": "seg-mwnb8tr7-e6e42d",
+      "number": 5,
+      "description": "场4 地下齿轮室·夜·内景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-92d8367bc898"
+    },
+    {
+      "id": "seg-mwnb8uev-6fdeca",
+      "number": 1,
+      "description": "场1 地下齿轮室·夜·内景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-c30c0c45b926"
+    },
+    {
+      "id": "seg-mwnb8uev-1407d9",
+      "number": 2,
+      "description": "场2 蘑菇集市·白天·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-c30c0c45b926"
+    },
+    {
+      "id": "seg-mwnb8uev-47dc0d",
+      "number": 3,
+      "description": "场3 磨坊·黄昏·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-c30c0c45b926"
+    },
+    {
+      "id": "seg-mwnb8uev-f78d66",
+      "number": 4,
+      "description": "场4 河桥·夜·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-c30c0c45b926"
+    },
+    {
+      "id": "seg-mwnb8v26-79b19f",
+      "number": 1,
+      "description": "场1 山坡灯塔·黄昏·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-e63b9b332c41"
+    },
+    {
+      "id": "seg-mwnb8v26-9d5204",
+      "number": 2,
+      "description": "场2 钟楼广场·夜·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-e63b9b332c41"
+    },
+    {
+      "id": "seg-mwnb8v26-45f09a",
+      "number": 3,
+      "description": "场3 钟楼内部·夜·内景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-e63b9b332c41"
+    },
+    {
+      "id": "seg-mwnb8v26-0dcb7b",
+      "number": 4,
+      "description": "场4 星夜码头·夜·外景",
+      "shotType": "",
+      "duration": 5,
+      "imagePrompt": "",
+      "videoPrompt": "",
+      "status": "pending",
+      "clipState": "placeholder",
+      "references": [],
+      "paramValues": {},
+      "episodeId": "ep-e63b9b332c41"
+    }
+  ],
+  "totalDuration": 65,
+  "updatedAt": "2026-11-19T08:50:56.191Z",
+  "sharedParams": {
+    "enabled": true,
+    "assets": [],
+    "presetId": "h3",
+    "params": {
+      "task_type": "t2v",
+      "cfg": 1,
+      "seed": 0,
+      "frame_rate": 24,
+      "width": 1376,
+      "height": 768,
+      "ref_max_size": 864,
+      "total_frames": 124,
+      "steps": 8,
+      "sampler": "euler",
+      "scheduler": "simple",
+      "shift_video": 12,
+      "shift_audio": 3,
+      "clear_vram_between_segments": true,
+      "clear_vram_before_refine": false,
+      "clear_vram_before_face_refine": false,
+      "cache_frames_codec": "raw",
+      "export_source_images": false,
+      "export_pre_face_refine": false,
+      "cache_name": "",
+      "refImageSize": "match",
+      "continuityEnabled": false,
+      "continuityOverlapFrames": 22,
+      "continuityMode": "continue",
+      "continuityRedraw": 0.1,
+      "continuityKeepTail": true,
+      "exportMode": "all",
+      "maxExportFrames": 0,
+      "audioMode": "generate",
+      "commonEnabled": true,
+      "aspect": "16:9",
+      "scaleFactor": 1
+    }
+  }
+}

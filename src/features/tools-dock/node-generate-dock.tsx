@@ -1248,7 +1248,7 @@ export function NodeGenerateDock({
           style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 6, color: theme.toolbar.textMuted, fontSize: 12 }}
         >
           <ImageOff size={14} />
-          {t('nodeDock.textOnlyModel', '当前模型只吃文字：连入的素材这次不参与生成，切回图生图就能直接用。')}
+          {t('nodeDock.textOnlyModel', '当前模型不支持参考图：本次只按文字描述生成。要用参考素材，请切换到支持参考图的模型。')}
         </div>
       ) : null}
 

@@ -72,8 +72,8 @@ function resolveSize(input: {
     if (model === "moss") return { width: alignTo(raw.width, 16), height: alignTo(raw.height, 16) };
     return { width: alignTo(raw.width, 32), height: alignTo(raw.height, 32) };
   }
-  if (model === "qwen") return { width: 1344, height: 1008 };
-  return { width: 1024, height: 1024 };
+  if (model === "qwen") return { width: 2048, height: 1536 };
+  return { width: 2048, height: 2048 };
 }
 
 /** 单张图：代理提交到插件，写认领台账 */
@@ -164,6 +164,7 @@ export async function submitProxyImage(
     sourceNodeId: req.sourceNodeId,
     sourceStorageKey: sourceKey ?? undefined,
     prompt: req.prompt,
+    title: req.title?.trim() || undefined,
     model,
     params: { ...common, aspect: req.aspect, megapixels: req.megapixels, negative_prompt: negative },
     subject,
