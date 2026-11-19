@@ -444,7 +444,10 @@ export function AssetPickPanel({
   useEffect(() => {
     if (!focusSubjectId || panelTab !== 'subject') return;
     const idx = subjRows.findIndex((row) => row.type === 'subject' && row.item.id === focusSubjectId);
-    if (idx >= 0) setSubjectIdx(idx);
+    // 只在值真的变了才写状态（2026-11-19 用户报「主体列表卡顿跳动」）：
+    // subjRows 每次重建都是新数组，无条件 setSubjectIdx 会把高亮反复拉回焦点主体，
+    // 表现为列表来回跳 + 详情图反复重绘。
+    if (idx >= 0) setSubjectIdx((prev) => (prev === idx ? prev : idx));
   }, [focusSubjectId, panelTab, subjRows]);
 
   /**
@@ -524,13 +527,24 @@ export function AssetPickPanel({
   useEffect(() => {
     if (panelTab === 'asset') {
       const a = flat[activeIdx];
-      setDetail(a ? { type: 'asset', ref: a } : null);
+      const next: PickDetailTarget | null = a ? { type: 'asset', ref: a } : null;
+      // 同一条目不重设（否则每次列表重建都新建对象 → 详情大图重挂载 → 卡顿/跳动）
+      setDetail((prev) => {
+        if (!prev && !next) return prev;
+        if (prev?.type === 'asset' && next?.type === 'asset' && prev.ref.id === next.ref.id) return prev;
+        return next;
+      });
     }
   }, [activeIdx, flat, panelTab]);
   useEffect(() => {
     if (panelTab === 'subject') {
       const row = subjRows[subjectIdx];
-      setDetail(row && row.type !== 'hint' ? { type: 'subject', subject: row.item } : null);
+      const next: PickDetailTarget | null = row && row.type !== 'hint' ? { type: 'subject', subject: row.item } : null;
+      setDetail((prev) => {
+        if (!prev && !next) return prev;
+        if (prev?.type === 'subject' && next?.type === 'subject' && prev.subject.id === next.subject.id) return prev;
+        return next;
+      });
     }
   }, [subjectIdx, subjRows, panelTab]);
 
