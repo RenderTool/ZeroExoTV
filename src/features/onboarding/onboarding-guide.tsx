@@ -182,6 +182,11 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const pickMcpDir = useCallback(async () => {
     try {
       const picked = await pickDirectoryPath();
+      if (picked === 'offline') {
+        // 浏览器安全限制：网页拿不到所选文件夹的绝对路径。离线时只能引导手填。
+        message.info('服务未启动时，浏览器不把文件夹绝对路径交给网页。请直接把路径粘到输入框，例如 D:\\ZeroExoMCP；服务在线后「选择目录」可自动反查。');
+        return;
+      }
       if (!picked) return;
       setMcpDir(picked);
       try { localStorage.setItem(MCP_DIR_KEY, picked); } catch { /* 隐私模式忽略 */ }

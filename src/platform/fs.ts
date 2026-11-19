@@ -200,9 +200,14 @@ export async function pickDataRoot(): Promise<PickedDataRoot | null | 'offline'>
  * 选任意目录并反查绝对路径（给 MCP 安装目录用）：只写一次性探针取真实路径，
  * 不切换数据根、不落浏览器授权句柄。
  */
-export async function pickDirectoryPath(): Promise<string | null> {
+export async function pickDirectoryPath(): Promise<string | null | 'offline'> {
   await httpFsReady;
-  if (!httpFs.online) throw new Error('本地数据服务离线：可直接手填安装目录（如 D:\\ZeroExoMCP），或先启动服务再点「选择目录」');
+  if (!httpFs.online) {
+    // 2026-11-19 用户口径：选安装目录与「装没装服务」无关，不能因离线就报错。
+    // 但浏览器安全限制不允许网页读取所选文件夹的绝对路径（只能拿到文件夹名），
+    // 离线时无法反查，交给调用方引导用户手填/粘路径。
+    return 'offline';
+  }
   type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };
   const picker = (window as unknown as { showDirectoryPicker?: (o: PickerOptions) => Promise<DirHandle> }).showDirectoryPicker;
   if (!picker) throw new Error('当前浏览器不支持 File System Access API（请用 Chromium 内核浏览器）');

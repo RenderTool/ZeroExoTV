@@ -6,7 +6,7 @@
  * MCP 官方版 = 仓库构建时的 mcp-server 版本（version.json.mcpVersion）。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Modal } from 'antd';
+import { Popover } from 'antd';
 import type { ThemeConfig } from '@zeroexo/plugin-theme';
 import { readJson } from '@/platform/fs.js';
 import {
@@ -55,6 +55,7 @@ export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElem
   const muted = theme.toolbar.textMuted ?? '';
   const text = theme.toolbar.text ?? '';
   const border = theme.toolbar.border ?? 'rgba(255,255,255,0.12)';
+  const isDark = theme.mode === 'dark';
 
   const rowStyle = { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, padding: '6px 0' } as const;
   const labelStyle = { fontSize: 11, color: muted, flexShrink: 0 } as const;
@@ -107,14 +108,20 @@ export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElem
   );
 
   return (
-    <>
-      {/* 2026-11-19 用户反馈「正式版首页点不开版本号」：Popover 在首页固定定位的角落会被
-          其它层叠/条件遮挡，改成显式 Modal，点击必定可见。 */}
+    // 2026-11-19 用户反馈「首页点不开版本号」：徽标在页面左下角，原 placement=bottomRight
+    // 会把气泡渲染到屏幕底部之外，看起来就是点了没反应。保持上拉气泡（topLeft）。
+    <Popover
+      content={content}
+      trigger="click"
+      placement="topLeft"
+      open={open}
+      onOpenChange={setOpen}
+      styles={{ content: { background: isDark ? '#1f1f1f' : '#fff', borderRadius: 10, padding: '10px 14px' } }}
+    >
       <button
         type="button"
         data-version-badge
         title="版本与更新状态"
-        onClick={() => setOpen(true)}
         style={{
           height: 24, padding: '0 8px', borderRadius: 12, cursor: 'pointer',
           border: `1px solid ${appOutdated || mcpOutdated ? STATUS_WARN : border}`,
@@ -124,17 +131,6 @@ export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElem
       >
         v{APP_VERSION}
       </button>
-      <Modal
-        open={open}
-        onCancel={() => setOpen(false)}
-        footer={null}
-        width={360}
-        centered
-        title={null}
-        destroyOnHidden
-      >
-        {content}
-      </Modal>
-    </>
+    </Popover>
   );
 }
