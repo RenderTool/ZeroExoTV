@@ -32,6 +32,7 @@ import { useTranslation } from 'react-i18next';
 import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
 import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
 import { buildShotAiBrief } from './shot-ai-brief.js';
+import { checkShotPrompt } from '@/features/canvas-nodes/storyboard/shot-quality-check.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
@@ -180,8 +181,16 @@ export function resolveRefVisual(
       const byKey = tree.states
         .flatMap((st) => st.media ?? [])
         .find((m) => m.type !== 'audio' && m.key === origin.mediaKey);
-      const media = inState ?? byKey;
-      return media?.key ? { storageKey: media.key } : { stale: true };
+      // 2026-11-19 报障：主体图重新生成后落在「基础状态」，旧引用带的是 state='定妆' + 旧 mediaKey，
+      // 两个匹配都落空就整排槽位标红「失效」——但用户看到的是图明明已经出好了。
+      // 状态名对不上（被重建/合并）时，按该主体当前图回落；只有整棵树一张图都没有才算真失效。
+      const matched = inState ?? byKey;
+      if (matched?.key) return { storageKey: matched.key };
+      if (!state) {
+        const current = tree.states.flatMap((st) => st.media ?? []).find((m) => m.type !== 'audio');
+        if (current?.key) return { storageKey: current.key };
+      }
+      return { stale: true };
     }
   }
   // 旧引用没有 origin：按 id 回查主体树当前状态图
@@ -412,10 +421,24 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     return keys;
   }, [subjects, subjectTrees]);
 
-  const segmentAssets = useMemo(
-    () => (shot.references ?? []).map(shotRefToDirectorRef).filter((r): r is DirectorAssetRef => r !== null),
-    [shot.references],
-  );
+  const segmentAssets = useMemo(() => {
+    /**
+     * 2026-11-19 报障「一行里塞满重复格、每格都失效」根因：
+     * 历史写入把同一个 subject-state 引用追加了两遍（slot 1–4 与 5–8 完全同 id 同 storageKey），
+     * 槽位计算按条数分格 → 同一张图占两格，React key 重复还会把悬停预览渲染成叠层。
+     * 这里按「id + 媒体键」去重，只保留第一次出现的格（槽号以首条为准）。
+     */
+    const seen = new Set<string>();
+    return (shot.references ?? [])
+      .map(shotRefToDirectorRef)
+      .filter((r): r is DirectorAssetRef => r !== null)
+      .filter((r) => {
+        const k = `${r.id}|${r.storageKey ?? r.url ?? ''}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+  }, [shot.references]);
   /** 提示词只属于片段（2026-11-05 公共提示词层下线） */
   const currentPrompt = shot.imagePrompt ?? '';
   /** 片段标题（Row2 左侧，2026-11-05 补回）：镜头号 + 时长，取现有字段、随选中片段实时变化；空数据给中性文案 */
@@ -827,18 +850,24 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
           </Dropdown>
         )}
         {hoverSlot === a.id && (
+          /**
+           * 2026-11-19 报障「悬停出现多重预览图」：
+           * 旧实现是一张 200 宽的大卡（外层卡 + 内层 184×120 空图占位 + 槽格自身占位），
+           * 引用失效时三层灰底大图标叠在一起，看起来像好几个面板。
+           * 现在只输出一张矮行卡（48 缩略 + 两行文字），无论成功/失效都只有这一个容器、一个缩略位。
+           */
           <span
             data-slot-preview
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             style={{
-              position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 40, width: 200,
-              background: palette.popBg, border: `1px solid ${palette.popBorder}`, borderRadius: 8,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.45)', padding: 8, cursor: 'default',
-              display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left',
+              position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 40, width: 232,
+              background: palette.popBg, border: `1px solid ${isStale ? palette.danger : palette.popBorder}`,
+              borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', padding: 8, cursor: 'default',
+              display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
             }}
           >
-            {/* 2026-11-05 媒体分派：图片 hover 大图；视频 <video muted loop autoPlay> 可点播/暂停；音频 <audio controls> */}
+            {/* 单缩略位：图片/视频取同一档，音频 48 高内放控件；失效时只给图标，不再套第二层占位盒 */}
             {visual.storageKey || visual.url ? (
               <ThumbImage
                 kind={a.kind}
@@ -846,24 +875,36 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                 storageKey={visual.storageKey}
                 url={visual.url}
                 prefer={a.kind === 'image' ? 'preview' : 'thumb'}
-                width={184} height={a.kind === 'audio' ? 40 : 120} radius={8}
+                width={a.kind === 'audio' ? 96 : 48} height={a.kind === 'audio' ? 32 : 48} radius={6}
                 title={a.title ?? a.id}
-                icon={<Icon size={26} style={{ opacity: 0.6 }} />}
+                icon={<Icon size={16} style={{ opacity: 0.6 }} />}
               />
             ) : (
-              <span style={{ width: 184, height: 76, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Icon size={26} style={{ opacity: 0.6 }} />
+              <span
+                style={{
+                  width: 48, height: 48, borderRadius: 6, flexShrink: 0,
+                  border: `1px dashed ${isStale ? palette.danger : palette.chipBorder}`,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Icon size={16} style={{ opacity: 0.6 }} />
               </span>
             )}
-            <span style={{ fontSize: 12, color: palette.capsuleText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {a.title ?? a.id}
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 12, color: palette.capsuleText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {a.title ?? a.id}
+              </span>
+              <span style={{ fontSize: 10, color: isStale ? palette.danger : palette.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {isStale
+                  ? t('director.refStale', '引用已失效：原主体或状态已删除')
+                  : (slot?.label ?? '')}
+              </span>
             </span>
-            <span style={{ fontSize: 10, color: palette.sub }}>{slot?.label ?? ''}</span>
             <button
               type="button"
               data-slot-remove
               onClick={(e) => { e.stopPropagation(); setHoverSlot(null); requestRemoveAsset(a.id); }}
-              style={{ alignSelf: 'flex-start', border: 'none', borderRadius: 4, background: 'transparent', color: palette.sub, cursor: 'pointer', fontSize: 11, padding: '2px 4px' }}
+              style={{ flexShrink: 0, border: 'none', borderRadius: 4, background: 'transparent', color: palette.sub, cursor: 'pointer', fontSize: 11, padding: '2px 4px' }}
               onMouseEnter={(e) => { e.currentTarget.style.color = palette.danger; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = palette.sub; }}
             >
@@ -1123,6 +1164,13 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     [segmentAssets, shot.guide?.fromAssetId],
   );
 
+  /** 分镜质量闸门（2026-11-19）：提示词 @引用 与槽位必须对得上，error 会阻止生成 */
+  const qualityIssues = useMemo(
+    () => checkShotPrompt({ imagePrompt: shot.imagePrompt, references: visibleSegmentAssets }),
+    [shot.imagePrompt, visibleSegmentAssets],
+  );
+  const qualityErrors = qualityIssues.filter((i) => i.level === 'error');
+
   return (
     <div
       data-director-prompt-panel
@@ -1241,6 +1289,35 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         >
           {segTitle}
         </span>
+        {qualityIssues.length ? (
+          <Popover
+            trigger="hover"
+            placement="bottomLeft"
+            classNames={{ root: 'director-popover' }}
+            content={(
+              <div data-shot-quality-panel style={{ width: 300, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
+                <strong>分镜质量检查</strong>
+                {qualityIssues.map((q, i) => (
+                  <span key={`${q.code}-${i}`} style={{ color: q.level === 'error' ? palette.danger : palette.sub, lineHeight: 1.6 }}>
+                    {q.level === 'error' ? '错误：' : '提示：'}{q.message}
+                  </span>
+                ))}
+              </div>
+            )}
+          >
+            <span
+              data-shot-quality-badge
+              style={{
+                flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 3, height: 18, padding: '0 6px',
+                borderRadius: 4, fontSize: 10, cursor: 'default',
+                background: qualityErrors.length ? palette.danger : 'rgba(245,158,11,0.18)',
+                color: qualityErrors.length ? '#fff' : '#f59e0b',
+              }}
+            >
+              {qualityErrors.length ? `质量 ${qualityErrors.length}` : `提示 ${qualityIssues.length}`}
+            </span>
+          </Popover>
+        ) : null}
         {/* Row2 右侧：元信息胶囊
             2026-11-04 第八条C（用户更正）：编号胶囊「分镜 N」删除——两种编号标签均不再显示，
             当前片段靠激活态与上方表格高亮表达；「分镜」字样全区域清零 */}

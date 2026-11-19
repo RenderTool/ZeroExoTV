@@ -1590,6 +1590,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     : undefined;
   /** 新一次运行期间，旧缓存版本还挂在 selectedShot 上——不能拿旧视频顶替实时预览。 */
   const directorRunning = comfyRun.phase === 'running' || comfyRun.phase === 'queued';
+  /** 2026-11-19 修复：只有「当前查看的片段确实在本次运行序列里」才算它生成中，
+      不能因为别的片段在跑就把选中镜头的预览区标成「生成中」。 */
+  const selectedInRun = directorRunning && comfyRun.segmentShotIds.includes(selectedShot.id);
   const canShowLiveFrame = (directorRunning || !completedVideoKey)
     && !!(previewFrame?.image || previewFrame?.video)
     && !!selectedShot
@@ -1776,7 +1779,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                状态跟随当前激活片段（selectedShot 切换即联动）。
                未生成 / 生成中（·detail 预留，dry-run 阶段无真实进度）/ 已生成 · Ns / 生成失败（+原因一行）。 */
             placeholderStatus:
-              directorRunning
+              selectedInRun
                 ? 'generating'
                 : completedVideoKey
                   ? 'done'
@@ -2298,53 +2301,96 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                     startRunNow([...runPickerSelection], pickerAutoDisconnect);
                   }}
                 >
-                  {t('director.runPickerConfirm', '确认 ({{n}} 段)', { n: runPickerSelection.size })}
+                  {(() => {
+                    const eps = new Set(shots.filter((s) => runPickerSelection.has(s.id)).map((s) => s.episodeId ?? ''));
+                    return t('director.runPickerConfirm', '确认 ({{n}} 段)', { n: runPickerSelection.size })
+                      + (eps.size > 0 ? ` · ${eps.size} 集` : '');
+                  })()}
                 </Button>
               </div>
             </div>
           }
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 400, overflowY: 'auto' }}>
-            {shots.map((shot) => (
-              <label
-                key={shot.id}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-                  borderRadius: 8, border: '1px solid rgba(128,128,128,0.20)', cursor: 'pointer',
-                  opacity: runPickerSelection.has(shot.id) ? 1 : 0.7,
-                }}
-              >
-                <Checkbox
-                  checked={runPickerSelection.has(shot.id)}
-                  onChange={(e) => {
-                    setRunPickerSelection((prev) => {
-                      const next = new Set(prev);
-                      if (e.target.checked) next.add(shot.id);
-                      else next.delete(shot.id);
-                      return next;
-                    });
-                  }}
-                />
-                <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  {t('director.shotNumber', '片段 {{n}}', { n: shot.number })}
-                </span>
-                <span style={{ opacity: 0.55, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-                  {shot.duration}s
-                </span>
-                <span style={{
-                  flex: 1, opacity: 0.5, fontSize: 12, overflow: 'hidden',
-                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {shot.imagePrompt || '—'}
-                </span>
-                {shot.status === 'done' && (
-                  <span style={{ fontSize: 11, color: '#52c41a' }}>✓ 已生成</span>
-                )}
-                {shot.status === 'generating' && (
-                  <span style={{ fontSize: 11, color: '#1890ff' }}>生成中</span>
-                )}
-              </label>
-            ))}
+            {/* 2026-11-19 用户指令：批量选择必须标明是第几集——几百集时全挤在一起根本分不清。
+                按集分组：集标题做分组头，行内写「第N集 · 片段M」。 */}
+            {episodeKeys.map((key) => {
+              const ep = episodeContext.episodes.find((e) => e.id === key);
+              const group = episodeGroups[key] ?? [];
+              if (group.length === 0) return null;
+              const epLabel = ep ? displayEpisodeTitle(ep.title, ep.number) : '已删除的集';
+              return (
+                <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6, paddingTop: 6,
+                    fontSize: 11, fontWeight: 600, letterSpacing: 0.3, opacity: 0.75,
+                    position: 'sticky', top: 0, background: 'var(--zeroexo-modal-bg, rgba(20,20,20,0.02))',
+                  }}>
+                    <span>{epLabel}</span>
+                    <span style={{ fontWeight: 400, opacity: 0.7 }}>{group.length} 段</span>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      onClick={() => setRunPickerSelection((prev) => {
+                        const next = new Set(prev);
+                        const allSelected = group.every((s) => next.has(s.id));
+                        for (const s of group) {
+                          if (allSelected) next.delete(s.id);
+                          else next.add(s.id);
+                        }
+                        return next;
+                      })}
+                      style={{
+                        border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+                        fontSize: 10, fontWeight: 400, color: 'inherit', opacity: 0.8, textDecoration: 'underline',
+                      }}
+                    >
+                      {group.every((s) => runPickerSelection.has(s.id)) ? '全不选本集' : '全选本集'}
+                    </button>
+                  </div>
+                  {group.map((shot) => (
+                    <label
+                      key={shot.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                        borderRadius: 8, border: '1px solid rgba(128,128,128,0.20)', cursor: 'pointer',
+                        opacity: runPickerSelection.has(shot.id) ? 1 : 0.7,
+                      }}
+                    >
+                      <Checkbox
+                        checked={runPickerSelection.has(shot.id)}
+                        onChange={(e) => {
+                          setRunPickerSelection((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(shot.id);
+                            else next.delete(shot.id);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap' }}>
+                        {`第${ep?.number ?? '?'}集 · 片段 ${shot.number}`}
+                      </span>
+                      <span style={{ opacity: 0.55, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                        {shot.duration}s
+                      </span>
+                      <span style={{
+                        flex: 1, opacity: 0.5, fontSize: 12, overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {shot.imagePrompt || '—'}
+                      </span>
+                      {shot.status === 'done' && (
+                        <span style={{ fontSize: 11, color: '#52c41a' }}>✓ 已生成</span>
+                      )}
+                      {shot.status === 'generating' && (
+                        <span style={{ fontSize: 11, color: '#1890ff' }}>生成中</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </Modal>
 

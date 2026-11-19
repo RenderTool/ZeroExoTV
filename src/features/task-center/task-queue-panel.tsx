@@ -9,7 +9,10 @@ import { useTranslation } from 'react-i18next';
 import {
   CheckCircle2, Clapperboard, Image as ImageIcon, ListChecks, Loader2, Music, Upload, Video, X, XCircle, Ban,
 } from 'lucide-react';
+import { Switch } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { useMcpBannerVisible } from '@/features/project-log/mcp-banner-visibility.js';
+import { ProjectMemorySection } from '@/features/project-log/project-memory-section.js';
 import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } from './task-queue-store.js';
 import { cancelBrokerTask } from './task-broker-client.js';
 import { cancelPluginTask, deletePluginTask } from './plugin-task-client.js';
@@ -68,6 +71,7 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
   const { t } = useTranslation();
   const pid = projectId ?? getCurrentCanvasId();
   usePluginTaskQueue(pid);
+  const [mcpBanner, setMcpBanner] = useMcpBannerVisible();
   const tasks = useTaskQueueStore((s) => s.tasks);
   const clearFinished = useTaskQueueStore((s) => s.clearFinished);
   const active = useMemo(() => countActiveTasks(tasks), [tasks]);
@@ -165,6 +169,15 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
           }}>{active}</span>
         ) : null}
         <span style={{ flex: 1 }} />
+        {/* 2026-11-19 用户指令：MCP 工作浮层的开关放这里，浮层不再是关不掉的挂件 */}
+        <span
+          data-mcp-banner-toggle
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 400, color: muted }}
+          title={t('taskQueue.mcpBannerHint', 'MCP 代理工作时在右下角显示进度浮层')}
+        >
+          <span>{t('taskQueue.mcpBanner', 'MCP 浮层')}</span>
+          <Switch size="small" checked={mcpBanner} onChange={setMcpBanner} />
+        </span>
         <button
           type="button"
           onClick={() => {
@@ -210,6 +223,8 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
           </>
         )}
       </div>
+      {/* 2026-11-19 用户口径：需求页签取消，需求/决策/进度/待办/审核统一收进这里，与任务队列同屏。 */}
+      <ProjectMemorySection projectId={projectId} />
     </div>
   );
 }

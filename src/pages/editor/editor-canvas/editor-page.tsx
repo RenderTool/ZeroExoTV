@@ -62,6 +62,7 @@ import { ScriptTabContent } from '@/features/canvas-tabs/script-tab-content.js';
 import { StoryboardTabContent } from '@/features/canvas-tabs/storyboard-tab-content.js';
 import { SubjectLinkDialogHost } from '@/features/canvas-nodes/storyboard/subject-link-dialog.js';
 import { WorkbenchTabContent } from '@/features/canvas-tabs/workbench-tab-content.js';
+import { McpWorkingBanner } from '@/features/project-log/mcp-working-banner.js';
 import { buildDefaultEpisodes } from '@/services/canvas-script.js';
 import { ensureScript } from '@/entities/script-store.js';
 import { ensureProjectMounts } from '@/entities/slot-containers.js';
@@ -837,6 +838,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 1000 }}>
         <VersionBadge theme={theme} />
       </div>
+      <McpWorkingBanner />
       <div style={mainRowStyle}>
       <div style={mainColStyle}>
       <div style={headerStyle}>

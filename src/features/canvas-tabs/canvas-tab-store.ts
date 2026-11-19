@@ -29,11 +29,11 @@ export const CANVAS_TAB_KEY = 'canvas';
  */
 export type CanvasTabKind = 'script' | 'storyboard' | 'workbench' | 'plan';
 
-/** 固定槽位种类（canvas = 画布槽位） */
-export type FixedSlotKind = 'script' | 'storyboard' | 'workbench' | 'canvas';
+/** 固定槽位种类（canvas = 画布槽位；projectLog = 需求记录页） */
+export type FixedSlotKind = 'script' | 'storyboard' | 'workbench' | 'canvas' | 'projectLog';
 
-/** 默认槽位顺序：①剧本 ②分镜 ③出片 ④画布（用户可拖拽重排，持久化） */
-export const DEFAULT_SLOT_ORDER: readonly FixedSlotKind[] = ['script', 'storyboard', 'workbench', 'canvas'];
+/** 默认槽位顺序：①剧本 ②分镜 ③出片 ④画布 ⑤需求（用户可拖拽重排，持久化） */
+export const DEFAULT_SLOT_ORDER: readonly FixedSlotKind[] = ['script', 'storyboard', 'workbench', 'canvas', 'projectLog'];
 
 /** 槽位顺序持久化 key（localStorage，本地级持久化） */
 const SLOT_ORDER_STORAGE_KEY = 'zeroexo:canvas-tab-slot-order';
@@ -45,7 +45,7 @@ function loadSlotOrder(): FixedSlotKind[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [...DEFAULT_SLOT_ORDER];
     const valid = parsed.filter((k): k is FixedSlotKind =>
-      k === 'script' || k === 'storyboard' || k === 'workbench' || k === 'canvas');
+      k === 'script' || k === 'storyboard' || k === 'workbench' || k === 'canvas' || k === 'projectLog');
     // 完整性校验：四个槽位必须齐全（防旧版本/脏数据缺槽位）
     if (valid.length !== DEFAULT_SLOT_ORDER.length) return [...DEFAULT_SLOT_ORDER];
     return valid;
@@ -171,6 +171,7 @@ function isCanvasCopyKey(key: string): boolean {
 /** 由绑定推导槽位页签 key（无绑定返回 null） */
 export function slotTabKey(kind: FixedSlotKind, bindings: SlotBindings): string | null {
   if (kind === 'canvas') return CANVAS_TAB_KEY;
+  if (kind === 'projectLog') return 'projectLog';
   const id = bindings[kind];
   return id ? buildTabKey(kind, id) : null;
 }
@@ -290,7 +291,7 @@ function recordOpenCanvases(get: () => CanvasTabState): void {
 /** 2026-11-05 刷新恢复页签：进入项目期间的用户切页动作 → 按项目记入 view-prefs（无活跃项目则忽略） */
 function recordLastSlot(
   get: () => CanvasTabState,
-  slot: 'script' | 'storyboard' | 'workbench' | 'canvas',
+  slot: 'script' | 'storyboard' | 'workbench' | 'canvas' | 'projectLog',
 ): void {
   const projectId = get().activeProjectId;
   if (!projectId) return;
@@ -346,11 +347,11 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
     // 2026-11-04 供应下线：页签不再以"画布上存在绑定节点"为前提——
     // 裸 kind（无载体，页级组件渲染空态）与 kind:id（有载体，节点 portal 供内容）均为合法 key；
     // 激活只是切换指针，不创建节点、不写图。其余非法 key 一律忽略。
-    if (!/^(script|storyboard|workbench)(:.+)?$/.test(key)) return;
+    if (!/^(script|storyboard|workbench|projectLog)(:.+)?$/.test(key)) return;
     if (activeTabKey === key) return;
     set({ activeTabKey: key });
     // 2026-11-05 刷新恢复页签：按项目记录用户最后所在页签（view-prefs 持久化）
-    recordLastSlot(get, key.split(':')[0] as 'script' | 'storyboard' | 'workbench');
+    recordLastSlot(get, key.split(':')[0] as 'script' | 'storyboard' | 'workbench' | 'projectLog');
   },
 
   closeTab: (key) => {

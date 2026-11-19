@@ -15,8 +15,6 @@
  */
 
 import { useState } from 'react';
-import { NotebookPen } from 'lucide-react';
-import { useProjectLogView } from '@/features/project-log/project-log-store.js';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -39,6 +37,7 @@ const SLOT_LABEL_KEY: Record<FixedSlotKind, string> = {
   storyboard: 'canvasTab.subjects',
   workbench: 'canvasTab.director',
   canvas: 'canvasTab.canvas',
+  projectLog: 'canvasTab.requirements',
 };
 
 /** 槽位显示名兜底文案（2026-11-04 正式命名：主体库 / 导演台） */
@@ -47,6 +46,7 @@ const SLOT_FALLBACK_LABEL: Record<FixedSlotKind, string> = {
   storyboard: '主体库',
   workbench: '分镜',
   canvas: '画布',
+  projectLog: '需求',
 };
 
 export function CanvasTabBar(): React.ReactElement {
@@ -60,8 +60,6 @@ export function CanvasTabBar(): React.ReactElement {
   // 画布副本页签已移到画布区顶部的第二层页签条（CanvasDocumentTabs），本组件只负责固定槽位
   // 拖拽中的槽位下标（四个固定槽位整体参与排序）
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const logActive = useCanvasTabStore((s) => s.activeTabKey) === 'projectLog';
-  const setLogActive = useProjectLogView((s) => s.setActive);
 
   const dark = mode === 'dark';
   // 胶囊分段控件色板：深色=浮层灰块（参考图），浅色=白底块+轻投影（经典 segmented control）
@@ -79,7 +77,6 @@ export function CanvasTabBar(): React.ReactElement {
   } as CSSProperties;
 
   const handleActivate = (kind: FixedSlotKind): void => {
-    setLogActive(false);
     // 2026-11-04 供应下线：有绑定 → kind:id（节点 portal 供内容）；无绑定 → 裸 kind（页级组件空态）。
     // 纯读指针切换，绝不创建节点/写图。
     const key = slotTabKey(kind, slotBindings) ?? kind;
@@ -92,8 +89,10 @@ export function CanvasTabBar(): React.ReactElement {
         // 2026-11-05 用户指令：主体库不再占顶部页签，只保留抽屉内「主体」分段。
         // 项目级容器与数据（entities/storyboard.json）照旧挂载，仅顶部入口移除；
         // idx 保留为 slotOrder 原始下标，拖拽重排仍按真实位置计算。
+        // 2026-11-19 用户口径再修正：需求页签也取消——需求/进度/审核是「项目记忆」，
+        // 由 Agent 自主维护，入口收进任务队列面板（TaskQueuePanel → ProjectMemorySection）。
         .map((kind, idx) => ({ kind, idx }))
-        .filter(({ kind }) => kind !== 'storyboard')
+        .filter(({ kind }) => kind !== 'storyboard' && kind !== 'projectLog')
         .map(({ kind, idx }) => {
         // 与 handleActivate 同口径：无绑定时页签 key 为裸 kind
         const key = slotTabKey(kind, slotBindings) ?? kind;
@@ -138,20 +137,6 @@ export function CanvasTabBar(): React.ReactElement {
           </button>
         );
       })}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={logActive}
-        className={['zx-canvas-tab', logActive ? 'is-active' : ''].filter(Boolean).join(' ')}
-        onClick={() => {
-          setLogActive(true);
-          activateTab('projectLog');
-        }}
-        title="需求：需求 / 决策 / 进度记录"
-      >
-        <NotebookPen size={13} strokeWidth={logActive ? 2.2 : 1.8} />
-        需求
-      </button>
     </div>
   );
 }

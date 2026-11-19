@@ -1206,6 +1206,7 @@ function StateEditPanel({
   tree, node, theme, isDark, episodes, visualStyle, onUpdateNode,
   onRestoreMedia, onDeleteHistoryMedia,
   jobKey, onStartGenerate, onCancelGenerate, onAddReference, onRemoveReference, onRenameSubject,
+  onReplaceMedia, onRemoveMedia, onSendMediaToCanvas,
 }: {
   tree: SubjectTree;
   node: SubjectTreeNode;
@@ -1226,6 +1227,10 @@ function StateEditPanel({
   onRemoveReference: () => void;
   /** 主体名：统一放在参考素材上方（2026-11-13 用户指令） */
   onRenameSubject: (next: string) => void;
+  /** 2026-11-19 用户反馈：编辑态丢了快速换图/移除/发送入口，补回编辑面板内 */
+  onReplaceMedia: (anchor: HTMLElement) => void;
+  onRemoveMedia: () => void;
+  onSendMediaToCanvas: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
   const { message: antdMessage } = AntdApp.useApp();
@@ -1437,6 +1442,34 @@ function StateEditPanel({
           data-media-slot
           style={{ width: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}
         >
+          {/* 2026-11-19 用户反馈：状态编辑模式下没有快速换图入口，补一行常驻工具条 */}
+          <div data-media-quick-actions style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Button
+              size="small"
+              data-media-action="replace"
+              onClick={(e) => onReplaceMedia(e.currentTarget)}
+            >
+              <ImagePlus size={12} style={{ marginRight: 4 }} />
+              {slotMedia?.key ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
+            </Button>
+            {slotMedia?.key ? (
+              <>
+                <Button size="small" data-media-action="remove" onClick={() => onRemoveMedia()}>
+                  <Trash2 size={12} style={{ marginRight: 4 }} />
+                  {t('subject.removeMedia', '移除这张图')}
+                </Button>
+                <Button size="small" data-media-action="send" onClick={() => onSendMediaToCanvas()}>
+                  <Send size={12} style={{ marginRight: 4 }} />
+                  {t('subject.sendMediaToCanvas', '发送到画布')}
+                </Button>
+              </>
+            ) : null}
+            {(node.mediaHistory?.length ?? 0) > 0 ? (
+              <span style={{ fontSize: 10, color: theme.toolbar.textMuted }}>
+                {t('subject.historyHint', '历史图可在下方点选恢复')}
+              </span>
+            ) : null}
+          </div>
           <div
             data-media-view-trigger
             onClick={(e) => {
@@ -2853,6 +2886,17 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                         onAddReference={(anchor) => setRefPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
                         onRemoveReference={() => setNodeReference(openTree.rootId, node.id, null)}
                         onRenameSubject={(next) => renameTree(openTree.rootId, next)}
+                        onReplaceMedia={(anchor) => setPanel({ rootId: openTree.rootId, stateId: node.id, anchorEl: anchor })}
+                        onRemoveMedia={() => { void removeMedia(openTree.rootId, node.id); }}
+                        onSendMediaToCanvas={() => {
+                          if (!first?.key) return;
+                          nodeActionBus.emit('subject:sendMediaToCanvas', {
+                            nodeId: '',
+                            name: isBase ? openTree.name : (node.state?.trim() || openTree.name),
+                            prompt: node.fullPrompt || node.deltaPrompt || '',
+                            storageKey: first.key,
+                          });
+                        }}
                       />
                     ) : undefined}
                     onToggleCover={() => toggleCover(openTree, node.id)}

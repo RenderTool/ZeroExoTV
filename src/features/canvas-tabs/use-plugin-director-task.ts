@@ -21,6 +21,7 @@ import {
 } from '@/features/task-center/plugin-task-client.js';
 import { landPluginSegment, pluginViewUrl } from './plugin-task-landing.js';
 import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
+import { recordLastSeed } from '@/shared/last-seed-store.js';
 
 export type PluginDirectorPhase = 'idle' | 'submitting' | 'queued' | 'running' | 'success' | 'error' | 'canceled';
 
@@ -214,7 +215,9 @@ export function usePluginDirectorTask(args: {
       if (prev === seg.state) continue;
       segmentStateRef.current.set(seg.index, seg.state);
       if (seg.state === 'running' || seg.state === 'queued') {
-        if (seg.state === 'running') cbRef.current.onSegmentState(shotId, 'generating');
+        // 2026-11-19 刷新丢状态：排队中的段也要把片段标成生成中，
+        // 否则刷新后插件任务还在跑，网页却把片段显示成「未生成」。
+        cbRef.current.onSegmentState(shotId, 'generating');
       } else if (seg.state === 'cancelled') {
         cbRef.current.onSegmentState(shotId, 'cancelled');
       } else if (seg.state === 'error') {
@@ -244,12 +247,21 @@ export function usePluginDirectorTask(args: {
           title: `片段 ${seg.index}`,
         });
         if (landed) {
+          // 2026-11-19 用户实测：出片后「上次种子」还是暂无、历史记录也没有参数/提示词。
+          // 原因是从插件的段里没把真实参数带进版本记录 —— 这里统一补上：
+          // 版本 params 存插件回传的真实参数（尺寸/步数/seed），并把实际种子记到项目级「上次种子」。
+          const segParams = (seg.params ?? {}) as Record<string, unknown>;
+          const usedSeed = Number(segParams.seed);
+          if (Number.isFinite(usedSeed)) {
+            recordLastSeed(usedSeed, task.projectId || args.projectId || '');
+          }
           const version: WorkbenchShotVersion = {
             id: `ver_${task.taskId}_${seg.index}`,
             storageKey: landed.storageKey,
             previewKey: seg.previewPath ? pluginViewUrl(base ?? '', seg.previewPath) ?? undefined : undefined,
             guide: landed.guide ?? (seg.guide?.id ? { id: seg.guide.id, frames: seg.guide.frames } : null),
-            prompt: seg.prompt ?? '',
+            prompt: seg.prompt ?? String(segParams.prompt ?? ''),
+            params: segParams,
             createdAt: new Date().toISOString(),
             status: 'done',
           };
@@ -269,7 +281,12 @@ export function usePluginDirectorTask(args: {
 
     // 当前段预览恢复（刷新不丢）：插件每步采样都把最新预览落盘并写回段 previewPath，
     // 这里按扩展名判断 mp4（<video>）或 webp/jpg/png（<img>），直接还原最近一次预览画面。
-    const currentSeg: PluginTaskSegment | undefined = current ? segs[current - 1] : undefined;
+    // 2026-11-19 刷新实测：任务还在排队（currentSegment 为空）时，也要从「第一个排队/运行段」
+    // 的 previewPath 还原上一张预览，否则刷新后预览区直接空白。
+    const currentSeg: PluginTaskSegment | undefined = current
+      ? segs[current - 1]
+      : segs.find((x) => x.state === 'running' || x.state === 'queued');
+    const previewSegmentNo = current ?? (currentSeg ? currentSeg.index : null);
     const previewUrl = currentSeg?.previewPath ? pluginViewUrl(base ?? '', currentSeg.previewPath) : null;
     const previewExt = (currentSeg?.previewPath ?? '').toLowerCase().split('.').pop() ?? '';
     const previewIsVideo = previewExt === 'mp4';
@@ -294,13 +311,13 @@ export function usePluginDirectorTask(args: {
         const persistedStep = currentSeg?.progress?.step ?? null;
         const cur = s.preview;
         const needRestore = !cur
-          || cur.segmentIndex !== current
+          || cur.segmentIndex !== previewSegmentNo
           || cur.step === null
           || (persistedStep !== null && cur.step < persistedStep);
         if (!needRestore) return s.preview;
         return previewIsVideo
-          ? { image: '', video: previewUrl, mime: previewMime, step: persistedStep, totalSteps: currentSeg?.progress?.totalSteps ?? null, segmentIndex: current }
-          : { image: previewUrl, mime: previewMime, step: persistedStep, totalSteps: currentSeg?.progress?.totalSteps ?? null, segmentIndex: current };
+          ? { image: '', video: previewUrl, mime: previewMime, step: persistedStep, totalSteps: currentSeg?.progress?.totalSteps ?? null, segmentIndex: previewSegmentNo }
+          : { image: previewUrl, mime: previewMime, step: persistedStep, totalSteps: currentSeg?.progress?.totalSteps ?? null, segmentIndex: previewSegmentNo };
       })(),
     }));
 
@@ -347,6 +364,25 @@ export function usePluginDirectorTask(args: {
 
   // 挂载/刷新：从插件任务表恢复（优先进行中，否则最近一条）
   useEffect(() => () => closePreview(), [closePreview]);
+
+  // 2026-11-19：任务表是唯一事实源，MCP / 另一个页面提交的批次本页也必须看见。
+  // 之前只在挂载时 list 一次，运行中任务由 MCP 提交时本页永远拿不到 → 片段不亮「生成中」、无预览。
+  useEffect(() => {
+    const projectId = args.projectId ?? null;
+    if (!projectId) return;
+    const timer = window.setInterval(() => {
+      if (pollRef.current !== null) return; // 自己正在轮询，不抢
+      void listPluginTasks(projectId).then((tasks) => {
+        const active = tasks.find((t) => t.state === 'running' || t.state === 'queued');
+        if (!active || active.taskId === taskRef.current?.taskId) return;
+        void applyTask(active).then(() => {
+          connectPreview(active.clientId || active.taskId);
+          startPolling(active.taskId);
+        });
+      }).catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [args.projectId, applyTask, connectPreview, startPolling]);
 
   useEffect(() => {
     const projectId = args.projectId ?? null;

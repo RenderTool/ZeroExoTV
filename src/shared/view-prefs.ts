@@ -74,7 +74,7 @@ export interface WorkbenchViewPrefs {
 }
 
 /** 2026-11-05 刷新恢复页签：画布页签按项目记忆最后所在槽位（字面量与 canvas-tab-store 同形，shared 不反向依赖 features） */
-export type CanvasTabLastSlot = 'script' | 'storyboard' | 'workbench' | 'canvas';
+export type CanvasTabLastSlot = 'script' | 'storyboard' | 'workbench' | 'canvas' | 'projectLog';
 
 export interface CanvasTabsViewPrefs {
   /** projectId → 最后所在页签槽位 */
@@ -157,7 +157,7 @@ function viewMode(v: unknown, fallback: AssetLibraryViewMode): AssetLibraryViewM
 
 /** 页签槽位合法值校验（损坏容错） */
 function canvasTabLastSlot(v: unknown): CanvasTabLastSlot | null {
-  return v === 'script' || v === 'storyboard' || v === 'workbench' || v === 'canvas' ? v : null;
+  return v === 'script' || v === 'storyboard' || v === 'workbench' || v === 'canvas' || v === 'projectLog' ? v : null;
 }
 
 /** 抽屉分段合法值校验（损坏容错） */

@@ -74,3 +74,33 @@ export async function appendAssetRecord(root: string, record: LibraryAsset): Pro
 export function assetTitleFromFilename(filename: string): string {
   return path.basename(filename).replace(/\.[^.]+$/, "");
 }
+
+/**
+ * 按 storageKey 删除资产记录（用户打回产物时用：库里不允许留不合格图误导后续环节）。
+ * CAS 文件不在这里删，由前端按引用归零回收。
+ */
+export async function removeAssetRecords(root: string, storageKeys: string[]): Promise<{ removed: number; titles: string[] }> {
+  const keys = new Set(storageKeys.filter(Boolean));
+  let removed = 0;
+  const titles: string[] = [];
+  const run = queue.then(async () => {
+    if (!keys.size) return;
+    const file = assetsLibraryFile(root);
+    const env = await readJsonIfExists<AssetsEnvelope>(file);
+    if (!env?.value) return;
+    const kept: LibraryAsset[] = [];
+    for (const a of env.value) {
+      if (keys.has(a.data?.storageKey)) {
+        removed += 1;
+        titles.push(a.title);
+        continue;
+      }
+      kept.push(a);
+    }
+    if (!removed) return;
+    await fs.writeFile(file, JSON.stringify({ __lf: 1, value: kept } satisfies AssetsEnvelope, null, 2), "utf8");
+  });
+  queue = run.then(() => undefined, () => undefined);
+  await run;
+  return { removed, titles };
+}

@@ -12,7 +12,7 @@ import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
-import { uploadToCas } from "../store/cas.js";
+import { uploadToCas, parseCasStorageKey } from "../store/cas.js";
 import { appendAssetRecord, assetsLibraryFile, type LibraryAsset } from "../store/asset-library.js";
 import { mutateWorkbench, readWorkbench } from "../store/workbench.js";
 import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
@@ -164,8 +164,68 @@ function contiguousRuns(shots: WorkbenchShot[], selectedIds: readonly string[]):
   return runs;
 }
 
+/**
+ * 提交提示词只认 imagePrompt（分镜结构化提示词唯一来源）。
+ * 2026-11-19：不允许回落 videoPrompt / 「第 N 段」。MCP 一回落，提交的就是
+ * 和分镜、参考图都无关的自由文本，成片必然对不上，且与网页点击运行的 payload 不同源。
+ */
 function shotPrompt(shot: WorkbenchShot): string {
-  return (shot.imagePrompt || shot.videoPrompt || '').trim() || `第 ${shot.number} 段`;
+  const p = (shot.imagePrompt ?? "").trim();
+  if (!p) throw new McpError("VALIDATION", `片段 ${shot.number ?? shot.id} 没有结构化提示词（imagePrompt 为空），拒绝提交`);
+  return p;
+}
+
+/** CAS 键 → 本地文件（media/cas/<hash>.<ext>） */
+function casFilePath(storageKey: string): string | null {
+  if (!storageKey.startsWith("cas:")) return null;
+  const parsed = parseCasStorageKey(storageKey);
+  if (!parsed) return null;
+  return path.join(dataRoot(), "media", "cas", `${parsed.hash}.${parsed.ext}`);
+}
+
+async function uploadRefImage(base: string, filePath: string, filename: string): Promise<string | null> {
+  const buf = await fs.readFile(filePath);
+  const form = new FormData();
+  form.append("image", new Blob([buf]), filename);
+  form.append("overwrite", "true");
+  const res = await fetch(`${base.replace(/\/+$/, "")}/upload/image`, { method: "POST", body: form });
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => null)) as { name?: string; subfolder?: string } | null;
+  if (!data?.name) return null;
+  return data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+}
+
+/**
+ * 按槽号顺序把插槽参考图上传给插件，返回插件侧文件名数组（= @Picture1..N）。
+ * 与网页 attachDirectorReferenceImages 同口径：缺文件 / 上传失败都直接抛错，
+ * 不允许「静默退化成纯文本生成」。
+ */
+async function uploadShotReferences(base: string, shot: WorkbenchShot): Promise<string[]> {
+  const refs = ((shot.references ?? []) as unknown as Array<Record<string, unknown>>)
+    .filter((r) => r.kind === "image")
+    .slice()
+    .sort((a, b) => {
+      const pa = typeof a.slotNo === "number" && a.slotNo >= 1 ? a.slotNo : Number.POSITIVE_INFINITY;
+      const pb = typeof b.slotNo === "number" && b.slotNo >= 1 ? b.slotNo : Number.POSITIVE_INFINITY;
+      return pa - pb;
+    })
+    .slice(0, 9);
+  const names: string[] = [];
+  for (const [i, ref] of refs.entries()) {
+    const key = String(ref.storageKey ?? "");
+    const filePath = casFilePath(key);
+    if (!filePath) {
+      throw new McpError(
+        "VALIDATION",
+        `片段 ${shot.number ?? shot.id} 第 ${i + 1} 张参考图没有可用文件（${key || "空 key"}）：先重新放入插槽再生成`,
+      );
+    }
+    const ext = path.extname(filePath) || ".png";
+    const name = await uploadRefImage(base, filePath, `director_${shot.id}_${i}${ext}`);
+    if (!name) throw new McpError("IO_ERROR", `参考图上传失败：${key}`);
+    names.push(name);
+  }
+  return names;
 }
 
 function buildDirectorPluginPayload(args: {
@@ -174,10 +234,25 @@ function buildDirectorPluginPayload(args: {
   shots: WorkbenchShot[];
   selectedIds: readonly string[];
   shared: Record<string, unknown>;
-}): {
+  base: string;
+}): Promise<{
   payload: Record<string, unknown>;
   plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }>;
-} {
+}> {
+  return buildPayloadAsync(args);
+}
+
+async function buildPayloadAsync(args: {
+  projectId: string;
+  taskId: string;
+  shots: WorkbenchShot[];
+  selectedIds: readonly string[];
+  shared: Record<string, unknown>;
+  base: string;
+}): Promise<{
+  payload: Record<string, unknown>;
+  plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }>;
+}> {
   const { projectId, taskId, shots, selectedIds, shared } = args;
   const aspect = String(shared.aspect ?? "16:9");
   const size = resolveVideoSize(aspect, Number(shared.scaleFactor ?? 1));
@@ -203,10 +278,14 @@ function buildDirectorPluginPayload(args: {
     const startGuide: { mode: "initial" | "chain" | "none"; id?: string } = resolved.id
       ? { mode: "initial", id: resolved.id }
       : { mode: "none" };
-    run.forEach((idx, k) => {
+    for (const [k, idx] of run.entries()) {
       const shot = shots[idx]!;
       const frames = durationToFrames(Number(shot.duration) || 5);
       const guide = k === 0 ? startGuide : { mode: "chain" as const };
+      // 参考图必须真上传（2026-11-19 事故）：只发提示词 = 插件按文本自由发挥，
+      // 画面会脱离主体定妆/场景概念图，也会出现果冻式漂移。这里与网页
+      // attachDirectorReferenceImages 同源：按槽号顺序上传，缺图直接报错。
+      const refs = await uploadShotReferences(args.base, shot);
       segments.push({
         shotId: shot.id,
         guide,
@@ -223,10 +302,11 @@ function buildDirectorPluginPayload(args: {
           guide_frames: guideFrames,
           live_tae_preview: true,
           liveTaePreview: true,
+          ...(refs.length ? { reference_image: refs[0] ?? "", reference_images: refs } : {}),
         },
       });
       plan.push({ shotId: shot.id, guide, frames, durationSec: Number((frames / 24).toFixed(3)) });
-    });
+    }
   }
 
   return {
@@ -437,12 +517,14 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         }
       }
       const taskId = newDirectorTaskId();
-      const built = buildDirectorPluginPayload({
+      const comfyBase = await resolveComfyBase(args.baseUrl);
+      const built = await buildDirectorPluginPayload({
         projectId: args.projectId,
         taskId,
         shots: allShots,
         selectedIds,
         shared: (wb.sharedParams?.params ?? {}) as Record<string, unknown>,
+        base: comfyBase,
       });
       if (args.dryRun) {
         return {

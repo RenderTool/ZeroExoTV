@@ -11,7 +11,7 @@
  * 2026-11-04：canvas 槽位补 Frame 图标（画布非节点类型、无同源对象），
  * 替换原 6px 红点占位，四槽位统一 lucide 描边图标语言（size 13 / strokeWidth 1.8，选中 2.2）。
  */
-import { FileText, Aperture, Film, ClipboardList, Frame, PictureInPicture2, X, type LucideIcon } from 'lucide-react';
+import { FileText, Aperture, Film, ClipboardList, Frame, PictureInPicture2, X, NotebookPen, type LucideIcon } from 'lucide-react';
 import type { CanvasTabKind, FixedSlotKind } from './canvas-tab-store.js';
 
 /** 页签类型 → Lucide 图标（含 canvas 槽位；plan 为历史 kind 保留兼容） */
@@ -26,6 +26,8 @@ export const CANVAS_TAB_ICONS: Record<CanvasTabKind | FixedSlotKind, LucideIcon>
   plan: ClipboardList,
   /** 画布（非节点类型，无同源对象；取画框语义图标，替换原红点占位） */
   canvas: Frame,
+  /** 需求（项目档案：需求/决策/进度/待办） */
+  projectLog: NotebookPen,
 };
 
 /**

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { App, Button, Input, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen, SlidersHorizontal } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen, SlidersHorizontal, BookOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { pickRoot, rootName, currentDataRootPath, switchDataRoot, pickDataRoot, migrateDataRoot } from '@/platform/fs.js';
@@ -56,12 +56,15 @@ function StepCard({
   title,
   done,
   theme,
+  extra,
   children,
 }: {
   index: number;
   title: string;
   done: boolean;
   theme: ThemeConfig;
+  /** 标题行右侧附加内容（例如「教程」按钮）；非空时放在标题与状态标签之间 */
+  extra?: React.ReactNode;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
@@ -82,6 +85,7 @@ function StepCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {/* 2026-11-18 用户要求：标题固定一行，明确写 Agent（例如豆包），不能换行 */}
           <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{index}. {title}</span>
+          {extra}
           {done ? <Tag color="success" style={{ marginInlineEnd: 0, flexShrink: 0 }}>已完成</Tag> : null}
         </div>
         {children}
@@ -112,6 +116,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
   const [modelPageOpen, setModelPageOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
 
   const pluginZipUrl = `${import.meta.env.BASE_URL}downloads/ComfyUI_ZeroExoNodes.zip`;
@@ -379,7 +384,24 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         </StepCard>
 
         {/* 3 ComfyUI */}
-        <StepCard index={3} title={t('onboarding.stepComfy', '连接 ComfyUI')} done={comfyDone} theme={theme}>
+        <StepCard
+          index={3}
+          title={t('onboarding.stepComfy', '连接 ComfyUI')}
+          done={comfyDone}
+          theme={theme}
+          extra={(
+            <Button
+              size="small"
+              type="link"
+              icon={<BookOpen size={13} />}
+              onClick={() => setTutorialOpen(true)}
+              data-testid="onboarding-comfy-tutorial"
+              style={{ flexShrink: 0, paddingInline: 0 }}
+            >
+              {t('onboarding.tutorial', '教程')}
+            </Button>
+          )}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Button
               size="small"
@@ -417,6 +439,22 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
       </div>
     </Modal>
     <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
+    {/* 第三步「连接 ComfyUI」的教程图（云电脑安装插件流程） */}
+    <Modal
+      open={tutorialOpen}
+      onCancel={() => setTutorialOpen(false)}
+      footer={null}
+      width={760}
+      centered
+      title={t('onboarding.comfyTutorialTitle', '连接 ComfyUI 教程')}
+      destroyOnClose
+    >
+      <img
+        src="/tutorials/comfyui-plugin-install.jpg"
+        alt={t('onboarding.comfyTutorialTitle', '连接 ComfyUI 教程')}
+        style={{ width: '100%', display: 'block', borderRadius: 8 }}
+      />
+    </Modal>
     {rootAsk && (
       <div
         style={{
