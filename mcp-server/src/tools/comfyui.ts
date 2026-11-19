@@ -78,4 +78,49 @@ export function registerComfyuiTools(server: McpServer, ctx: Ctx): void {
       };
     },
   });
+
+  // 2026-11-19：用户给了云端地址后，Agent 需要能替用户切换 ComfyUI 地址。
+  // 原实现只能 get，切换必须人回网页手填；这里补一个带探测的写入工具。
+  defTool(server, ctx, {
+    name: "set_comfyui_endpoint",
+    description:
+      "把网页/MCP 使用的 ComfyUI 地址切换为指定地址（含云端 https 地址），先探测 /system_stats 再写广播文件。" +
+      "写入前必须已拿到用户明确给出的地址；reachable=false 时仍然写入（用户可能只是暂时没开服务），但会返回警告。",
+    bits: ["project.write"],
+    schema: {
+      address: z.string().min(1).describe("ComfyUI 基地址，如 https://xxx.waas.aigate.cc 或 http://127.0.0.1:8188"),
+      backend: z.enum(["direct", "bridge"]).optional().describe("直连或桥接，默认 direct"),
+    },
+    handler: async (args) => {
+      const raw = args.address.trim().replace(/\/+$/, "");
+      if (!/^https?:\/\//i.test(raw)) {
+        throw new Error("地址必须以 http:// 或 https:// 开头");
+      }
+      const p = await probe(raw);
+      const payload: Broadcast = {
+        schemaVersion: 1,
+        address: raw,
+        backend: args.backend ?? "direct",
+        connected: p.reachable,
+        updatedAt: new Date().toISOString(),
+      };
+      const file = path.join(dataRoot(), BROADCAST_REL);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp-${Date.now()}`;
+      await fs.writeFile(tmp, JSON.stringify(payload, null, 2), "utf8");
+      await fs.rename(tmp, file);
+      return {
+        written: true,
+        address: raw,
+        backend: payload.backend,
+        reachable: p.reachable,
+        httpStatus: p.status,
+        probeError: p.error ?? null,
+        updatedAt: payload.updatedAt,
+        hint: p.reachable
+          ? "地址已切换且可达；网页需刷新或重新打开项目后按新地址发起作业。"
+          : "地址已写入但当前不可达：确认云端实例已启动、端口/协议正确；网页刷新后再试。",
+      };
+    },
+  });
 }

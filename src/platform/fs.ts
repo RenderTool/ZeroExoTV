@@ -202,7 +202,7 @@ export async function pickDataRoot(): Promise<PickedDataRoot | null | 'offline'>
  */
 export async function pickDirectoryPath(): Promise<string | null> {
   await httpFsReady;
-  if (!httpFs.online) throw new Error('本地数据服务离线：请先启动本地服务再选安装目录');
+  if (!httpFs.online) throw new Error('本地数据服务离线：可直接手填安装目录（如 D:\\ZeroExoMCP），或先启动服务再点「选择目录」');
   type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };
   const picker = (window as unknown as { showDirectoryPicker?: (o: PickerOptions) => Promise<DirHandle> }).showDirectoryPicker;
   if (!picker) throw new Error('当前浏览器不支持 File System Access API（请用 Chromium 内核浏览器）');

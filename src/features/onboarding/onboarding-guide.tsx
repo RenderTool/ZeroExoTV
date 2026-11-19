@@ -399,20 +399,22 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
                 ? t('onboarding.mcpDirChange', '重新选择')
                 : t('onboarding.mcpDirPick', '选择目录')}
             </Button>
-            {/* 2026-11-18 用户要求：第 2 步的目录选择要和第 1 步同一套样式（按钮 + 路径文字，不做输入框） */}
-            <span
-              data-testid="onboarding-mcp-dir"
-              style={{
-                ...hintStyle(theme),
-                maxWidth: 360,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                ...(mcpDirError ? { color: '#dc2626' } : {}),
+            {/* 2026-11-19 用户反馈：服务未安装时点「选择目录」会报「本地服务离线」，形成
+                「先装服务才能选目录 / 先选目录才能装服务」的死循环。这里允许直接手填绝对路径，
+                选择目录只在服务在线时用于反查路径，不再作为唯一入口。 */}
+            <Input
+              size="small"
+              value={mcpDir}
+              onChange={(e) => {
+                const v = e.target.value;
+                setMcpDir(v);
+                try { localStorage.setItem(MCP_DIR_KEY, v); } catch { /* 隐私模式忽略 */ }
               }}
-            >
-              {mcpDir || t('onboarding.mcpDirNone', '尚未选择')}
-            </span>
+              placeholder="D:\\ZeroExoMCP"
+              style={{ width: 300 }}
+              status={mcpDirError ? 'error' : undefined}
+              data-testid="onboarding-mcp-dir"
+            />
           </div>
           <span style={{ fontSize: 11, color: mcpDirError ? '#dc2626' : theme.toolbar.textMuted, lineHeight: 1.6 }}>
             {mcpDirError
