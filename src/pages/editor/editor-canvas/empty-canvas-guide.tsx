@@ -27,6 +27,8 @@ export interface EmptyCanvasGuideProps {
   store: ReactGraphStore;
   /** 网格间距（世界坐标，与 editor-page 的 gridSize 一致） */
   gridSize?: number;
+  /** 只读历史画布：只画网格/背景，不出现「右键创建节点」这类可编辑引导 */
+  readOnly?: boolean;
 }
 
 const FADE_OUT_MS = 300;
@@ -50,7 +52,7 @@ export function useIsCanvasEmpty(store: ReactGraphStore | null): boolean {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-export function EmptyCanvasGuide({ store, gridSize = 16 }: EmptyCanvasGuideProps): React.ReactElement | null {
+export function EmptyCanvasGuide({ store, gridSize = 16, readOnly = false }: EmptyCanvasGuideProps): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme, mode } = useTheme();
   const graph = useGraph(store);
@@ -142,7 +144,8 @@ export function EmptyCanvasGuide({ store, gridSize = 16 }: EmptyCanvasGuideProps
           background: glowVertical,
         }}
       />
-      {/* 居中提示 */}
+      {/* 居中提示（只读画布不显示，避免出现「右键创建节点」这种可编辑引导） */}
+      {!readOnly && (
       <div
         style={{
           position: 'absolute',
@@ -173,6 +176,7 @@ export function EmptyCanvasGuide({ store, gridSize = 16 }: EmptyCanvasGuideProps
           {t('editor.emptyGuideDrop')}
         </div>
       </div>
+      )}
     </div>
   );
 }

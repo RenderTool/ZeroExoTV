@@ -98,7 +98,7 @@ class ZeroExoRefVideo:
                 "guide_frames": (GUIDE_FRAME_OPTIONS, {"default": 22}),
                 "use_prev_guide": ("BOOLEAN", {"default": False}),
                 # 采样/性能开关（与 MiniMax H3 Director 同口径，默认值 = 引擎默认）
-                "sampler": (SAMPLER_OPTIONS, {"default": "res_multistep"}),
+                "sampler": (SAMPLER_OPTIONS, {"default": "euler"}),
                 "scheduler": (SCHEDULER_OPTIONS, {"default": "simple"}),
                 "shift_video": ("FLOAT", {"default": 12.0, "min": 0.0, "max": 100.0, "step": 0.1}),
                 "shift_audio": ("FLOAT", {"default": 3.0, "min": 0.0, "max": 100.0, "step": 0.1}),
@@ -128,6 +128,34 @@ class ZeroExoRefVideo:
             clear_vram_between_segments, cache_frames_codec, cache_name,
             reference_image, reference_images, guide_path, prev_guide_path="", unique_id=None):
         guide_frames = snap_guide_frames(guide_frames)
+        # 2026-11-19 参数错位防线（用户实测报障）：
+        # 旧工作流把 widget 值按**位置**序列化；节点后来在 guide_frames 之后插入了
+        # sampler / scheduler 两个下拉，重开旧图时值整体错位一格，典型现象：
+        #   guide_frames = false、sampler = simple、scheduler = 12、shift_video = 3、shift_audio = 1。
+        # 这类参数不会报错，只会安静地跑出一条糊片，所以在这里显式拦截。
+        if not isinstance(sampler, str) or sampler not in SAMPLER_OPTIONS:
+            raise RuntimeError(
+                f"ZeroExoRefVideo: sampler 取值异常（{sampler!r}）。"
+                "常见原因是旧工作流的参数按位置错位（scheduler/shift 被塞进了 sampler 槽）。"
+                "请删除该节点重新添加，或重新连接模板工作流后再运行。"
+            )
+        if not isinstance(scheduler, str) or scheduler not in SCHEDULER_OPTIONS:
+            raise RuntimeError(
+                f"ZeroExoRefVideo: scheduler 取值异常（{scheduler!r}，应为 {'/'.join(SCHEDULER_OPTIONS[:4])}）。"
+                "这是旧工作流 widget 位置错位的典型症状（数值被填进了下拉框）。"
+                "请删除该节点重新添加，或重新连接模板工作流后再运行。"
+            )
+        try:
+            shift_v = float(shift_video)
+            shift_a = float(shift_audio)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"ZeroExoRefVideo: shift 参数不是数字（{shift_video!r}/{shift_audio!r}）") from exc
+        if shift_v < shift_a:
+            raise RuntimeError(
+                f"ZeroExoRefVideo: shift_video({shift_v}) 小于 shift_audio({shift_a})。"
+                "H3 模型卡口径是 video=12 / audio=3（社区也有 5/5 的写法，可相等但不能倒挂）；"
+                "出现倒挂同样说明参数错位。"
+            )
         extra_refs = [part.strip() for part in str(reference_images or "").split(",") if part.strip()]
         timeline = _build_timeline(prompt, width, height, frames, frame_rate, reference_image, extra_refs)
         plan = plan_mod.build_director_plan(
@@ -175,7 +203,7 @@ class ZeroExoRefVideo:
             cfg=cfg,
             seed=seed,
             steps=steps,
-            sampler=str(sampler or "res_multistep"),
+            sampler=str(sampler or "euler"),
             scheduler=str(scheduler or "simple"),
             shift_video=float(shift_video),
             shift_audio=float(shift_audio),

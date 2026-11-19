@@ -150,6 +150,8 @@ export function TextNodeView({
       externalRenaming={externalRenaming}
       onRenameFinish={onRenameFinish}
       store={store}
+      // 滚动条贴右：正文内边距放在滚动容器内层，容器本身不留 padding（2026-11-17 用户反馈）
+      contentPadding={0}
     >
       <div
         style={{
@@ -217,24 +219,31 @@ export function TextNodeView({
               style={{
                 width: '100%',
                 height: '100%',
-                padding: '4px 8px',
+                // 滚动条必须贴在最右边：内边距交给内层，滚动容器本身不留左右 padding（2026-11-17 用户反馈）
+                padding: '4px 0',
                 overflow: 'auto',
                 boxSizing: 'border-box',
                 fontSize: 14,
                 lineHeight: 1.6,
                 color: content ? theme.toolbar.text : theme.toolbar.textMuted,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
                 cursor: 'text',
                 WebkitFontSmoothing: 'antialiased',
                 MozOsxFontSmoothing: 'grayscale',
                 backfaceVisibility: 'hidden',
               }}
               onDoubleClick={handleDoubleClick}
-              dangerouslySetInnerHTML={{
-                __html: content,
-              }}
-            />
+            >
+              <div
+                style={{
+                  padding: '0 8px',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+                dangerouslySetInnerHTML={{
+                  __html: content,
+                }}
+              />
+            </div>
           </div>
         ) : generating ? (
           // 生成中:行式 shimmer 骨架 + 任务信息 + 取消(与分镜同款扫光动画)

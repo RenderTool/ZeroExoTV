@@ -45,6 +45,12 @@ export interface CanvasDocument {
   updatedAt: string;
   /** 'project' = graph 在项目主 graph（1 号）；'inline' = graph 在本文件里（副本） */
   graphRef: CanvasGraphRef;
+  /**
+   * 临时链路画布（2026-11-17）：由生成资产的提示词快照挂载出来的可编辑副本。
+   * 不进入「子画布」列表（不是用户保存的子画布），只在打开时按需挂载；
+   * 用户在副本里点「保存为画布副本」才会得到一块正式子画布。
+   */
+  ephemeral?: boolean;
   graph?: GraphModel;
 }
 
@@ -169,6 +175,17 @@ export async function getCanvas(projectId: string, canvasId: string): Promise<Lo
       ? { ...raw, title: raw.title === LEGACY_MAIN_CANVAS_TITLE ? MAIN_CANVAS_TITLE : raw.title, locked: true, graphRef: 'project' as const }
       : mainDocFallback(projectId);
     const graph = await loadProjectGraph(projectId);
+    // 2026-11-19 数据事故：主图读不到不能当空图（否则自动保存会把唯一副本覆盖成空）。
+    // 只有「项目从来没有主画布元数据」时才允许空图开局；已有元数据却读不到图 = 数据缺失，必须显式报错。
+    if (!graph) {
+      const hadMainDoc = await stat(canvasPath(projectId, MAIN_CANVAS_ID)).catch(() => null);
+      if (hadMainDoc) {
+        throw new Error(
+          `主画布数据缺失（${projectId}）：磁盘上已有画布元数据但读不到主图，已阻止空图渲染以免覆盖。` +
+          '请从「历史版本」恢复，或检查 .lf/zeroexo/graph_data 下的图文件。',
+        );
+      }
+    }
     return { doc, graph: graph ?? emptyGraph(), stamp: null };
   }
   if (!isCanvasDoc(raw) || !raw.graph) return null;
@@ -218,7 +235,7 @@ export async function saveCanvas(
 /** 新建一份副本（graph 由调用方给；生成语义在 sub-canvas 执行器里，本模块只管落盘） */
 export async function createCanvas(
   projectId: string,
-  input: { title: string; graph: GraphModel; coverKey?: string | null; order?: number; id?: string },
+  input: { title: string; graph: GraphModel; coverKey?: string | null; order?: number; id?: string; ephemeral?: boolean },
 ): Promise<CanvasDocument> {
   const now = new Date().toISOString();
   const doc: CanvasDocument = {
@@ -234,6 +251,7 @@ export async function createCanvas(
     createdAt: now,
     updatedAt: now,
     graphRef: 'inline',
+    ...(input.ephemeral ? { ephemeral: true } : {}),
     graph: input.graph,
   };
   assertSafeCanvasId(doc.id);

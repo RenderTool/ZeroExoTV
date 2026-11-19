@@ -110,7 +110,8 @@ export async function createAssetNode(
         size,
         title: payload.title,
         data: {
-          prompt: payload.prompt ?? payload.title,
+          // 素材节点不是生成结果，没有提示词；旧写法回退到标题，导致面板显示一串资产 id
+          prompt: payload.prompt ?? '',
           content: contentUrl,
           storageKey,
           status: 'success',
@@ -149,7 +150,7 @@ export async function createAssetNode(
         size,
         title: payload.title,
         data: {
-          prompt: payload.title,
+          prompt: payload.prompt ?? '',
           content: contentUrl,
           storageKey,
           status: 'success',
@@ -185,7 +186,7 @@ export async function createAssetNode(
         size,
         title: payload.title,
         data: {
-          prompt: payload.title,
+          prompt: payload.prompt ?? '',
           content: contentUrl,
           storageKey,
           status: 'success',

@@ -68,7 +68,7 @@ describe("initialize instructions（五阶段流水线零安装规则）", () =>
     for (const stage of PIPELINE_STAGES) {
       expect(instructions).toContain(`阶段${stage.stage}`);
     }
-    for (const kw of ["收料", "转剧本", "提主体", "拆分镜", "出片前"]) {
+    for (const kw of ["收料", "转剧本", "提主体", "产出主体", "分镜与出片"]) {
       expect(instructions).toContain(kw);
     }
   });
@@ -80,7 +80,10 @@ describe("initialize instructions（五阶段流水线零安装规则）", () =>
     expect(instructions).toContain("未过 gate 不得进下一步");
     expect(instructions).toContain("最少需要问");
     expect(instructions).toContain("可以拆");
-    expect(instructions).toContain("禁止提交任何真实 GPU 生成任务");
+    // 口径：网页与插件握手执行、MCP 只代理发起与查询，不能写成「MCP 自己跑 GPU」
+    expect(instructions).toContain("MCP 只做三件事：代理发起、查询进度、管理结果");
+    expect(instructions).toContain("阶段3 提主体（占位清单）");
+    expect(instructions).toContain("先问用户「要不要开始生产分镜与视频」");
   });
 });
 

@@ -240,7 +240,7 @@ function SubjectLinkDialog({ projectId, payload, onClose }: SubjectLinkDialogPro
       footer={null}
       width={460}
       centered
-      destroyOnClose
+      destroyOnHidden
       title={
         <span style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <Send size={13} />

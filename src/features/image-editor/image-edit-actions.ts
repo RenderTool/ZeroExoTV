@@ -7,7 +7,7 @@
 
 import { AddEdgeCommand, AddNodeCommand, type CommandQueue, type NodeRecord } from '@zeroexo/core';
 import { uploadImage } from '@zeroexo/plugin-persistence';
-import { cropDataUrl, splitDataUrl, MAX_SPLIT_PIECES } from '@zeroexo/plugin-image-editor';
+import { cropDataUrl, splitDataUrl, splitCells, readImageMeta, MAX_SPLIT_PIECES } from '@zeroexo/plugin-image-editor';
 import type { CropRect, SplitParams } from '@zeroexo/plugin-image-editor';
 import { autoLandGenerationBlob } from '@/features/canvas-assets/history-autoland.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
@@ -184,10 +184,15 @@ export async function applySplit({
   // 计算切图前的同类型节点数量，确保标题编号不跳号
   const existingCount = commandQueue.getState().nodes.filter((n) => n.type === 'image').length;
   const childIds: string[] = [];
-  const layout = computeSplitLayout(
-    uploaded.map((img) => ({ width: img.width, height: img.height })),
-    params.columns,
-  );
+  // 落位以「源图尺寸 + 同一套分割线」为准：反读上传后切片像素会因缩放/重编码压边，
+  // 出现「碎片互相叠住」（2026-11-18 用户报障）。
+  const srcMeta = await readImageMeta(dataUrl).catch(() => null);
+  const layout = srcMeta
+    ? splitCells(params, srcMeta.width, srcMeta.height)
+    : computeSplitLayout(
+        uploaded.map((img) => ({ width: img.width, height: img.height })),
+        params.columns,
+      );
   uploaded.forEach((img, i) => {
     const cell = layout.cells[i] ?? { x: 0, y: 0, width: 200, height: 200 };
     const childId = `node-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
@@ -210,6 +215,10 @@ export async function applySplit({
           naturalHeight: img.height,
           mimeType: img.mimeType,
           bytes: img.bytes,
+          // 2026-11-19：切片尺寸必须锁死为「分割线网格里的这一格」。
+          // 图片节点有个「不等比例就自愈成 620×348 展示框」的兜底，切片一旦被它放大，
+          // 节点立刻大于落位网格 → 互相压住并显示成放大的错乱碎片。
+          lockSize: true,
         },
       }),
     );

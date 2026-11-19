@@ -236,12 +236,20 @@ export const TimelineClip = memo(function TimelineClip({
    * thumbnailUrl 已是会话内 URL（blob:/data:）时直通。
    */
   const firstFrame = useClipMediaUrl(director ? thumbnailUrl : undefined);
-  const videoPoster = useVideoPoster(director && !thumbnailUrl ? videoKey : undefined);
-  const thumbSrc = firstFrame.url ?? videoPoster.url;
+  /**
+   * 首帧兜底（2026-11-19 报障）：持久化首帧可能是 ComfyUI 8188 直连 URL（`/view?filename=…`），
+   * ComfyUI 一停/换实例就裂图（镜头卡显示「首帧加载失败」）。只要拿不到持久化首帧、或它 onError，
+   * 就用成片（CAS 视频）抽一帧顶上——成片本身在本地，不依赖 ComfyUI 在线。
+   */
+  const videoPoster = useVideoPoster(
+    director && videoKey && (!thumbnailUrl || thumbFailed) ? videoKey : undefined,
+  );
+  const posterSrc = videoPoster.url ?? '';
+  const thumbSrc = (thumbFailed ? '' : firstFrame.url) || posterSrc;
   /** 出片页沿用原判定（thumbnailUrl 直接渲染）；导演台按解析后的 URL 判定 */
-  const hasThumbImage = director ? (!!thumbSrc && !thumbFailed) : (!!thumbnailUrl && !thumbFailed);
+  const hasThumbImage = director ? (!!thumbSrc && !(thumbFailed && !posterSrc)) : (!!thumbnailUrl && !thumbFailed);
   const frameFailed = !!director && !hasThumbImage
-    && (thumbFailed || (thumbnailUrl ? firstFrame.failed : !!videoKey && videoPoster.failed));
+    && (thumbFailed || firstFrame.failed || (!thumbnailUrl && !!videoKey && videoPoster.failed));
   const hasMedia = hasThumbImage || !!videoKey;
   const badgeTone = directorBadgeTone(clip.data.status, isDark);
   const badgeStatus = clip.data.status ?? 'idle';

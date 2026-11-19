@@ -128,11 +128,29 @@ export function detectKind(mimeType: string): AssetKind {
   throw new UnsupportedFileTypeError('', mimeType);
 }
 
+const KIND_TITLE: Record<string, string> = { image: '图片', video: '视频', audio: '音频', text: '文本' };
+
+/**
+ * 2026-11-18 用户口径：拖进画布的素材名必须像人起的名字。
+ * 系统/缓存导出的文件常是 `c4149053-0082-4ba4-8962-1812db8e4472.png` 这类机器名，
+ * 直接拿来当节点标题就是一串 UUID。这里去掉扩展名，识别到机器名就回退成「图片 / 视频 / 音频」。
+ */
+export function humanizeAssetTitle(fileName: string, kind: string): string {
+  const base = fileName.replace(/\.\w+$/, '').trim();
+  const machineLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i.test(base)
+    || /^[0-9a-f]{16,}$/i.test(base)
+    || /^[0-9a-f]{20,}[_-]/i.test(base)
+    || /^[0-9a-f]{24,}/i.test(base)
+    // 形如「12 1c5c18240cf4438da47a72767450cf27」：带前缀的缓存文件名，整串仍是机器名
+    || /[0-9a-f]{20,}/i.test(base);
+  if (!base || machineLike) return KIND_TITLE[kind] ?? '素材';
+  return base;
+}
+
 export async function uploadAsset(
   file: File,
   onProgress?: (loaded: number, total: number) => void,
-): Promise<CreateAssetInput> {
-  // 1. 扩展名校验(不信任浏览器 file.type,防止 .ts→video/mp4 等误识别)
+): Promise<CreateAssetInput> {  // 1. 扩展名校验(不信任浏览器 file.type,防止 .ts→video/mp4 等误识别)
   const ext = file.name.split('.').pop()?.toLowerCase();
   if (ext && !EXTENSION_MIME_MAP[ext]) {
     throw new UnsupportedFileTypeError(file.name, `.${ext}`);
@@ -146,7 +164,7 @@ export async function uploadAsset(
   }
 
   const kind = detectKind(effectiveMimeType);
-  const title = file.name;
+  const title = humanizeAssetTitle(file.name, kind);
 
   // 2. 文件大小校验
   const limit = FILE_SIZE_LIMITS[kind];

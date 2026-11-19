@@ -119,7 +119,12 @@ export async function generateVideo({
   referenceImages = [],
   signal,
 }: GenerateVideoOptions): Promise<{ storageKey: string; generationId: string }> {
-  const basePrompt = shot.videoPrompt || shot.imagePrompt || shot.description || '';
+  // 只认分镜结构化提示词 imagePrompt（2026-11-18 事故：imagePrompt 为空时
+  // 静默回落 videoPrompt/description，提交出去的是和分镜、参考图都无关的自由文本）。
+  const basePrompt = (shot.imagePrompt ?? '').trim();
+  if (!basePrompt) {
+    throw new Error('本段没有分镜结构化提示词（imagePrompt 为空），先由分镜生成提示词再生成视频');
+  }
   // 自动 @图片N 占位：有参考图且提示词未含占位时追加（zerovideoAgent 槽位语法）
   const hasPlaceholder = /@图片\d/.test(basePrompt);
   const prompt =

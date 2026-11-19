@@ -131,7 +131,7 @@ describe('审计读取与过滤（验收④）', () => {
 });
 
 describe('配置块（验收②）', () => {
-  it('stdio 配置块含真实数据根、入口路径与注入的 token，复制即可用', () => {
+  it('stdio 配置块含入口路径与注入的 token，且不绑定数据根（切目录不用重装）', () => {
     const text = buildStdioConfig(
       {
         serverEntry: 'D:\\AICode\\zeroexo\\zeroexo-comfyui\\mcp-server\\dist\\index.js',
@@ -142,7 +142,8 @@ describe('配置块（验收②）', () => {
     const cfg = JSON.parse(text);
     expect(cfg.mcpServers.zeroexo.command).toBe('node');
     expect(cfg.mcpServers.zeroexo.args[0]).toContain('mcp-server');
-    expect(cfg.mcpServers.zeroexo.env.ZEROEXO_DATA_ROOT).toBe('D:\\Test');
+    // 数据根由 MCP 读本机持久配置（~/.zeroexo/data-root.txt），不再写进 env
+    expect(cfg.mcpServers.zeroexo.env.ZEROEXO_DATA_ROOT).toBeUndefined();
     expect(cfg.mcpServers.zeroexo.env.ZEROEXO_MCP_TOKEN).toBe('zxp_injected_raw');
   });
 });

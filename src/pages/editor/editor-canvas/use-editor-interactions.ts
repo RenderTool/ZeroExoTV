@@ -7,13 +7,29 @@
 import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { App } from 'antd';
 import { EDITOR_ICONS } from './icons.js';
+
+/** 比例档位 → 宽高比（"1024x768" 这类尺寸串直接算） */
+function aspectRatioOf(aspect?: string, size?: string): number | null {
+  if (size) {
+    const m = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(size);
+    if (m && Number(m[1]) > 0 && Number(m[2]) > 0) return Number(m[1]) / Number(m[2]);
+  }
+  if (!aspect) return null;
+  const pair = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(aspect.trim());
+  if (!pair) return null;
+  const w = Number(pair[1]);
+  const h = Number(pair[2]);
+  return w > 0 && h > 0 ? w / h : null;
+}
+
 import { useTheme } from '@zeroexo/plugin-theme';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, UpdateNodeDataCommand, BatchCommand, resolveNodeSize, resolvePlacement } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, UpdateNodeDataCommand, BatchCommand, ResizeNodeCommand, resolveNodeSize, resolvePlacement } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 // Plan#84（征集#184）：选区→**另存为项目内画布副本**（复制，主画布不动），与 1 号平级并排
 import { createCanvasCopyFromSelection } from '@/features/sub-canvas/canvas-copy.js';
-import { nodeActionBus, createAssetNode } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, createAssetNode, fitMediaSize, IMAGE_FIT_BOX } from '@zeroexo/plugin-nodes';
+import { createSizedAssetNode } from '@/features/asset-picker/services/asset-node-size.js';
 import type { AssetNodePayload } from '@zeroexo/plugin-nodes';
 import { PREVIEW_GROUP_ID, getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 import { configToPinDefaults, configToNodeDefaults, configToGroupDefaults } from '@/features/top-bar/index.js';
@@ -656,6 +672,26 @@ export function useEditorInteractions({
           ...patch,
           paramValues: { ...(cur && typeof cur === 'object' ? cur : {}), ...(pv as Record<string, any>) },
         };
+        // 空节点切比例时，节点框本身也要跟着变（否则面板显示 4:3、画布上还是 1:1 的框）。
+        // 只处理还没有产物的图片节点；已有图片/用户手动缩放过的不动。
+        const data = (node?.data ?? {}) as Record<string, unknown>;
+        if (node?.type === 'image' && !data.content && !data.storageKey) {
+          const merged = (finalPatch as { paramValues?: Record<string, unknown> }).paramValues ?? {};
+          const w = Number(merged.width);
+          const h = Number(merged.height);
+          if (w > 0 && h > 0) {
+            const fit = fitMediaSize(w, h, IMAGE_FIT_BOX);
+            const curW = Number(node.size?.width) || 0;
+            const curH = Number(node.size?.height) || 0;
+            if (curW > 0 && curH > 0 && (Math.abs(curW - fit.width) > 2 || Math.abs(curH - fit.height) > 2)) {
+              refs.commandQueue.execute(new ResizeNodeCommand(
+                nodeId,
+                { x: node.position.x, y: node.position.y, width: curW, height: curH },
+                { x: node.position.x, y: node.position.y, width: fit.width, height: fit.height },
+              ));
+            }
+          }
+        }
       }
       refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, finalPatch));
     },
@@ -676,12 +712,11 @@ export function useEditorInteractions({
         : 'image') as GenerationMode;
       void handlePromptGenerate(node.id, mode, prompt);
     });
-    // 一键同款(征集#43):复原生成链路 → 建下游新节点并展开提示词，等用户自己改
+    // 一键同款：新建同级节点 + 复制上游引用 + 历史参数，**不发起生成**（用户自己点生成）
     const unsubReplay = nodeActionBus.on('replayGeneration', (event: { nodeId: string }) => {
       void (async () => {
         const target = await handleReplayGeneration(event.nodeId, refs, state, t, message);
         if (!target) return;
-        // 2026-11-13 用户要求：一键同款只负责“建好节点 + 填好提示词”，不得直接发起生成
         requestNodeDockExpand(target.nodeId);
         if (target.prompt.trim()) requestNodeDockPrompt(target.nodeId, target.prompt);
       })();
@@ -1203,7 +1238,18 @@ export function useEditorInteractions({
           : event.kind === 'video'
             ? { kind: 'video', url: event.content ?? '', title: event.title, storageKey: event.storageKey, width: event.width, height: event.height }
             : { kind: 'audio', url: event.content ?? '', title: event.title, storageKey: event.storageKey };
-      void createAssetNode(payload, { x: host.position.x - 100, y: host.position.y }).then((node) => {
+      const pos = { x: host.position.x - 100, y: host.position.y };
+      // 2026-11-17 用户实测：@ 面板引入的图片/视频落成 620×348 宽幅默认容器，竖图两侧大黑边。
+      // 媒体必须走统一的尺寸入口 createSizedAssetNode（补真实宽高 + 长边上限等比 fit）；
+      // 文本节点没有比例概念，仍走 createAssetNode 的原契约。
+      const container = {
+        width: containerRef.current?.clientWidth ?? 0,
+        height: containerRef.current?.clientHeight ?? 0,
+      };
+      const building = event.kind === 'text'
+        ? createAssetNode(payload, pos)
+        : createSizedAssetNode(payload, pos, container);
+      void building.then((node) => {
         if (!node) return;
         q.execute(new AddNodeCommand(node));
         const sourcePin = NODE_OUTPUT_PIN[node.type] ?? 'output';
@@ -1233,6 +1279,34 @@ export function useEditorInteractions({
         source: { nodeId: source.id, pinId: sourcePin },
         target: { nodeId: host.id, pinId: targetPin },
       }));
+    });
+
+    // nodeDock:previewAspect: 参数面板改比例/尺寸 → 立刻把节点切到同比例（不必等出图纠偏）
+    const unsubPreviewAspect = nodeActionBus.on('nodeDock:previewAspect', (event: any) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const node = store.getGraph().nodes.find((n: any) => n.id === event.nodeId);
+      if (!node || node._deleted) return;
+      const ratio = aspectRatioOf(event.aspect, event.size);
+      if (!ratio) return;
+      const longSide = 320;
+      const minShort = 120;
+      let width = ratio >= 1 ? longSide : Math.round(longSide * ratio);
+      let height = ratio >= 1 ? Math.round(longSide / ratio) : longSide;
+      if (Math.min(width, height) < minShort) {
+        const up = minShort / Math.min(width, height);
+        width = Math.round(width * up);
+        height = Math.round(height * up);
+      }
+      const oldRect = {
+        x: node.position.x,
+        y: node.position.y,
+        width: node.size?.width ?? width,
+        height: node.size?.height ?? height,
+      };
+      if (Math.abs(oldRect.width - width) <= 2 && Math.abs(oldRect.height - height) <= 2) return;
+      q.execute(new ResizeNodeCommand(node.id, oldRect, { ...oldRect, width, height }));
     });
 
     // nodeDock:removeConnection: 面板删除参考素材 → 移除对应连线
@@ -1405,6 +1479,7 @@ export function useEditorInteractions({
       unsubEpisodesDeleted();
       unsubAddRef();
       unsubConnectRef();
+      unsubPreviewAspect();
       unsubRemoveRef();
       unsubNovelImport();
       unsubNovelImportInto();

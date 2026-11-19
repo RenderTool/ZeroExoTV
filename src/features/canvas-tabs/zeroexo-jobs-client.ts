@@ -56,6 +56,8 @@ export interface QwenImageJobParams {
   negative_prompt?: string;
   /** ComfyUI input 文件名（先经 /upload/image）；t2i 时为空 */
   input_image?: string;
+  /** 多参考图文件名（逗号串，按槽位顺序，最多 3 张；第一张同 input_image） */
+  input_images?: string;
   /** 遮罩文件名（可选；有值时服务端走遮罩模板） */
   mask_image?: string;
   seed: number;
@@ -86,6 +88,24 @@ export const MOSS_MODEL_LABEL = 'MossImage';
 export const LOCAL_VIDEO_MODEL_KEY = 'zeroexo:minimax-h3';
 export const LOCAL_VIDEO_MODEL_LABEL = 'H3ZeroExo';
 
+/**
+ * 旧数据 / 只读生成记录里常把本机模型写成展示名（qwen、QwenImage2.1、Krea2、Moss、H3），
+ * 这些值不是本机 channel key，模型能力判定会退化成「只吃文字」，参考图被丢掉。
+ * 所有读 node.data.model 的入口（同款复刻、只读记录、提示词面板）统一走这里归一。
+ */
+export function normalizeLocalModelKey(raw: string, nodeType?: string): string {
+  const value = (raw ?? '').trim();
+  if (!value) return nodeType === 'image' ? LOCAL_IMAGE_MODEL_KEY : '';
+  if (value.startsWith('zeroexo:')) return value;
+  // 云端渠道 key（provider::model）不动
+  if (value.includes('::')) return value;
+  if (/qwen/i.test(value)) return LOCAL_IMAGE_MODEL_KEY;
+  if (/krea/i.test(value)) return KREA2_MODEL_KEY;
+  if (/moss/i.test(value)) return MOSS_MODEL_KEY;
+  if (/h3|minimax/i.test(value)) return LOCAL_VIDEO_MODEL_KEY;
+  return value;
+}
+
 export interface ZeroexoJobStatus {
   ok: boolean;
   jobId: string;
@@ -103,11 +123,33 @@ function trimBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
+/**
+ * 本机 ComfyUI 原始报错 → 客户能看懂的一句话（2026-11-18 用户要求）。
+ * 队列拒绝的原始 JSON（missing_node_type / prompt_outputs_failed_validation）不能直接甩到界面。
+ */
+export function friendlyLocalJobError(raw?: string | null): string {
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
+  if (/missing_node_type|custom node may not be installed|not found/i.test(text)) {
+    const nodeName = /Node\s+'([^']+)'\s+not found/i.exec(text)?.[1]
+      ?? /'node_title':\s*'([^']+)'/.exec(text)?.[1]
+      ?? /'class_type':\s*'([^']+)'/.exec(text)?.[1];
+    return nodeName
+      ? `本机 ComfyUI 缺少「${nodeName}」节点：先安装对应模型插件再生成`
+      : '本机 ComfyUI 缺少所需模型节点：先安装对应模型插件再生成';
+  }
+  if (/prompt_outputs_failed_validation|队列拒绝/.test(text)) {
+    return 'ComfyUI 拒绝了这次生成：请检查尺寸、步数与模型设置后重试';
+  }
+  const one = text.replace(/\s+/g, ' ');
+  return one.length > 90 ? `${one.slice(0, 90)}…` : one;
+}
+
 async function readError(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { error?: unknown; message?: unknown };
     const msg = body?.error ?? body?.message;
-    if (typeof msg === 'string' && msg) return msg;
+    if (typeof msg === 'string' && msg) return friendlyLocalJobError(msg) || `HTTP ${res.status}`;
   } catch { /* 非 JSON */ }
   return `HTTP ${res.status}`;
 }

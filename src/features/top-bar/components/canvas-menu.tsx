@@ -13,16 +13,19 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Home, Plus, Copy, Trash2, Download } from 'lucide-react';
+import { Home, Plus, Copy, Trash2, Download, History } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { LogoIcon } from '@/assets/ico/index.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
+import { CanvasHistoryDialog } from './canvas-history-dialog.js';
 
 export interface CanvasMenuProps {
   theme: ThemeConfig;
+  /** 当前项目 id（历史版本要按项目读磁盘快照） */
+  projectId: string;
   onHome: () => void;
   onNewProject: () => void;
   /** 打包导出本项目（zip：画布 + 素材 + 副本画布），只读也不拦 */
@@ -33,6 +36,7 @@ export interface CanvasMenuProps {
 
 export function CanvasMenu({
   theme,
+  projectId,
   onHome,
   onNewProject,
   onExportProject,
@@ -42,6 +46,7 @@ export function CanvasMenu({
   const { t } = useTranslation();
   const readOnly = useReadOnly();
   const [open, setOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const handleHome = useCallback(() => { setOpen(false); onHome(); }, [onHome]);
   const handleNew = useCallback(() => { setOpen(false); onNewProject(); }, [onNewProject]);
@@ -55,6 +60,8 @@ export function CanvasMenu({
     { key: 'new', label: t('menu.newProject'), icon: <Plus size={14} />, onClick: handleNew },
     // 导出是只读操作：只读模式下照常提供（用户要随时备份）
     { key: 'export', label: t('menu.exportProject', '导出项目'), icon: <Download size={14} />, onClick: handleExport },
+    // 历史版本：只读操作（仅读磁盘快照 + 恢复需要确认），只读模式下也可查看
+    { key: 'history', label: t('menu.canvasHistory', '历史版本'), icon: <History size={14} />, onClick: () => { setOpen(false); setHistoryOpen(true); } },
     // 只读隐藏拷贝/删除（2026-08-25 系统性只读防护）：拷贝项目=创建副本、删除=销毁画布，均属项目级写操作
     ...(!readOnly
       ? [
@@ -67,6 +74,7 @@ export function CanvasMenu({
   ];
 
   return (
+    <>
     <Dropdown
       open={open}
       onOpenChange={setOpen}
@@ -80,6 +88,8 @@ export function CanvasMenu({
         <LogoIcon size={30} />
       </button>
     </Dropdown>
+    <CanvasHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} projectId={projectId} />
+    </>
   );
 }
 

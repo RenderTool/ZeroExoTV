@@ -180,7 +180,9 @@ function rebuildMainTrack(wb: WorkbenchContainer): void {
 }
 
 function emptyWorkbench(): Omit<WorkbenchContainer, "version" | "updatedAt"> {
-  const first = makeSegment(1, "");
+  // 2026-11-19 修复：空导演台不再预置一条空片段。
+  // 原实现预置 number=1、description="" 的片段，拆分镜时又追加 1..N，导致同集出现两条「片段 1」，
+  // 且这条空片段没有 episodeId，会混进全集合集统计与连播序列。
   return {
     schemaVersion: 1,
     title: "导演台",
@@ -191,11 +193,11 @@ function emptyWorkbench(): Omit<WorkbenchContainer, "version" | "updatedAt"> {
         sourceChain: { origin: "workbench-container" },
         status: "active",
         order: 0,
-        clips: [{ ref: { sourceShotId: first.id, kind: "shot" }, timeline: { startMs: 0, durationMs: first.duration * 1000 } }],
+        clips: [],
       },
     ],
-    shots: [first],
-    totalDuration: first.duration,
+    shots: [],
+    totalDuration: 0,
   };
 }
 
@@ -368,6 +370,7 @@ export function setShotPrompt(
     duration?: number;
     negativePrompt?: string;
     paramValues?: Record<string, unknown>;
+    episodeId?: string;
   },
 ) {
   return updateWorkbench(root, projectId, {
@@ -375,10 +378,16 @@ export function setShotPrompt(
     mutate: (wb) => {
       const shot = findShot(wb, opts.shotId);
       if (opts.imagePrompt !== undefined) shot.imagePrompt = opts.imagePrompt;
-      if (opts.videoPrompt !== undefined) shot.videoPrompt = opts.videoPrompt;
+      if (opts.videoPrompt !== undefined) {
+        shot.videoPrompt = opts.videoPrompt;
+        // 导演台提示词面板读写的是 imagePrompt（单轨输入）；只写 videoPrompt 会让
+        // 网页上看到的提示词为空、生成时也没有画面描述。两轨同值时一并补齐。
+        if (opts.imagePrompt === undefined && !shot.imagePrompt) shot.imagePrompt = opts.videoPrompt;
+      }
       if (opts.description !== undefined) shot.description = opts.description;
       if (opts.shotType !== undefined) shot.shotType = opts.shotType;
       if (opts.duration !== undefined) shot.duration = opts.duration;
+      if (opts.episodeId !== undefined) shot.episodeId = opts.episodeId || undefined;
       if (opts.negativePrompt !== undefined) {
         shot.paramValues = { ...(shot.paramValues ?? {}), negativePrompt: opts.negativePrompt };
       }

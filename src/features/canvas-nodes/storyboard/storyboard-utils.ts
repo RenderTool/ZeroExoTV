@@ -6,7 +6,7 @@
 import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityKind, AiSubject } from './storyboard-types';
 import type { ProductionItem } from '../production-manager/production-manager-types';
 import { resolveSubjectCover } from '../production-manager/production-manager-types';
-import { nonBaseStates, type SubjectTree } from './subject-tree-types';
+import { findTreeForItem, nonBaseStates, subjectBaseCoverKeys, subjectCoverCandidates, type SubjectTree } from './subject-tree-types';
 import { resolveContentUrl } from '@zeroexo/plugin-nodes';
 
 /**
@@ -240,8 +240,12 @@ export function collectSubjectSources(
       kind: it.kind,
       id: it.id,
       aliases: it.aliases ?? [],
-      // 封面唯一解析入口（手动 coverKey → 第一个状态图 → 无）
-      thumbnailUrl: resolveSubjectCover(it).key ?? undefined,
+      // 封面唯一解析入口（手动 coverKey → 基础状态首图 → 无）：基础状态空 = 封面空
+      thumbnailUrl: resolveSubjectCover(
+        it,
+        subjectCoverCandidates(findTreeForItem(subjectTrees ?? [], it, productionItems ?? [])),
+        subjectBaseCoverKeys(findTreeForItem(subjectTrees ?? [], it, productionItems ?? [])),
+      ).key ?? undefined,
       generationStatus: hasImages ? 'generated' : 'placeholder',
     });
   }

@@ -423,7 +423,10 @@
     "viewAllFull": "查看全部",
     "myFavorites": "我的收藏",
     "favoriteToMyLibrary": "收藏到我的提示词库",
-    "loginToFavorite": "请先登录后再收藏"
+    "loginToFavorite": "请先登录后再收藏",
+    "batchCancel": "取消",
+    "retry": "重试",
+    "noMatch": "没有匹配项"
   },
   "confirm": {
     "deleteCanvasTitle": "删除项目",
@@ -682,7 +685,8 @@
     "missingTitle": "子画布文件缺失",
     "missingBody": "projects/{{pid}}/subcanvases/{{id}}.json 不存在（可能被外部删除或移动）。关闭本页签不会丢主画布上的入口卡。",
     "error": "子画布加载失败",
-    "newNode": "新建"
+    "newNode": "新建",
+    "deleteFailed": "删除失败，请重试"
   },
   "canvasTab": {
     "canvas": "画布",
@@ -698,7 +702,10 @@
     "workbenchLoading": "正在加载分镜…",
     "workbenchLoadError": "分镜读取失败，请重新打开页签",
     "storyboardMissing": "此项目尚无主体库内容，点击下方按钮初始化",
-    "createStoryboard": "初始化主体库"
+    "createStoryboard": "初始化主体库",
+    "scriptConflict": "剧本已被外部修改，已重新载入最新版本",
+    "scriptSaveFailed": "剧本保存失败，请重试",
+    "scriptMissing": "此项目尚无剧本"
   },
   "toolsDock": {
     "tool": "工具",
@@ -1134,6 +1141,17 @@
   "assetLibrary": {
     "pageTitle": "公共资产",
     "pageSubtitle": "统一管理素材、主体与提示词",
+    "viewPrompt": "查看提示词",
+    "chainOpened": "已打开生成链路",
+    "moreActions": "更多操作",
+    "sendTo": "发送到",
+    "sendToSubject": "发送到主体",
+    "editImage": "编辑图片",
+    "uploadToLibrary": "上传到公共资产",
+    "referenceImage": "参考图",
+    "untitledImage": "图片",
+    "untitledVideo": "视频",
+    "uploadMaterial": "上传素材",
     "searchPlaceholder": "搜索名称或标签",
     "filterAll": "全部",
     "filterImage": "图片",
@@ -1205,8 +1223,8 @@
     "historyTabImage": "图片",
     "historyTabVideo": "视频",
     "historyTabAll": "全部",
-    "historySourceCanvas": "从画布生成",
-    "historySourceDirector": "从分镜",
+    "historySourceCanvas": "画布历史",
+    "historySourceDirector": "分镜历史",
     "historyEmptyDirectorImage": "分镜只生成视频，没有图片产出记录",
     "historyEmptyDirectorVideo": "还没有分镜生成的视频，在分镜运行片段后自动收录",
     "historyEmptyImage": "还没有图片生成记录，在画布上调用 API 生成图片后自动收录",
@@ -1217,7 +1235,7 @@
     "exportTo": "导出到…",
     "exportToProject": "导出到本项目素材",
     "exportToLibrary": "导出到公共库",
-    "addToPublicLibrary": "加入公共资产",
+    "addToPublicLibrary": "发送到资产",
     "addToProject": "加入本项目",
     "addToScope": "加入资产库",
     "historyAlreadyInProject": "本项目已有相同内容，无需重复加入",
@@ -1265,7 +1283,43 @@
     "cardMissingImage": "该图片未落盘或文件缺失，请重新导入",
     "cardMissingVideo": "该视频未落盘或文件缺失，请重新导入",
     "emptyAssetsTitle": "还没有资产",
-    "emptyAssetsHint": "点击上方按钮添加你的第一个资产"
+    "emptyAssetsHint": "点击上方按钮添加你的第一个资产",
+    "canvasAssetsGroup": "画布资产",
+    "storyboardAssetsGroup": "分镜资产",
+    "canvasHistoryTitle": "画布历史",
+    "directorHistoryTitle": "分镜历史",
+    "setSegmentCover": "设为片段封面",
+    "segmentCover": "当前封面",
+    "setSegmentCoverHint": "设为该片段封面（替换分镜显示并更新下一段引导）",
+    "noEpisode": "未分集",
+    "segmentGenerating": "生成中",
+    "filterAllSegments": "全部片段",
+    "allSegments": "全部片段",
+    "segmentGeneratingNoReplace": "该片段正在生成，完成后再替换",
+    "linkedToSegment": "已关联到镜头 {{num}}",
+    "batchDeleteBody": "删除后可在提示条中撤销；素材文件不会立即从磁盘移除。",
+    "moveVersions": "移动到片段",
+    "moveVersionsTitle": "移动到片段",
+    "moveVersionsOk": "移动",
+    "moveVersionsHint": "把选中的 {{n}} 个版本移动到下面这个片段；只改归属，不动封面。",
+    "episodeCol": "集",
+    "segmentCol": "段",
+    "segmentVersionCount": "{{n}} 个版本",
+    "pendingSegment": "待定 · {{episode}} · 镜头 {{num}}（原片段已移除，新建后自动关联回来）",
+    "unlinkedSegments": "未关联片段",
+    "moveToSegment": "移动到…",
+    "versionLabel": "第 {{n}} 版",
+    "deleteSegmentTitle": "删除这个片段？",
+    "deleteSegmentOnlyVersion": "这是该片段唯一的版本，删除后这个镜头会从分镜历史消失，且无法恢复。",
+    "deleteSegmentKeepOthers": "只会删除当前启用的这一版；该片段下还有 {{n}} 个版本保留。",
+    "emptyProjectTitle": "本项目还没有资产",
+    "emptyLibraryTitle": "还没有资产",
+    "emptyProjectHint": "可以从公共资产引用或直接上传",
+    "emptyLibraryHint": "点击上方按钮添加你的第一个资产",
+    "scopeCapsuleProjectDisabled": "进入项目后可用",
+    "scopeNeedProject": "项目资产需进入项目后创建",
+    "legacyNoChain": "旧版本生成的历史记录，没有提示词和链路可查看",
+    "open": "打开"
   },
   "openLib": {
     "scopeTab": "开源库",
@@ -2523,7 +2577,7 @@
     "sendToAsset": "发送到资产库",
     "alreadyLinked": "已关联到资产库",
     "coverImage": "封面图",
-    "canvasGenerate": "画布生成",
+    "canvasGenerate": "去画布生成",
     "inlineRenameHint": "双击改状态名",
     "replaceMediaInline": "换图",
     "editState": "编辑状态",
@@ -2731,7 +2785,9 @@
     "selectAllEpisodes": "全选",
     "clearEpisodes": "清空",
     "appearEpisodesAllCount": "全部（{{n}} 集）",
-    "appearEpisodesRange": "第 {{ranges}} 集（共 {{n}} 集）"
+    "appearEpisodesRange": "第 {{ranges}} 集（共 {{n}} 集）",
+    "episodeAll": "全集",
+    "deleteThisState": "删除此状态"
   },
   "episode": {
     "pending": "等待中",
@@ -2863,7 +2919,9 @@
     "scriptMetaTitle": "本剧信息",
     "scriptLoglinePlaceholder": "一句话说清整部剧讲了什么",
     "scriptTitleLabel": "剧名",
-    "scriptTitlePlaceholder": "这部剧的名字"
+    "scriptTitlePlaceholder": "这部剧的名字",
+    "metaSavedWithStyle": "本剧信息已保存，{{n}} 个主体提示词已同步全剧风格",
+    "metaVisualStyle": "全剧风格（所有主体继承）"
   },
   "assetPick": {
     "current": "当前资源",
@@ -3012,7 +3070,9 @@
     "addedToSegment": "已发送到分镜",
     "guideResolving": "正在查找引导…",
     "guideMissing": "该素材没有引导",
-    "guideSent": "已发送引导"
+    "guideSent": "已发送引导",
+    "coverVideoOnly": "只有视频可以设为片段封面",
+    "coverSet": "已设为当前片段封面（最新缓存版本）"
   },
   "director": {
     "guideSlot": "引导",
@@ -3122,7 +3182,9 @@
     "deleteVersionTitle": "删除这个版本？",
     "deleteVersionBody": "只删除这份历史快照，当前内容不受影响。",
     "deleteVersionOk": "删除",
-    "deleteVersionDone": "已删除该版本"
+    "deleteVersionDone": "已删除该版本",
+    "segmentTitle": "镜头 {{num}}",
+    "importDone": "已导入 {{count}} 个资产"
   },
   "scriptImportModal": {
     "title": "导入剧本",
@@ -3173,7 +3235,7 @@
   },
   "onboarding": {
     "mcpFirstRun": "还没有检测到 MCP 服务：先复制安装命令跑一次。",
-    "stepMcpFirstRun": "先复制安装命令，在终端跑一次；成功后本页会自动识别。",
+    "stepMcpFirstRun": "点击下方「一键复制」按钮，然后到豆包等 Agent 的对话框粘贴，它会自己装好并启动。",
     "downloadMcp": "下载 MCP 安装包",
     "refreshMcp": "我已启动，刷新状态",
     "copyBootstrap": "复制安装命令",
@@ -3188,9 +3250,16 @@
     "rootGuess": "已按所选目录名推测为 {{path}}；确认后点「切换到此目录」",
     "title": "使用指引",
     "stepRoot": "选择存储目录",
-    "stepMcp": "接入 MCP（给 Agent IDE）",
+    "stepMcp": "接入 Agent（例如豆包）",
     "stepComfy": "连接 ComfyUI",
-    "stepMcpHint": "复制配置，粘到 Agent IDE 的 MCP 设置里。",
+    "stepMcpHint": "点击下方「一键复制」按钮，然后到豆包等 Agent 的对话框粘贴，它会自己装好。",
+    "mcpDirLabel": "安装目录",
+    "mcpDirNone": "尚未选择",
+    "mcpDirPick": "选择目录",
+    "mcpDirWarn": "不能放 C 盘，也不能和第一步目录相同。",
+    "mcpDirChange": "重新选择",
+    "mcpCopy": "一键复制",
+    "mcpCopied": "已复制，粘给 Agent 就行",
     "copyMcp": "复制 MCP 配置",
     "downloadPlugin": "下载插件 ZIP",
     "pluginPathHint": "解压到 {{path}}，重启 ComfyUI",
@@ -3201,12 +3270,39 @@
     "mcpNotReady": "MCP 未就绪，暂无可复制配置",
     "notice": "第一次使用？先完成存储目录、MCP、ComfyUI 三项准备。",
     "start": "开始创作",
-    "footerHint": "随时可从主页底部「使用指引」再次打开",
+    "footerHint": "随时可再打开",
     "chooseRoot": "选择目录",
     "changeRoot": "重新选择",
     "rootNone": "尚未选择",
     "testComfy": "测试连接",
     "comfyOk": "已连接",
-    "comfyFailed": "连接失败"
+    "comfyFailed": "连接失败",
+    "modelUnet": "视频主模型",
+    "modelVideoVae": "视频 VAE",
+    "modelAudioVae": "音频 VAE",
+    "modelClip": "文本编码器",
+    "modelRefresh": "刷新列表",
+    "modelPick": "选择或输入模型名",
+    "modelEmpty": "连接后读取列表，也可手动输入",
+    "modelGuideHint": "列表就是本机已有的模型，随便选；标「推荐」只是建议。",
+    "recTagYes": "推荐",
+    "recTagNo": "（非推荐）",
+    "recommendPrefix": "推荐：",
+    "recSelected": "已选推荐",
+    "recAvailable": "当前连接已有",
+    "recMissing": "当前连接没有这个文件",
+    "recUnknown": "连接后核对",
+    "vaeWarning": "当前连接里没有可用的 MiniMax H3 视频/音频 VAE（或当前选中的不是 H3 版本）。请更换为文件名带 h3 的兼容版本；第三方量化版也可以，但不要选 LTX/Wan 的普通 VAE。"
+  },
+  "folderListView": {
+    "namePlaceholder": "文件夹名称",
+    "create": "创建",
+    "title": "项目文件夹",
+    "newFolder": "新建",
+    "empty": "暂无文件夹"
+  },
+  "styleGallery": {
+    "pickButton": "选择风格",
+    "emptySelected": "未选择：主体提示词沿用旧模板，建议先选一套全剧风格"
   }
 }

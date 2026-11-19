@@ -24,8 +24,10 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     stage: 1,
     name: "收料",
     action:
-      "确认用户给的是原文/剧本/参考文件夹；列出缺什么（项目名？剧本原文？素材图？），缺哪样问哪样，禁止编造",
-    gate: "项目名与剧本原文齐备才进阶段2",
+      "确认用户给的是原文/剧本/参考文件夹；列出缺什么（项目名？剧本原文？素材图？），缺哪样问哪样，禁止编造；" +
+      "**用户只给结果目标、项目还是空的（例如「做 4 个测试片段 / 帮我出几张测试图」）时按「从零创作」走**：先输出缺项清单" +
+      "（剧本原文或故事线？主体是谁、几种形态？图片模型/张数/比例/尺寸/步数？分镜几段、每段几秒？分辨率与步数档？），逐项问用户，禁止自己拍板默认值",
+    gate: "项目名与剧本原文齐备（或用户已确认从零创作的故事线与主体）才进阶段2",
   },
   {
     stage: 2,
@@ -36,28 +38,34 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   },
   {
     stage: 3,
-    name: "提主体",
+    name: "提主体（占位清单）",
     action:
-      "从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源）→ 逐主体给用户一张表 + 缺图清单（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用）→ 确认后 upsert_subject → set_subject_profile 按强制字段表生成三视图/场景/道具标准提示词；" +
+      "从已入库剧本列主体清单（名称/类型/别名/形态/状态/出现集数/身份锚点句/图片来源）→ 逐主体给用户一张表 + 缺图清单" +
+      "（外观=身份锚点句：性别年龄+面部+发型+体型+服装+标志物，锁定后同场景逐字复用）→ 建占位主体（upsert_subject）与状态标签；" +
       "全剧风格先 list_style_presets 让用户选一套 → set_global_style（dryRun→用户确认→userConfirmed+baseVersion），所有主体提示词继承这一套；" +
-      "挂图必须先 read_asset 亲眼看、把画面反推成 prompt，再 set_subject_image（没看过/没 prompt 会被拒）；多人合照/模特合集/别的角色图不许挂",
-    gate: "主体清单经用户确认才建主体/状态、才进阶段4——清单未确认不得 upsert、不得挂图",
+      "**这一步只建占位、不出图**：图片由下一步按确认后的提示词产出",
+    gate: "主体清单经用户确认才建占位、才进阶段4——清单未确认不得出图",
   },
   {
     stage: 4,
-    name: "拆分镜",
+    name: "产出主体",
     action:
-      "必须等用户明确说「可以拆」之后，才 split_script_to_shots 进导演台并生成提示词（先 dryRun 出草案→用户确认切分→confirm 落盘），" +
-      "再按 zeroexo://skills/shots-prompts 的「镜头卡」逐段重设 description（职责/来源场次/起点→唯一动作→终点/景别机位运镜/声音/视觉依据）与时长，" +
-      "set_shot_prompt 补双轨提示词；草案不等于分镜，不得直接出片",
-    gate: "用户没说拆不动手——剧本未入库不得拆分镜；草案未确认不得 confirm",
+      "用户确认清单后，set_subject_profile 按强制字段表生成三视图/场景/道具标准提示词（角色三视图写死「画面共 3 个：正面特写/正面全身/背面全身」，禁止额外机位）→ " +
+      "用主体自己的参考图发起生成（图生图，比例/尺寸按用户要求）→ 产物回挂该主体状态图；" +
+      "挂图必须先 read_asset 亲眼看、把画面反推成 prompt，再 set_subject_image；多人合照/模特合集/别的角色图不许挂；" +
+      "成品交用户审核",
+    gate: "主体图经用户审核通过才进阶段5——未审核不得拆段、不得出片",
   },
   {
     stage: 5,
-    name: "出片前检查",
+    name: "分镜与出片",
     action:
-      "运行前一次性检查槽位、缺图、时长并报给用户；set_shared_params 装配并预览——⚠️ 禁止提交任何真实 GPU 生成任务（真实生成走前端/ComfyUI）；导出用 open_project 打开前端编辑器完成",
-    gate: "检查结果经用户确认才导出",
+      "先问用户「要不要开始生产分镜与视频」（用户明确同意才动手）→ split_script_to_shots 先 dryRun 出草案 → 用户确认切分 → confirm 落盘 → " +
+      "按 zeroexo://skills/shots-prompts 的「镜头卡」逐段重设 description 与时长，set_shot_prompt 补双轨提示词 → 分镜与提示词再交用户审核 → " +
+      "审核通过后 set_shared_params 装配并预览、一次性检查槽位/缺图/时长报给用户；" +
+      "画布图片由 MCP 代理发起（generate_canvas_images / edit_canvas_image 提交、get_generation_task 轮询）；" +
+      "导演台视频由 ComfyUI 插件执行（网页发起运行，MCP 只校验延续法并查询任务）；导出用 open_project 打开前端编辑器完成",
+    gate: "用户同意才拆段；分镜与提示词经用户审核、出片参数经用户确认才提交生成",
   },
 ];
 
@@ -255,8 +263,8 @@ export const MODULE_SPECS: ModuleSpec[] = [
   },
   {
     key: "run",
-    name: "运行（Run / 生成参数装配）",
-    purpose: "生成参数装配与预览：把片段 + 主体锚点 + 公共参数组装成可执行的生成参数，供前端/ComfyUI 侧执行。",
+    name: "运行（出片参数与任务）",
+    purpose: "出片参数装配、任务提交与进度查询：画布图片由 MCP 提交并执行，导演台视频由 ComfyUI 插件执行。",
     requiredInputs: [
       "projectId",
       "片段就绪：shots 已有 description / 时长 / 双轨提示词",
@@ -268,9 +276,10 @@ export const MODULE_SPECS: ModuleSpec[] = [
     ],
     order: 7,
     stage: 5,
-    mcpTools: ["get_workbench", "set_shared_params", "set_shot_prompt"],
+    mcpTools: ["get_workbench", "set_shared_params", "set_shot_prompt", "generate_canvas_images", "get_generation_task"],
     caveats: [
-      "前置阶段5 出片前检查：运行前一次性检查槽位/缺图/时长并报给用户（gate：禁止提交任何真实 GPU 生成任务——本 MCP 只做参数装配与预览，真实生成由前端 / ComfyUI 执行）",
+      "前置阶段5 出片前检查：运行前一次性检查槽位/缺图/时长并报给用户（gate：检查结果经用户确认才出片）",
+      "交接口径：画布图片任务由 MCP Task Broker 执行（数据根 .lf/zeroexo/app_meta/tasks）；导演台视频由 ComfyUI 插件执行（output/zeroexo/tasks）；查询两边都认",
       "装配结果先给用户过目（dryRun / 预览），不静默默认参数",
       "同场景所有片段提示词中，身份 / 服装 / 光线方向字符串必须逐字一致",
       "机器推荐：成片视频 48GB 显存；24GB 只适合预览/短片段。预览 refImageSize=match、steps=8、scaleFactor=0.4；成片 scaleFactor=1.7–1.8。图片按官方 2K 口径写参数（最长边 2048、16 对齐，2K 只是参数层面），尺寸系数 1.7–1.8。",

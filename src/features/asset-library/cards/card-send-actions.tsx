@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import { Clapperboard, ImagePlus, Loader2, Share2, UserRound, Waypoints } from 'lucide-react';
+import type { ThemeConfig } from '@zeroexo/shared';
 import { openSubjectLinkDialog } from '@/features/canvas-nodes/storyboard/subject-link-dialog.js';
 
 // ===== 能力规则（与 workbench-slot-bus 槽位分配同口径） =====
@@ -102,6 +103,7 @@ export function SendActionButtons({
   canvasDisabled,
   visible,
   alwaysVisible,
+  ghostTheme,
   t,
 }: SendActionHandlers & {
   /** 发送到主体：目标素材键（提供时菜单出现「发送到主体」） */
@@ -113,6 +115,11 @@ export function SendActionButtons({
   alwaysVisible?: boolean;
   /** 宿主显式要求浮在封面上（绝对定位右上角）；默认 false = 内联排在标题行右侧 */
   overlay?: boolean;
+  /**
+   * 幽灵样式主题（2026-11-19 用户口径）：传入时按钮改为「卡片信息区里的纯图标」——
+   * 透明底 + 主题文字色，与主体卡的图标行完全一致；不传则沿用封面半透明黑底。
+   */
+  ghostTheme?: ThemeConfig;
   t: TFunction;
 }): React.ReactElement | null {
   const [directorMenuOpen, setDirectorMenuOpen] = useState(false);
@@ -135,7 +142,9 @@ export function SendActionButtons({
     });
   }
   if (subjectStorageKey && (kind === 'image' || kind === 'video' || kind === 'audio')) {
-    items.push({
+    // 2026-11-18 用户口径：发送菜单顺序全站统一「主体 → 画布 → 分镜」，
+    // 主体项固定排最前，不再按调用处顺序拼接。
+    items.unshift({
       key: 'sendToSubject',
       icon: <UserRound size={13} />,
       label: t('assetLibrary.sendToSubject', '发送到主体'),
@@ -149,12 +158,19 @@ export function SendActionButtons({
       },
     });
   }
-  const btn: React.CSSProperties = {
-    ...cardActionBtnStyle,
-    opacity,
-    cursor: importing ? 'wait' : 'pointer',
-    transition: 'opacity 0.2s, background 0.15s',
-  };
+  const btn: React.CSSProperties = ghostTheme
+    ? {
+      width: 24, height: 24, padding: 0, border: 'none', borderRadius: 6,
+      background: 'transparent', color: ghostTheme.toolbar.textMuted, cursor: importing ? 'wait' : 'pointer',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      opacity, transition: 'color 0.15s, opacity 0.2s, background 0.15s',
+    }
+    : {
+      ...cardActionBtnStyle,
+      opacity,
+      cursor: importing ? 'wait' : 'pointer',
+      transition: 'opacity 0.2s, background 0.15s',
+    };
   return (
     <>
       <Dropdown

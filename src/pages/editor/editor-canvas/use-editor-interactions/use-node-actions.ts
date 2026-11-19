@@ -147,6 +147,11 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
             },
             { key: 'delete', label: t('toolbar.delete'), shortcut: 'Delete', icon: createElement(EDITOR_ICONS.delete, { size: 14 }), danger: true, onClick: () => {
               if (!refs.commandQueue || !refs.store) return;
+              // 生成中的节点可以移动，但不能删除（任务仍在跑，删除会断开任务归属并丢结果）。
+              if (((node?.data ?? {}) as Record<string, unknown>).status === 'loading') {
+                message.warning(t('editor.runningNodeCannotDelete', '生成中的节点不能删除（可移动）'));
+                return;
+              }
               // 2026-11-04 修复「删除后残留」: 与键盘 Delete / 层级面板删除统一为物理移除
               // (ReplaceSceneCommand 从文档中移除节点), 不再留 _deleted 墓碑;
               // 无 group 插件时回退 RemoveNodeCommand(画布/层级面板均已过滤墓碑节点)

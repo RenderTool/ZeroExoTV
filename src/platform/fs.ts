@@ -11,7 +11,9 @@
  * File System Access 授权；离线时走原授权路径，二者互斥、不产生双写。
  */
 
-import { httpFs, httpFsReady, switchHttpFsRoot } from './http-fs.js';
+import { httpFs, httpFsOnline, httpFsReady, switchHttpFsRoot, locateHttpFsRoot, statHttpFsRoot, migrateHttpFsRoot, markHttpFsOffline, dataRootExpectsService, markDataRootOrigin, type PickedDataRoot } from './http-fs.js';
+
+export type { PickedDataRoot } from './http-fs.js';
 
 const DB_NAME = 'zeroexo-local';
 const DB_STORE = 'handles';
@@ -112,7 +114,15 @@ export async function pickRoot(suggestPath?: string): Promise<string> {
   const h = await picker.call(window, options);
   root = h;
   await idbPut(h, ROOT_KEY);
+  // 服务离线时用户选的目录才是数据权威；服务在线时数据权威恒在服务端，不能改口径
+  if (!httpFsOnline()) markDataRootOrigin('browser');
   return h.name;
+}
+
+/** 已保存的上次目录名（首启门拿它显示「继续使用 D:\Test」，避免让用户再走一遍选目录流程） */
+export async function getSavedRootName(): Promise<string | null> {
+  const saved = await idbGet<DirHandle>(ROOT_KEY).catch(() => null);
+  return saved?.name ?? null;
 }
 
 /** 页面启动时恢复授权；ask=true 时可在一次用户手势内请求补授权（HTTP 模式恒可用） */
@@ -147,6 +157,86 @@ export async function switchDataRoot(next: string): Promise<string> {
   return info.dataRoot;
 }
 
+/** 页面写进所选目录的一次性探针文件：服务端靠它的内容反查绝对路径 */
+const ROOT_PROBE_FILE = '.zeroexo-root-probe';
+
+/**
+ * 选新数据根（2026-11-17 用户要求）：用**浏览器自带的目录选择器**——线上就是这套资源管理器
+ * 风格的选择框，由浏览器弹出，一定在页面之上，不会出现「窗口压在浏览器背后」的问题。
+ * 浏览器拿不到绝对路径，选完在目录里写一次性探针，再让本地服务反查真实路径。
+ * - 用户取消：返回 null
+ * - 本地服务离线：返回 'offline'（调用方改走纯浏览器目录授权）
+ */
+export async function pickDataRoot(): Promise<PickedDataRoot | null | 'offline'> {
+  if (!httpFsOnline()) return 'offline';
+  type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };
+  const picker = (window as unknown as { showDirectoryPicker?: (o: PickerOptions) => Promise<DirHandle> }).showDirectoryPicker;
+  if (!picker) throw new Error('当前浏览器不支持 File System Access API（请用 Chromium 内核浏览器）');
+  let handle: DirHandle;
+  try {
+    handle = await picker.call(window, { id: 'zeroexo-data-root', mode: 'readwrite' });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return null;
+    throw e;
+  }
+  const token = `zx${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  let probeWritten = false;
+  try {
+    const fh = await handle.getFileHandle(ROOT_PROBE_FILE, { create: true });
+    const w = await (fh as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable();
+    await w.write(token);
+    await w.close();
+    probeWritten = true;
+    const path = await locateHttpFsRoot(handle.name, token);
+    return await statHttpFsRoot(path);
+  } finally {
+    if (probeWritten) {
+      try { await handle.removeEntry(ROOT_PROBE_FILE); } catch { /* 清理失败不影响选择结果 */ }
+    }
+  }
+}
+
+/**
+ * 选任意目录并反查绝对路径（给 MCP 安装目录用）：只写一次性探针取真实路径，
+ * 不切换数据根、不落浏览器授权句柄。
+ */
+export async function pickDirectoryPath(): Promise<string | null> {
+  await httpFsReady;
+  if (!httpFs.online) throw new Error('本地数据服务离线：请先启动本地服务再选安装目录');
+  type PickerOptions = { id?: string; mode?: 'read' | 'readwrite'; startIn?: string | { mode: 'path'; path: string | string[] } };
+  const picker = (window as unknown as { showDirectoryPicker?: (o: PickerOptions) => Promise<DirHandle> }).showDirectoryPicker;
+  if (!picker) throw new Error('当前浏览器不支持 File System Access API（请用 Chromium 内核浏览器）');
+  let handle: DirHandle;
+  try {
+    handle = await picker.call(window, { id: 'zeroexo-mcp-dir', mode: 'readwrite' });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return null;
+    throw e;
+  }
+  const token = `zxd${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  let probeWritten = false;
+  try {
+    const fh = await handle.getFileHandle(ROOT_PROBE_FILE, { create: true });
+    const w = await (fh as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable();
+    await w.write(token);
+    await w.close();
+    probeWritten = true;
+    return await locateHttpFsRoot(handle.name, token);
+  } finally {
+    if (probeWritten) {
+      try { await handle.removeEntry(ROOT_PROBE_FILE); } catch { /* 清理失败不影响选择结果 */ }
+    }
+  }
+}
+
+/** 迁移数据根：旧根数据复制到新根后切根，网页与 MCP 同时生效 */
+export async function migrateDataRoot(from: string, to: string): Promise<string> {
+  await httpFsReady;
+  if (!httpFs.online) throw new Error('当前未连接本地数据服务：无法迁移数据目录');
+  const info = await migrateHttpFsRoot(from, to);
+  try { localStorage.setItem(SAVED_DATA_ROOT_KEY, info.dataRoot); } catch { /* 隐私模式忽略 */ }
+  return info.dataRoot;
+}
 /** 启动时把上次切换的目录重新应用到本地服务（服务重启后仍生效） */
 export async function applySavedDataRoot(): Promise<void> {
   await httpFsReady;
@@ -177,18 +267,32 @@ export async function getRootPathHint(): Promise<string | null> {
   return idbGet<string>(ROOT_PATH_HINT_KEY);
 }
 
+/**
+ * 数据根状态（2026-11-18 授权弹框修复）：读取失败时唯一可判断「到底是哪一环」的入口。
+ * - ok：有读写通道（服务在线，或已授权目录）；
+ * - service-offline：数据权威在本地服务（本次连过 / 上次就是服务模式），服务掉线 —— 不是授权问题；
+ * - unauthorized：确实没有可读写的数据目录，该弹授权框。
+ */
+export type DataRootState = 'ok' | 'service-offline' | 'unauthorized';
+
+export async function dataRootState(): Promise<DataRootState> {
+  await httpFsReady;
+  if (httpFs.online) return 'ok';
+  // 服务模式的数据根只认 8790：离线就走「服务离线」提示，绝不退化成「请选择目录」
+  if (dataRootExpectsService()) return 'service-offline';
+  if (root) return (await probe(root, 'readwrite')) === 'granted' ? 'ok' : 'unauthorized';
+  const saved = await idbGet<DirHandle>(ROOT_KEY);
+  if (!saved) return 'unauthorized';
+  if ((await probe(saved, 'readwrite')) !== 'granted') return 'unauthorized';
+  root = saved;
+  return 'ok';
+}
+
 /** 是否已拿到可读写的存储（HTTP 实体服务在线 或 目录授权有效） */
 export async function isAuthorized(): Promise<boolean> {
   // 必须等启动期探测落定：否则 FS_DRIVER 的 _initStorage 会在 httpFs 上线前判「未授权」，
   // localforage 实例一旦降级到 IndexedDB 就永久粘滞（cas: 键再也读不到磁盘文件）。
-  await httpFsReady;
-  if (httpFs.online) return true;
-  if (root) return (await probe(root, 'readwrite')) === 'granted';
-  const saved = await idbGet<DirHandle>(ROOT_KEY);
-  if (!saved) return false;
-  if ((await probe(saved, 'readwrite')) !== 'granted') return false;
-  root = saved;
-  return true;
+  return (await dataRootState()) === 'ok';
 }
 
 export async function getRoot(): Promise<DirHandle> {
@@ -244,11 +348,15 @@ async function fileAt(path: string): Promise<FileSystemFileHandle | null> {
 }
 
 export async function ensureDir(path: string): Promise<void> {
+  // 启动期必须等本地服务探测落定：否则 effect 里的首批读写在 httpFs 上线前
+  // 落到未授权的 FSA 分支，整页表现为「刷新后剧本/主体/导演台一直加载中」。
+  await httpFsReady;
   if (httpFs.online) return httpFs.ensureDir(path);
   await walk(path, true);
 }
 
 export async function writeFile(path: string, data: string | Blob): Promise<void> {
+  await httpFsReady;
   if (httpFs.online) {
     if (typeof data !== 'string') data = await data.text();
     await httpFs.writeFile(path, data);
@@ -266,7 +374,15 @@ export async function writeFile(path: string, data: string | Blob): Promise<void
 }
 
 export async function readFile(path: string): Promise<string | null> {
-  if (httpFs.online) return httpFs.readFile(path);
+  await httpFsReady;
+  if (httpFs.online) {
+    try {
+      return await httpFs.readFile(path);
+    } catch {
+      // 本地服务中途被关掉：清掉 online 标记，改走目录授权，避免整页读不到项目/素材
+      markHttpFsOffline();
+    }
+  }
   const fh = await fileAt(path);
   if (!fh) return null;
   const f = await fh.getFile();
@@ -297,6 +413,7 @@ export async function writeJsonIfUnchanged(path: string, value: unknown, expecte
 }
 
 export async function stat(path: string): Promise<{ size: number; lastModified: number } | null> {
+  await httpFsReady;
   if (httpFs.online) return httpFs.stat(path);
   const fh = await fileAt(path);
   if (!fh) return null;
@@ -305,6 +422,7 @@ export async function stat(path: string): Promise<{ size: number; lastModified: 
 }
 
 export async function remove(path: string): Promise<void> {
+  await httpFsReady;
   if (httpFs.online) return httpFs.remove(path);
   const i = path.lastIndexOf('/');
   const dir = i < 0 ? await getRoot() : await walkExisting(path.slice(0, i));
@@ -322,6 +440,7 @@ export interface DirEntry {
 }
 
 export async function listDir(path: string): Promise<DirEntry[]> {
+  await httpFsReady;
   if (httpFs.online) return httpFs.listDir(path);
   const dir = await walkExisting(path);
   if (!dir) return [];
@@ -347,6 +466,7 @@ export interface FileStat {
 
 /** 二进制落盘（同样走 HTTP 服务或 createWritable 全量提交，不留半文件） */
 export async function writeFileBlob(path: string, data: Uint8Array, mimeType = 'application/octet-stream'): Promise<void> {
+  await httpFsReady;
   if (httpFs.online) return httpFs.writeFileBlob(path, data, mimeType);
   const i = path.lastIndexOf('/');
   const dir = i < 0 ? await getRoot() : await walk(path.slice(0, i), true);
@@ -358,7 +478,16 @@ export async function writeFileBlob(path: string, data: Uint8Array, mimeType = '
 
 /** 读为 Blob（objectURL 用）；不存在返回 null */
 export async function readFileHandle(path: string): Promise<Blob | null> {
-  if (httpFs.online) return httpFs.readBlob(path);
+  await httpFsReady;
+  if (httpFs.online) {
+    try {
+      const blob = await httpFs.readBlob(path);
+      if (blob) return blob;
+    } catch {
+      // 数据服务中途关闭 / 端口变了：回落目录授权，不能把「服务掉线」说成「目录未授权」
+      markHttpFsOffline();
+    }
+  }
   const fh = await fileAt(path);
   if (!fh) return null;
   return fh.getFile();
@@ -371,6 +500,7 @@ export async function removeFile(path: string): Promise<void> {
 
 /** 批量取一个目录直属文件的 stat（递归由调用方按目录层次组织，避免深目录卡顿） */
 export async function statMany(dirPath: string): Promise<FileStat[]> {
+  await httpFsReady;
   if (httpFs.online) return httpFs.statMany(dirPath);
   const dir = await walkExisting(dirPath);
   if (!dir) return [];

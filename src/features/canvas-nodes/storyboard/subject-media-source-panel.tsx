@@ -38,7 +38,11 @@ export const SubjectMediaSourcePanel = memo(function SubjectMediaSourcePanel({
       projectId={projectId}
       anchorEl={anchorEl}
       acceptKinds={['image', 'audio']}
-      initialTab="canvas"
+      // 2026-11-17 用户实测：主体换图/首次导入被逼着先「导入资产」。
+      // 这个面板的上传本来就只落 CAS + 挂主体状态引用（不写资产库），
+      // 所以直接把「上传」页签挂到第一位：没有图时默认停在「上传」，有图时停在「画布」。
+      tabs={['subject', 'historyCanvas', 'upload', 'canvas']}
+      initialTab={current ? 'historyCanvas' : 'upload'}
       current={current && current.kind !== 'video' ? { storageKey: current.storageKey, kind: current.kind } : null}
       onRemoveCurrent={onRemove}
       uploadHint={t('subject.uploadScopedHint', '手动上传仅归属该主体，不进入公共/项目资产库')}

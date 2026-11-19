@@ -23,6 +23,8 @@ import {
 } from '@/services/sync/sync-service.js';
 import { useSyncStatus } from '@/services/sync/sync-store.js';
 import { createCanvasScript } from '@/services/canvas-script.js';
+import { purgeProjectData } from '@/entities/project-purge.js';
+import { purgeOrphanGuides } from '@/entities/guide-purge.js';
 
 export interface UseProjectsResult {
   projects: CanvasProjectMeta[];
@@ -91,6 +93,24 @@ export function useProjects(): UseProjectsResult {
       }
       // 删除项目时同步清理关联的资源文件(图片/视频/音频)
       await cleanupProjectResourcesBatch(ids);
+      // 目录级联（2026-11-16 用户要求）：assets/<pid> 与 projects/<pid> 必须与项目一起删，
+      // 否则删完项目还留着垃圾目录；引导缓存随导演台 workbench 一并回收
+      for (const id of ids) {
+        try {
+          await purgeProjectData(id);
+        } catch (err) {
+          console.warn(`[useProjects] purge project data failed for ${id}:`, err);
+        }
+      }
+      // 删完后回收「一个项目都不再引用」的引导缓存：导演台帧一个几百 MB，
+      // 只删项目不回收的话 media/guides 会一直涨（2026-11-17 用户报障 2GB 残留）
+      try {
+        const orphan = await purgeOrphanGuides();
+        if (orphan.removed > 0) console.info(`[guide-purge] 已回收 ${orphan.removed} 个无引用引导缓存`);
+        if (orphan.skipped) console.warn(`[guide-purge] 本轮跳过：${orphan.skipped}`);
+      } catch (err) {
+        console.warn('[useProjects] purge orphan guides failed:', err);
+      }
       await storeDelete(ids);
       setProjects((prev) => prev.filter((p) => !ids.includes(p.id)));
     } catch (err) {

@@ -42,6 +42,9 @@ export interface UseVideoStagePropsInput {
   onSequenceSeek: (time: number) => void;
   /** 全屏播放范围选择 */
   onFullscreenPlay: (mode: 'all' | 'clip') => void;
+  /** 连播：单段播完推进下一段（关闭单段循环） */
+  sequenceChain?: boolean;
+  onPlaybackEnded?: () => void;
   /** 新建片段回调 */
   onInsertAt: (afterShotId: string | null) => void;
   /** 生成视频回调（仅 completed 片态可用） */
@@ -76,8 +79,9 @@ export function useWorkbenchVideoStageProps(input: UseVideoStagePropsInput): Sto
     onTogglePlay,
     onSequenceSeek,
     onFullscreenPlay,
+    sequenceChain,
+    onPlaybackEnded,
     onInsertAt,
-    
     onGenerate,
     onStop,
     theme,
@@ -124,7 +128,7 @@ export function useWorkbenchVideoStageProps(input: UseVideoStagePropsInput): Sto
 
     // 占位黑幕卡：当前片段没有媒体时才出（未生成的占位片段）
     const placeholderPrompt = !activeMediaStorageKey && currentShot
-      ? (currentShot.videoPrompt || currentShot.imagePrompt || currentShot.description || '')
+      ? (currentShot.imagePrompt || currentShot.videoPrompt || currentShot.description || '')
       : undefined;
     const placeholderTitle = currentShot
       ? `#${currentShot.number}${currentShot.shotType ? ` ${currentShot.shotType}` : ''}`
@@ -151,6 +155,8 @@ export function useWorkbenchVideoStageProps(input: UseVideoStagePropsInput): Sto
       placeholderPrompt,
       placeholderTitle,
       onFullscreenPlay,
+      sequenceChain,
+      onPlaybackEnded,
       canPlayClip: !!currentShot,
       theme,
       isDark,
@@ -168,7 +174,11 @@ export function useWorkbenchVideoStageProps(input: UseVideoStagePropsInput): Sto
     onSequenceSeek,
     onFullscreenPlay,
     onInsertAt,
-    
+    // 2026-11-19 修「连播不推进」：这几个 props 之前漏在依赖数组里，memo 一直返回
+    // 第一帧的旧对象 → sequenceChain 永远是 false、onPlaybackEnded 永远不接线，
+    // <video> 就一直在 loop 里循环第一段。
+    sequenceChain,
+    onPlaybackEnded,
     onGenerate,
     onStop,
     theme,

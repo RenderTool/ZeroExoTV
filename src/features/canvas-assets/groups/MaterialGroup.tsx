@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Dropdown, Input, Modal, Tooltip } from 'antd';
+import { App, Button, Dropdown, Tooltip } from 'antd';
 import { CheckSquare, Download, FileSearch, Pencil, Send, Square, Trash2, X } from 'lucide-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -29,9 +29,11 @@ import { HistoryGroup } from './HistoryGroup.js';
 import { useSubjectTotalCount } from '@/features/canvas-nodes/storyboard/use-storyboard-subject-data.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { AddTile, CategoryChips, EmptyState, SearchBox, SkeletonGrid, SCROLL_AREA_STYLE, ToolbarRow } from '../components/common.js';
 import { FocusScrollIntoView } from '@/features/canvas-assets/components/focus-scroll-into-view.js';
-import { isAuthorized, pickRoot, restoreRoot, withPermissionPrompt } from '@/platform/fs.js';
+import { dataRootState, pickRoot, restoreRoot, withPermissionPrompt, type DataRootState } from '@/platform/fs.js';
+import { probeHttpFs } from '@/platform/http-fs.js';
 import { reloadWithDisk } from '@/platform/boot.js';
 
 const KIND_OPTIONS = [
@@ -42,11 +44,13 @@ const KIND_OPTIONS = [
   { key: 'text', labelKey: 'assetLibrary.filterText' },
 ];
 
-export function MaterialGroup({ store, theme, lockedScope }: {
+export function MaterialGroup({ store, theme, lockedScope, hideCapsules }: {
   store: CanvasAssetsPanelStore;
   theme: ThemeConfig;
   /** 独立入口锁定的作用域：全局资产 / 主体；不再显示混合胶囊 */
   lockedScope?: 'library' | 'subject';
+  /** 由外层统一胶囊行承载切换时，不重复渲染「公共 / 本项目 / 开源库 / 主体」这一排 */
+  hideCapsules?: boolean;
 }): React.ReactElement {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -64,11 +68,11 @@ export function MaterialGroup({ store, theme, lockedScope }: {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 空列表不等于「没有素材」：数据目录未授权 / 8790 离线时写入与读取都会静默失败。
-  // 这里把真实状态显示出来，并提供一次用户手势即可恢复的入口（与 MCP 服务无关）。
-  const [storageState, setStorageState] = useState<{ authorized: boolean } | null>(null);
+  // 2026-11-18：按 dataRootState 分成两种原因分别提示——服务离线不许说成目录未授权。
+  const [storageState, setStorageState] = useState<{ state: DataRootState } | null>(null);
   useEffect(() => {
     const check = (): void => {
-      void isAuthorized().catch(() => false).then((authorized) => setStorageState({ authorized }));
+      void dataRootState().catch((): DataRootState => 'unauthorized').then((state) => setStorageState({ state }));
     };
     check();
     window.addEventListener('focus', check);
@@ -82,6 +86,12 @@ export function MaterialGroup({ store, theme, lockedScope }: {
     } catch (err) {
       message.warning(`没能恢复目录授权：${err instanceof Error ? err.message : String(err)}`);
     }
+  }, [message]);
+  /** 服务离线：探测 8790，通了整页刷新（localforage 驱动运行中不换） */
+  const reconnectService = useCallback(async () => {
+    const info = await probeHttpFs();
+    if (info) reloadWithDisk();
+    else message.warning('本地数据服务仍未响应：请在项目目录执行 pnpm fs（或 pnpm dev）后重试');
   }, [message]);
 
   // 2026-11-05 约定：抽屉用户资产（公共/本项目）补齐「发送到导演台」，与开源库同一执行器
@@ -149,7 +159,10 @@ export function MaterialGroup({ store, theme, lockedScope }: {
   }));
 
   // 页签按项目恢复：进入抽屉素材分组时读取 canvasDrawer 切片（与写入同一 view-prefs 存储键）
-  const projectId = useCanvasTabStore((s) => s.slotBindings.script);
+  // 独立入口（只锁公共资产/主体两段）里 slotBindings.script 可能还没绑定，回退到当前画布 id，
+  // 否则主体计数拿不到项目 → 胶囊上永远没有数字（其它分段都有）。
+  const boundProjectId = useCanvasTabStore((s) => s.slotBindings.script);
+  const projectId = boundProjectId ?? getCurrentCanvasId() ?? null;
   // 胶囊「主体 N」总数（与主体库列表同源；2026-11-06 用户反馈：其它三段有计数，主体段没有）
   const subjectCount = useSubjectTotalCount(projectId);
   const hydratedProjectRef = useRef<string | null>(null);
@@ -160,9 +173,12 @@ export function MaterialGroup({ store, theme, lockedScope }: {
     if (saved && saved !== store.materialScopeTab) store.setMaterialScopeTab(saved);
   }, [projectId, store.materialScopeTab, store.setMaterialScopeTab]);
 
-  // 独立入口：锁定为全局资产/主体，不再展示混合分段
+  // 独立入口：只锁定首次进入的分段，之后用户可以靠顶部 Tab 在「公共资产 / 主体」之间自由切换
+  const lockedAppliedRef = useRef(false);
   useEffect(() => {
-    if (lockedScope && store.materialScopeTab !== lockedScope) store.setMaterialScopeTab(lockedScope);
+    if (!lockedScope || lockedAppliedRef.current) return;
+    lockedAppliedRef.current = true;
+    if (store.materialScopeTab !== lockedScope) store.setMaterialScopeTab(lockedScope);
   }, [lockedScope, store.materialScopeTab, store.setMaterialScopeTab]);
 
   /** 图片资产「编辑」：交给编辑器页在画布建节点并打开图片编辑页签（结果落回画布） */
@@ -180,27 +196,23 @@ export function MaterialGroup({ store, theme, lockedScope }: {
     });
   }, []);
 
-  const capsuleBar = lockedScope ? (
-    <div style={{ padding: '10px 20px 0', fontSize: 13, fontWeight: 600, color: theme.toolbar.text, flexShrink: 0 }}>
-      {lockedScope === 'subject'
-        ? t('assetLibrary.scopeCapsuleSubject', '主体')
-        : t('assetLibrary.scopeCapsuleLibrary', '公共资产')}
-    </div>
-  ) : (
+  const capsuleBar = (
     // 2026-11-04 约定（口径翻案）：「公共资产 N / 本项目 N」胶囊只放在这里——
     // 抽屉素材分组顶部、类型筛选行之上。资产库工具栏/主页/项目弹窗一律不出现。复用同一 ScopeCapsuleTabs。
     // 2026-11-05 开源库接入：胶囊扩为三段「公共 / 本项目 / 开源库」，开源库只读展示不与用户数据混排。
     // 2026-11-05 抽屉接主体：追加第四段「主体」，同段渲染主体库三级页面（SubjectGroup）。
+    // 2026-11-17 用户要求：独立入口不再用「丑陋的标题文本」，主体与公共资产合并成 Tab 互切。
     <div style={{ padding: '8px 20px 0', flexShrink: 0 }}>
       <ScopeCapsuleTabs
         value={store.materialScopeTab}
         onChange={store.setMaterialScopeTab}
         libraryCount={store.materialScopeCounts.library}
-        projectCount={store.materialScopeCounts.project}
+        projectCount={lockedScope ? null : store.materialScopeCounts.project}
         showSubject
         subjectCount={subjectCount}
-        showDirector
+        showDirector={!lockedScope}
         directorCount={store.directorCount}
+        only={lockedScope ? ['library', 'subject'] : undefined}
         theme={theme}
       />
     </div>
@@ -210,7 +222,7 @@ export function MaterialGroup({ store, theme, lockedScope }: {
   if (store.materialScopeTab === 'subject') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        {capsuleBar}
+        {!hideCapsules && capsuleBar}
         <SubjectGroup theme={theme} />
       </div>
     );
@@ -219,7 +231,7 @@ export function MaterialGroup({ store, theme, lockedScope }: {
   if (store.materialScopeTab === 'director') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        {capsuleBar}
+        {!hideCapsules && capsuleBar}
         <HistoryGroup store={store} theme={theme} forcedSource="director" />
       </div>
     );
@@ -234,24 +246,13 @@ export function MaterialGroup({ store, theme, lockedScope }: {
       style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
     >
       {/* 分段胶囊：见上方 capsuleBar（共用于素材/主体分段） */}
-      {capsuleBar}
+      {!hideCapsules && capsuleBar}
 
       {/* 开源库只读作用域：独立渲染（分页 60/页、18+ 门控、按需下载落 CAS 后可发送），不走用户素材编排 */}
         <>
-      {/* 主操作统一放顶部（2026-11-06 用户指令：原来埋在最底下每次找半天） */}
-      <div style={{ padding: '12px 20px 4px', flexShrink: 0 }}>
-        <AddTile label={t('assetLibrary.uploadMaterial', { defaultValue: '上传素材' })} onClick={() => fileInputRef.current?.click()} theme={theme} />
-      </div>
-      <ToolbarRow>
-        <CategoryChips
-          items={kindOptions}
-          active={materialKind}
-          onChange={(k) => setMaterialKind((k ?? 'all') as any)}
-          theme={theme}
-        />
-      </ToolbarRow>
-      {/* 搜索统一在分类标签下方；多选开关紧跟搜索（与资产库页面 2026-08-29 约定同一落位） */}
-      <ToolbarRow style={{ paddingTop: 0 }}>
+      {/* 统一顺序（2026-11-16 用户指令）：搜索栏 + 批量操作按钮 → 分类标签 → 内容 */}
+      {/* 搜索 + 多选开关位于分类标签上方（与资产库页面同一落位） */}
+      <ToolbarRow style={{ paddingTop: 10 }}>
         <SearchBox value={search} onChange={setSearch} placeholder={t('assetLibrary.searchPlaceholder')} theme={theme} />
         <Tooltip title={assetMultiSelect ? t('common.multiSelectExit', '退出多选') : t('common.multiSelect', '多选')}>
           <Button
@@ -264,6 +265,18 @@ export function MaterialGroup({ store, theme, lockedScope }: {
           />
         </Tooltip>
       </ToolbarRow>
+      <ToolbarRow style={{ paddingTop: 0 }}>
+        <CategoryChips
+          items={kindOptions}
+          active={materialKind}
+          onChange={(k) => setMaterialKind((k ?? 'all') as any)}
+          theme={theme}
+        />
+      </ToolbarRow>
+      {/* 主操作统一放内容区顶部 */}
+      <div style={{ padding: '10px 20px', flexShrink: 0 }}>
+        <AddTile label={t('assetLibrary.uploadMaterial', { defaultValue: '上传素材' })} onClick={() => fileInputRef.current?.click()} theme={theme} />
+      </div>
       {/* 批量条：只在多选态出现，形态与资产库页面多选栏一致（左侧计数、右侧动作） */}
       {assetMultiSelect && (() => {
         const noneSelected = assetSelectedAssets.length === 0;
@@ -312,20 +325,35 @@ export function MaterialGroup({ store, theme, lockedScope }: {
         {loadingAssets && assets.length === 0 ? (
           <SkeletonGrid theme={theme} />
         ) : assets.length === 0 ? (
-          storageState && !storageState.authorized ? (
-            <div data-storage-warning style={{ padding: '36px 24px', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
-              <div style={{ fontSize: 13, color: theme.toolbar.text, marginBottom: 8 }}>数据目录未就绪，素材无法写入或读取</div>
-              <div style={{ lineHeight: 1.8 }}>
-                本地数据服务（8790）未在线，且浏览器目录授权未恢复（刷新后需重新授权）。<br />
-                这是浏览器的目录授权，与 MCP 服务无关。
+          storageState && storageState.state !== 'ok' ? (
+            storageState.state === 'service-offline' ? (
+              <div data-storage-warning style={{ padding: '36px 24px', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
+                <div style={{ fontSize: 13, color: theme.toolbar.text, marginBottom: 8 }}>本地数据服务离线，素材无法读取</div>
+                <div style={{ lineHeight: 1.8 }}>
+                  素材都在 8790 本地数据服务的数据根里，服务不在线就全是空的——不是没有素材，也不用重新选目录。
+                </div>
+                <Button size="small" type="primary" style={{ marginTop: 14 }} onClick={() => void reconnectService()}>
+                  重新连接
+                </Button>
+                <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.7 }}>
+                  服务没起来就在项目目录执行 pnpm fs（或 pnpm dev），起来后点「重新连接」。
+                </div>
               </div>
-              <Button size="small" type="primary" style={{ marginTop: 14 }} onClick={() => void reauthorize()}>
-                重新授权 / 选择目录
-              </Button>
-              <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.7 }}>
-                也可以用 pnpm dev 启动本地数据服务，或到「服务 → 数据目录」重新选择文件夹。
+            ) : (
+              <div data-storage-warning style={{ padding: '36px 24px', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
+                <div style={{ fontSize: 13, color: theme.toolbar.text, marginBottom: 8 }}>数据目录未就绪，素材无法写入或读取</div>
+                <div style={{ lineHeight: 1.8 }}>
+                  浏览器目录授权未恢复（刷新后需要点一次）。<br />
+                  这是浏览器的目录授权，与 MCP 服务无关。
+                </div>
+                <Button size="small" type="primary" style={{ marginTop: 14 }} onClick={() => void reauthorize()}>
+                  重新授权 / 选择目录
+                </Button>
+                <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.7 }}>
+                  也可以到「服务 → 数据目录」重新选择文件夹。
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <EmptyState theme={theme} />
           )
@@ -406,7 +434,12 @@ export function MaterialGroup({ store, theme, lockedScope }: {
         multiple
         accept="image/*,video/*,audio/*,text/plain,.txt,.md"
         style={{ display: 'none' }}
-        onChange={(e) => { if (e.target.files) void handleUpload(e.target.files); e.target.value = ''; }}
+        onChange={(e) => {
+          // 先固定文件列表再清空：隐藏 input 的 FileList 是活的，清空会把已传引用一起清成 0 个
+          const picked = e.target.files ? Array.from(e.target.files) : [];
+          e.target.value = '';
+          if (picked.length > 0) void handleUpload(picked);
+        }}
       />
 
       {/* 素材详情统一走 MediaLightbox 壳（2026-11-05：文本只读，不再弹旧详情面板） */}
@@ -435,28 +468,7 @@ export function MaterialGroup({ store, theme, lockedScope }: {
         />
       )}
 
-      {/* 重命名弹窗（素材/提示词共用） */}
-      <Modal
-        title={t('assetLibrary.renameTitle', { defaultValue: '重命名' })}
-        open={store.renameItemOpen}
-        onCancel={() => store.setRenameItemOpen(false)}
-        onOk={() => void store.handleRenameItem()}
-        okText={t('common.confirm', { defaultValue: '确认' })}
-        cancelText={t('common.cancel', { defaultValue: '取消' })}
-        centered
-        width="calc(100vw - 32px)"
-        style={{ maxWidth: 420 }}
-        destroyOnHidden
-      >
-        <Input
-          value={store.renameItemName}
-          onChange={(e) => store.setRenameItemName(e.target.value)}
-          placeholder={t('assetLibrary.renamePlaceholder', { defaultValue: '请输入新名称' })}
-          maxLength={50}
-          autoFocus
-          onPressEnter={() => void store.handleRenameItem()}
-        />
-      </Modal>
+      {/* 重命名弹窗已提到 CanvasAssetsPanel 根部（历史/主体分组也要能弹） */}
     </UploadDropZone>
   );
 }

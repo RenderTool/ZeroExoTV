@@ -10,6 +10,7 @@ import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint
 import {
   cancelZeroexoJob,
   fetchZeroexoJob,
+  friendlyLocalJobError,
   probeZeroexoPlugin,
   submitQwenImageJob,
   uploadZeroexoReference,
@@ -20,7 +21,7 @@ import {
 } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
-import { readLastSeed, recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
+import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
 import { clampQwenSize, QWEN_DEFAULT_STEPS } from '@/features/canvas-tabs/qwen-limits.js';
 import {
   createPreviewClientId,
@@ -90,6 +91,21 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * 首次提交自动重试（2026-11-17 用户实测「图生图要点一次重试才生效」）：
+ * 空闲 keep-alive 被网关静默关掉时，浏览器对 POST 不重试，第一次必然报 Failed to fetch。
+ * 这里对上传 / 提交各补一次重试，用户点一次就能出图。
+ */
+async function withSubmitRetry<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) throw err;
+    await sleep(800, signal);
+    return fn();
+  }
+}
+
 async function readImageSize(blob: Blob): Promise<{ width: number; height: number }> {
   try {
     const bitmap = await createImageBitmap(blob);
@@ -136,6 +152,7 @@ export function buildQwenEditPrompt(input: {
   hasInputImage: boolean;
   hasMask: boolean;
   transparentBackground: boolean;
+  referenceCount?: number;
 }): string {
   // 官方局部编辑原理：遮罩不是 latent mask，而是把区域标红后作为 image_1 的一部分；
   // 服务端模板再按同一遮罩把原图合成回来。这里把指令限定在红区，并要求去掉标记。
@@ -145,7 +162,35 @@ export function buildQwenEditPrompt(input: {
   const withAlpha = input.transparentBackground
     ? `${base} The background must be transparent; output a PNG with an alpha channel.`
     : base;
-  return input.hasInputImage ? `参考图1：${withAlpha}` : withAlpha;
+  if (!input.hasInputImage) return withAlpha;
+  const count = Math.max(1, Math.min(16, input.referenceCount ?? 1));
+  if (count === 1) return `参考图1：${withAlpha}`;
+  const labels = Array.from({ length: count }, (_, i) => `参考图${i + 1}`).join('、');
+  return `${labels}：${withAlpha}`;
+}
+
+/**
+ * 出图尺寸（2026-11-17 用户纠正，硬性）：参考图只做生成引导，不参与尺寸计算。
+ * 只有显式「跟随原图」(sizeMode='source') 才用输入图尺寸；其余一律用请求尺寸。
+ */
+export function resolveQwenTargetSize(input: {
+  width?: number;
+  height?: number;
+  params?: Record<string, unknown>;
+  sourceSize?: { width: number; height: number } | null;
+  /** 有效参考图数量：多图参考生成没有「原图」概念 */
+  referenceCount?: number;
+}): { width: number; height: number } {
+  const params = input.params ?? {};
+  const requested = clampQwenSize(
+    num(input.width ?? params.width, 1344),
+    num(input.height ?? params.height, 1008),
+  );
+  const sourceSize = input.sourceSize;
+  if (sourceSize && params.sizeMode === 'source' && (input.referenceCount ?? 0) === 1) {
+    return clampQwenSize(sourceSize.width, sourceSize.height);
+  }
+  return requested;
 }
 
 export async function generateLocalQwenImage(req: LocalImageRequest): Promise<LocalImageResult> {
@@ -153,8 +198,14 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
   const ep = useComfyuiEndpointStore.getState();
   const base = ep.address.replace(/\/+$/, '');
   if (!base) throw new Error('尚未连接 ComfyUI：先在右上角连接本机 ComfyUI');
-  if (!ep.connected && !(await probeZeroexoPlugin(base))) {
-    throw new Error('本机 ComfyUI 未连接或 ZeroExo 插件不在线');
+  if (!ep.connected) {
+    // 首次点击时插件探测常因冷启动/空闲连接失败，表现为「再点一次就好」。这里补一次探测。
+    let ok = await probeZeroexoPlugin(base);
+    if (!ok) {
+      await sleep(600);
+      ok = await probeZeroexoPlugin(base);
+    }
+    if (!ok) throw new Error('本机 ComfyUI 未连接或 ZeroExo 插件不在线');
   }
   // 空闲后 keep-alive 会被网关静默关掉，浏览器不重试 POST → 首次提交必报 Failed to fetch。
   // 先打一个 GET 预热，后面的上传 / 提交就走新连接（否则表现为「点两次才生成」）。
@@ -162,15 +213,18 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
 
   const params = req.params ?? {};
   const source = req.referenceImages?.[0];
-  const requested = clampQwenSize(num(params.width, 1344), num(params.height, 1008));
-  // 2026-11-13 修复 tensor mismatch：有参考图时，输出尺寸必须与输入图完全一致（都按 16 对齐、≤2K）。
-  // 以前「跟随原图」把 width/height 传 undefined，服务端回退 1024×1024，输入却是别的尺寸 → latent 对不上。
+  // 2026-11-17 用户实测「设了 16:9 2MP 出图永远 1:1」：参考图只做生成引导，
+  // 它的尺寸绝不参与出图尺寸计算。只有显式选择「跟随原图」(sizeMode='source') 才按原图；
+  // 其余一律用请求尺寸（参数面板的 size / aspect + 百万像素换算结果）。
   const sourceBlob = source ? await dataUrlBlob(source) : null;
   const sourceSize = sourceBlob ? await readImageSize(sourceBlob) : null;
-  const followSource = Boolean(sourceSize) && params.sizeMode !== 'custom';
-  const target = followSource && sourceSize
-    ? clampQwenSize(sourceSize.width, sourceSize.height)
-    : requested;
+  const target = resolveQwenTargetSize({
+    width: req.width,
+    height: req.height,
+    params,
+    sourceSize,
+    referenceCount: req.referenceImages?.length ?? 0,
+  });
   const outWidth = target.width;
   const outHeight = target.height;
   const clientId = req.resume?.clientId ?? createPreviewClientId();
@@ -189,27 +243,40 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
     let jobId = req.resume?.jobId ?? '';
     let state: ZeroexoJobState = 'queued';
     if (!req.resume) {
-      // 输入图一律缩放到与输出完全相同的尺寸（含遮罩），避免 Qwen latent 尺寸不一致
-      const inputSource = source ? await fitDataUrlToSize(source, outWidth, outHeight) : undefined;
+      // 参考图原样上传：只做生成引导，绝不按出图尺寸拉伸（拉伸会改变主体比例）；
+      // 出图尺寸由 width/height 决定，Qwen 编码器自己按 resolution=0 处理参考图尺寸。
       let inputName = '';
-      if (inputSource) {
-        const blob = await dataUrlBlob(inputSource);
+      const extraNames: string[] = [];
+      if (source) {
+        const blob = await dataUrlBlob(source);
         if (!blob) throw new Error('输入图读取失败');
-        inputName = (await uploadZeroexoReference(base, blob, 'zx_qwen_input.png')) ?? '';
-        if (!inputName) throw new Error('输入图上传 ComfyUI 失败');
+        // 上传前再预热一次：把可能已被网关关掉的空闲连接换成新连接
+        await warmZeroexoConnection(base);
+        inputName = await withSubmitRetry(() => uploadZeroexoReference(base, blob, 'zx_qwen_input.png'), req.signal) ?? '';
+        // 有参考图却上传失败 = 静默退化成文生图（用户实测「不 @图片就不带参考图」的真正原因之一）。
+        // 这里必须报错，不能悄悄按文生图跑。
+        if (!inputName) throw new Error('参考图上传 ComfyUI 失败（连接被重置），已阻止退化成文生图，请重试');
+        // 多图参考：连入的每一张都按槽位顺序上传并交给模型，用不用是模型自己的事
+        // 参考图不再缩放：只做引导，拉伸会改变主体比例；尺寸一律由请求参数决定
+        for (const [i, extra] of (req.referenceImages ?? []).slice(1, 16).entries()) {
+          const b = await dataUrlBlob(extra);
+          if (!b) continue;
+          const name = await withSubmitRetry(() => uploadZeroexoReference(base, b, `zx_qwen_input_${i + 2}.png`), req.signal) ?? '';
+          if (name) extraNames.push(name);
+        }
       }
       let maskName = '';
       if (req.maskDataUrl) {
         const maskFitted = await fitDataUrlToSize(req.maskDataUrl, outWidth, outHeight);
         const blob = await dataUrlBlob(maskFitted);
         if (!blob) throw new Error('遮罩读取失败');
-        maskName = (await uploadZeroexoReference(base, blob, 'zx_qwen_mask.png')) ?? '';
+        maskName = await withSubmitRetry(() => uploadZeroexoReference(base, blob, 'zx_qwen_mask.png'), req.signal) ?? '';
         if (!maskName) throw new Error('遮罩上传 ComfyUI 失败');
       }
 
-      const seed = params.seed === undefined || params.seed === null
-        ? (readLastSeed(getCurrentCanvasId()) ?? resolveSeed(-1))
-        : resolveSeed(params.seed);
+      // 2026-11-17 用户实测「同提示词再生成，返回的还是那张图」：seed 缺省时此前复用「上次种子」，
+      // 同 prompt + 同 seed = 完全同一张图（再落库时按 CAS 去重，看着像没生成）。缺省一律随机。
+      const seed = resolveSeed(params.seed);
       recordLastSeed(seed, getCurrentCanvasId() ?? undefined);
       // 有输入图（图生图 / 遮罩）时提示词点名「参考图1」，否则 Qwen Image 会退化成文生图
       const editPrompt = buildQwenEditPrompt({
@@ -217,8 +284,9 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
         hasInputImage: Boolean(inputName),
         hasMask: Boolean(req.maskDataUrl),
         transparentBackground: params.transparent_background === true,
+        referenceCount: 1 + extraNames.length,
       });
-      const submitted = await submitQwenImageJob(base, {
+      const submitted = await withSubmitRetry(() => submitQwenImageJob(base, {
         clientJobId: `zx_qwen_${Date.now()}`,
         clientId,
         project: getCurrentCanvasId() ?? 'canvas',
@@ -227,17 +295,20 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
           edit_prompt: editPrompt,
           negative_prompt: String(params.negative_prompt ?? ''),
           input_image: inputName,
+          input_images: extraNames.length ? [inputName, ...extraNames].join(',') : '',
           mask_image: maskName,
           seed,
           steps: num(params.steps, QWEN_DEFAULT_STEPS),
           cfg: num(params.cfg, 1),
           denoise: num(params.denoise, 1),
-          edit_mode: !inputName,
+          // 出图尺寸只认参数面板：参考图只做生成引导，不参与尺寸。
+          // 旧逻辑 edit_mode=!inputName，有参考图时会走「参考图 latent」，导致永远按原图比例出图（选 4:3 仍出 1:1）。
+          edit_mode: true,
           use_llm_enhance: params.use_llm_enhance === true,
           width: outWidth ?? 1024,
           height: outHeight ?? 1024,
         },
-      });
+      }), req.signal);
       jobId = submitted.jobId;
       state = submitted.state;
       req.onJobSubmitted?.({ jobId, clientId, base });
@@ -254,7 +325,7 @@ export async function generateLocalQwenImage(req: LocalImageRequest): Promise<Lo
         state = status.state;
         const out = (status.outputs ?? []).find((o) => o.kind === 'image') ?? status.outputs?.[0];
         if (out?.path) outputPath = out.path;
-        if (state === 'error') throw new Error(status.error || '本机图像执行失败（详见 ComfyUI 日志）');
+        if (state === 'error') throw new Error(friendlyLocalJobError(status.error) || '本机图像执行失败（详见 ComfyUI 日志）');
         if (state === 'cancelled') throw new Error('本机图像作业已取消');
       }
     } catch (err) {

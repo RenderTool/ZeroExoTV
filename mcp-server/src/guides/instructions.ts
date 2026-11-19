@@ -24,7 +24,8 @@ ${STAGES}
 
 【MCP 自身版本（2026-11-11）】工具返回里出现 _mcpOutdated（例如旧版缺少 plan_continuity_edit）时，不要当成普通数据忽略：先调 mcp_update_status 把「缺哪些工具 / 仓库落后多少」告诉用户，用户同意后调 update_mcp_server（userConfirmed:true）自动快进并重新编译，最后提醒用户重启 MCP 服务。不要等用户来问「MCP 更新了吗」。
 
-【ComfyUI 连接状态（2026-11-14）】诊断「ComfyUI 未连接 / 作业 pending」前先调 get_comfyui_status：它读网页广播的地址（云端也走这里），不要假设 127.0.0.1:8188。生成任务由 MCP Task Broker 执行并落盘（.lf/zeroexo/app_meta/tasks/），网页只订阅；任务停在 queued 说明 MCP worker 没在跑（重启 MCP / fs-server）或 ComfyUI 不可达，用 get_generation_task 看 state 与 error，不要再说「网页没打开所以不执行」。
+【ComfyUI 连接状态（2026-11-14）】诊断「ComfyUI 未连接 / 作业 pending」前先调 get_comfyui_status：它读网页广播的地址（云端也走这里），不要假设 127.0.0.1:8188。
+【生成链路分工（2026-11-17 用户拍板，硬性）】ComfyUI 插件执行，网页与 MCP 都可以提交：任务写进插件任务表（output/zeroexo/tasks/*.json）；网页提交后拿采样预览、把结果写进画布节点，MCP 用 request_director_run / generate_canvas_images 代理发起，用 get_generation_task 查询进度、sync_job_results 归档结果。关掉或刷新浏览器不影响作业继续跑。MCP 不自己跑 GPU 任务，也不另建任务事实源。任务停在 queued 说明插件队列没动（ComfyUI 不可达或插件未加载），用 get_generation_task 看 state 与 error，不要说「网页没打开所以不执行」。
 
 【升级 / 连上后先查漏补缺（2026-11-13 用户要求，硬性）】
 - 每次连上、或用户提到「更新了 / 升级了 MCP」时：先调 get_upgrade_guide 读说明，再调 audit_upgrade({projectId})（只读，不改文件）。
@@ -36,8 +37,8 @@ ${STAGES}
 - 背景：H3 引擎按 17 帧块组织 latent，所以每段可见帧必须吸附成 17k+5；段与段之间靠「上一段尾帧 22 帧」衔接。
   照搬原稿段落时长、或不接尾帧，出来的是「看起来连着的碎段」，不是可交付的片子；外行客户看不出问题，所以更不能由 Agent 自行决定跳过。
 - 分集/片段纠错：已有片段改集用「move_segments」，删重复片段用「delete_segments」，删整集用「delete_episode」；**禁止用重建来“移动”**，那会留下旧集重复片段。
-- 顺序：split_script_to_shots / add_segment 对齐段数 → plan_continuity_edit（dryRun）把「段号 / 帧数 / 秒数 / 是否吃上一段尾帧」整张表给用户 → 用户确认 → confirm:true + userConfirmed:true 落盘 → **request_director_run 提交 MCP 任务**（MCP 串行执行；网页只订阅进度/预览/结果，不执行）→ 用 get_generation_task 查进度。
-- 硬约束：每段可见帧（17k+5）＋引导帧（22）≤ 736。批量生成按**连续段（run）**提交：每个 run 只取「起始段前一段当前缓存版本」的 guide 作为起点，run 内由插件用 prevJobId 内循环续接，**不逐段发送 guide**；分段选择（如 3,4 + 6,7）时每段 run 的起始段各自取上一段缓存（3 吃 2、6 吃 5）。起始段没有可用 guide 时 request_director_run 直接拒绝，绝不回退插件 LAST_GUIDE。
+- 顺序：split_script_to_shots / add_segment 对齐段数 → plan_continuity_edit（dryRun）把「段号 / 帧数 / 秒数 / 是否吃上一段尾帧」整张表给用户 → 用户确认 → confirm:true + userConfirmed:true 落盘 → **request_director_run 提交到 ComfyUI 插件任务表**（MCP 不跑 GPU；插件执行，网页与 MCP 都查询进度/预览/结果）→ 用 get_generation_task 查进度。
+- 硬约束：每段可见帧（17k+5）＋引导帧（22）≤ 736。批量生成按**连续段（run）**提交：每个 run 只取「起始段前一段当前缓存版本」的 guide 作为起点，run 内由插件用 prevJobId 内循环续接，**不逐段发送 guide**；分段选择（如 3,4 + 6,7）时每段 run 的起始段各自取上一段缓存（3 吃 2、6 吃 5）。起始段没有可用 guide 时按「none」生成，不拒绝、不回退插件 LAST_GUIDE。
 - 禁止：把原稿段长直接当段长、只写「承上/接上一段」这类调度词冒充延续法、只做一半就交付。
 
 【导入前强制预检（2026-11-10 弱模型事故后加，必须遵守）】
@@ -64,4 +65,5 @@ ${STAGES}
 
 【禁止事项】不擅自替用户决定 mode/strategy/presetId 等枚举选项；不覆盖用户数据（写前 dryRun 预览，用户确认才 confirm，overwrite 须用户明示）；不静默默认参数（缺 baseVersion/mode/duration 就报错或就问）；生成只经 request_director_run / generate_canvas_images 提交 MCP 任务，不自己拼 /prompt 或绕开任务表；遇 VERSION_CONFLICT 重读再写。
 
+【数据根迁移后的收尾——Agent 主动做，不要等用户催】用户在网页换了数据目录（或迁移过数据）后：先调 data_root_status，看清「当前根 / MCP 还装在哪个目录 / 旧根是否还在、占多少空间」；把这三件事原样告诉用户，并问两件事：① 要不要把 MCP 安装目录搬到新数据根 ② 旧目录要不要删（删除不可恢复）。同意搬就调 relocate_mcp_install（userConfirmed:true），然后必须提示「从新入口重启 MCP」；重启确认新服务在线后，再调 cleanup_old_data_root（先 dryRun:true 给清单，用户答复后才 confirm:true）。顺序永远是先搬 MCP 再删旧目录；旧根里不属于 ZeroExo 的文件不删，也不得删除当前数据根或盘根。
 ${SKILLS_POINTER}`;

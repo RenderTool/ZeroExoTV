@@ -18,8 +18,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '../base-node-view.js';
 import { generatingPreviewKey, useGeneratingPreviewStore } from '../generating-preview-store.js';
 import { replaceNodeImage } from '../utils/replace-node-image.js';
-import { planOnloadResize } from '../utils/media-fit.js';
-import { IMAGE_DEFAULT_SIZE, IMAGE_LONG_SIDE, MEDIA_MIN_SIZE } from '../utils/node-contracts.js';
+import { IMAGE_DEFAULT_SIZE, IMAGE_FIT_BOX, fitMediaSize } from '../utils/node-contracts.js';
 
 // ===== 引脚定义 =====
 export function getImageNodePins(): Pin[] {
@@ -85,7 +84,17 @@ export function ImageNodeView({
   const budgetPx = node.size?.width
     ? Math.min(Math.round(node.size.width * viewportK * dpr), 2048)
     : null;
-  const hydratedContent = useProgressiveImage(data.storageKey, data.content ?? '', invK ?? 1, budgetPx);
+  // 2026-11-18 图裂修复：storageKey 是 cas: 时**不信任 data.content**。
+  // content 是生成当次会话的 blob:/dataURL（只读历史链路快照里尤其常见），
+  // 刷新/换页后 blob 已失效 → 优先渲染它就是「一点开提示词就裂图」。
+  // CAS 键本身可复现，content 仅对非 CAS 老数据有意义。
+  const isCasMedia = (data.storageKey ?? '').startsWith('cas:');
+  const hydratedContent = useProgressiveImage(
+    data.storageKey,
+    isCasMedia ? '' : (data.content ?? ''),
+    invK ?? 1,
+    budgetPx,
+  );
   // 使用 hydratedContent 判断是否有内容,避免异步解析期间渲染 <img src=""> 导致浏览器跳转
   const hasContent = !!hydratedContent;
   // 生成节点语义(2026-08-25 用户拍板):只要连入上游即生成节点态(隐藏替换按钮,避免"既是生成器又是资源器"二义态);
@@ -93,6 +102,8 @@ export function ImageNodeView({
   const hasIncoming = useHasIncomingEdges(store, node.id, isSelected);
   const isGeneratorState = hasIncoming;
   const isAiGenerated = !!(data as Record<string, unknown>).generationId;
+  // 只读历史快照（生成链路子画布）：隐藏「替换图片」等编辑入口，位置/尺寸仍可拖
+  const isReadOnlySnapshot = Boolean((data as Record<string, unknown>).__readonly);
   // 后端缩略图 URL 404 时降级到 content(blob URL 或原图)
   const [imgSrc, setImgSrc] = useState(hydratedContent);
   useEffect(() => { setImgSrc(hydratedContent); }, [hydratedContent]);
@@ -129,28 +140,16 @@ export function ImageNodeView({
       }
     }
 
-    const newSize = planOnloadResize(node.size ?? IMAGE_DEFAULT_SIZE, nw, nh, {
-      // 2026-11-05 用户拍板：统一长边上限 320（不再撑到 620），按真实比例重算，节点内不留 letterbox
-      maxLongSide: IMAGE_LONG_SIDE,
-      minShortSide: MEDIA_MIN_SIZE.height,
-    });
-    if (newSize) {
-      const oldRect = {
-        x: node.position.x,
-        y: node.position.y,
-        width: node.size?.width ?? IMAGE_DEFAULT_SIZE.width,
-        height: node.size?.height ?? IMAGE_DEFAULT_SIZE.height,
-      };
-      if (commandQueue) commandQueue.execute(new ResizeNodeCommand(node.id, oldRect, { ...oldRect, ...newSize }));
-      else updateNode({ size: newSize });
-    }
+    // 尺寸只走一条路径：下面 healedKeyRef 的统一 620×348 装框逻辑。
+    // 这里不再单独 planOnloadResize，否则两条 resize 会互相覆盖，出现「每个节点尺寸都不一样」。
   };
 
   // 后端缩略图/预览图 404 时的降级链:
   //   当前 URL → data.content(blob/dataURL) → 后端 preview 级 URL(后端无变体自动回退原图)
   //   节点展示层不直连 full 档(征集 #77 三档契约),均失败则不再循环(guard 防抖)
   const handleImgError = (): void => {
-    if (data.content && imgSrc !== data.content) {
+    // CAS 键：content 可能是已失效的 blob:，降级到它只会再裂一次，直接跳过
+    if (!isCasMedia && data.content && imgSrc !== data.content) {
       setImgSrc(data.content);
       return;
     }
@@ -165,23 +164,39 @@ export function ImageNodeView({
    * 只靠 onLoad 会漏：节点可能在图片加载完成之后才被外部更新数据，或 MCP 新建节点用固定 300×300。
    * 这里以 naturalWidth/Height 为准兜底纠正一次（长边 ≤320、短边 ≥120）。
    */
+  /**
+   * 每个图源只自愈一次：拖拽时 node.position 每帧变化会让本效果重跑，
+   * 若条件写成「尺寸不匹配就提交」，会每帧发一条 ResizeNodeCommand 把整张画布
+   * 反复重建（表现为连线抖成虚线、节点松手后还在跟随）。这里用 ref 锁死图源。
+   */
+  const healedKeyRef = useRef<string>('');
   useEffect(() => {
-    if (contentOnly || !commandQueue) return;
-    if (data.status !== 'success') return;
+    if (contentOnly) return;
+    // 切分切片节点：尺寸就是「原图分割线上的那一格」，绝不能被自愈改成 620×348 展示框。
+    // 一旦自愈放大会把 3×2 切片按原网格落位的布局直接压乱（2026-11-19 用户报「切分后是错乱碎片」）。
+    if ((data as { lockSize?: boolean }).lockSize) return;
+    if (data.status !== 'success' && !data.content && !data.storageKey) return;
     const nw = data.naturalWidth;
     const nh = data.naturalHeight;
     if (!nw || !nh) return;
+    const key = `${data.storageKey ?? ''}|${nw}x${nh}`;
+    if (healedKeyRef.current === key) return;
     const curW = node.size?.width ?? IMAGE_DEFAULT_SIZE.width;
     const curH = node.size?.height ?? IMAGE_DEFAULT_SIZE.height;
-    const ratio = nh / nw;
-    let width = Math.min(IMAGE_LONG_SIDE, Math.max(MEDIA_MIN_SIZE.height, Math.round(curW)));
-    let height = Math.round(width * ratio);
-    if (height > IMAGE_LONG_SIDE) { height = IMAGE_LONG_SIDE; width = Math.round(height / ratio); }
-    if (height < MEDIA_MIN_SIZE.height) { height = MEDIA_MIN_SIZE.height; width = Math.round(height / ratio); }
-    if (Math.abs(width - curW) <= 2 && Math.abs(height - curH) <= 2) return;
-    // 自动布局不走命令队列（避免队列缺失/校验拒绝导致尺寸纠正失效）；用户手动拖角仍走 ResizeNodeCommand
-    updateNode({ size: { width, height } });
-  }, [contentOnly, commandQueue, data.status, data.naturalWidth, data.naturalHeight, node.id, node.position.x, node.position.y, node.size?.width, node.size?.height]);
+    // 统一规则：等比装进 620×348 展示框；只在每个图源加载时纠一次，用户手动缩放不被覆盖。
+    const { width, height } = fitMediaSize(nw, nh, IMAGE_FIT_BOX);
+    if (Math.abs(width - curW) <= 2 && Math.abs(height - curH) <= 2) {
+      healedKeyRef.current = key;
+      return;
+    }
+    healedKeyRef.current = key;
+    if (commandQueue) {
+      const rect = { x: node.position.x, y: node.position.y, width: curW, height: curH };
+      commandQueue.execute(new ResizeNodeCommand(node.id, rect, { ...rect, width, height }));
+    } else {
+      updateNode({ size: { width, height } });
+    }
+  }, [contentOnly, commandQueue, data, node.id, node.position.x, node.position.y, node.size?.width, node.size?.height]);
 
   // 节点颜色使用 theme.node.fill(所有类型共用)
   const nodeColor = theme.node.fill;
@@ -194,9 +209,12 @@ export function ImageNodeView({
   // 替换图片:统一使用 replaceNodeImage(通过 CommandQueue,支持撤销/重做,保持比例)
   const handleFileReplace = async (file: File): Promise<void> => {
     if (!file.type.startsWith('image/')) return;
-    // 标题刷新为文件名(去掉扩展名)
+    // 标题刷新为文件名(去掉扩展名)；系统/缓存导出的 UUID 机器名不拿来当标题
     const fileName = file.name.replace(/\.[^.]+$/, '');
-    updateNode({ title: fileName });
+    const machineName = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i.test(fileName)
+      || /^[0-9a-f]{16,}$/i.test(fileName)
+      || /^[0-9a-f]{20,}/i.test(fileName);
+    if (!machineName) updateNode({ title: fileName });
     await replaceNodeImage(commandQueue, node, file, {
       onStatusChange: () => {},
     });
@@ -310,7 +328,7 @@ export function ImageNodeView({
         hasContent={hasContent}
         onReplace={handleReplaceClick}
         isSelected={isSelected}
-        showReplaceButton={isSelected && !isGeneratorState && !isAiGenerated}
+        showReplaceButton={isSelected && !isGeneratorState && !isAiGenerated && !isReadOnlySnapshot}
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}

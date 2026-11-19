@@ -49,7 +49,6 @@ const NEW_CONFIG = {
 const store = localforage.createInstance({
   name: NEW_CONFIG.name,
   storeName: NEW_CONFIG.storeName,
-  driver: [localforage.INDEXEDDB, localforage.LOCALSTORAGE],
 });
 
 /** graph 存储 key 前缀 */
@@ -66,6 +65,7 @@ async function loadFromOldStorage(projectId: string): Promise<PersistedGraphStat
     const oldStore = localforage.createInstance({
       name: OLD_CONFIG.name,
       storeName: OLD_CONFIG.storeName,
+      // 迁移源只读旧 IndexedDB，不注入磁盘链
       driver: [localforage.INDEXEDDB, localforage.LOCALSTORAGE],
     });
     const oldKey = `${OLD_CONFIG.graphKeyPrefix}:${projectId}`;
@@ -109,7 +109,9 @@ export async function loadProjectGraph(projectId: string): Promise<GraphModel | 
   const raw = await store.getItem<PersistedGraphState>(graphKey(projectId));
   if (raw) {
     const graph = raw.graph ?? null;
-    if (!graph) return null;
+    // raw 存在但 graph 为空 = 持久化数据损坏，不能当成“项目还没有图”；
+    // 否则画布会把 null 渲染成空图，下一次保存直接覆盖用户磁盘上的图。
+    if (!graph) throw new Error(`[graph-store] 项目主图数据损坏（graph 为空）: ${projectId}`);
     // P1-6: 合并大 data 分片(由 PersistencePlugin 拆分存储)
     const merged = await mergeProjectLargeData(projectId, graph);
     // 本地版修复:云端形状的 storageKey 还原成本地键(见 repairLocalStorageKeys)
@@ -161,6 +163,20 @@ async function mergeProjectLargeData(projectId: string, graph: GraphModel): Prom
  * @param graph 图数据
  */
 export async function saveProjectGraph(projectId: string, graph: GraphModel): Promise<void> {
+  // 2026-11-19 数据事故防线：磁盘上已有节点、这次却要写空图 → 直接拒绝。
+  // 事故链条：读取端拿不到主图（缺键/读失败）→ getCanvas 回退空图 → 自动保存把唯一副本覆盖成空图。
+  // 空图覆盖已有数据只可能是「没读到」而不是「用户真删光」，所以这里必须硬拦，宁可报错也不静默归零。
+  if (!graph.nodes?.length) {
+    const existing = await store.getItem<PersistedGraphState>(graphKey(projectId)).catch(() => null)
+      ?? await loadFromOldStorage(projectId).catch(() => null);
+    const existingNodes = existing?.graph?.nodes?.length ?? 0;
+    if (existingNodes > 0) {
+      throw new Error(
+        `[graph-store] 拒绝用空图覆盖已有数据（${projectId} 现有 ${existingNodes} 个节点）。` +
+        '请先刷新或从历史版本恢复，确认画布已加载后再保存。',
+      );
+    }
+  }
   const data: PersistedGraphState = {
     version: CURRENT_VERSION,
     savedAt: Date.now(),

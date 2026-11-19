@@ -70,9 +70,15 @@ vi.mock('@/platform/fs.js', () => ({
 }));
 
 // 1 号虚拟挂载的图存储口：也换成内存（不碰 localforage）
-const mainGraph = { current: null as unknown };
+const mainGraph = {
+  current: null as unknown,
+  error: null as Error | null,
+};
 vi.mock('@zeroexo/plugin-persistence', () => ({
-  loadProjectGraph: async () => (mainGraph.current ? JSON.parse(JSON.stringify(mainGraph.current)) : null),
+  loadProjectGraph: async () => {
+    if (mainGraph.error) throw mainGraph.error;
+    return mainGraph.current ? JSON.parse(JSON.stringify(mainGraph.current)) : null;
+  },
   saveProjectGraph: async (_pid: string, graph: unknown) => { mainGraph.current = JSON.parse(JSON.stringify(graph)); },
 }));
 
@@ -106,6 +112,7 @@ beforeEach(() => {
   mem.files.clear();
   mem.clock = 1_000;
   mainGraph.current = null;
+  mainGraph.error = null;
 });
 
 describe('1 号主画布（虚拟挂载，不可删）', () => {
@@ -129,6 +136,14 @@ describe('1 号主画布（虚拟挂载，不可删）', () => {
     expect(onDisk.graph).toBeUndefined();
     expect(onDisk.graphRef).toBe('project');
     expect(onDisk.version).toBe(got!.doc.version + 1);
+  });
+
+  it('主 graph 读取失败 → getCanvas 抛错，绝不返回空图继续保存', async () => {
+    await ensureCanvasMounts(PID);
+    const before = mem.files.get(canvasPath(PID, MAIN_CANVAS_ID))!.text;
+    mainGraph.error = new Error('图数据损坏');
+    await expect(getCanvas(PID, MAIN_CANVAS_ID)).rejects.toThrow(/图数据损坏/);
+    expect(mem.files.get(canvasPath(PID, MAIN_CANVAS_ID))!.text).toBe(before);
   });
 
   it('deleteCanvas(main) 抛错且不删任何东西（用户硬要求：1 号不可删）', async () => {

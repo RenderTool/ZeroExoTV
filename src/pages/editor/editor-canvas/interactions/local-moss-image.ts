@@ -11,6 +11,7 @@ import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint
 import {
   cancelZeroexoJob,
   fetchZeroexoJob,
+  friendlyLocalJobError,
   probeZeroexoPlugin,
   submitMossJob,
   warmZeroexoConnection,
@@ -20,7 +21,7 @@ import {
 } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
-import { readLastSeed, recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
+import { recordLastSeed, resolveSeed } from '@/shared/last-seed-store.js';
 import {
   createPreviewClientId,
   ComfyuiPreviewSocket,
@@ -103,9 +104,8 @@ export async function generateMossImage(req: LocalMossRequest): Promise<LocalIma
 
   const params = req.params ?? {};
   const size = resolveMossSize(req.aspect, num(params.megapixels, MOSS_DEFAULT_MEGAPIXELS));
-  const seed = params.seed === undefined || params.seed === null
-    ? (readLastSeed(getCurrentCanvasId()) ?? resolveSeed(-1))
-    : resolveSeed(params.seed);
+  // 2026-11-17：seed 缺省不再复用上次种子（同 prompt + 同 seed 会得到完全同一张图）
+  const seed = resolveSeed(params.seed);
 
   const clientId = req.resume?.clientId ?? createPreviewClientId();
   let previewSocket: ComfyuiPreviewSocket | null = null;
@@ -152,7 +152,7 @@ export async function generateMossImage(req: LocalMossRequest): Promise<LocalIma
       state = status.state;
       const out = (status.outputs ?? []).find((o) => o.kind === 'image') ?? status.outputs?.[0];
       if (out?.path) outputPath = out.path;
-      if (state === 'error') throw new Error(status.error || 'Moss 执行失败（详见 ComfyUI 日志）');
+      if (state === 'error') throw new Error(friendlyLocalJobError(status.error) || 'Moss 执行失败（详见 ComfyUI 日志）');
       if (state === 'cancelled') throw new Error('Moss 作业已取消');
     }
 

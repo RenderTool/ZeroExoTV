@@ -136,11 +136,11 @@ afterEach(() => {
 });
 
 describe('抽屉历史入口', () => {
-  it('独立 history 页签已移除（画布产物进 canvasHistory / 导演台产物进 directorHistory），剧本页签也不存在', () => {
+  it('画布历史/导演台历史已合并为单一 history 入口（2026-11-16），剧本页签也不存在', () => {
     const keys = DRAWER_TAB_DEFS.map((d) => d.key);
-    expect(keys).not.toContain('history');
-    expect(keys).toContain('canvasHistory');
-    expect(keys).toContain('directorHistory');
+    expect(keys).toContain('history');
+    expect(keys).not.toContain('canvasHistory');
+    expect(keys).not.toContain('directorHistory');
     // 2026-11-16 挂载顺序重排：模块独有页签（canvasStructure/scriptMeta）垫底
     expect(keys[keys.length - 2]).toBe('canvasStructure');
     expect(keys[keys.length - 1]).toBe('scriptMeta');
@@ -157,13 +157,13 @@ describe('抽屉历史入口', () => {
 });
 
 describe('真实抽屉渲染链结构断言（无浏览器）', () => {
-  it('CanvasAssetsPanel 直挂画布/导演台历史（moduleOnly 页签垫底）；导演台类目由 MaterialGroup 锁来源渲染 HistoryGroup', () => {
+  it('CanvasAssetsPanel 直挂合并后的 HistoryGroup（组内 Tab 切画布/分镜来源）；导演台类目由 MaterialGroup 锁来源渲染', () => {
     const src = readSrc('src/features/canvas-assets/CanvasAssetsPanel.tsx');
     expect(src).toContain('DRAWER_TAB_DEFS.map');
-    expect(src).not.toContain("activeGroup === 'history'");
-    // 2026-11-16：画布历史/导演台历史由 CanvasAssetsPanel 直挂（forcedSource 锁来源）
-    expect(src).toContain('forcedSource="canvas"');
-    expect(src).toContain('forcedSource="director"');
+    // 2026-11-16：合并入口不锁来源（组内 Tab 切换），不再有 forcedSource 双分支
+    expect(src).toContain("activeGroup === 'history'");
+    expect(src).not.toContain('forcedSource="canvas"');
+    expect(src).not.toContain('forcedSource="director"');
     const material = readSrc('src/features/canvas-assets/groups/MaterialGroup.tsx');
     expect(material).toContain('forcedSource="director"');
     expect(material).toContain('<HistoryGroup');

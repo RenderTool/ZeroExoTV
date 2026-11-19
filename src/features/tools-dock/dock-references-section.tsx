@@ -8,7 +8,7 @@
 import React, { memo, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { Upload, X, Check, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Plus, X, Check, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 
@@ -229,7 +229,7 @@ export const DockReferencesSection = memo(function DockReferencesSection({
                 <button type="button" onClick={(e) => handleAddReference(e.currentTarget)} title={t('nodeDock.uploadFirstFrame', '上传图片作为首帧/尾帧')} style={{ width: 56, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-                  <Upload size={14} />
+                  <Plus size={14} />
                 </button>
               )}
               <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1 }}>{label}</span>
@@ -247,7 +247,7 @@ export const DockReferencesSection = memo(function DockReferencesSection({
           <button type="button" onClick={(e) => handleAddReference(e.currentTarget)} style={{ width: 48, height: 48, borderRadius: 14, border: `1px dashed ${navBorder}`, background: 'transparent', color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.12s' }} title={textOnly ? t('nodeDock.uploadRefText', '上传文本素材(图片/视频转剧本链路暂未开放)') : t('nodeDock.uploadRef', '上传参考素材(支持图片/视频/文本)')}
             onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-            <Upload size={15} />
+            <Plus size={15} />
           </button>
           {incomingNodes.map(renderThumb)}
         </>

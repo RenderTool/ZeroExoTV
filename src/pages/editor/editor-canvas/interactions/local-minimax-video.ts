@@ -9,6 +9,7 @@ import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint
 import {
   cancelZeroexoJob,
   fetchZeroexoJob,
+  friendlyLocalJobError,
   probeZeroexoPlugin,
   submitZeroexoJob,
   uploadZeroexoReference,
@@ -193,6 +194,9 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
           use_low_vram: useLowVram,
           ...(req.guideId ? { guide_id: req.guideId } : {}),
           reference_image: referenceImage,
+          // 多参考：连入的图片全部交给插件（插件按 reference_images 逐张接进模板），
+          // 只传 reference_image 会把第 2 张起的参考图丢掉。
+          ...(referenceNames.length > 1 ? { reference_images: referenceNames } : {}),
         },
       });
       jobId = submitted.jobId;
@@ -224,7 +228,7 @@ export async function generateLocalMiniMaxVideo(req: LocalVideoRequest): Promise
             baseUrl: base,
           };
         }
-        if (state === 'error') throw new Error(status.error || '本机执行失败（详见 ComfyUI 日志）');
+        if (state === 'error') throw new Error(friendlyLocalJobError(status.error) || '本机执行失败（详见 ComfyUI 日志）');
         if (state === 'cancelled') throw new Error('本机作业已取消');
       }
     } catch (err) {

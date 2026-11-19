@@ -12,6 +12,7 @@ import type { TFunction } from 'i18next';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { removeAssets, restoreAssets } from '@/features/asset-picker/asset-store.js';
 import { countWorkbenchReferences } from '@/entities/slot-containers.js';
+import { detachDeletedShotVersions } from '@/entities/workbench-version-detach.js';
 
 /** antd MessageInstance 的最小面（App.useApp().message 即满足） */
 export interface UndoMessageLike {
@@ -44,6 +45,24 @@ export async function deleteAssetsWithUndo(args: DeleteWithUndoArgs): Promise<nu
   const ids = args.assets.map((a) => a.id);
 
   const deleted = await removeAssets(ids);
+
+  // 2026-11-16 用户要求：删掉历史版本 = 片段自己也回到对应状态；
+  // 否则预览仍显示旧成片、卡片仍「已完成」，刷新后这一版还会从片段缓存里冒出来。
+  // 注意：历史分组里的「版本卡」是 shot.cache.versions 的投影，其 id 不一定是资产记录 id，
+  // removeAssets 可能匹配不到（deleted 为空）；此时仍要按 storageKey 摘缓存，否则必定「刷新又回来」。
+  if (args.projectId) {
+    const source = deleted.length > 0 ? deleted : args.assets;
+    const refs = source
+      .map((a) => ({
+        shotId: String((a.data as { originNodeId?: string } | undefined)?.originNodeId ?? ''),
+        storageKey: String((a.data as { storageKey?: string } | undefined)?.storageKey ?? ''),
+      }))
+      .filter((r) => r.storageKey);
+    if (refs.length > 0) {
+      await detachDeletedShotVersions(args.projectId, refs).catch(() => undefined);
+    }
+  }
+
   if (deleted.length === 0) return 0;
 
   const refCount = args.projectId

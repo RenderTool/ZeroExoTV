@@ -31,6 +31,37 @@ export async function cropDataUrl(dataUrl: string, crop: CropRect): Promise<stri
   return canvas.toDataURL('image/png');
 }
 
+/**
+ * 切片落位（2026-11-18）：位置/尺寸直接由「同一套分割线 + 源图尺寸」推导，
+ * 不再反读上传后切片像素——上传链路一旦缩放/重新编码，反读尺寸就会让切片互相压边。
+ * 累计边界各自取整 → 相邻切片共享同一条边，零缝隙、零重叠。
+ */
+export function splitCells(
+  params: SplitParams,
+  sourceWidth: number,
+  sourceHeight: number,
+  targetTotalWidth = 480,
+): { cells: Array<{ x: number; y: number; width: number; height: number }>; scale: number } {
+  const { rows, columns } = params;
+  const colBounds = resolveBoundaries(params.columnBreaks, columns, sourceWidth);
+  const rowBounds = resolveBoundaries(params.rowBreaks, rows, sourceHeight);
+  const scale = sourceWidth > 0 ? Math.min(1, targetTotalWidth / sourceWidth) : 1;
+  const edgeX = colBounds.map((v) => Math.round(v * scale));
+  const edgeY = rowBounds.map((v) => Math.round(v * scale));
+  const cells: Array<{ x: number; y: number; width: number; height: number }> = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < columns; c++) {
+      cells.push({
+        x: edgeX[c]!,
+        y: edgeY[r]!,
+        width: Math.max(1, edgeX[c + 1]! - edgeX[c]!),
+        height: Math.max(1, edgeY[r + 1]! - edgeY[r]!),
+      });
+    }
+  }
+  return { cells, scale };
+}
+
 /** 将归一化分割线换算为像素边界数组 [0, b1, b2, ..., 总长];缺省均匀 */
 function resolveBoundaries(breaks: number[] | undefined, count: number, total: number): number[] {
   const inner =

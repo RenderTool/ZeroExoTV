@@ -9,12 +9,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  isTombstoneSkip,
   listAssets,
   addAsset as storeAdd,
   removeAssets as storeRemove,
   updateAsset as storeUpdate,
 } from './asset-store.js';
 import { filterLiveAssets } from './asset-liveness.js';
+import { listDeletedKeys } from '@/entities/deleted-asset-tombstones.js';
 import type { CreateAssetInput, UpdateAssetInput } from './asset-store.js';
 import type { Asset } from './index.js';
 import {
@@ -44,8 +46,15 @@ export function useAssets(): UseAssetsResult {
     try {
       setError(null);
       const list = await listAssets();
+      // 2026-11-16 列表层兜底：命中删除墓碑的记录一律不出现。
+      // 删除即「内容失效」——即使某条异常链把记录重建了，也不能在抽屉/资产库/@ 面板复活。
+      const tombstones = await listDeletedKeys().catch(() => new Set<string>());
+      const visible = tombstones.size === 0 ? list : list.filter((a) => {
+        const key = (a.data as { storageKey?: string }).storageKey;
+        return !key || !tombstones.has(key);
+      });
       // 2026-11-11：引用已失效的资产（文件被清理/删除）不再出现在列表里
-      setAssets(await filterLiveAssets(list));
+      setAssets(await filterLiveAssets(visible));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load assets');
     } finally {
@@ -56,6 +65,8 @@ export function useAssets(): UseAssetsResult {
   const addAsset = useCallback(async (input: CreateAssetInput): Promise<Asset | null> => {
     try {
       const asset = await storeAdd(input);
+      // 墓碑命中（内容已被用户删除）：不落库、不进列表，返回 null 让调用方给可见原因
+      if (isTombstoneSkip(asset)) return null;
       setAssets((prev) => [asset, ...prev]);
       // 触发云同步推送(异步,不阻塞 UI)
       onAssetCreated(asset.id);

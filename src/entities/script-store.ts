@@ -254,6 +254,10 @@ export async function ensureScript(
 ): Promise<{ entity: ScriptEntity; created: boolean }> {
   const existing = await readScript(projectId);
   if (existing) return { entity: existing, created: false };
+  // 文件存在但解析失败（或读盘失败）时，绝不能按“空剧本”创建并覆盖。数据恢复靠 snapshots。
+  if (await stat(scriptPath(projectId))) {
+    throw new Error(`[script-store] 剧本文件存在但读取失败，拒绝按空剧本重建: ${scriptPath(projectId)}`);
+  }
   try {
     const created = await writeScript(projectId, {
       baseVersion: 0,

@@ -6,7 +6,7 @@
  * 用法：全剧只选一套；主体提示词拼这套的 promptZh（去掉 [主体], 前缀），不再每个主体各写风格。
  */
 
-export type StylePresetCategory = 'director' | 'mainstream' | 'animation' | 'genre';
+export type StylePresetCategory = 'director' | 'mainstream' | 'animation' | 'genre' | 'combo';
 
 export interface StylePreset {
   id: string;
@@ -31,9 +31,77 @@ export const STYLE_CATEGORY_LABELS: Record<'all' | StylePresetCategory, string> 
   mainstream: '主流',
   animation: '动画',
   genre: '题材',
+  combo: '组合技',
 };
 
 export const STYLE_PRESETS: StylePreset[] = [
+  {
+    id: "combo-sci-fi-3d-pbr",
+    name: "科幻3D·超写实PBR (Sci-Fi 3D + Hyperreal PBR)",
+    nameZh: "科幻3D·超写实PBR",
+    nameEn: "Sci-Fi 3D + Hyperreal PBR",
+    category: "combo",
+    intro: "科幻硬表面建模 + 基于物理的渲染：金属粗糙度、清漆层、次表面散射、体积光。适合太空舱、机甲、义体、工业废墟。",
+    promptZh: "[主体], 科幻 3D 硬表面建模, 超写实 PBR 材质(金属粗糙度与清漆层, 次表面散射, 微划痕), 体积光与雾, 冷白主光配青蓝轮廓光, 高密度细节但版式干净",
+    promptEn: "[subject], 科幻 3D 硬表面建模, 超写实 PBR 材质(金属粗糙度与清漆层, 次表面散射, 微划痕), 体积光与雾, 冷白主光配青蓝轮廓光, 高密度细节但版式干净",
+    palette: ["#1f2937", "#0ea5e9"],
+  },
+  {
+    id: "combo-anime-pbr",
+    name: "动漫造型·PBR材质（皮克斯向） (Anime Shapes + PBR (Pixar-like))",
+    nameZh: "动漫造型·PBR材质（皮克斯向）",
+    nameEn: "Anime Shapes + PBR (Pixar-like)",
+    category: "combo",
+    intro: "皮克斯/迪士尼式 3D 动画造型，比例夸张但材质完全基于物理：柔和 SSS、布料绒感、地面接触阴影。适合合家欢、萌宠、奇幻。",
+    promptZh: "[主体], 皮克斯/迪士尼向 3D 动画造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深",
+    promptEn: "[subject], 皮克斯/迪士尼向 3D 动画造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深",
+    palette: ["#1f2937", "#0ea5e9"],
+  },
+  {
+    id: "combo-real-film",
+    name: "实拍摄影·电影胶片 (Live-Action + Film Stock)",
+    nameZh: "实拍摄影·电影胶片",
+    nameEn: "Live-Action + Film Stock",
+    category: "combo",
+    intro: "实拍质感 + 胶片化学：5219 颗粒、自然窗光、实用光源作为动机光。适合年代戏、都市写实、犯罪悬疑。",
+    promptZh: "[主体], 实拍摄影质感, 柯达 5219 电影胶片颗粒, 35mm 定焦, 自然窗光与实用光源, 轻微高光溢出, 低饱和高对比",
+    promptEn: "[subject], 实拍摄影质感, 柯达 5219 电影胶片颗粒, 35mm 定焦, 自然窗光与实用光源, 轻微高光溢出, 低饱和高对比",
+    palette: ["#1f2937", "#0ea5e9"],
+  },
+  {
+    id: "combo-cel-shaded",
+    name: "赛璐璐动画·电影光 (Cel Shading + Cinematic Light)",
+    nameZh: "赛璐璐动画·电影光",
+    nameEn: "Cel Shading + Cinematic Light",
+    category: "combo",
+    intro: "二维赛璐璐上色叠加电影级布光：硬边阴影、手绘高光、纸面微颗粒。适合番剧、武侠、热血。",
+    promptZh: "[主体], 二维赛璐璐上色, 硬边阴影与手绘高光, 电影级三点布光, 纸面微颗粒, 干净的线条与分色",
+    promptEn: "[subject], 二维赛璐璐上色, 硬边阴影与手绘高光, 电影级三点布光, 纸面微颗粒, 干净的线条与分色",
+    palette: ["#1f2937", "#0ea5e9"],
+  },
+  {
+    id: "combo-stop-motion",
+    name: "定格动画·实物微缩 (Stop-Motion Miniature)",
+    nameZh: "定格动画·实物微缩",
+    nameEn: "Stop-Motion Miniature",
+    category: "combo",
+    intro: "手工微缩布景 + 逐帧质感：黏土/织物/木料、微抖与浅景深。适合童话、黑色幽默、品牌短片。",
+    promptZh: "[主体], 定格动画微缩布景, 黏土与织物手工质感, 逐帧轻微抖动感, 微距浅景深, 棚拍实用灯",
+    promptEn: "[subject], 定格动画微缩布景, 黏土与织物手工质感, 逐帧轻微抖动感, 微距浅景深, 棚拍实用灯",
+    palette: ["#1f2937", "#0ea5e9"],
+  },
+  {
+    id: "combo-ink-3d",
+    name: "水墨·体积渲染 (Ink Wash + Volumetric)",
+    nameZh: "水墨·体积渲染",
+    nameEn: "Ink Wash + Volumetric",
+    category: "combo",
+    intro: "水墨笔触与留白叠加体积雾渲染，宣纸纹理与矿物颜料。适合国风、山水、写意打斗。",
+    promptZh: "[主体], 水墨笔触与留白, 体积雾与光束渲染, 宣纸纹理, 淡彩矿物颜料, 写意而不失结构",
+    promptEn: "[subject], 水墨笔触与留白, 体积雾与光束渲染, 宣纸纹理, 淡彩矿物颜料, 写意而不失结构",
+    palette: ["#1f2937", "#0ea5e9"],
+  },
+
   {
     id: "wes-anderson",
     name: "韦斯·安德森 (Wes Anderson)",

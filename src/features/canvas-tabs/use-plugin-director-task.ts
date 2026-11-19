@@ -71,6 +71,10 @@ const INITIAL: PluginDirectorState = {
   guidance: {}, preview: null, livePreviewSupported: true, startedAt: 0,
 };
 
+/** 连续轮询失败几次后判定 ComfyUI 已断开；2 秒一次，避免一次网络抖动就误报。 */
+const POLL_FAILURE_LIMIT = 3;
+const OFFLINE_MESSAGE = 'ComfyUI 连接已断开或任务已丢失，无法确认任务状态';
+
 const PHASE: Record<string, PluginDirectorPhase> = {
   queued: 'queued', running: 'running', success: 'success', error: 'error',
   failed: 'error', cancelled: 'canceled', canceled: 'canceled', interrupted: 'error',
@@ -96,6 +100,8 @@ export function usePluginDirectorTask(args: {
   const dismissedRef = useRef<Set<string>>(new Set());
   const queueStartedRef = useRef<Set<string>>(new Set());
   const queueFinishedRef = useRef<Set<string>>(new Set());
+  const pollFailuresRef = useRef(0);
+  const offlineNotifiedRef = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) window.clearInterval(pollRef.current);
@@ -168,7 +174,9 @@ export function usePluginDirectorTask(args: {
     const phase = PHASE[task.state] ?? 'queued';
     const current = task.currentSegment ?? null;
     const queue = useTaskQueueStore.getState();
-    if (!queueStartedRef.current.has(task.taskId)) {
+    // 用户已「清空已完成」的任务不再入队（刷新恢复也不能复活）；落库流程不受影响。
+    const queueDismissed = queue.dismissed.has(task.taskId);
+    if (!queueDismissed && !queueStartedRef.current.has(task.taskId)) {
       queueStartedRef.current.add(task.taskId);
       queue.start({
         id: task.taskId,
@@ -177,14 +185,14 @@ export function usePluginDirectorTask(args: {
         phase: '排队中',
       });
     }
-    if (task.state === 'running' || task.state === 'queued') {
+    if (!queueDismissed && (task.state === 'running' || task.state === 'queued')) {
       const currentSeg = current ? segs[current - 1] : undefined;
       queue.update(task.taskId, {
         phase: current ? `第 ${current}/${task.totalCount ?? segs.length} 段` : '排队中',
         ...(currentSeg?.progress ? { progress: currentSeg.progress } : {}),
       });
     }
-    if (['success', 'error', 'interrupted', 'cancelled'].includes(task.state) && !queueFinishedRef.current.has(task.taskId)) {
+    if (!queueDismissed && ['success', 'error', 'interrupted', 'cancelled'].includes(task.state) && !queueFinishedRef.current.has(task.taskId)) {
       queueFinishedRef.current.add(task.taskId);
       queue.finish(
         task.taskId,
@@ -194,9 +202,14 @@ export function usePluginDirectorTask(args: {
     }
 
     // 段状态 diff：只在变化时通知宿主
+    // 插件任务仍在 running/queued 时，段级 interrupted 可能只是网页刷新导致
+    // WebSocket 短暂断开后的瞬态值：此时不能写回「中断/未生成」，
+    // 否则刷新一次就把正在生成的片段抹成 pending（2026-11-18 实测）。
+    const taskActive = task.state === 'running' || task.state === 'queued';
     for (const seg of segs) {
       const shotId = seg.shotId;
       if (!shotId) continue;
+      if (taskActive && seg.state === 'interrupted') continue;
       const prev = segmentStateRef.current.get(seg.index);
       if (prev === seg.state) continue;
       segmentStateRef.current.set(seg.index, seg.state);
@@ -302,12 +315,33 @@ export function usePluginDirectorTask(args: {
   }, [args.projectId, stopPolling, closePreview]);
 
   const poll = useCallback(async (taskId: string) => {
-    const task = await getPluginTask(taskId).catch(() => null);
-    if (task) await applyTask(task);
-  }, [applyTask]);
+    let task: PluginTask | null = null;
+    try {
+      task = await getPluginTask(taskId);
+    } catch {
+      task = null;
+    }
+    if (!task) {
+      pollFailuresRef.current += 1;
+      if (pollFailuresRef.current < POLL_FAILURE_LIMIT) return;
+      // 连续失败后不能继续显示“生成中”：ComfyUI 可能已经退出，任务状态未知。
+      stopPolling();
+      closePreview();
+      setState((s) => ({ ...s, phase: 'error', error: OFFLINE_MESSAGE }));
+      if (offlineNotifiedRef.current !== taskId) {
+        offlineNotifiedRef.current = taskId;
+        cbRef.current.onNotice('error', OFFLINE_MESSAGE);
+      }
+      return;
+    }
+    pollFailuresRef.current = 0;
+    await applyTask(task);
+  }, [applyTask, stopPolling, closePreview]);
 
   const startPolling = useCallback((taskId: string) => {
     stopPolling();
+    pollFailuresRef.current = 0;
+    offlineNotifiedRef.current = null;
     pollRef.current = window.setInterval(() => { void poll(taskId); }, 2000);
   }, [poll, stopPolling]);
 
@@ -342,6 +376,8 @@ export function usePluginDirectorTask(args: {
       segmentStateRef.current = new Map();
       landedRef.current = new Set();
       errorNotifiedRef.current = null;
+      pollFailuresRef.current = 0;
+      offlineNotifiedRef.current = null;
       setState({
         ...INITIAL,
         phase: 'submitting',
@@ -384,6 +420,8 @@ export function usePluginDirectorTask(args: {
     closePreview();
     segmentStateRef.current = new Map();
     landedRef.current = new Set();
+    pollFailuresRef.current = 0;
+    offlineNotifiedRef.current = null;
     setState(INITIAL);
   }, [stopPolling, closePreview]);
 

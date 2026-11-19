@@ -103,6 +103,8 @@ export function VideoNodeView({
   const hasIncoming = useHasIncomingEdges(store, node.id, isSelected);
   const isGeneratorState = hasIncoming;
   const isAiGenerated = !!(data as Record<string, unknown>).generationId;
+  // 只读历史快照：隐藏「替换视频」入口（位置/尺寸仍可拖）
+  const isReadOnlySnapshot = Boolean((data as Record<string, unknown>).__readonly);
 
   // === 帧控制状态(仅用于显示帧计数) ===
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -603,7 +605,7 @@ export function VideoNodeView({
         hasContent={hasContent}
         onReplace={handleReplaceClick}
         isSelected={isSelected}
-        showReplaceButton={isSelected && !isGeneratorState && !isAiGenerated}
+        showReplaceButton={isSelected && !isGeneratorState && !isAiGenerated && !isReadOnlySnapshot}
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}

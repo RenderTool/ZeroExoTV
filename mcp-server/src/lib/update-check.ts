@@ -105,6 +105,19 @@ export async function gitBehindCount(repoRoot: string | null): Promise<number | 
   }
 }
 
+/** 语义化版本比较（只比较数字段，忽略前缀与预发布后缀）：a<b 返回 -1 */
+function cmpVersion(a: string, b: string): number {
+  const parse = (v: string) => v.replace(/^v/i, "").split(/[.-]/).map((n) => Number.parseInt(n, 10) || 0);
+  const x = parse(a);
+  const y = parse(b);
+  const len = Math.max(x.length, y.length);
+  for (let i = 0; i < len; i += 1) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
 export async function buildUpdateStatus(input: {
   root: string;
   tools: string[];
@@ -127,7 +140,8 @@ export async function buildUpdateStatus(input: {
     .then((raw) => (JSON.parse(raw) as { version?: string }).version ?? null)
     .catch(() => null);
   const requiredVersion = manifest?.mcpVersion ?? null;
-  const versionOutdated = Boolean(requiredVersion && localVersion && requiredVersion !== localVersion);
+  // 只有「本机 < 网页要求」才算落后；本机更新（如 v0.3.95 vs 网页 v0.3.94）不能报落后
+  const versionOutdated = Boolean(requiredVersion && localVersion && cmpVersion(localVersion, requiredVersion) < 0);
 
   let hint: string | null = null;
   if (missing.length > 0) {

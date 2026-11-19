@@ -7,7 +7,7 @@
  * 页签（按调用方给的顺序渲染，数据与回调由调用方注入）：
  * - canvas   画布媒体节点（图片/视频/音频）
  * - asset    资产候选（已映射为 DirectorAssetRef；按「已入槽 → 项目 → 全局」分组）
- * - subject  主体库（整主体占槽 / 展开状态图子行 / 主体状态素材）
+ * - subject  主体库（主体 = 根，只负责展开/收起；写入只发生在状态图子行）
  * - openlib  开源库（复用 OpenLibBrowser 单一定义源）
  * - upload   手动上传（主体状态媒体专用：上传按钮在面板内）
  *
@@ -23,7 +23,7 @@ import { ChevronDown, Film, Image as ImageIcon, Music, Plus, User, Waypoints, X,
 import type { DirectorAssetRef } from '@/entities/director-params.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import { nonBaseStates, SUBJECT_BASE_STATE_ID, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { nonBaseStates, subjectBaseCoverKeys, SUBJECT_BASE_STATE_ID, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 
 /** 素材面板条目拖拽 MIME：拖到已占用的插槽格 = 就地替换该槽内容（槽号不变） */
@@ -36,9 +36,21 @@ export const ASSET_PICK_ROW_HEIGHT = 44;
 export const ASSET_PICK_THUMB_SIZE = 36;
 export const ASSET_PICK_DETAIL_WIDTH = 216;
 
-export type AssetPickTab = 'canvas' | 'asset' | 'subject' | 'upload' | 'guide';
+/**
+ * 页签。
+ * 2026-11-18 用户口径：按使用语境成组——
+ *   分镜语境：主体 → 分镜历史（高频一起用，主体在前）
+ *   画布语境：画布历史 → 公共资产（公共资产在后）
+ * 所以历史按来源拆成两个页签，不再用组内子 Tab。
+ */
+export type AssetPickTab = 'canvas' | 'historyCanvas' | 'historyDirector' | 'asset' | 'subject' | 'upload' | 'guide';
 
-const DEFAULT_TABS: AssetPickTab[] = ['canvas', 'asset', 'subject'];
+/** 2026-11-18 用户口径（第 3 次澄清）：不是把两个类目塞进一页，而是**页签顺序对调**——
+ *  分镜语境：主体 → 分镜历史（相邻，Tab 能直接切）→ 画布历史 → 公共资产；
+ *  画布语境：画布历史 → 公共资产 → 主体 → 分镜历史。 */
+const DEFAULT_TABS: AssetPickTab[] = ['subject', 'historyDirector', 'historyCanvas', 'asset'];
+/** 画布语境默认页签顺序（画布历史 → 公共资产 → 主体 → 分镜历史 → 画布节点媒体） */
+export const CANVAS_TABS: AssetPickTab[] = ['historyCanvas', 'asset', 'subject', 'historyDirector', 'canvas'];
 
 /**
  * 引导数据候选（2026-11-09）：来自已生成视频产物的 guide，进 `WorkbenchShot.guide` 独立槽，
@@ -141,12 +153,14 @@ export interface AssetPickCurrentMedia {
 }
 
 export interface AssetPickPanelProps {
-  /** 页签顺序（缺省 canvas/asset/subject/openlib；upload 需同时给 onUploadFiles） */
+  /** 页签顺序（缺省按 2026-11-16 用户口径：公共资产 → 主体 → 历史 → 画布；upload 需同时给 onUploadFiles） */
   tabs?: AssetPickTab[];
   /** 资产页签候选（调用方映射；按 pooledOrder 把已入槽的排最前） */
   candidates?: DirectorAssetRef[];
-  /** 画布页签候选（调用方从画布节点映射） */
+  /** 画布页签候选（仅画布上物理存在的媒体节点） */
   canvasMedia?: DirectorAssetRef[];
+  /** 历史页签候选：画布历史 + 分镜历史（生成产物，2026-11-16 用户口径） */
+  historyMedia?: { canvas: DirectorAssetRef[]; director: DirectorAssetRef[] };
   /** 主体库条目（images = 状态图，stateTag = 状态名） */
   subjects?: ProductionItem[];
   /** 主体树（状态级媒体：图片/音频/视频） */
@@ -169,7 +183,7 @@ export interface AssetPickPanelProps {
   onPickAsset: (ref: DirectorAssetRef) => void;
   /** 单击画布媒体条目（缺省回落 onPickAsset） */
   onPickCanvasMedia?: (ref: DirectorAssetRef) => void;
-  /** 单击整主体（引用 `subject:<id>`；无图主体同样可占槽） */
+  /** 单击整主体：已废弃（主体只是根节点、不带图片），保留签名兼容外部调用方，面板不再触发 */
   onPickSubject?: (item: ProductionItem) => void;
   /** 单击展开的状态图子行（精确插入某张状态图） */
   onPickSubjectImage?: (item: ProductionItem, img: ProductionItemImage) => void;
@@ -191,6 +205,8 @@ export interface AssetPickPanelProps {
   placement?: { mode: 'anchor' } | { mode: 'fixed'; left: number; top: number };
   /** 面板初始页签 */
   initialTab?: AssetPickTab;
+  /** 打开时定位并展开该主体（分镜插槽替换 = 用户正换这个主体的状态图） */
+  focusSubjectId?: string;
   /** 空态文案覆盖（主体媒体面板用「素材」口径） */
   emptyAssetText?: string;
   emptyCanvasText?: string;
@@ -217,7 +233,7 @@ export function AssetPickPanel({
   allowedKinds,
   onPickAsset,
   onPickCanvasMedia,
-  onPickSubject,
+  historyMedia,
   onPickSubjectImage,
   onPickSubjectState,
   guideCandidates = [],
@@ -229,6 +245,7 @@ export function AssetPickPanel({
   onRemoveCurrent,
   placement = { mode: 'anchor' },
   initialTab,
+  focusSubjectId,
   emptyAssetText,
   emptyCanvasText,
   uploadHint,
@@ -240,10 +257,12 @@ export function AssetPickPanel({
     const list = tabs.filter((k) => {
       if (k === 'upload') return !!onUploadFiles;
       if (k === 'guide') return !!onPickGuide;
+      // 历史两个页签恒在（无内容走空态），避免页签数量随数据抖动、类目位置跳变
+
       return true;
     });
     return list.length > 0 ? list : ['asset' as AssetPickTab];
-  }, [tabs, onUploadFiles, onPickGuide]);
+  }, [tabs, onUploadFiles, onPickGuide, historyMedia]);
 
   const [activeIdx, setActiveIdx] = useState(0);
   const [panelTab, setPanelTab] = useState<AssetPickTab>(() => {
@@ -349,11 +368,13 @@ export function AssetPickPanel({
           : (st.state || t('director.subjectStateFallback', '剧照')),
         prompt: m.prompt,
       })));
+    // 默认基础状态 = 封面：基础状态没图就显图标占位，绝不拿别的状态图冒充（2026-11-18 用户口径）
     const coverValid = Boolean(item.coverKey && images.some((i) => i.storageKey === item.coverKey));
+    const baseKey = subjectBaseCoverKeys(tree)[0] ?? null;
     return {
       ...item,
       images,
-      coverKey: coverValid ? item.coverKey : (images[0]?.storageKey ?? null),
+      coverKey: coverValid ? item.coverKey : baseKey,
     };
   }), [subjects, treeByItemId, t]);
 
@@ -405,6 +426,18 @@ export function AssetPickPanel({
     }
     return rows;
   }, [subjectGroups, expandedSubjects, query]);
+
+  // 分镜插槽替换：面板一打开就展开当前主体，避免用户在「主体」页签里再找一次。
+  useEffect(() => {
+    if (!focusSubjectId) return;
+    setExpandedSubjects((prev) => (prev.has(focusSubjectId) ? prev : new Set(prev).add(focusSubjectId)));
+  }, [focusSubjectId]);
+
+  useEffect(() => {
+    if (!focusSubjectId || panelTab !== 'subject') return;
+    const idx = subjRows.findIndex((row) => row.type === 'subject' && row.item.id === focusSubjectId);
+    if (idx >= 0) setSubjectIdx(idx);
+  }, [focusSubjectId, panelTab, subjRows]);
 
   /**
    * 主体「状态级媒体」行：主体树 → 状态 → 媒体。数据源是主体树本身，
@@ -469,14 +502,15 @@ export function AssetPickPanel({
           }
         } else if (e.key === 'Enter' && !inSearch) {
           e.preventDefault();
-          if (row?.type === 'subject') onPickSubject?.(row.item);
+          // 主体只是根：Enter 也只展开状态列表，绝不隐式选中某张封面（2026-11-18 用户口径）
+          if (row?.type === 'subject') toggleSubject(row.item.id);
           else if (row?.type === 'state') onPickSubjectImage?.(row.item, row.img);
         }
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [flat, subjRows, expandedSubjects, activeIdx, subjectIdx, panelTab, onPickAsset, onPickSubject, onPickSubjectImage, toggleSubject, onClose]);
+  }, [flat, subjRows, expandedSubjects, activeIdx, subjectIdx, panelTab, onPickAsset, onPickSubjectImage, toggleSubject, onClose]);
 
   /** 键盘高亮移动 → 详情面板同步（不承担选中职责）；页签无条目 → 空态 */
   useEffect(() => {
@@ -562,7 +596,8 @@ export function AssetPickPanel({
       })()}
       {detail?.type === 'subject' && (() => {
         const item = detail.subject;
-        const coverKey = resolveSubjectCover(item).key;
+        // 封面 = 手动 coverKey（用户显式切换）→ 基础状态首图 → 无
+        const coverKey = resolveSubjectCover(item, undefined, subjectBaseCoverKeys(treeByItemId.get(item.id))).key;
         const inSlot = slotLabels[`subject:${item.id}`];
         return (
           <>
@@ -606,8 +641,17 @@ export function AssetPickPanel({
     return q ? canvasMedia.filter((m) => (m.title ?? '').toLowerCase().includes(q)) : canvasMedia;
   }, [canvasMedia, searchQ]);
 
+  /** 历史按来源拆成两个页签（画布历史 / 分镜历史），页签自己就是来源 */
+  const historySource: 'canvas' | 'director' =
+    panelTab === 'historyDirector' ? 'director' : 'canvas';
+  const filteredHistoryMedia = useMemo(() => {
+    if (panelTab !== 'historyCanvas' && panelTab !== 'historyDirector') return [];
+    const list = historyMedia?.[historySource] ?? [];
+    const q = searchQ.trim().toLowerCase();
+    return q ? list.filter((m) => (m.title ?? '').toLowerCase().includes(q)) : list;
+  }, [historyMedia, historySource, searchQ, panelTab]);
+
   const pickCanvas = onPickCanvasMedia ?? onPickAsset;
-  const pickSubject = onPickSubject ?? (() => {});
   const pickSubjectImage = onPickSubjectImage ?? (() => {});
   const pickSubjectState = onPickSubjectState ?? (() => {});
 
@@ -622,9 +666,11 @@ export function AssetPickPanel({
   const tabLabel = (key: AssetPickTab): string => {
     switch (key) {
       case 'canvas': return t('director.canvasTab', '画布');
-      case 'asset': return t('director.assetTab', '资产');
+      case 'historyCanvas': return t('director.historySourceCanvas', '画布历史');
+      case 'historyDirector': return t('director.historySourceDirector', '分镜历史');
+      case 'asset': return t('director.assetTab', '公共资产');
       case 'subject': return t('director.subjectTab', '主体');
-      case 'upload': return t('director.uploadTab', '手动上传');
+      case 'upload': return t('director.uploadTab', '上传');
       case 'guide': return t('director.guideTab', '引导');
     }
   };
@@ -694,8 +740,9 @@ export function AssetPickPanel({
         )}
 
         {/* 页签行 + 常驻关闭（Esc / 点外部之外的第三出口，不写入不改数据） */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexShrink: 0 }}>
-          <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 8, background: 'rgba(255,255,255,0.05)', flexWrap: 'wrap', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexShrink: 0, minWidth: 0 }}>
+          {/* 2026-11-17 用户实测：页签变多后会换行（手动上传/历史被挤到第二行）——改成单行横向滚动，绝不换行 */}
+          <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 8, background: 'rgba(255,255,255,0.05)', flexWrap: 'nowrap', minWidth: 0, flexShrink: 1, overflowX: 'auto', overflowY: 'hidden' }}>
             {visibleTabs.map((key) => {
               const active = panelTab === key;
               return (
@@ -706,9 +753,10 @@ export function AssetPickPanel({
                   data-asset-pick-tab={key}
                   onClick={() => setPanelTab(key)}
                   style={{
-                    padding: '6px 14px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
+                    padding: '6px 10px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
                     background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
                     color: active ? palette.capsuleText : palette.sub,
+                    whiteSpace: 'nowrap', flexShrink: 0,
                   }}
                 >
                   {tabLabel(key)}
@@ -808,7 +856,7 @@ export function AssetPickPanel({
           <div data-canvas-media-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {filteredCanvasMedia.length === 0 ? (
               <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
-                {emptyCanvasText ?? t('director.canvasMediaEmpty', '画布上暂无图片/视频/音频节点')}
+                {emptyCanvasText ?? t('director.canvasMediaEmpty', '画布上暂无图片/视频/音频')}
               </div>
             ) : filteredCanvasMedia.map((ref) => {
               const Icon = KIND_ICON[ref.kind];
@@ -850,8 +898,61 @@ export function AssetPickPanel({
           </div>
         )}
 
+        {(panelTab === 'historyCanvas' || panelTab === 'historyDirector') && (
+          <div data-history-media-list data-history-source={historySource} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {filteredHistoryMedia.length === 0 ? (
+              <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
+                {t('director.historyEmpty', '暂无生成历史')}
+              </div>
+            ) : filteredHistoryMedia.map((ref) => {
+              const Icon = KIND_ICON[ref.kind];
+              const used = slotLabels[ref.id];
+              return (
+                <button
+                  key={ref.id}
+                  type="button"
+                  data-history-media-item={ref.id}
+                  onClick={() => pickCanvas(ref)}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
+                    padding: '0 10px', border: 'none', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                    background: 'transparent', color: palette.capsuleText, fontSize: 13, textAlign: 'left',
+                  }}
+                >
+                  <ThumbImage
+                    kind={ref.kind}
+                    storageKey={ref.storageKey}
+                    url={ref.url}
+                    prefer="thumb"
+                    width={ASSET_PICK_THUMB_SIZE}
+                    height={ASSET_PICK_THUMB_SIZE}
+                    radius={6}
+                    title={ref.title}
+                    icon={<Icon size={18} style={{ opacity: 0.7 }} />}
+                  />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ref.title}
+                  </span>
+                  <span style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
+                    {used ?? KIND_NAME[ref.kind]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {panelTab === 'asset' && (
-          <div data-asset-panel-list ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div
+            data-asset-panel-list
+            ref={listRef}
+            style={{
+              flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain',
+              display: 'flex', flexDirection: 'column', gap: 2,
+            }}
+          >
             {/* 导入资产：列表顶部一行（导入类按钮统一放顶部，不埋底部） */}
             {flat.length > 0 && onUploadFiles && (
               <button
@@ -1004,8 +1105,8 @@ export function AssetPickPanel({
           />
         )}
 
-        {/* 主体页签（文件夹语义 1 对 N）：
-            一级行单击 = 整主体引用；chevron 独立命中区 = 展开/收起；展开后子行 = 精确插状态图 */}
+        {/* 主体页签（2026-11-18 用户口径）：主体是根节点、本身不代表任何图片，
+            一级行 = 展开/收起状态列表，写入只发生在展开后的状态图子行（精确插那张图） */}
         {panelTab === 'subject' && (
           <div data-asset-panel-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {subjRows.map((row, idx) => {
@@ -1027,8 +1128,9 @@ export function AssetPickPanel({
                       <button
                         type="button"
                         data-subject-item={item.id}
+                        data-subject-expanded={expanded || undefined}
                         data-asset-panel-active={selected || undefined}
-                        onClick={() => pickSubject(item)}
+                        onClick={() => toggleSubject(item.id)}
                         onMouseEnter={() => { if (draggingRef.current) return; setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
                         onFocus={() => { setSubjectIdx(idx); setDetail({ type: 'subject', subject: item }); }}
                         style={{
@@ -1038,7 +1140,7 @@ export function AssetPickPanel({
                           color: palette.capsuleText, fontSize: 13, textAlign: 'left',
                         }}
                       >
-                        {/* chevron 独立命中区（≥20px）：点箭头才展开/收起，点行只插入 */}
+                        {/* chevron 独立命中区（≥20px）：与行点击同一动作（展开/收起） */}
                         <span
                           data-subject-chevron={item.id}
                           role="button"

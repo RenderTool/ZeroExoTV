@@ -14,7 +14,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Modal, Tooltip, App as AntdApp } from 'antd';
-import { ChevronLeft, ChevronRight, Trash2, Upload as UploadIcon, Rabbit } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trash2, Plus, Rabbit } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { ThumbNav, usePreviewImage } from '@zeroexo/plugin-nodes';
@@ -324,7 +324,7 @@ export const StoryboardSubjectManager = memo(function StoryboardSubjectManager({
                       position: 'absolute', top: 6, right: 6, display: 'inline-flex', alignItems: 'center', gap: 4, height: 22, padding: '0 8px', border: `1px solid ${isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'}`, borderRadius: 5,
                       background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', color: textPrimary, cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap', zIndex: 1,
                     }}>
-                      {uploading ? '...' : <><UploadIcon size={11} />{t('subject.addState')}</>}
+                      {uploading ? '...' : <><Plus size={11} />{t('subject.addState')}</>}
                     </button>
                   </Tooltip>
                   {hasVariants ? (

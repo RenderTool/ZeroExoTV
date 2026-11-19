@@ -421,7 +421,10 @@
     "viewAllFull": "すべて見る",
     "myFavorites": "マイお気に入り",
     "favoriteToMyLibrary": "マイプロンプトに保存しました",
-    "loginToFavorite": "ログインしてお気に入りに追加"
+    "loginToFavorite": "ログインしてお気に入りに追加",
+    "batchCancel": "キャンセル",
+    "retry": "再試行",
+    "noMatch": "一致する項目がありません"
   },
   "confirm": {
     "deleteCanvasTitle": "キャンバスを削除",
@@ -662,7 +665,8 @@
     "missingTitle": "サブキャンバスファイルが見つかりません",
     "missingBody": "projects/{{pid}}/subcanvases/{{id}}.json が存在しません（外部で削除または移動された可能性）。このタブを閉じてもメインキャンバスの入口カードは消えません。",
     "error": "サブキャンバスの読み込みに失敗しました",
-    "newNode": "新規"
+    "newNode": "新規",
+    "deleteFailed": "削除に失敗しました。再試行してください"
   },
   "canvasTab": {
     "canvas": "キャンバス",
@@ -672,7 +676,12 @@
     "subjects": "主体庫",
     "director": "ディレクター",
     "storyboardMissing": "このプロジェクトには主体庫がありません。下のボタンで初期化してください",
-    "createStoryboard": "主体庫を初期化"
+    "createStoryboard": "主体庫を初期化",
+    "subjectsLoadError": "被写体ライブラリの読み込みに失敗しました。タブを開き直してください。",
+    "subjectsLoading": "被写体ライブラリを読み込み中…",
+    "scriptConflict": "脚本が外部で変更されたため、最新版を再読み込みしました",
+    "scriptSaveFailed": "脚本の保存に失敗しました。再試行してください",
+    "scriptMissing": "このプロジェクトにはまだ脚本がありません"
   },
   "toolsDock": {
     "tool": "ツール",
@@ -1160,8 +1169,8 @@
     "historyTabImage": "画像",
     "historyTabVideo": "動画",
     "historyTabAll": "すべて",
-    "historySourceCanvas": "キャンバスから生成",
-    "historySourceDirector": "監督台から",
+    "historySourceCanvas": "キャンバス履歴",
+    "historySourceDirector": "絵コンテ履歴",
     "historyEmptyDirectorImage": "監督台は動画のみを生成するため、画像の産出記録はありません。",
     "historyEmptyDirectorVideo": "監督台で生成した動画はまだありません。クリップを実行すると自動的に記録されます。",
     "historyEmptyImage": "画像の生成記録はまだありません。キャンバスで API 生成すると自動収録されます",
@@ -1172,7 +1181,7 @@
     "exportTo": "書き出し先…",
     "exportToProject": "このプロジェクトの素材へ書き出し",
     "exportToLibrary": "公共ライブラリへ書き出し",
-    "addToPublicLibrary": "公共アセットに追加",
+    "addToPublicLibrary": "アセットへ送信",
     "addToProject": "このプロジェクトに追加",
     "addToScope": "アセットに追加",
     "historyAlreadyInProject": "このプロジェクトに同じ内容があります",
@@ -1221,6 +1230,7 @@
     "cardMissingVideo": "動画ファイルが未保存または見つかりません。再インポートしてください",
     "sendToCanvas": "キャンバスに送信",
     "sendToDirector": "演出台へ送信",
+    "sendToSubject": "主体へ送信",
     "sendGuideToDirector": "ガイドを送信",
     "sendSourceVideo": "元動画を送信",
     "sendToDirectorMenu": "演出台へ送信",
@@ -1231,7 +1241,53 @@
     "guideMissing": "この動画にはガイドがありません",
     "guideDownloadFailed": "ガイドのダウンロード失敗：ファイルが存在しないか ComfyUI 未接続です",
     "emptyAssetsTitle": "アセットがまだありません",
-    "emptyAssetsHint": "上のボタンをクリックして最初のアセットを追加"
+    "emptyAssetsHint": "上のボタンをクリックして最初のアセットを追加",
+    "canvasAssetsGroup": "キャンバス素材",
+    "storyboardAssetsGroup": "ストーリーボード素材",
+    "canvasHistoryTitle": "キャンバス履歴",
+    "directorHistoryTitle": "ストーリーボード履歴",
+    "viewPrompt": "プロンプトを見る",
+    "setSegmentCover": "セグメントのカバーに設定",
+    "segmentCover": "現在のカバー",
+    "setSegmentCoverHint": "このセグメントのカバーに設定（ストーリーボード表示と次セグメントのガイドを更新）",
+    "noEpisode": "エピソード未分け",
+    "segmentGenerating": "生成中",
+    "filterAllSegments": "すべてのセグメント",
+    "allSegments": "すべてのセグメント",
+    "segmentGeneratingNoReplace": "このセグメントは生成中です。完了後に置き換えてください",
+    "linkedToSegment": "ショット {{num}} にリンク済み",
+    "batchDeleteBody": "削除後はトーストから元に戻せます。素材ファイルはすぐにはディスクから削除されません。",
+    "moveVersions": "セグメントへ移動",
+    "moveVersionsTitle": "セグメントへ移動",
+    "moveVersionsOk": "移動",
+    "moveVersionsHint": "選択した {{n}} 件のバージョンを下のセグメントへ移動します。所属のみ変更され、カバーは変わりません。",
+    "episodeCol": "話",
+    "segmentCol": "段",
+    "segmentVersionCount": "{{n}} バージョン",
+    "pendingSegment": "保留中 · {{episode}} · ショット {{num}}（元のセグメントは削除済み。新規作成後に自動で再リンクされます）",
+    "unlinkedSegments": "未リンクのセグメント",
+    "moveToSegment": "移動先…",
+    "versionLabel": "バージョン {{n}}",
+    "deleteSegmentTitle": "このセグメントを削除しますか？",
+    "deleteSegmentOnlyVersion": "これはこのセグメントの唯一のバージョンです。削除するとこのショットはストーリーボード履歴から消え、元に戻せません。",
+    "deleteSegmentKeepOthers": "現在有効なバージョンのみ削除されます。このセグメントには {{n}} 件のバージョンが残ります。",
+    "editImage": "編集",
+    "moreActions": "その他",
+    "sendTo": "送信",
+    "untitledVideo": "動画",
+    "untitledImage": "画像",
+    "uploadMaterial": "素材をアップロード",
+    "scopeCapsuleDirector": "ストーリーボード",
+    "scopeCapsuleSubject": "被写体",
+    "emptyProjectTitle": "このプロジェクトにはまだ素材がありません",
+    "emptyLibraryTitle": "まだ素材がありません",
+    "emptyProjectHint": "公共素材から参照するか、直接アップロードできます",
+    "emptyLibraryHint": "上のボタンから最初の素材を追加してください",
+    "uploadToLibrary": "マイ素材ライブラリへアップロード",
+    "scopeCapsuleProjectDisabled": "プロジェクト内で利用可能",
+    "scopeNeedProject": "プロジェクト素材はプロジェクト内で作成してください",
+    "legacyNoChain": "旧バージョンで生成された履歴です。プロンプトとチェーンは表示できません",
+    "open": "開く"
   },
   "openLib": {
     "scopeTab": "オープンライブラリ",
@@ -2693,7 +2749,9 @@
     "selectAllEpisodes": "全選択",
     "clearEpisodes": "クリア",
     "appearEpisodesAllCount": "全話（{{n}} 話）",
-    "appearEpisodesRange": "第 {{ranges}} 話（計 {{n}} 話）"
+    "appearEpisodesRange": "第 {{ranges}} 話（計 {{n}} 話）",
+    "episodeAll": "全話",
+    "deleteThisState": "この状態を削除"
   },
   "episode": {
     "pending": "待機中",
@@ -2825,7 +2883,9 @@
     "scriptMetaTitle": "本作の情報",
     "scriptLoglinePlaceholder": "作品全体の内容を一文で",
     "scriptTitleLabel": "タイトル",
-    "scriptTitlePlaceholder": "作品のタイトル"
+    "scriptTitlePlaceholder": "作品のタイトル",
+    "metaSavedWithStyle": "作品情報を保存しました。{{n}} 件の被写体プロンプトを全編スタイルに同期しました",
+    "metaVisualStyle": "全編スタイル（すべての被写体が継承）"
   },
   "assetPick": {
     "current": "現在の素材",
@@ -2974,7 +3034,9 @@
     "addedToSegment": "演出台へ送信しました",
     "guideResolving": "ガイドを検索中…",
     "guideMissing": "この素材にはガイドがありません",
-    "guideSent": "ガイドを送信しました"
+    "guideSent": "ガイドを送信しました",
+    "coverVideoOnly": "セグメントのカバーには動画のみ設定できます",
+    "coverSet": "現在のセグメントのカバーに設定しました（最新キャッシュ版）"
   },
   "director": {
     "guideSlot": "ガイド",
@@ -3084,7 +3146,9 @@
     "deleteVersionTitle": "このバージョンを削除しますか？",
     "deleteVersionBody": "この履歴スナップショットのみ削除します。現在の内容は変わりません。",
     "deleteVersionOk": "削除",
-    "deleteVersionDone": "バージョンを削除しました"
+    "deleteVersionDone": "バージョンを削除しました",
+    "segmentTitle": "ショット {{num}}",
+    "importDone": "{{count}} 件の素材を読み込みました"
   },
   "scriptImportModal": {
     "title": "脚本を読み込む",
@@ -3135,7 +3199,7 @@
   },
   "onboarding": {
     "mcpFirstRun": "MCP サービスがまだ見つかりません。インストールコマンドを一度実行してください。",
-    "stepMcpFirstRun": "インストールコマンドをコピーしてターミナルで一度実行してください。成功するとこのページが自動で認識します。",
+    "stepMcpFirstRun": "下の「コピー」を押し、Doubao などの Agent のチャットに貼り付けてください。Agent がインストールして起動します。",
     "copyBootstrap": "インストールコマンドをコピー",
     "bootstrapPending": "インストールコマンドを生成中（先に保存先を承認してください）…",
     "rootManaged": "ローカルデータサービスが管理中：",
@@ -3148,9 +3212,9 @@
     "rootGuess": "フォルダ名から {{path}} と推定しました。確認して「切り替え」を押してください。",
     "title": "使用ガイド",
     "stepRoot": "保存先フォルダを選択",
-    "stepMcp": "MCP を接続（Agent IDE 用）",
+    "stepMcp": "Agent に接続（例：Doubao）",
     "stepComfy": "ComfyUI に接続",
-    "stepMcpHint": "設定をコピーして Agent IDE の MCP 設定に貼り付けます。",
+    "stepMcpHint": "下の「コピー」を押し、Doubao などの Agent のチャットに貼り付けてください。Agent がインストールします。",
     "copyMcp": "MCP 設定をコピー",
     "downloadPlugin": "プラグイン ZIP をダウンロード",
     "pluginPathHint": "{{path}} に解凍し、ComfyUI を再起動",
@@ -3168,5 +3232,16 @@
     "testComfy": "接続テスト",
     "comfyOk": "接続済み",
     "comfyFailed": "接続に失敗しました"
+  },
+  "folderListView": {
+    "namePlaceholder": "フォルダ名",
+    "create": "作成",
+    "title": "プロジェクトフォルダ",
+    "newFolder": "新規",
+    "empty": "フォルダはまだありません"
+  },
+  "styleGallery": {
+    "pickButton": "スタイルを選択",
+    "emptySelected": "未選択：被写体プロンプトは旧テンプレートのままです。先に全編スタイルを選択してください"
   }
 }

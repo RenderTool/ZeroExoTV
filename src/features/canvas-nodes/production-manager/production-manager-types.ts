@@ -85,18 +85,22 @@ export interface SubjectCoverResolution {
 }
 
 /**
- * 主体封面唯一解析入口（回落链：手动 coverKey → 第一张状态图 → 无）。
+ * 主体封面唯一解析入口（回落链：手动 coverKey → 基础状态首图 → 无）。
  * 主体库卡片 / 主体详情头部 / 导演台主体行 全部走这里，禁止各处各算一套。
- * 手动封面指向的状态图被删除时自动回落到第一个状态图，不留死链。
+ * 手动封面指向的状态图被删除时自动回落到默认封面，不留死链。
  *
- * extraKeys（2026-11-06 主体库页面化）：主体树里的媒体键（baseState.referenceImages /
- * states[].media）。本地版主体图大多只存在于树里、不在条目 images[] 中，
- * 故「把某个状态设为封面」写入的 coverKey 需要这份候选集才算有效手动封面；
- * 候选同时充当默认回落（images 在前，保持既有口径）。不传 = 旧行为。
+ * extraKeys（2026-11-06 主体库页面化）：主体树里的媒体键（states[].media）。
+ * 本地版主体图大多只存在于树里、不在条目 images[] 中，故「把某个状态设为封面」写入的
+ * coverKey 需要这份候选集才算有效手动封面。不传 = 旧行为。
+ *
+ * baseKeys（2026-11-18 用户口径）：基础状态的图键。**默认基础状态 = 封面**，
+ * 基础状态没图时封面必须是空（上层渲染图标占位），禁止拿别的状态图冒充封面
+ * （否则会出现「基础状态空、主体却有封面」）。只有显式 coverKey 才允许封面来自其它状态。
  */
 export function resolveSubjectCover(
   item: Pick<ProductionItem, 'coverKey' | 'images'> | null | undefined,
   extraKeys?: readonly (string | null | undefined)[],
+  baseKeys?: readonly (string | null | undefined)[],
 ): SubjectCoverResolution {
   const imageKeys = (item?.images ?? []).map((img) => img?.storageKey).filter((k): k is string => Boolean(k));
   // 有主体树候选时以树为准：条目 images 是老数据，可能还留着旧封面；
@@ -110,6 +114,11 @@ export function resolveSubjectCover(
   if (candidates.length === 0) return { key: null, source: 'none' };
   const manual = item?.coverKey ?? null;
   if (manual && candidates.includes(manual)) return { key: manual, source: 'manual' };
+  // 传了 baseKeys = 调用方知道基础状态是谁：默认封面只认基础状态首图，没有就空着
+  if (baseKeys !== undefined) {
+    const base = (baseKeys ?? []).find((k): k is string => Boolean(k)) ?? null;
+    return base ? { key: base, source: 'default' } : { key: null, source: 'none' };
+  }
   return { key: candidates[0]!, source: 'default' };
 }
 

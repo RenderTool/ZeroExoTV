@@ -6,6 +6,31 @@ import { readdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { execSync } from 'node:child_process';
 import { spawn } from 'node:child_process';
 
+// ===== `.js` 说明符回落到同名 `.ts/.tsx`（2026-11-17 报障根因修复）=====
+// 这个仓库的源码统一用 ESM 写法 `import './x.js'`（指向同目录的 x.ts）。
+// 一旦有人跑 in-source 的 tsc，src 下就会出现与 .ts 同名的 .js，Vite 会优先加载那份
+// 旧编译产物 —— 改了 .ts 不生效、运行时还会报 "does not provide an export named ..."。
+// 这些 .js 已按要求清掉；这里让解析器在 .js 缺失时回落到 .ts/.tsx，源码即唯一事实源。
+function resolveTsFromJsSpecifier(): Plugin {
+  const tryExts = ['.ts', '.tsx'] as const;
+  return {
+    name: 'zeroexo-resolve-ts-from-js-specifier',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (!importer || !source.endsWith('.js')) return null;
+      let base: string;
+      if (source.startsWith('@/')) base = path.resolve(__dirname, './src', source.slice(2, -3));
+      else if (source.startsWith('.')) base = path.resolve(path.dirname(importer), source.slice(0, -3));
+      else return null;
+      for (const ext of tryExts) {
+        const candidate = `${base}${ext}`;
+        if (existsSync(candidate)) return candidate;
+      }
+      return null;
+    },
+  };
+}
+
 // ===== 版本清单（2026-11-11 用户要求）=====
 // 网页与 MCP 都显示版本号，并提供「官方最新版 vs 本地版本」对照：
 // - 构建时把 version.json 写进 dist（GitHub Pages 部署后即官方最新版清单）；
@@ -47,49 +72,54 @@ function versionManifest(): Plugin {
   };
 }
 
-// ===== 本地数据服务随应用自动拉起（2026-11-05 数据同源）=====
-// 用户打开页面时 fs-server（默认 8790）必须永远在线，否则前端退到临时存储。
-// 1. dev/preview 启动时探测 8790：已在线则不重复拉起（fs-server 自身也幂等退出，双保险）；
-// 2. 不在线则 spawn node mcp-server/dist/index.js --fs-server，异常退出时在终端 warn；
-// 3. dev server 关闭时一并关闭自己拉起的子进程（外部已存在的实例不动）。
+// ===== 本地数据服务独立守护（2026-11-18 用户报障：Agent 干活期间 8787/8790 反复掉线）=====
+// 用户打开页面时 fs-server（默认 8790）必须始终在线，否则前端退到临时存储、素材读取失败。
+// 1. dev/preview 启动时只探测 8790 的 /health：已在线就什么都不做；离线才拉起；
+// 2. 拉起经 tools/start-fs-server.mjs 的一次性 launcher 二次 spawn：服务不挂在 dev 的进程树上，
+//    dev/preview 关闭、Ctrl+C、进程树清理都不会带走它（直接在 vite 里 spawn 会被 tree-kill 连着杀）；
+// 3. 幂等由服务自身保证（端口已有实例即 process.exit(0)）；要停服务只能显式结束该进程。
 const FS_SERVER_PORT = process.env.ZEROEXO_FS_PORT ?? '8790';
 function zeroexoFsServer(): Plugin {
-  let child: ReturnType<typeof spawn> | null = null;
   const start = (log: { info: (m: string) => void; warn: (m: string) => void }): void => {
     void fetch(`http://127.0.0.1:${FS_SERVER_PORT}/health`)
       .then((r) => {
         if (r.ok) {
-          log.info('[fs-server] 8790 已有实例在线，跳过拉起');
+          log.info(`[fs-server] ${FS_SERVER_PORT} 已有实例在线，跳过拉起`);
         } else {
           throw new Error('health 非 200');
         }
       })
       .catch(() => {
-        child = spawn(process.execPath, [path.resolve(__dirname, 'mcp-server/dist/index.js'), '--fs-server'], {
-          stdio: 'inherit',
-        });
-        child.on('exit', (code) => {
-          if (code !== 0 && code !== null) log.warn(`[fs-server] 子进程退出（code=${code}），页面将退到临时存储`);
-          child = null;
-        });
-        log.info(`[fs-server] 已自动拉起本地数据服务 http://127.0.0.1:${FS_SERVER_PORT}`);
+        const dist = path.resolve(__dirname, 'mcp-server/dist/index.js');
+        if (!existsSync(dist)) {
+          log.warn('[fs-server] 缺少 mcp-server/dist/index.js：先执行 pnpm fs:build，或用 pnpm fs 前台启动');
+          return;
+        }
+        const launcher = path.resolve(__dirname, 'tools/start-fs-server.mjs');
+        spawn(process.execPath, [launcher, dist, '--port', FS_SERVER_PORT], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        }).unref();
+        log.info(`[fs-server] 已拉起独立守护进程 http://127.0.0.1:${FS_SERVER_PORT}（关闭 dev 不会停止它）`);
+        // 起没起来以 /health 为准，别只看 spawn 是否成功
+        setTimeout(() => {
+          void fetch(`http://127.0.0.1:${FS_SERVER_PORT}/health`)
+            .then((r) => {
+              if (r.ok) log.info(`[fs-server] ${FS_SERVER_PORT} 就绪`);
+              else log.warn(`[fs-server] ${FS_SERVER_PORT} 未就绪：页面会退到临时存储`);
+            })
+            .catch(() => log.warn(`[fs-server] ${FS_SERVER_PORT} 未就绪：页面会退到临时存储`));
+        }, 1500);
       });
-  };
-  const stop = (): void => {
-    if (child) {
-      child.kill();
-      child = null;
-    }
   };
   return {
     name: 'zeroexo-fs-server',
     configureServer(server) {
       start(server.config.logger);
-      server.httpServer?.on('close', stop);
     },
     configurePreviewServer(server) {
       start(server.config.logger);
-      server.httpServer?.on('close', stop);
     },
   };
 }
@@ -124,7 +154,7 @@ function cleanStaleBuildAssets(): Plugin {
 export default defineConfig({
   // GitHub Pages 项目站点：部署时设置 VITE_BASE_PATH=/<repo>/；自定义域名/根站点保持 /
   base: process.env.VITE_BASE_PATH || '/',
-  plugins: [tailwindcss(), react(), zeroexoFsServer(), cleanStaleBuildAssets(), versionManifest()],
+  plugins: [resolveTsFromJsSpecifier(), tailwindcss(), react(), zeroexoFsServer(), cleanStaleBuildAssets(), versionManifest()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_PKG.version),
     __MCP_VERSION__: JSON.stringify(MCP_PKG.version),

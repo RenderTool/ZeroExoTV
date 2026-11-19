@@ -97,10 +97,12 @@ export function CanvasCopiesGroup({ store, theme }: CanvasCopiesGroupProps) {
   }, [projectId, refreshKey]);
 
   const filtered = useMemo(() => {
+    // 临时链路画布（提示词快照挂载出来的副本）不进子画布列表：它不是用户保存的子画布
+    const visible = items.filter((c) => !c.ephemeral);
     const kw = store.search.trim().toLowerCase();
-    if (!kw) return items;
+    if (!kw) return visible;
     // 1 号永远留着（用户不会想搜不到主画布），其余按标题过滤
-    return items.filter((c) => c.id === MAIN_CANVAS_ID || c.title.toLowerCase().includes(kw));
+    return visible.filter((c) => c.id === MAIN_CANVAS_ID || c.title.toLowerCase().includes(kw));
   }, [items, store.search]);
 
   const open = useCallback((c: CanvasSummary) => {
@@ -255,7 +257,7 @@ export function CanvasCopiesGroup({ store, theme }: CanvasCopiesGroupProps) {
         cancelText={t('common.cancel', '取消')}
         onOk={() => void commitRename()}
         onCancel={() => setRenaming(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Input
           autoFocus

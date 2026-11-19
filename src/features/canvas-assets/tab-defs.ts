@@ -14,15 +14,15 @@
 
 /** 抽屉分组页签定义（数组顺序 = sidebar 按钮顺序） */
 export const DRAWER_TAB_DEFS = [
-  // 全局分组（所有模块共用）置顶：
-  // 2026-11-16 用户要求：全局资产 / 主体 / 画布历史 / 导演台历史各自独立入口，不再混在一个资产分组里
-  { key: 'assets', labelKey: 'assetLibrary.scopeCapsuleLibrary', moduleOnly: false },
-  { key: 'subjects', labelKey: 'assetLibrary.scopeCapsuleSubject', moduleOnly: false },
-  { key: 'canvasHistory', labelKey: 'assetLibrary.scopeCapsuleCanvasHistory', moduleOnly: false },
-  { key: 'directorHistory', labelKey: 'assetLibrary.scopeCapsuleDirector', moduleOnly: false },
+  // 全局分组（所有模块共用）置顶。
+  // 2026-11-18 用户口径：左侧两组不再叫「历史 / 资产」，改成按产出方命名——
+  //   画布资产 = 画布自己产出（组内 画布历史 → 公共资产）
+  //   分镜资产 = 分镜自己产出（组内 主体 → 分镜历史）
+  { key: 'assets', labelKey: 'assetLibrary.canvasAssetsGroup', defaultLabel: '画布资产', moduleOnly: false },
+  { key: 'history', labelKey: 'assetLibrary.storyboardAssetsGroup', defaultLabel: '分镜资产', moduleOnly: false },
+  // 任务队列：全局分组（MCP 任务 / 取消运行中或排队中任务）
   { key: 'tasks', labelKey: 'taskQueue.title', moduleOnly: false },
-  // 2026-11-16 用户指令：模块独有分组（画布结构 / 本剧信息）统一垫底，
-  // sidebar 渲染时在首个独有分组上方画分割线，与全局分组隔开
+  // 2026-11-16 用户指令：模块独有分组（画布结构 / 本剧信息）垫底；按钮之间不加分割线
   // 画布相关合并为一个入口：层级 / 子画布在组内用 Tab 切换
   { key: 'canvasStructure', labelKey: 'canvasCopy.drawerTab', moduleOnly: true },
   // 2026-11-07 用户指令：剧本页的「本剧信息」放进资产抽屉，作为独立分组（整部剧一句话概述 + 标签）
@@ -37,11 +37,11 @@ export type DrawerModule = 'canvas' | 'script' | 'storyboard' | 'workbench';
 
 /** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在（顺序与 DRAWER_TAB_DEFS 一致） */
 export const DRAWER_MODULE_GROUPS: Record<DrawerModule, readonly DrawerGroup[]> = {
-  canvas: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'canvasStructure'],
+  canvas: ['assets', 'history', 'tasks', 'canvasStructure'],
   // 剧本 / 导演台：本剧信息是这两个阶段共用的项目级信息，只在这两个模块挂载
-  script: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'scriptMeta'],
-  storyboard: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks'],
-  workbench: ['assets', 'subjects', 'canvasHistory', 'directorHistory', 'tasks', 'scriptMeta'],
+  script: ['assets', 'history', 'tasks', 'scriptMeta'],
+  storyboard: ['assets', 'history', 'tasks'],
+  workbench: ['assets', 'history', 'tasks', 'scriptMeta'],
 };
 
 /**

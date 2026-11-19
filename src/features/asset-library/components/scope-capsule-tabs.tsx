@@ -42,6 +42,8 @@ export interface ScopeCapsuleTabsProps {
    * null / 未传 = 尚未加载 → 不显示徽标（不假称 0）。
    */
   subjectCount?: number | null;
+  /** 只显示这些分段（独立入口锁定场景：只留「公共资产 / 主体」两段，用 Tab 互切） */
+  only?: ScopeCapsuleTab[];
   theme: ThemeConfig;
 }
 
@@ -54,6 +56,7 @@ export function ScopeCapsuleTabs({
   directorCount,
   showSubject,
   subjectCount,
+  only,
   theme,
 }: ScopeCapsuleTabsProps): React.ReactElement {
   const { t } = useTranslation();
@@ -86,7 +89,7 @@ export function ScopeCapsuleTabs({
     <CapsuleTabs
       value={value}
       onChange={(key) => onChange(key as ScopeCapsuleTab)}
-      segments={segments}
+      segments={only ? segments.filter((s) => only.includes(s.key as ScopeCapsuleTab)) : segments}
       theme={theme}
     />
   );

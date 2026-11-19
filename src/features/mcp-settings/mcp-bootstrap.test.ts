@@ -7,13 +7,15 @@ describe('buildBootstrapCommand', () => {
     downloadUrl: 'https://rendertool.github.io/ZeroExoTV/downloads/zeroexo-mcp-server.tgz',
   };
 
-  it('Windows：下载 → 解压 → 启动（沿用默认数据根，不劫持现有数据目录）', () => {
-    const cmd = buildBootstrapCommand({ ...base, platform: 'windows' });
+  it('Windows：下载 → 解压 → 启动（装到数据根旁，禁止装进 C 盘）', () => {
+    const cmd = buildBootstrapCommand({ ...base, platform: 'windows', dataRoot: 'D:\\Test' });
     expect(cmd).toContain('powershell');
     expect(cmd).toContain('Invoke-WebRequest');
     expect(cmd).not.toContain('ZEROEXO_DATA_ROOT');
     expect(cmd).toContain('--http --port 8787');
     expect(cmd).toContain('tar -xzf');
+    expect(cmd).toContain('D:\\Test\\.mcp-server\\next');
+    expect(cmd).not.toContain('USERPROFILE');
   });
 
   it('mac/linux：curl 下载 + tar 解压 + 自动数据根启动', () => {

@@ -13,6 +13,8 @@ import {
   type WorkbenchShotReference,
 } from "../store/workbench.js";
 import { readStoryboard, upsertSubject, type ProductionItem } from "../store/storyboard.js";
+import { reviewProject, reviewSummaryText, PASS_SCORE } from "../lib/shot-review.js";
+import { checkScriptReadiness, checkSubjectReadiness } from "../lib/readiness.js";
 import {
   composeImagePrompt,
   composeNegativePrompt,
@@ -92,12 +94,65 @@ function sceneMeta(heading: string): { name: string; place: "内" | "外"; time:
     .replace(/^(INT\.|EXT\.)\s*/i, "")
     .replace(/^第\s*\S+\s*场\s*[:：]?\s*/, "")
     .replace(/\s*[·・]\s*(内|外)(\s*[·・]\s*(日|夜))?$/, "")
+    // 常见标准写法「测试室 夜 内」：时间在中间、内外在末尾，也要从场景名里剥掉
+    .replace(/\s+(日|夜)\s+(内|外)$/, "")
+    .replace(/\s+(内|外)\s+(日|夜)$/, "")
     .replace(/\s*-\s*(日|夜)$/, "")
     .trim();
   return { name: name || heading, place, time };
 }
 
 export function registerPlanTools(server: McpServer, ctx: Ctx): void {
+  defTool(server, ctx, {
+    name: "review_shots",
+    description:
+      "分镜/提示词质检（检查模式）：逐片段 0–10 分，检查结构完整、参考图槽位与 <Subject N> 锚定、外貌/服装描写、"
+      + "负面词范畴化、形容词汤、帧预算（≤736）、单镜运镜与动作终点态。返回 issues（error 必须修，warn 建议修）+ fix 建议。"
+      + "低于 7 分或存在 error 时，request_director_run / apply_shot_prompts 会直接拒绝（用户明确认可可传 userOverride:true）。",
+    bits: ["project.read", "script.read", "subject.read", "workbench.read"],
+    schema: {
+      projectId: z.string(),
+      shotIds: z.array(z.string()).optional().describe("只检查指定片段；不传 = 全部"),
+      verbose: z.boolean().optional().describe("true 时返回逐条 issues（默认也返回，verbose 仅控制截断）"),
+    },
+    handler: async (args) => {
+      const root = dataRoot();
+      const wb = await readWorkbench(root, args.projectId);
+      const sb = await readStoryboard(root, args.projectId);
+      const script = await readScript(root, args.projectId);
+      const scriptHasEpisodes = script ? (script.episodes ?? []).length > 0 : false;
+      const review = reviewProject(wb, sb, { scriptHasEpisodes });
+      const scriptReady = checkScriptReadiness(script);
+      const subjectReady = checkSubjectReadiness(sb, (wb?.shots ?? []) as never);
+      const picked = args.shotIds?.length
+        ? { ...review, shots: review.shots.filter((s) => args.shotIds!.includes(s.shotId)) }
+        : review;
+      const ok = picked.ok && scriptReady.ready && subjectReady.ready;
+      return {
+        projectId: args.projectId,
+        passScore: PASS_SCORE,
+        ok,
+        score: picked.score,
+        blocking: picked.blocking
+          + scriptReady.issues.filter((i) => i.level === "error").length
+          + subjectReady.issues.filter((i) => i.level === "error").length,
+        summary: [
+          reviewSummaryText(picked),
+          scriptReady.ready ? "" : `剧本未定稿：${scriptReady.issues.filter((i) => i.level === "error").map((i) => i.message).join("；")}`,
+          subjectReady.ready ? "" : `主体未完善：${subjectReady.issues.filter((i) => i.level === "error").map((i) => i.message).join("；")}`,
+        ].filter(Boolean).join("\n"),
+        script: scriptReady,
+        subjects: subjectReady,
+        projectIssues: picked.projectIssues,
+        shots: picked.shots,
+        next: ok
+          ? "质检通过，可以 request_director_run 出片。"
+          : "先按 issues 的 fix 修（补剧本/补主体图/改提示词），再重新 review_shots；"
+            + "若用户看过结果并明确认为可以，可带 userOverride:true 继续。",
+      };
+    },
+  });
+
   defTool(server, ctx, {
     name: "validate_project",
     description:
@@ -394,13 +449,36 @@ export function registerPlanTools(server: McpServer, ctx: Ctx): void {
       shotIds: z.array(z.string()).optional(),
       dryRun: z.boolean().optional(),
       confirm: z.boolean().optional(),
+      userOverride: z.boolean().optional().describe("用户明确认可跳过质检门（用户权限高于 MCP 规范）"),
     },
     handler: async (args) => {
       guardDryRunConfirm(args, { requireOne: true });
       const root = dataRoot();
+      // 前置门（2026-11-19 用户要求）：剧本没定稿 / 主体没完善不许生成分镜提示词。
+      const script = await readScript(root, args.projectId);
+      const scriptReady = checkScriptReadiness(script);
       const wb = await readWorkbench(root, args.projectId);
-      if (!wb) throw new McpError("NOT_FOUND", "导演台不存在");
       const sb = await readStoryboard(root, args.projectId);
+      const subjectReady = checkSubjectReadiness(sb, (wb?.shots ?? []) as never);
+      const gateErrors = [...scriptReady.issues, ...subjectReady.issues].filter((i) => i.level === "error");
+      if (!scriptReady.ready || !subjectReady.ready) {
+        if (!args.userOverride) {
+          throw new McpError(
+            "PREFLIGHT_GATE_FAILED",
+            [
+              scriptReady.ready ? "" : "剧本未定稿：",
+              ...scriptReady.issues.filter((i) => i.level === "error").map((i) => `  - ${i.message}（${i.fix ?? ""}）`),
+              subjectReady.ready ? "" : "主体未完善：",
+              ...subjectReady.issues.filter((i) => i.level === "error").map((i) => `  - ${i.message}（${i.fix ?? ""}）`),
+              "",
+              `共 ${gateErrors.length} 条阻断项。先把剧本/主体补齐再写提示词；用户明确要求先写时传 userOverride:true。`,
+            ].filter(Boolean).join("\n"),
+            { scriptReady: scriptReady.ready, subjectReady: subjectReady.ready },
+          );
+        }
+        console.warn(`[preflight-gate] userOverride 放行：剧本 ${scriptReady.ready} / 主体 ${subjectReady.ready}（项目 ${args.projectId}）`);
+      }
+      if (!wb) throw new McpError("NOT_FOUND", "导演台不存在");
       const subjectsById = new Map((sb?.entities ?? []).map((e) => [e.id, e]));
       const subjectsByName = new Map((sb?.entities ?? []).map((e) => [e.name, e]));
 
@@ -459,7 +537,18 @@ export function registerPlanTools(server: McpServer, ctx: Ctx): void {
         }
         out.push({ shotId: shot.id, number: shot.number, refs: refs.length, imagePrompt });
       }
-      return { written: !args.dryRun, shots: out.length, version, samples: out.slice(0, 2) };
+      const after = args.dryRun ? null : await readWorkbench(root, args.projectId);
+      const review = after ? reviewProject(after, sb, { scriptHasEpisodes: true }) : null;
+      return {
+        written: !args.dryRun,
+        shots: out.length,
+        version,
+        samples: out.slice(0, 2),
+        review: review ? { ok: review.ok, score: review.score, blocking: review.blocking, summary: reviewSummaryText(review) } : null,
+        hint: review && !review.ok
+          ? "写入了但质检未过：先按 review 的 fix 改，再 review_shots；未过线不要 request_director_run。"
+          : undefined,
+      };
     },
   });
 }

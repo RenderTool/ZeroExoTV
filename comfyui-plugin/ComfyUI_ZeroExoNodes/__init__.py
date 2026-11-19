@@ -79,7 +79,7 @@ VISIBLE_PARAMS = {
     },
     "lora_strength": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0},
     # 采样 / 性能（与 MiniMax H3 Director 同口径；默认值 = 引擎默认）
-    "sampler": {"type": "string", "default": "res_multistep"},
+    "sampler": {"type": "string", "default": "euler"},
     "scheduler": {"type": "string", "default": "simple"},
     "shift_video": {"type": "number", "default": 12.0},
     "shift_audio": {"type": "number", "default": 3.0},
@@ -99,6 +99,9 @@ IMAGE_VISIBLE_PARAMS = {
     "input_image": {"type": "string", "default": ""},
     # 遮罩（可选；有值时走 qwen_image_edit_mask 模板）
     "mask_image": {"type": "string", "default": ""},
+    # 多参考图（可选）：按顺序最多 3 张，第一张同时作为 input_image。
+    # 模板里的 BatchImagesNode 批量喂给 TextEncodeQwenImage21，Qwen 2.1 原生支持多图参考。
+    "input_images": {"type": "string", "default": ""},
     "seed": {"type": "integer", "default": 1, "min": 0},
     "steps": {"type": "integer", "default": 25, "min": 1, "max": 100},
     "cfg": {"type": "number", "default": 1.0},
@@ -142,7 +145,7 @@ TEMPLATE_DEFAULTS = {
     "use_low_vram": False,
     "lora_name": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
     "lora_strength": 1.0,
-    "sampler": "res_multistep",
+    "sampler": "euler",
     "scheduler": "simple",
     "shift_video": 12.0,
     "shift_audio": 3.0,
@@ -174,6 +177,36 @@ def ensure_dir(path: str) -> str:
     return path
 
 
+def _attach_extra_ref_images(template: dict[str, Any], names: Any) -> None:
+    """多参考图接进模板：第 2、3 张各建 LoadImage，直接接到 TextEncodeQwenImage21 的 images.image_2/3。
+
+    注意不能挂到 BatchImagesNode：它输出的是一个 batch，而 TextEncodeQwenImage21 的
+    images 是 autogrow 的多路输入（image_1..image_16），一图一路才会被模型逐张看到。
+    """
+    if isinstance(names, str):
+        items = [p.strip() for p in names.split(",") if p.strip()]
+    elif isinstance(names, (list, tuple)):
+        items = [str(p).strip() for p in names if str(p).strip()]
+    else:
+        items = []
+    if len(items) <= 1:
+        return
+    encode_ids = [nid for nid, node in template.items() if isinstance(node, dict) and node.get("class_type") == "TextEncodeQwenImage21"]
+    if not encode_ids:
+        return
+    encoder = template[encode_ids[0]]
+    inputs = encoder.setdefault("inputs", {})
+    # TextEncodeQwenImage21 的 images 是 image_1..image_16：槽位够接 16 张
+    for slot, name in enumerate(items[1:16], start=1):
+        node_id = f"zx_ref_image_{slot}"
+        template[node_id] = {
+            "inputs": {"image": name},
+            "class_type": "LoadImage",
+            "_meta": {"title": f"参考图 {slot + 1}"},
+        }
+        inputs[f"images.image_{slot + 1}"] = [node_id, 0]
+
+
 def substitute(node: Any, params: dict[str, Any]) -> Any:
     """模板占位符：__zx:name__ 换成参数值（整串保留类型，串内拼接转字符串）。"""
     if isinstance(node, str):
@@ -193,9 +226,19 @@ def substitute(node: Any, params: dict[str, Any]) -> Any:
 
 def _available_models(folder: str) -> list[str]:
     try:
-        return list(folder_paths.get_filename_list(folder))
+        names = list(folder_paths.get_filename_list(folder))
     except Exception:
         return []
+    # 编码器可能被用户放在 models/clip（老目录习惯），CLIPLoader 两处都会列出来；
+    # 只查 text_encoders 会把「已配置好的 qwen3vl」误判成缺失。
+    if folder == "text_encoders":
+        try:
+            for name in folder_paths.get_filename_list("clip"):
+                if name not in names:
+                    names.append(name)
+        except Exception:
+            pass
+    return names
 
 
 def _pick_model(folder: str, current: str, preferred: tuple[str, ...]) -> str:
@@ -213,8 +256,13 @@ def _pick_model(folder: str, current: str, preferred: tuple[str, ...]) -> str:
     return names[0]
 
 
-def apply_model_overrides(template: dict[str, Any], models: Any) -> dict[str, Any]:
-    """把前端选择的模型文件名写进模板；加载器节点不变，只换权重文件。"""
+def apply_model_overrides(template: dict[str, Any], models: Any, family: str = "auto") -> dict[str, Any]:
+    """把前端选择的模型文件名写进模板；加载器节点不变，只换权重文件。
+
+    family 决定编码器怎么取：image = 生图工作流（要 4096 维图像编码器），
+    video = H3 参考视频（要 5120 维 32b 编码器）。auto = 按模板里现有的编码器名推断。
+    前端「文本编码器」槽位是 H3 的配置，套到生图工作流上必然形状不匹配，所以这里按工作流分族。
+    """
     m = models if isinstance(models, dict) else {}
     unet = str(m.get("unet") or "").strip()
     video_vae = str(m.get("videoVae") or "").strip()
@@ -229,31 +277,44 @@ def apply_model_overrides(template: dict[str, Any], models: Any) -> dict[str, An
             continue
         cls = node.get("class_type")
         if cls == "UNETLoader":
-            inputs["unet_name"] = _pick_model(
-                "diffusion_models",
-                unet or str(inputs.get("unet_name") or ""),
-                ("minimax_h3", "h3", "qwen_image", "qwen"),
-            )
+            if unet:
+                inputs["unet_name"] = unet
+            elif family != "image":
+                # 视频槽位只对视频工作流生效；生图工作流沿用模板自己的底模
+                inputs["unet_name"] = _pick_model(
+                    "diffusion_models",
+                    str(inputs.get("unet_name") or ""),
+                    ("minimax_h3", "h3", "qwen_image", "qwen"),
+                )
         elif cls == "CLIPLoader":
             current_clip = str(inputs.get("clip_name") or "")
-            image_clip = ("qwen3.5" in current_clip.lower() or "qwen_image" in current_clip.lower())
-            inputs["clip_name"] = _pick_model(
-                "text_encoders",
-                clip or current_clip,
-                ("qwen3.5", "qwen_image", "qwen3vl_32b") if image_clip else ("minimax_h3", "qwen3vl_32b"),  # H3 必须 32b（hidden 5120）；8b/4b 会 matmul 形状不匹配，禁止回落
-            )
+            current_is_image = ("qwen3.5" in current_clip.lower() or "qwen_image" in current_clip.lower())
+            is_image_flow = family == "image" or (family == "auto" and current_is_image)
+            if is_image_flow:
+                # 生图工作流：H3 的 32b 编码器（5120）绝不能进来，否则报 4096/5120 形状错误
+                if clip and ("qwen3.5" in clip.lower() or "qwen_image" in clip.lower()):
+                    inputs["clip_name"] = clip
+                else:
+                    inputs["clip_name"] = _pick_model("text_encoders", current_clip, ("qwen3.5", "qwen_image"))
+            else:
+                # H3 参考视频：用户选的就是它；没配时只在含 32b 的项里回落，绝不回落到 8b/4b
+                if clip and not ("qwen3.5" in clip.lower() or "qwen_image" in clip.lower()):
+                    inputs["clip_name"] = clip
+                else:
+                    names = [n for n in _available_models("text_encoders") if "32b" in n.lower()]
+                    inputs["clip_name"] = names[0] if names else current_clip
             if clip_type:
                 inputs["type"] = clip_type
         elif cls == "VAELoader":
             current = str(inputs.get("vae_name") or "").lower()
             if "audio" in current:
-                inputs["vae_name"] = _pick_model(
-                    "vae", audio_vae or str(inputs.get("vae_name") or ""), ("audio", "minimax_h3")
+                inputs["vae_name"] = audio_vae or _pick_model(
+                    "vae", str(inputs.get("vae_name") or ""), ("audio", "minimax_h3")
                 )
             else:
-                inputs["vae_name"] = _pick_model(
+                inputs["vae_name"] = video_vae or _pick_model(
                     "vae",
-                    video_vae or str(inputs.get("vae_name") or ""),
+                    str(inputs.get("vae_name") or ""),
                     ("qwen_image", "qwen") if "qwen" in current else ("video", "minimax_h3"),
                 )
         elif cls == "CheckpointLoaderSimple":
@@ -724,7 +785,16 @@ async def submit_job(request):
         template = substitute(load_template(template_kind), params)
     except FileNotFoundError:
         return web.json_response({"ok": False, "error": f"缺少模板 templates/{template_kind}.json"}, status=400)
-    template = apply_model_overrides(template, body.get("models"))
+    # 前端四个槽位是「视频 H3」的配置：只有参考视频工作流能用，图片工作流用模板自己的底模/编码器
+    template = apply_model_overrides(
+        template,
+        body.get("models"),
+        family="video" if kind == "reference_video" else "image",
+    )
+    # 多参考图：把第 2、3 张接进模板的 BatchImagesNode（Qwen 2.1 原生支持多图参考），
+    # 只做「有就加」的增补，不改变单图既有链路。
+    if template_kind in ("qwen_image_edit", "qwen_image_edit_mask"):
+        _attach_extra_ref_images(template, params.get("input_images"))
     if kind == "reference_video":
         # H3 必须用 32b 文本编码器（hidden 5120）；若机器上只有 8b/4b（4096），
         # 继续跑会在 matmul 报 "shapes cannot be multiplied (10x4096 and 5120x5376)"，
@@ -738,7 +808,7 @@ async def submit_job(request):
                 return web.json_response({
                     "ok": False,
                     "error": (
-                        f"缺少 H3 文本编码器 {clip_name}：请把 qwen3vl_32b_minimax_h3_* 放进 models/text_encoders。"
+                        f"缺少 H3 文本编码器 {clip_name}：请把 qwen3vl_32b_minimax_h3_* 放进 models/text_encoders（放 models/clip 也认）。"
                         " 8b/4b 的 hidden 是 4096，H3 需要 5120，强行跑会报 matmul 形状不匹配。"
                     ),
                 }, status=400)
@@ -961,7 +1031,7 @@ def _prepare_batch_segment(
     out_guide = os.path.join(guide_dir, f"gd_{uuid.uuid4().hex[:12]}.safetensors")
     params["guide_path"] = out_guide
     template = substitute(load_template("reference_video"), params)
-    template = apply_model_overrides(template, models)
+    template = apply_model_overrides(template, models, family="video")
     available_text_encoders = _available_models("text_encoders")
     for node in template.values():
         if not isinstance(node, dict) or node.get("class_type") != "CLIPLoader":
@@ -1272,6 +1342,20 @@ async def task_cancel(request):
             _interrupt_prompt(str(child["promptId"]))
     _save_job(job)
     return web.json_response({"ok": True, "task": job})
+
+
+@routes.delete("/zeroexo/v1/tasks/{task_id}")
+async def task_delete(request):
+    """真删任务事实源（网页「清空已完成」调用）：终态任务删 JSON + 内存，刷新不再复活。"""
+    task_id = request.match_info["task_id"]
+    job = JOBS.get(task_id) or task_store.load_task(output_root(), task_id)
+    if not job:
+        return web.json_response({"ok": True, "deleted": False})
+    if job.get("state") in ("queued", "running"):
+        return web.json_response({"ok": False, "error": "任务进行中，请先取消再删除"}, status=409)
+    JOBS.pop(task_id, None)
+    deleted = task_store.delete_task(output_root(), task_id)
+    return web.json_response({"ok": True, "deleted": deleted})
 
 
 from .ref_video import (

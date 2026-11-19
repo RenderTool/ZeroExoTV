@@ -12,7 +12,7 @@ import {
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } from './task-queue-store.js';
 import { cancelBrokerTask } from './task-broker-client.js';
-import { cancelPluginTask } from './plugin-task-client.js';
+import { cancelPluginTask, deletePluginTask } from './plugin-task-client.js';
 import { usePluginTaskQueue } from './use-plugin-task-queue.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 
@@ -152,11 +152,11 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
   return (
     <div data-task-queue-panel style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 8px',
-        borderBottom: `1px solid ${border}`, fontSize: 12, color: theme.toolbar.text, flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px 0',
+        fontSize: 13, fontWeight: 600, color: theme.toolbar.text, flexShrink: 0,
       }}>
 
-        <span style={{ fontWeight: 600 }}>{t('taskQueue.title', '任务队列')}</span>
+        <span>{t('taskQueue.title', '任务队列')}</span>
         {active > 0 ? (
           <span style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -167,7 +167,13 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
         <span style={{ flex: 1 }} />
         <button
           type="button"
-          onClick={clearFinished}
+          onClick={() => {
+            // 2026-11-16 用户实测：只清展示层刷新必复活——插件侧任务 JSON 一并真删。
+            // 先取 id 再 clearFinished（清空后 finished 就变了）。
+            const pluginIds = finished.filter((x) => x.source === 'plugin').map((x) => x.id);
+            clearFinished();
+            for (const id of pluginIds) void deletePluginTask(id).catch(() => undefined);
+          }}
           disabled={finished.length === 0}
           style={{
             border: 'none', background: 'transparent', padding: 0, cursor: finished.length ? 'pointer' : 'default',
@@ -181,7 +187,6 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
       <div style={{ overflowY: 'auto', paddingTop: 10, flex: 1, minHeight: 0 }}>
         {tasks.length === 0 ? (
           <div style={{ padding: '36px 14px', textAlign: 'center', color: muted, fontSize: 12 }}>
-            <ListChecks size={22} style={{ opacity: 0.35, marginBottom: 8 }} />
             <div>{t('taskQueue.empty', '暂无任务')}</div>
           </div>
         ) : (

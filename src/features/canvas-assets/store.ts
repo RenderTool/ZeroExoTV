@@ -106,12 +106,13 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   // 其余模块（剧本/主体库/导演台）即使上次停在层级，也回落到资产，绝不把画布层级挂出来。
   const drawerModule = module ?? 'canvas';
   const visibleGroups = DRAWER_MODULE_GROUPS[drawerModule];
+  // 2026-11-18 用户口径：默认落点按语境——画布模块落「画布资产」，剧本 / 分镜 / 导演台落「分镜资产」
   const [groupByModule, setGroupByModule] = useState<Record<DrawerModule, DrawerGroup>>({
-    canvas: 'assets', script: 'assets', storyboard: 'assets', workbench: 'assets',
+    canvas: 'assets', script: 'history', storyboard: 'history', workbench: 'history',
   });
   const activeGroup: DrawerGroup = visibleGroups.includes(groupByModule[drawerModule])
     ? groupByModule[drawerModule]
-    : 'assets';
+    : visibleGroups[0]!;
   const setGroupForModule = useCallback((group: DrawerGroup) => {
     setGroupByModule((prev) => (prev[drawerModule] === group ? prev : { ...prev, [drawerModule]: group }));
   }, [drawerModule]);
@@ -283,6 +284,18 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
         return;
       }
       await refreshAssets();
+      // 2026-11-19 用户报「发送到资产后找不到在哪」：加入公共库后必须把抽屉切到
+      // 公共资产作用域 + 素材分组，并滚动定位到新卡，而不是只弹一条提示。
+      const createdId = typeof created === 'object' && created && 'id' in created
+        ? String((created as { id?: string }).id ?? '')
+        : '';
+      if (target === 'library') setMaterialScopeTab('library');
+      setGroupForModule('assets');
+      const createdKind = (created as { kind?: string } | null)?.kind;
+      if (createdKind && ['video', 'image', 'audio', 'text'].includes(createdKind)) {
+        setMaterialKind(createdKind as 'image' | 'video' | 'audio' | 'text');
+      }
+      if (createdId) setFocusAssetId(createdId);
       antdMessage.success(target === 'library'
         ? t('assetLibrary.historyAddedToLibrary', { defaultValue: '已加入公共库（与原产出共用同一文件）' })
         : t('assetLibrary.historyAddedToProject', { defaultValue: '已加入本项目资产（与历史共用同一文件）' }));
@@ -334,7 +347,13 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     setSearch('');
   }, [visibleGroups, setGroupForModule]);
 
-  /** 素材上传（复用独立上传队列） */  const handleUpload = useCallback(async (files: FileList) => {
+  /** 素材上传（复用独立上传队列）
+   *  入参接受 FileList 或 File[]；**第一行必须拍快照**：隐藏 input 的 FileList 是活的，
+   *  onChange 里紧跟的 `e.target.value = ''` 会同步把它清成 0 个，异步函数再读就是空——
+   *  这正是「点上传素材按钮报无产出、拖拽正常」的根因（2026-11-17 实测）。
+   */
+  const handleUpload = useCallback(async (raw: FileList | File[]) => {
+    const files = Array.from(raw);
     if (files.length === 0) return;
     // 未授权 / 8790 离线时 CAS 与素材记录都写不进盘，旧行为只会显示「该文件夹暂无内容」。
     // 这里直接给出真实原因与恢复入口（浏览器目录授权与 MCP 服务无关）。
@@ -343,25 +362,42 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       return;
     }
     try {
-      const inputs = await uploadFiles(Array.from(files));
-      if (inputs.length === 0) {
-        antdMessage.warning(t('asset.uploadFailedAll'));
-        return;
-      }
+      const inputs = await uploadFiles(files);
       // 2026-11-04 约定：抽屉上传归属跟随素材分组当前胶囊段（公共段→公共库四类校验；
       // 本项目段→写入当前画布；与资产库弹窗同一 resolveUploadScope 口径）
       // openlib / subject 段无上传入口（只读/主体页面），兜底按公共库口径
       const uploadScopeTab: AssetScope = materialScopeTab === 'project' ? 'project' : 'library';
       const uploadScope = resolveUploadScope(uploadScopeTab, getCurrentCanvasId());
-      const created = await storeAddAssets(inputs.map((i) => ({ ...i, ...uploadScope })));
-      if (created.length === 0) {
-        antdMessage.warning('没有新增素材：文件可能已存在，或当前分组与上传归属不一致（试试切到「公共资产」查看）');
+      // 三态上报（2026-11-16）：新建 / 去重命中复用 / 墓碑跳过，三种结局分开提示，
+      // 不再用一句「上传完成」掩盖「其实一条没新增」。
+      const report = { created: [] as Asset[], dedupedExisting: [] as Asset[], skippedTombstone: [] as string[] };
+      const handled = await storeAddAssets(inputs.map((i) => ({ ...i, ...uploadScope })), report, { reviveDeleted: true });
+      for (const a of report.created) onAssetCreated(a.id);
+      await refreshAssets();
+      if (report.created.length > 0) {
+        setGroupForModule('assets');
+        antdMessage.success(
+          report.dedupedExisting.length > 0
+            ? `已上传 ${report.created.length} 个，另有 ${report.dedupedExisting.length} 个已存在直接复用`
+            : `已上传 ${report.created.length} 个`,
+        );
         return;
       }
-      for (const a of created) onAssetCreated(a.id);
-      await refreshAssets();
-      setGroupForModule('assets');
+      if (report.dedupedExisting.length > 0) {
+        setGroupForModule('assets');
+        antdMessage.info(`${report.dedupedExisting.length} 个文件已存在于素材库，已复用（不产生重复记录）`);
+        return;
+      }
+      if (report.skippedTombstone.length > 0) {
+        antdMessage.warning('这些文件此前被删除过，不会重建；如需恢复请在资产库用「撤销删除」找回');
+        return;
+      }
+      // 既没新建也没去重：上传链路确实没产出（不是格式问题）
+      antdMessage.warning(
+        `上传链路没有产出记录（解析出 ${inputs.length} 个、入账 ${handled.length} 个）：请确认数据目录已授权、本地数据服务在线后重试`,
+      );
     } catch (err) {
+      console.warn('[upload] drawer 失败', err);
       antdMessage.error(err instanceof Error ? err.message : t('asset.uploadFailed'));
     }
   }, [uploadFiles, refreshAssets, antdMessage, t, materialScopeTab, setGroupForModule]);

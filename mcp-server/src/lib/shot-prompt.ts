@@ -106,20 +106,21 @@ export function anchorSubjectMentions(text: string, subjects: PromptSubject[]): 
 }
 
 
-function subjectDefinition(s: PromptSubject, assetsBound: boolean): string {
+function subjectDefinition(s: PromptSubject, assetsBound: boolean, sceneOnly: boolean): string {
   const n = s.slot ?? 0;
   const ref = `@Picture${n}`;
   const state = s.state ? `（${s.state}）` : "";
   if (s.kind === "scene") {
     return assetsBound && n > 0
-      ? `<Subject ${n}> 是本段场景${s.name}${state}，取自 ${ref}（场景轴图）：只作空间结构、材质与光位基准，不锁首帧、不锁构图。`
+      ? sceneOnly
+        ? `<Subject ${n}> 是本段场景${s.name}${state}，取自 ${ref}（场景概念图）：以该图为画面基准，锁定建筑形制、空间结构、地平线、机位高度与构图；运镜只做轻微推近/横移，不得换场景、换建筑或改变前中后景关系。`
+        : `<Subject ${n}> 是本段场景${s.name}${state}，取自 ${ref}（场景概念图）：锁定建筑形制、空间结构、地平线与光位，构图可随角色调度调整，不得换场景或换建筑。`
       : `<Subject ${n}> 是本段场景${s.name}${state}，纯文字定义不设参考图：只作空间结构、材质与光位基准。`;
   }
   if (s.kind === "character") {
-    const anchor = s.anchor ? `${s.anchor}，` : "";
     return assetsBound && n > 0
-      ? `<Subject ${n}> 是${s.name}${state}（${anchor}外貌锁定），取自 ${ref}（定妆图）：锁定该角色外观与服饰，不锁构图。`
-      : `<Subject ${n}> 是${s.name}${state}（${anchor}纯文字定义不设参考图）：锁定该角色外观。`;
+      ? `<Subject ${n}> 是角色${s.name}${state}，取自 ${ref}（定妆图）：只锁身份，不描述外貌；姿势与构图随本段调度。`
+      : `<Subject ${n}> 是角色${s.name}${state}，纯文字定义不设参考图：只锁身份，不描述外貌。`;
   }
   return assetsBound && n > 0
     ? `<Subject ${n}> 是${s.name}${state}，取自 ${ref}（道具图）：只作道具形制与材质基准。`
@@ -134,6 +135,8 @@ export function composeImagePrompt(input: ComposeShotInput): string {
   const chars = subjects.filter((s) => s.kind === "character");
   const props = subjects.filter((s) => s.kind === "prop");
   const sceneRef = scene ? `Subject ${scene.slot}` : "";
+  // 无角色的场景段 = 概念图就是画面本体：锁构图/机位，避免「塔在左、成片中右」的漂移。
+  const sceneOnly = !!scene && chars.length === 0;
   const action = anchorSubjectMentions(clean(input.action), subjects);
   const colors = input.style.colors;
   const colorText = colors
@@ -148,13 +151,17 @@ export function composeImagePrompt(input: ComposeShotInput): string {
     : "";
 
   const defs = [
-    ...subjects.map((s) => subjectDefinition(s, input.assetsBound)),
+    ...subjects.map((s) => subjectDefinition(s, input.assetsBound, sceneOnly)),
     props.length === 0 && !subjects.some((s) => s.kind === "prop") ? "" : "",
   ]
     .filter(Boolean)
     .join("\n");
 
-  const defsText = `${defs}\n主体锚定：${subjects.map((s) => `<Subject ${s.slot}>＝${s.name}（@Picture${s.slot}）`).join("；")}。凡正文出现其中任一主体，即按该图锁形制、不锁构图。`;
+  // 主体定义行已经写明 `<Subject N> → 名称/参考图/锁什么`；不再追加一行「主体锚定」重复映射，
+  // 也不在定义里复述角色外貌（2026-11-18 用户两次强调：前面已锚定，别再重复）。
+  const defsText = sceneOnly
+    ? `${defs}\n本段无角色，场景概念图即画面基准：建筑形制、地平线、机位与构图全部以该图为准，禁止另起构图。`
+    : defs;
 
   const size = shotSize[input.number % shotSize.length]!;
   const cam = input.index === 0 ? "固定机位，缓慢推近" : "固定机位";

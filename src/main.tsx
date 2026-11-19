@@ -19,6 +19,16 @@ import './i18n/config.js';
 // 注册磁盘解析器，让 useHydratedContent/resolveMediaUrl 能读到正式视频与首帧。
 setExternalMediaBlobResolver(getMediaBlob);
 
+// 2026-11-19 用户要求：预览 / 引导里的视频禁止进浏览器「画中画」。
+// 1) 关键 <video> 已加 disablePictureInPicture；
+// 2) 这里做全局兜底：右键菜单 / 快捷键 / 站点例外进入 PiP 时立刻退出，
+//    否则缩略图被拉成浮动小窗非常影响体验。
+document.addEventListener('enterpictureinpicture', () => {
+  if (document.pictureInPictureElement) {
+    void document.exitPictureInPicture().catch(() => { /* ignore */ });
+  }
+}, true);
+
 // 等 bootReady 再渲染：HTTP 实体服务探测（≤600ms）必须先于 RootGate 判定，
 // 否则授权门会在探测完成前弹出。
 void bootReady.then(() => {

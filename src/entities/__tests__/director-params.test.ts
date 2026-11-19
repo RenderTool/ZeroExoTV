@@ -437,6 +437,32 @@ describe('validateRunSelection / buildPackSummary（dry-run）', () => {
     expect(issues.some((i) => i.code === 'empty-prompt')).toBe(true);
   });
 
+  it('只有自由文本 videoPrompt、没有结构化 imagePrompt → prompt-not-structured（不提交自由文本）', () => {
+    const issues = validateRunSelection({
+      shots: [shot(1, { imagePrompt: '', videoPrompt: '16:9 画幅，24fps，暴雨夜…' })], shared,
+      tier: 'h3', selectedIds: ['seg-1'],
+    });
+    expect(issues.some((i) => i.code === 'prompt-not-structured')).toBe(true);
+    expect(issues.some((i) => i.code === 'empty-prompt')).toBe(false);
+  });
+
+  it('提示词里的 @引用 解析不到槽位 → mention-unresolved；能落到槽位则不报', () => {
+    const gone = validateRunSelection({
+      shots: [shot(1, { imagePrompt: '<Subject 1> 是 @天穹残塔，<Subject 2> 是 @霜 Show', references: [] })],
+      shared, tier: 'h3', selectedIds: ['seg-1'],
+    });
+    expect(gone.some((i) => i.code === 'mention-unresolved')).toBe(true);
+
+    const ok = validateRunSelection({
+      shots: [shot(1, {
+        imagePrompt: '<Subject 1> 是 @Picture1 场景轴图',
+        references: [{ id: 'r1', kind: 'image', storageKey: 'cas:abc.png', title: '天穹残塔' } as never],
+      })],
+      shared, tier: 'h3', selectedIds: ['seg-1'],
+    });
+    expect(ok.some((i) => i.code === 'mention-unresolved')).toBe(false);
+  });
+
   it('buildPackSummary：槽位表 / 每段帧数 / 延续关系正确', () => {
     const shots = [
       shot(1, { duration: 5, references: [img('g1')] }),

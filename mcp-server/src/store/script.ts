@@ -402,15 +402,28 @@ export async function importScript(
       const html = toScriptHtml(meta.body);
       if (meta.title && (!s.title || s.title === "剧本" || s.title === opts.title)) s.title = meta.title;
       if (opts.strategy === "overwrite") {
-        s.episodes = [];
-        s.episodes.push({
-          id: `ep-${crypto.randomBytes(6).toString("hex")}`,
-          number: 1,
-          title: opts.title ?? meta.episodeTitle ?? autoEpisodeTitle(1),
-          content: html,
-          status: "draft",
-        });
-        s.activeEpisodeId = s.episodes[0].id;
+        // 2026-11-19 修复（数据丢失）：overwrite 传了 episodeId 时必须只替换那一集。
+        // 原实现无论传什么都把 episodes 清空重建，结果「重导第 1 集」把第 2 集整集删掉。
+        const targetId = opts.episodeId;
+        if (targetId) {
+          const ep = s.episodes.find((e) => e.id === targetId);
+          if (!ep) throw new McpError("NOT_FOUND", `overwrite 目标 episode 不存在: ${targetId}`);
+          ep.content = html;
+          if (opts.title ?? meta.episodeTitle) ep.title = (opts.title ?? meta.episodeTitle)!;
+          ep.status = "draft";
+          s.activeEpisodeId = ep.id;
+        } else {
+          // 未指定单集 = 整部剧本重写（保持原有“全部替换”语义）
+          s.episodes = [];
+          s.episodes.push({
+            id: `ep-${crypto.randomBytes(6).toString("hex")}`,
+            number: 1,
+            title: opts.title ?? meta.episodeTitle ?? autoEpisodeTitle(1),
+            content: html,
+            status: "draft",
+          });
+          s.activeEpisodeId = s.episodes[0].id;
+        }
       } else if (opts.strategy === "new_episode") {
         const n = nextEpisodeNumber(s);
         s.episodes.push({

@@ -21,6 +21,12 @@ export interface CreateCanvasCopyArgs {
   nodeIds: string[];
   /** 缺省 = 「画布副本 N」 */
   title?: string;
+  /** 临时链路画布：不进子画布列表（提示词快照挂载用） */
+  ephemeral?: boolean;
+  /** 指定文档 id（同一生成资产重复点击时复用同一块临时画布） */
+  id?: string;
+  /** 只读历史快照（查看提示词链路）：可看不可改，想改走「生成同款」 */
+  readOnly?: boolean;
 }
 
 export type CreateCanvasCopyResult =
@@ -87,6 +93,17 @@ export async function createCanvasCopyFromSelection(args: CreateCanvasCopyArgs):
 
   const nodes = visible.filter((n) => picked.has(n.id)).map(deepClone);
   normalizeNodesToOrigin(nodes);
+  // 只读链路快照落盘前清掉会话级媒体地址（2026-11-18 图裂）：
+  // blob:/dataURL 只活当次会话，写进盘里下次打开必裂；CAS 键可复现，只留 storageKey。
+  for (const n of nodes) {
+    const d = n.data as Record<string, unknown> | undefined;
+    const key = typeof d?.storageKey === 'string' ? (d.storageKey as string) : '';
+    if (!d || !key.startsWith('cas:')) continue;
+    delete d.content;
+    delete d.dataUrl;
+    delete d.url;
+    delete d.localJob;
+  }
   const edges = ((graph.edges ?? []) as EdgeRecord[])
     .filter((e) => picked.has(e.source.nodeId) && picked.has(e.target.nodeId))
     .map(deepClone);
@@ -105,12 +122,16 @@ export async function createCanvasCopyFromSelection(args: CreateCanvasCopyArgs):
       title,
       coverKey: pickAutoCoverKey(nodes),
       order: existingCount + 1,
+      ephemeral: args.ephemeral,
+      id: args.id,
       graph: {
         nodes,
         edges,
         // 副本内容已平移到原点：打开即 0/0，不再继承主画布当前视口造成偏移
         viewport: { x: 0, y: 0, k: 1 },
-        metadata: { savedFrom: 'selection' },
+        metadata: args.readOnly
+          ? { savedFrom: 'generation-chain', readOnly: true }
+          : { savedFrom: 'selection' },
       } as GraphModel,
     });
     return { ok: true, doc, copiedNodes: nodes.length, copiedEdges: edges.length };

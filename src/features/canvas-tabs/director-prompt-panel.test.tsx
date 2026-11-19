@@ -723,7 +723,7 @@ describe('槽位池 + @ 入栈语义', () => {
     expect(refs[0]?.slotNo).toBe(1);
   });
 
-  it('主体 Tab：单击一级行 = 整主体占槽（subject:<id>）；chevron 展开后点状态图子行 = 精确插入（subject:<id>:<stateId>）；二级菜单残留 = 0', () => {
+  it('主体 Tab：点一级行只展开状态列表（不占槽、不插封面）；点状态图子行才精确插入（subject:<id>:<storageKey>）；二级菜单残留 = 0', () => {
     const patches: Array<Partial<WorkbenchShot>> = [];
     const { container } = renderPanel({ subjects: SUBJECTS, onShotChange: (p) => patches.push(p) });
     fireEvent.click(container.querySelector('[data-asset-add="segment"]') as Element);
@@ -735,35 +735,31 @@ describe('槽位池 + @ 入栈语义', () => {
     expect(panel.querySelector('[data-director-asset-subpanel]')).toBeNull();
     expect(panel.querySelector('[data-director-subject-subpanel]')).toBeNull();
     expect(panel.querySelector('[data-subpanel-commit]')).toBeNull();
-    // 切主体 Tab → 单击主体一级行 = 直接写入整主体引用 subject:sub-1（占一个图片槽位 + 插入 @Picture1）
     fireEvent.click(panel.querySelector('[data-asset-panel-tab="subject"]') as Element);
-    fireEvent.click(panel.querySelector('[data-subject-item="sub-1"]') as Element);
-    const refPatch = patches.find((p) => Array.isArray(p.references));
-    const refs = refPatch?.references as Array<{ id: string; title?: string }>;
-    expect(refs.some((r) => r.id === 'subject:sub-1')).toBe(true);
-    expect(refs[0]?.title).toBe('季莹');
-    const promptPatch = patches.find((p) => typeof p.imagePrompt === 'string');
-    expect(promptPatch?.imagePrompt).toContain('@Picture1 ');
-    // chevron 独立命中区：点箭头展开（不写入），子行出现
-    // （插入后面板会关闭，重开面板再测展开）
-    fireEvent.click(container.querySelector('[data-asset-add="segment"]') as Element);
-    const panel2 = container.querySelector('[data-director-asset-panel]') as HTMLElement;
-    fireEvent.click(panel2.querySelector('[data-asset-panel-tab="subject"]') as Element);
+    // 主体只是根，本身不代表任何图片：点一级行 = 展开，绝不隐式把封面塞进槽位（2026-11-18 用户口径）
     const before = patches.length;
-    fireEvent.click(panel2.querySelector('[data-subject-chevron="sub-1"]') as Element);
-    expect(patches.length).toBe(before); // 点箭头不插入
-    const childRow = panel2.querySelector('[data-subject-state-row="sk-1"]');
+    fireEvent.click(panel.querySelector('[data-subject-item="sub-1"]') as Element);
+    expect(patches.length).toBe(before);
+    expect(panel.querySelector('[data-subject-expanded="true"]')).toBeTruthy();
+    const childRow = panel.querySelector('[data-subject-state-row="sk-1"]');
     expect(childRow).toBeTruthy();
-    // 详情面板：状态图集合只读（无插入动作）
-    const detail = panel2.querySelector('[data-asset-detail]');
-    expect(detail?.querySelector('[data-subject-detail-image="sk-1"]')).toBeTruthy();
-    expect(detail?.querySelector('[data-subject-detail-insert]')).toBeNull();
-    // 单击子行 = 精确插入 subject:sub-1:sk-1
-    fireEvent.click(childRow as Element);
-    const refPatch2 = [...patches].reverse().find((p) => Array.isArray(p.references));
-    const refs2 = refPatch2?.references as Array<{ id: string; title?: string }>;
-    expect(refs2.some((r) => r.id === 'subject:sub-1:sk-1')).toBe(true);
-    expect(refs2.find((r) => r.id === 'subject:sub-1:sk-1')?.title).toBe('季莹·基础形象');
+    // chevron 与行点击同一动作：再点一次收起，子行消失
+    fireEvent.click(panel.querySelector('[data-subject-chevron="sub-1"]') as Element);
+    expect(panel.querySelector('[data-subject-state-row="sk-1"]')).toBeNull();
+    // 重新展开 → 悬停只更新详情（状态图集合只读、无插入动作），单击子行才写入
+    fireEvent.click(panel.querySelector('[data-subject-chevron="sub-1"]') as Element);
+    fireEvent.mouseEnter(panel.querySelector('[data-subject-item="sub-1"]') as Element);
+    expect(panel.querySelector('[data-asset-detail]')?.querySelector('[data-subject-detail-image="sk-1"]')).toBeTruthy();
+    expect(panel.querySelector('[data-asset-detail]')?.querySelector('[data-subject-detail-insert]')).toBeNull();
+    fireEvent.click(panel.querySelector('[data-subject-state-row="sk-1"]') as Element);
+    const refPatch = [...patches].reverse().find((p) => Array.isArray(p.references));
+    const refs = refPatch?.references as Array<{ id: string; title?: string }>;
+    expect(refs.some((r) => r.id === 'subject:sub-1:sk-1')).toBe(true);
+    // 基础状态 = 封面：子行标题带「（封面）」标记，写入的是精确状态图而不是裸主体
+    expect(refs.find((r) => r.id === 'subject:sub-1:sk-1')?.title).toBe('季莹·基础形象（封面）');
+    // 整主体引用不再产生：任何写入里都不该出现裸 subject:sub-1
+    expect(patches.some((p) => Array.isArray(p.references)
+      && (p.references as Array<{ id: string }>).some((r) => r.id === 'subject:sub-1'))).toBe(false);
   });
 
   it('主体文件夹语义：chevron 命中区 ≥20px 与行点击互不误触；键盘 → 展开 / ← 收起；无图主体展开给中性提示行（不可点）', () => {
@@ -790,7 +786,7 @@ describe('槽位池 + @ 入栈语义', () => {
     // 键盘 ← 收起
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(panel.querySelector('[data-subject-state-row="sk-1"]')).toBeNull();
-    // 无图主体：一级行仍可直接插入；展开后给中性提示行（不可点 = 无 data-subject-state-row / 无点击写入）
+    // 无图主体：一级行只展开并给中性提示行（不写入），提示行同样不可点
     const chevronEmpty = panel.querySelector('[data-subject-chevron="sub-9"]') as HTMLElement;
     fireEvent.click(chevronEmpty);
     const hint = panel.querySelector('[data-subject-empty-hint="sub-9"]');
@@ -798,10 +794,9 @@ describe('槽位池 + @ 入栈语义', () => {
     expect(hint?.textContent).toContain('该主体尚未录入状态图');
     fireEvent.click(hint as Element);
     expect(patches.length).toBe(0); // 提示行不可点
-    // 无图主体一级行直接插入 subject:sub-9
+    // 无图主体一级行点击：仍然只展开，不产生任何引用
     fireEvent.click(panel.querySelector('[data-subject-item="sub-9"]') as Element);
-    const refPatch = patches.find((p) => Array.isArray(p.references));
-    expect((refPatch?.references as Array<{ id: string }>).some((r) => r.id === 'subject:sub-9')).toBe(true);
+    expect(patches.length).toBe(0);
   });
 
   it('搜索命中状态图名 → 自动展开父组并定位子行；搜索框内 ←→ 不触发收起/展开', () => {
@@ -1014,21 +1009,18 @@ describe('@ 浮层详情面板与无图主体（第四条）', () => {
     expect(panel.querySelector('[data-asset-detail]')?.textContent).toContain('悬停或用 ↑↓ 选择条目查看详情');
   });
 
-  it('无图主体可点可占槽（引用 subject:<id>，占一个图片槽位 + 插入 @PictureN；槽位格 = 图标+槽号占位格）', () => {
+  it('无图主体：点一级行只展开并提示未录入状态图，不占槽、不插 @；历史 subject:<id> 占位格仍能渲染', () => {
     const patches: Array<Partial<WorkbenchShot>> = [];
     const { container } = renderPanel({ subjects: NOIMG_SUBJECTS, onShotChange: (p) => patches.push(p) });
     fireEvent.click(container.querySelector('[data-asset-add="segment"]') as Element);
     const panel = container.querySelector('[data-director-asset-panel]') as HTMLElement;
     fireEvent.click(panel.querySelector('[data-asset-panel-tab="subject"]') as Element);
     fireEvent.click(panel.querySelector('[data-subject-item="sub-9"]') as Element);
-    const refPatch = patches.find((p) => Array.isArray(p.references));
-    const refs = refPatch?.references as Array<{ id: string; title?: string; kind?: string }>;
-    expect(refs.some((r) => r.id === 'subject:sub-9')).toBe(true);
-    expect(refs[0]?.title).toBe('无图侠');
-    expect(refs[0]?.kind).toBe('image'); // 占图片槽位（计入 h3=9 上限）
-    const promptPatch = patches.find((p) => typeof p.imagePrompt === 'string');
-    expect(promptPatch?.imagePrompt).toContain('@Picture1 ');
-    // 占位格：图标 + 槽号，无图（名称在 hover 预览卡）
+    // 主体是根、不带图片：没有任何写入，也没有 @PictureN 被插入
+    expect(patches.some((p) => Array.isArray(p.references))).toBe(false);
+    expect(patches.some((p) => typeof p.imagePrompt === 'string')).toBe(false);
+    expect(panel.querySelector('[data-subject-empty-hint="sub-9"]')).toBeTruthy();
+    // 历史引用（老工程里已写入的整主体引用）仍按原样渲染占位格，不做破坏性迁移
     const { container: c2 } = renderPanel({
       subjects: NOIMG_SUBJECTS,
       shot: makeShot({

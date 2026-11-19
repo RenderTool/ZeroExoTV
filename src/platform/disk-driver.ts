@@ -80,7 +80,12 @@ async function readEntry(rel: string, key: string): Promise<unknown> {
   try {
     const parsed = JSON.parse(text) as { __lf?: number; value?: unknown };
     return parsed && parsed.__lf === 1 && 'value' in parsed ? parsed.value : parsed;
-  } catch {
+  } catch (err) {
+    // 画布主图 / graph_data 损坏时绝不能返回 null：调用方会把 null 当“项目还没有图”，
+    // 随后一次空图保存就把用户磁盘上的图覆盖掉（2026-11-18 P0）。
+    if (rel.includes('/graph_data/')) {
+      throw new Error(`[lf-disk] 图数据损坏，已拒绝按空数据处理: ${rel} (${err instanceof Error ? err.message : String(err)})`);
+    }
     return null;
   }
 }

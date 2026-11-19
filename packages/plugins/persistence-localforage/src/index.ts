@@ -66,6 +66,9 @@ export interface PersistenceOptions {
   /** P1-6: 大 data 字段拆分阈值(字节). node.data 的 JSON 序列化超过此值则单独存储.
    *  默认 2048(2KB), 设为 0 禁用拆分. */
   largeDataThreshold?: number;
+  /** 2026-11-18 数据安全：写盘闸门。返回 false 时本次保存整体跳过（
+   *  用于“当前文档不是主画布”时禁止把副本内容写进主 graph）。 */
+  shouldPersist?: () => boolean;
 }
 
 /** 当前数据版本(随版本升级递增) */
@@ -112,6 +115,10 @@ export class PersistencePlugin implements Plugin {
   private readonly version: number;
   private readonly largeDataThreshold: number;
   private projectId?: string;
+  /** 2026-11-18 写盘闸门（宿主注入；返回 false 时整体跳过保存） */
+  private shouldPersist?: () => boolean;
+  /** 2026-11-19 快照钩子（宿主注入；写成功后追加磁盘历史版本） */
+  private snapshotHook?: (graph: GraphModel, projectId?: string) => void;
   private store: LocalForage;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   /** P1-6: requestIdleCallback id, 用于取消待执行的保存 */
@@ -122,6 +129,13 @@ export class PersistencePlugin implements Plugin {
   private _suppressNextSave = false;
   /** 最近一次保存的错误(用于外部检查) */
   private _lastSaveError: Error | null = null;
+  /**
+   * 2026-11-19 数据安全：本页面成功读到的磁盘版本（PersistedState.savedAt）。
+   * - 非空 = 本页拿到的是一份完整快照；保存前若磁盘 savedAt 已变化，说明别的页面/MCP 写过，
+   *   直接拒绝覆盖（旧页面 last-writer-wins 就是画布丢数据的直接原因）。
+   * - null = 本页从未成功读到图；磁盘已有节点时禁止保存，避免「空图启动 → 覆盖全量」。
+   */
+  private _loadedSavedAt: number | null = null;
   /** 最近一次保存的 Promise(用于 deactivate 等待完成) */
   private _savePromise: Promise<void> | null = null;
 
@@ -131,6 +145,7 @@ export class PersistencePlugin implements Plugin {
     this.version = options.version ?? CURRENT_VERSION;
     this.largeDataThreshold = options.largeDataThreshold ?? 2048;
     this.projectId = options.projectId;
+    this.shouldPersist = options.shouldPersist;
 
     // 配置 localforage 实例(独立实例, 避免污染全局)
     this.store = localforage.createInstance({
@@ -194,6 +209,20 @@ export class PersistencePlugin implements Plugin {
     this.subscribeChanges();
   }
 
+  /** 2026-11-18 数据安全：宿主注入写盘闸门（例如「只有主画布文档才允许写主 graph」） */
+  setShouldPersist(fn?: () => boolean): void {
+    this.shouldPersist = fn;
+  }
+
+  /**
+   * 数据安全（2026-11-19）：每次成功写入 localforage 后回调一次快照钩子。
+   * 宿主用它把主画布 graph 同步落到磁盘历史版本（只追加、不覆盖），
+   * 避免「某个页面实例写出旧/空 graph」后用户成果没有可回溯版本。
+   */
+  setSnapshotHook(fn?: (graph: GraphModel, projectId?: string) => void): void {
+    this.snapshotHook = fn;
+  }
+
   /** 订阅命令事件 → 防抖保存（activate/resume 共用） */
   private subscribeChanges(): void {
     if (!this.context) return;
@@ -230,6 +259,8 @@ export class PersistencePlugin implements Plugin {
   /** 切换项目(更新 projectId, 下次 save/load 使用新 key) */
   setProjectId(id: string | undefined): void {
     this.projectId = id;
+    // 换项目 = 读盘基线作废，必须由下一次 load 重新建立
+    this._loadedSavedAt = null;
   }
 
   /** 标记下次 graph 变化不触发保存(用于 load/replaceState 后避免无意义保存) */
@@ -247,6 +278,35 @@ export class PersistencePlugin implements Plugin {
 
   /** 实际执行保存(分离出来以便追踪 Promise) */
   private async _doSave(graph: GraphModel): Promise<void> {
+    // 2026-11-18 数据安全闸门：当前编辑器装载的不是主画布文档时，绝不把内容写进主 graph 键
+    if (this.shouldPersist && !this.shouldPersist()) return;
+    // 2026-11-18 数据安全闸门：读盘失败/空图启动不得覆盖已有非空画布（一次覆盖就是用户全部节点丢失）
+    const prev = await this.store.getItem<PersistedState>(this.getStorageKey());
+    const prevNodes = prev?.graph?.nodes?.length ?? 0;
+    if (!graph.nodes || graph.nodes.length === 0) {
+      if (prevNodes > 0) {
+        console.warn('[Persistence] 拦截空图写入：磁盘上还有', prevNodes, '个节点，拒绝覆盖');
+        return;
+      }
+    }
+    // 2026-11-19 数据安全闸门：写入必须基于本页读到的那一版
+    if (prevNodes > 0 || prev?.savedAt) {
+      if (this._loadedSavedAt == null) {
+        // 本页从未成功加载，却要写一份图（常见于读失败后渲染空图，用户随便点一下触发自动保存）
+        this._lastSaveError = new Error(
+          `VERSION_CONFLICT: 本页未读到项目主图却尝试保存（磁盘已有 ${prevNodes} 个节点）。请刷新后重试。`,
+        );
+        console.warn('[Persistence] 拦截未加载状态下的写入:', this._lastSaveError.message);
+        return;
+      }
+      if (prev?.savedAt && prev.savedAt !== this._loadedSavedAt) {
+        this._lastSaveError = new Error(
+          'VERSION_CONFLICT: 项目主图已被其他页面或外部工具更新，本页保存已取消。请刷新后再编辑。',
+        );
+        console.warn('[Persistence] 拦截过期写入:', this._lastSaveError.message);
+        return;
+      }
+    }
     const data: PersistedState = {
       version: this.version,
       savedAt: Date.now(),
@@ -262,6 +322,9 @@ export class PersistencePlugin implements Plugin {
           this.store.setItem(`${dataPrefix}:${nodeId}`, nodeData),
         );
         await Promise.all([this.store.setItem(this.getStorageKey(), { ...data, graph: mainGraph }), ...writes]);
+        this._loadedSavedAt = data.savedAt;
+        // 写成功 → 磁盘历史快照（宿主钩子内部自行去重/轮转，失败不影响保存）
+        try { this.snapshotHook?.(graph, this.projectId); } catch { /* ignore */ }
       } catch (err) {
         this._lastSaveError = err instanceof Error ? err : new Error(String(err));
         console.error('[Persistence] save failed:', this._lastSaveError);
@@ -269,6 +332,8 @@ export class PersistencePlugin implements Plugin {
     } else {
       try {
         await this.store.setItem(this.getStorageKey(), data);
+        this._loadedSavedAt = data.savedAt;
+        try { this.snapshotHook?.(graph, this.projectId); } catch { /* ignore */ }
       } catch (err) {
         this._lastSaveError = err instanceof Error ? err : new Error(String(err));
         console.error('[Persistence] save failed:', this._lastSaveError);
@@ -294,6 +359,7 @@ export class PersistencePlugin implements Plugin {
       // 先尝试从新存储读取
       const raw = await this.store.getItem<PersistedState>(this.getStorageKey());
       if (raw) {
+        this._loadedSavedAt = raw.savedAt ?? null;
         const migrated = this.migrate(raw);
         // 防御: 迁移后的数据可能没有 graph 字段(数据损坏)
         if (!migrated.graph) {
@@ -321,6 +387,7 @@ export class PersistencePlugin implements Plugin {
         }
         // 迁移后保存到新存储
         await this.store.setItem(this.getStorageKey(), migrated);
+        this._loadedSavedAt = migrated.savedAt ?? null;
         return migrated.graph;
       }
 
@@ -545,6 +612,7 @@ export {
   acquireMediaObjectUrl,
   releaseMediaObjectUrl,
   invalidateMediaObjectUrl,
+  invalidateAllMediaObjectUrls,
   subscribeMediaObjectUrl,
   __configureMediaUrlProviderForTests,
   type MediaUrlResult,

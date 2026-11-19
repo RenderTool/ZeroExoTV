@@ -7,6 +7,19 @@
 
 @import "tailwindcss";
 
+/* ===== 视频：屏蔽浏览器原生悬浮控件 / 画中画按钮（2026-11-19 用户要求） =====
+   Chrome 的媒体浮层（含「画中画」按钮）走 shadow DOM 伪元素，只能这样压掉；
+   组件侧同时已加 disablePictureInPicture 并把进入 PiP 的事件立刻退出（见 main.tsx）。 */
+video::-webkit-media-controls,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-overlay-picture-in-picture-button,
+video::-webkit-media-controls-picture-in-picture-button,
+video::-internal-media-controls-overlay-cast-button {
+  display: none !important;
+}
+
+
+
 /* ===== 设计令牌 ===== */
 @theme inline {
   --font-display: 'Sora', 'SF Pro Display', -apple-system, BlinkMacSystemFont,

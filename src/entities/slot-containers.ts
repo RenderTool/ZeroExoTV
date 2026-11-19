@@ -12,7 +12,7 @@
  * 后续（编辑界面迁移）：主体库/导演台 页签的编辑器数据从 node.data 迁到这两个容器，
  * 迁移前容器先就位（本模块），页签打开不再依赖画布节点。
  */
-import { readJson, writeJson } from '@/platform/fs';
+import { readJson, stat, writeJson } from '@/platform/fs';
 import { preSaveSnapshot, afterWriteSnapshot, writeSnapshot, recycleSnapshots } from './snapshot-store.js';
 import { ensureScript } from './script-store.js';
 import type { DirectorAssetRef, DirectorModelTier } from './director-params.js';
@@ -231,6 +231,11 @@ export async function ensureStoryboardContainer(
 ): Promise<{ container: StoryboardContainer; created: boolean }> {
   const existing = await readStoryboardContainer(projectId, io);
   if (existing) return { container: existing, created: false };
+  const path = containerPath(projectId, 'storyboard');
+  // 文件存在但解析失败：绝不能按“空容器”重建并覆盖。数据恢复靠 snapshots，不靠自愈写入。
+  if (await stat(path)) {
+    throw new Error(`[slot-containers] 主体库文件存在但读取失败，拒绝按空容器重建: ${path}`);
+  }
   const container: StoryboardContainer = {
     schemaVersion: SLOT_CONTAINER_SCHEMA_VERSION,
     version: 1,
@@ -239,7 +244,7 @@ export async function ensureStoryboardContainer(
     entities: [],
     updatedAt: new Date().toISOString(),
   };
-  await io.writeJson(containerPath(projectId, 'storyboard'), container);
+  await io.writeJson(path, container);
   return { container, created: true };
 }
 
@@ -292,6 +297,11 @@ export async function ensureWorkbenchContainer(
     return { container: healed, created: false };
   }
   const seg = createDefaultWorkbenchSegment();
+  const path = containerPath(projectId, 'workbench');
+  // 文件存在但解析失败：绝不能按“空容器”重建并覆盖。数据恢复靠 snapshots。
+  if (await stat(path)) {
+    throw new Error(`[slot-containers] 导演台文件存在但读取失败，拒绝按空容器重建: ${path}`);
+  }
   const container: WorkbenchContainer = {
     schemaVersion: SLOT_CONTAINER_SCHEMA_VERSION,
     version: 1,
@@ -301,7 +311,7 @@ export async function ensureWorkbenchContainer(
     totalDuration: DEFAULT_WORKBENCH_SEGMENT_DURATION,
     updatedAt: new Date().toISOString(),
   };
-  await io.writeJson(containerPath(projectId, 'workbench'), container);
+  await io.writeJson(path, container);
   return { container, created: true };
 }
 
@@ -357,10 +367,18 @@ export async function updateWorkbenchContainer(
   projectId: string,
   patch: WorkbenchContainerPatch | WorkbenchContainerPatchFn,
   io: ContainersIO = defaultIO,
+  opts?: { expectedVersion?: number },
 ): Promise<WorkbenchContainer> {
   const path = containerPath(projectId, 'workbench');
   return withWriteLock(path, async () => {
     const { container } = await ensureWorkbenchContainer(projectId, io);
+    // 外部写入保护（2026-11-18）：MCP 写导演台后，网页内存可能还是旧版本；
+    // 不校验版本就整表覆盖，会把 Agent 新增的片段/提示词全部冲掉。
+    if (opts?.expectedVersion != null && container.version !== opts.expectedVersion) {
+      throw new Error(
+        `VERSION_CONFLICT: 导演台已被外部修改（磁盘 v${container.version}，页面 v${opts.expectedVersion}），请刷新页面后再编辑`,
+      );
+    }
     const resolved = typeof patch === 'function' ? patch(container) : patch;
     const next: WorkbenchContainer = {
       ...container,
@@ -368,7 +386,14 @@ export async function updateWorkbenchContainer(
       version: container.version + 1,
       updatedAt: new Date().toISOString(),
     };
+    // 2026-11-19 数据安全：导演台每次写入前留一份快照（此前只在「发起生成」时留，
+    // 导致「发送到资产 / 切封面」这类写坏 media 的操作没有可回溯版本）。空转写不落。
+    if (snapshotHooksEnabled(io)) await preSaveSnapshot(projectId, 'workbench', container, next);
     await io.writeJson(path, next);
+    if (snapshotHooksEnabled(io)) {
+      await afterWriteSnapshot(projectId, 'workbench', next);
+      await recycleSnapshots(projectId, 'workbench');
+    }
     return next;
   });
 }

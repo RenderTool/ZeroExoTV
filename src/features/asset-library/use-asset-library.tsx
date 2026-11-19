@@ -442,30 +442,57 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   // ── 操作回调 ──
 
   const handleUpload = useCallback(
-    async (files: FileList): Promise<void> => {
-      if (files.length === 0) return;
+    async (files: FileList | File[]): Promise<void> => {
+      // 先拍快照：隐藏 input 的 FileList 会在 onChange 里被 `value=''` 清空，
+      // 异步函数跨过 await 再读就变成 0 个（2026-11-17 实测「解析出 0 个」根因）
+      const picked = Array.from(files);
+      if (picked.length === 0) return;
       try {
-        const inputs = await uploadFiles(Array.from(files));
-        const failedCount = Array.from(files).length - inputs.length;
+        const inputs = await uploadFiles(picked);
         if (inputs.length === 0) {
-          antdMessage.warning(t('asset.uploadFailedAll'));
+          // 理论上 uploadFiles 不会返回空（全败抛真实原因），保留兜底：说清是链路没跑起来
+          console.warn('[upload] 0 结果', { picked: picked.length, first: picked[0]?.name, firstType: picked[0]?.type });
+          antdMessage.warning(
+            `上传链路未产出记录（选中 ${picked.length} 个文件，例如「${picked[0]?.name ?? ''}」）：请按 F12 查看 Console 中的 [upload] 日志`,
+          );
           return;
         }
         // 资产项目化：上传归属跟随当前 Tab（resolveUploadScope 纯函数口径）——
         // 公共段上传显式归入公共库（store 层 assertLibraryKind 兜底四类校验）；
         // 本项目段显式写入当前 projectId（不再依赖 getCurrentCanvasId 残留值）
         const uploadScope = resolveUploadScope(scopeTab, props.projectId);
-        const created = await storeAddAssets(inputs.map((i) => ({ ...i, ...uploadScope })));
-        for (const a of created) {
+        // 三态上报（2026-11-16）：新建 / 去重命中复用 / 墓碑跳过分开提示，
+        // 避免「上传完成」其实一条没新增，也避免去重被误报成失败。
+        const report = { created: [] as Asset[], dedupedExisting: [] as Asset[], skippedTombstone: [] as string[] };
+        const handled = await storeAddAssets(inputs.map((i) => ({ ...i, ...uploadScope })), report, { reviveDeleted: true });
+        for (const a of report.created) {
           onAssetCreated(a.id);
         }
         await refreshAssets();
-        setActiveGroup('material');
-        if (failedCount > 0) {
-          antdMessage.warning(t('asset.uploadPartial', { success: inputs.length, total: Array.from(files).length }));
-        } else {
-          antdMessage.success(t('asset.uploadComplete'));
+        if (report.created.length > 0) {
+          setActiveGroup('material');
+          const failedCount = picked.length - handled.length;
+          if (failedCount > 0) {
+            antdMessage.warning(
+              `已新增 ${report.created.length} 个，${failedCount} 个未入账（已存在复用 ${report.dedupedExisting.length} 个，已删不再重建 ${report.skippedTombstone.length} 个）`,
+            );
+          } else {
+            antdMessage.success(`已上传 ${report.created.length} 个文件`);
+          }
+          return;
         }
+        if (report.dedupedExisting.length > 0) {
+          setActiveGroup('material');
+          antdMessage.info(`${report.dedupedExisting.length} 个文件已存在于素材库，已复用（不产生重复记录）`);
+          return;
+        }
+        if (report.skippedTombstone.length > 0) {
+          antdMessage.warning('这些文件此前被删除过，不会重建；如需恢复请在资产库用「撤销删除」找回');
+          return;
+        }
+        antdMessage.warning(
+          `上传没有产出记录（解析出 ${inputs.length} 个、入账 ${handled.length} 个）：请确认数据目录已授权、本地数据服务在线后重试`,
+        );
       } catch (err) {
         antdMessage.error(err instanceof Error ? err.message : t('asset.uploadFailed'));
       }

@@ -117,7 +117,7 @@ def build_graph(
         # optional widgets (deterministic defaults; mirror upstream widget defaults)
         "bd_grp_advanced": BD_GRP_ADVANCED,
         "steps": int(ov.get("steps", w.get("steps", 25))),
-        "sampler": str(ov.get("sampler", w.get("sampler", "res_multistep"))),
+        "sampler": str(ov.get("sampler", w.get("sampler", "euler"))),
         "scheduler": str(ov.get("scheduler", w.get("scheduler", "simple"))),
         "shift_video": float(ov.get("shiftVideo", w.get("shift_video", 12.0))),
         "shift_audio": float(ov.get("shiftAudio", w.get("shift_audio", 3.0))),

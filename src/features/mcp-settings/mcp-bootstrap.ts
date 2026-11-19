@@ -18,17 +18,23 @@ export function buildBootstrapCommand(opts: {
   platform: BootstrapPlatform;
   downloadUrl: string;
   port?: number;
+  /** 数据根绝对路径；Windows 下 MCP 装到 <数据根>\.mcp-server\next，禁止装进 C 盘（2026-11-17 用户硬性要求） */
+  dataRoot?: string;
 }): string {
   const port = opts.port ?? 8787;
   const url = opts.downloadUrl.replace(/'/g, "''");
   if (opts.platform === 'windows') {
+    // 安装目录与数据根同目录：MCP 放 C 盘会让系统盘吃满，用户明确禁止（宁可同目录）
+    const root = (opts.dataRoot ?? 'D:\\Test');
+    const dir = `${root}\\.mcp-server\\next`;
+    const tgz = `${dir}\\mcp.tgz`;
+    const entry = `${dir}\\package\\dist\\index.js`;
     return [
       'powershell -NoProfile -ExecutionPolicy Bypass -Command "',
-      "$d=Join-Path $env:USERPROFILE '.zeroexo\\mcp';",
-      'New-Item -ItemType Directory -Force $d | Out-Null;',
-      `Invoke-WebRequest '${url}' -OutFile (Join-Path $d 'mcp.tgz');`,
-      "tar -xzf (Join-Path $d 'mcp.tgz') -C $d;",
-      `node (Join-Path $d 'package\\dist\\index.js') --http --port ${port}`,
+      `New-Item -ItemType Directory -Force '${dir}' | Out-Null;`,
+      `Invoke-WebRequest '${url}' -OutFile '${tgz}';`,
+      `tar -xzf '${tgz}' -C '${dir}';`,
+      `node '${entry}' --http --port ${port}`,
       '"',
     ].join(' ');
   }

@@ -7,7 +7,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Pagination } from 'antd';
-import { ChevronDown, Search, Upload } from 'lucide-react';
+import { ChevronDown, Plus, Search } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 
 // ===== 分组 Tab =====
@@ -261,7 +261,7 @@ export function SearchBox({ value, onChange, placeholder, theme, inputData }: {
       alignItems: 'center',
       gap: 6,
       flex: 1,
-      minWidth: 0,
+      minWidth: 140,
       height: 26,
       padding: '0 8px',
       borderRadius: 6,
@@ -397,13 +397,13 @@ export function ToolbarRow({ children, style, dataAttr }: { children: ReactNode;
 /**
  * 抽屉底端「新建/上传」单一形态（2026-11-05 用户拍板：主体库「添加主体」必须与素材「上传素材」
  * 同款同位）：整宽虚线框 + 左图标 + 文案，中性色（不用强调色/品牌红）。
- * icon 缺省 = Upload（上传语义）；新建语义传 Plus，不再另造一套按钮样式。
+ * icon 缺省 = Plus（统一「加号」入口，上传也用加号）；需要别的语义再显式传。
  */
 export function AddTile({ label, onClick, theme, icon, dataAttr }: {
   label: string;
   onClick: () => void;
   theme: ThemeConfig;
-  /** 左侧图标（缺省 Upload） */
+  /** 左侧图标（缺省 Plus） */
   icon?: ReactNode;
   /** 透传 data-* 标记（供宿主结构断言/测试定位，不改变任何样式） */
   dataAttr?: Record<string, string>;
@@ -432,7 +432,7 @@ export function AddTile({ label, onClick, theme, icon, dataAttr }: {
         fontFamily: 'inherit',
       }}
     >
-      {icon ?? <Upload size={16} />}
+      {icon ?? <Plus size={16} />}
       {label}
     </button>
   );

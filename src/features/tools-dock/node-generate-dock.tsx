@@ -18,7 +18,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Text, Image, Music, Film, Sparkles, ChevronDown, ChevronUp, Layers, FileText, Aperture, ImageOff,
+  Text, Image, Music, Film, Sparkles, ChevronDown, ChevronUp, Layers, FileText, Aperture, ImageOff, Eye,
 } from 'lucide-react';
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -58,6 +58,8 @@ export interface NodeGenerateDockProps {
   nodeType: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard';
   /** Plan#74 Phase B：生成通道。agent-proxy=投递画布Agent主管(script/storyboard，dock=初始询问)；direct-api=provider直调LLM(image/video/audio/text，默认) */
   generationChannel?: 'direct-api' | 'agent-proxy';
+  /** 只读历史链路：点面板里的「生成同款」回主画布按这条记录重做 */
+  onReadOnlyGenerateSame?: (nodeId: string) => void;
   initialPrompt?: string;
   isRunning: boolean;
   onPromptChange: (nodeId: string, prompt: string) => void;
@@ -255,6 +257,12 @@ export const DockInputSection = memo(function DockInputSection({
         onMentionPanelChange={onMentionPanelChange}
         popupBackground={popupBg}
         popupBorderColor={popupBorder}
+        // badge 缩略图 / 悬停大图：与参考槽位同一条 storageKey → thumb 解析链
+        resolvePreviewUrl={async (item) => {
+          if (item.url) return item.url;
+          const key = item.asset?.storageKey;
+          return key ? await resolveAnyThumbUrl(key) : null;
+        }}
       />
     </div>
   );
@@ -288,6 +296,7 @@ export function NodeGenerateDock({
   generationChannel = 'direct-api',
   accept,
   presetKind,
+  onReadOnlyGenerateSame,
 }: NodeGenerateDockProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -455,12 +464,23 @@ export function NodeGenerateDock({
     () => incomingNodes.some((n) => n.type === 'image' || n.type === 'stacked-media'),
     [incomingNodes],
   );
+  // 有效输入图数量 = 连线图节点 + 节点内 @ 选中的参考图；
+  // 多图 = 多图参考生成，参数面板不提供「原图」选项。
+  const imageReferenceCount = useMemo(() => {
+    const connected = incomingNodes.filter((n) => n.type === 'image' || n.type === 'stacked-media').length;
+    const own = Array.isArray((node?.data as { referenceImages?: unknown } | undefined)?.referenceImages)
+      ? ((node!.data as { referenceImages: unknown[] }).referenceImages.length)
+      : 0;
+    return connected + own;
+  }, [incomingNodes, node]);
   const supportedInputTypes = useMemo(() => {
     if (!currentModelValue) return ['text'];
     // 本机 MiniMax H3：参考生视频（文本 + 一张参考图），与插件节点单参考槽一致
     if (currentModelValue === LOCAL_VIDEO_MODEL_KEY) return ['text', 'image'];
     // 本机 Qwen Image 2.1：图像编辑（文本 + 参考图）
     if (currentModelValue === LOCAL_IMAGE_MODEL_KEY) return ['text', 'image'];
+    // 旧数据/只读记录写成展示名 qwen / QwenImage2.1：同样按图像编辑处理，不能退化成纯文生图
+    if (/qwen/i.test(currentModelValue) && !currentModelValue.includes('::')) return ['text', 'image'];
     // Krea2 文生图：只有文本输入（模型没有参考图槽）
     if (currentModelValue === KREA2_MODEL_KEY || currentModelValue === MOSS_MODEL_KEY) return ['text'];
     return getModelInputTypes(channels, currentModelValue);
@@ -469,16 +489,8 @@ export function NodeGenerateDock({
   // 参考素材区是否出现：纯文生图模型（Krea2）只吃文本，不给「上传参考图」的假入口
   const supportsReferenceInput = supportedInputTypes.some((t) => t !== 'text');
 
-  // 纯文生图模型不接收图片：把已有的图片连线明确断开（而不是留一条看似有效的线）
-  const supportedInputKey = supportedInputTypes.join(',');
-  useEffect(() => {
-    if (!currentModelValue || mode !== 'image' || supportedInputTypes.includes('image')) return;
-    for (const n of incomingNodes) {
-      if (n.type === 'image') {
-        nodeActionBus.emit('nodeDock:removeConnection', { nodeId, sourceNodeId: n.id });
-      }
-    }
-  }, [currentModelValue, mode, supportedInputKey, incomingNodes, nodeId]);
+  // 纯文生图模型不接收图片时，连线保留（用户随时可以切回图生图），只在素材区标「不支持」，
+  // 提交时由 compileReferenceImages 按模型能力丢弃这些输入。绝不再自动断开用户的连线。
 
   // ===== 参考素材统一选择页（2026-11-13）=====
   const [assetPickerAnchor, setAssetPickerAnchor] = useState<HTMLElement | null>(null);
@@ -494,7 +506,9 @@ export function NodeGenerateDock({
   const pickerCanvasNodes = useMemo(() => {
     const graph = store.getGraph();
     return graph.nodes
-      .filter((n) => n.type === 'image' || n.type === 'video' || n.type === 'audio')
+      // 2026-11-17 用户实测：@ 面板「画布」页签列出早已删除的节点（图片1/图片2/片段 1_帧…）。
+      // 根因是这里直接读 graph.nodes，没过墓碑过滤——已删节点是 _deleted 墓碑，画布上不可见但仍在图里。
+      .filter((n) => (n.type === 'image' || n.type === 'video' || n.type === 'audio') && isVisibleNode(n))
       .map((n) => {
         const d = (n.data ?? {}) as Record<string, unknown>;
         return {
@@ -702,14 +716,17 @@ export function NodeGenerateDock({
 
   const editorRef = useRef<GeneratorPromptEditorHandle>(null);
   const inputAnchorRef = useRef<HTMLDivElement | null>(null);
-  const [mentionPanelAnchor, setMentionPanelAnchor] = useState<HTMLElement | null>(null);
-  const handleMentionPanelChange = useCallback((open: boolean): void => {
+  const [mentionPanelAnchor, setMentionPanelAnchor] = useState<HTMLElement | null>(null);  const handleMentionPanelChange = useCallback((open: boolean): void => {
     setMentionPanelAnchor(open ? inputAnchorRef.current : null);
   }, []);
+
+  /** 用户主动 @ 选中的画布节点（与「连入槽位」区分：断开/删除后 badge 要回退成文本） */
+  const [pinnedRefIds, setPinnedRefIds] = useState<Record<string, true>>({});
 
   /** @ 选择面板选中 → 插入 @ 引用 chip（与「+」面板共用数据源，但不连线：@ 的语义是“按名引用”） */
   const handleMentionPick = useCallback((pick: AssetSlotPick): void => {
     if (pick.fromNodeId) {
+      setPinnedRefIds((prev) => (prev[pick.fromNodeId!] ? prev : { ...prev, [pick.fromNodeId!]: true }));
       // 画布已有节点：优先复用 canvasMentionRefs 同款条目（名称/缩略图口径一致，提交按名称匹配）
       const existing = canvasMentionRefs.find((r) => r.id === pick.fromNodeId);
       if (existing) {
@@ -735,6 +752,20 @@ export function NodeGenerateDock({
     setExtraMentionRefs((prev) => (prev.some((r) => r.id === id) ? prev : [...prev, item]));
     editorRef.current?.insertReference(id, item);
   }, [canvasMentionRefs, pickerCanvasNodes]);
+
+  /**
+   * 引用失效 → **保留 badge 占位、只标记“待关联”**（2026-11-17 用户最终口径）：
+   * 不把 badge 拆成文本，槽位重新连入同一素材就自动恢复关联；
+   * 直接发任务时，失效引用不进入参考输入，提示词里保留的 `@名称` 按文本传递。
+   */
+  useEffect(() => {
+    const valid = [
+      ...references.map((r) => r.id),
+      ...extraMentionRefs.map((r) => r.id),
+      ...Object.keys(pinnedRefIds),
+    ];
+    editorRef.current?.markInvalidReferences(valid);
+  }, [references, extraMentionRefs, pinnedRefIds]);
 
   // ===== Plan#79 T2：预设标签（原胶囊动作下沉）=====
   // 上游名取自已连入的参考素材（堆叠内部卡片以 `::` 分隔，此处只认整体连入的节点），
@@ -856,6 +887,10 @@ export function NodeGenerateDock({
   const handleParamValuesChange = useCallback(
     (patch: Record<string, any>) => {
       onConfigChange?.(nodeId, { paramValues: patch });
+      // 2026-11-17 用户要求：改比例/尺寸时节点先切到对应比例，不要等出图才纠
+      const aspect = typeof patch.aspect === 'string' ? patch.aspect : undefined;
+      const size = typeof patch.size === 'string' ? patch.size : undefined;
+      if (aspect || size) nodeActionBus.emit('nodeDock:previewAspect', { nodeId, aspect, size });
     },
     [onConfigChange, nodeId],
   );
@@ -969,9 +1004,7 @@ export function NodeGenerateDock({
   );
   const mentionRequired = stackedRefs.length > 0 && !hasMentionedStacked;
 
-  // 只读模式整体隐藏（2026-08-25 系统性只读防护）：提示词输入/生成按钮是核心编辑入口，
-  // portal 浮层逃逸画布遮罩，必须组件级拦截
-  if (readOnly) return null;
+  // 只读模式走上面的只读展示面板（提示词 + 参数），这里不再整体隐藏
 
   // 堆叠节点:资源浏览器语义,不作为生成目标(约定:下方不显示提示词面板,
   // 堆叠只作为上游参考输入,具体卡片经 @ 在生成节点面板中引用)
@@ -1019,6 +1052,93 @@ export function NodeGenerateDock({
   // 折叠态内容 overflow hidden + pointerEvents none:不可点、不可聚焦,但不卸载 → 再次展开无白屏。
   const COLLAPSE_EASE = '0.28s cubic-bezier(0.22, 1, 0.36, 1)';
   const COLLAPSED_BAR_HEIGHT = 34;
+
+  // ===== 只读历史链路：不再隐藏面板，改为「只读提示词 + 参数」展示 +「生成同款」 =====
+  // 链路里每个节点都可能是一次生成（参考图也可能是生成出来的），点谁都能回看自己的提示词/参数；
+  // 真要在主画布重做某一段，就点这个面板里的「生成同款」。
+  if (readOnly) {
+    const nodeData = ((node as NodeRecord | null | undefined)?.data ?? {}) as Record<string, unknown>;
+    const pv = (paramValues ?? nodeData.paramValues ?? {}) as Record<string, unknown>;
+    const generation = (nodeData.generation ?? {}) as { prompt?: string; model?: string };
+    const promptText = String(
+      (typeof nodeData.prompt === 'string' ? nodeData.prompt : '')
+      || (typeof generation.prompt === 'string' ? generation.prompt : '')
+      || prompt
+      || '',
+    ).trim();
+    const modelText = String(model || generation.model || (nodeData.model as string) || '');
+    if (!promptText && !modelText && Object.keys(pv).length === 0) return null;
+    const sizeText = pv.width && pv.height ? `${pv.width}×${pv.height}` : '';
+    const stepText = pv.steps ? `${pv.steps} 步` : '';
+    const seedText = pv.seed !== undefined && pv.seed !== null ? `seed ${pv.seed}` : '';
+    const wrapStyle: CSSProperties = inline ? {
+      position: 'relative', width: '100%', maxWidth: '100%', zIndex: 'auto' as unknown as number, ...style,
+    } : isMobile ? mobileWrapStyle : {
+      position: 'absolute', left: centerX, top: bottomY, transform: 'translateX(-50%)',
+      zIndex: 48, width: 420, maxWidth: 'calc(100vw - 24px)',
+    };
+    const chipStyle: CSSProperties = {
+      padding: '2px 8px', borderRadius: 999, border: `1px solid ${theme.toolbar.border}`,
+    };
+    return (
+      <div style={wrapStyle} onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+        <div style={{ ...cardStyle, overflow: 'hidden' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px',
+            borderBottom: `1px solid ${theme.toolbar.border}`, color: theme.toolbar.text, fontSize: 12,
+          }}>
+            <span style={{ display: 'inline-flex', flexShrink: 0 }}>{typeMeta.icon}</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {t('nodeDock.readonlyTitle', '生成记录 · 只读')}
+            </span>
+            <Eye size={13} style={{ flexShrink: 0, opacity: 0.6 }} />
+          </div>
+          <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(modelText || sizeText || stepText || seedText) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 11, color: theme.toolbar.textMuted }}>
+                {modelText && <span style={chipStyle}>{modelText}</span>}
+                {sizeText && <span style={chipStyle}>{sizeText}</span>}
+                {stepText && <span style={chipStyle}>{stepText}</span>}
+                {seedText && <span style={chipStyle}>{seedText}</span>}
+              </div>
+            )}
+            {promptText ? (
+              <pre style={{
+                margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text',
+                maxHeight: '30vh', overflow: 'auto', fontSize: 12, lineHeight: 1.7,
+                color: theme.toolbar.text,
+              }}>{promptText}</pre>
+            ) : (
+              <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
+                {t('nodeDock.readonlyNoPrompt', '这条历史记录没有提示词（旧版本生成）')}
+              </span>
+            )}
+          </div>
+          {onReadOnlyGenerateSame && (
+            <div style={{
+              display: 'flex', justifyContent: 'flex-end', padding: '0 14px 12px',
+            }}>
+              <button
+                type="button"
+                data-testid="readonly-dock-generate-same"
+                onClick={(e) => { e.stopPropagation(); onReadOnlyGenerateSame(nodeId); }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', borderRadius: 999,
+                  border: `1px solid ${theme.toolbar.accent}`,
+                  background: theme.toolbar.accent,
+                  color: '#fff', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                <Sparkles size={13} />
+                {t('nodeDock.readonlyGenerateSame', '生成同款')}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1104,8 +1224,8 @@ export function NodeGenerateDock({
       </button>
 
       {/* 参考素材区(单色融入;memo 隔离;按 paramValues.mode 智能切换首尾帧/多模态)
-          Krea2 等纯文生图模型没有参考图输入：不渲染上传/槽位区，避免误导用户「可以垫图」 */}
-      {supportsReferenceInput ? (
+          纯文生图模型（Krea2/Moss）：连线照旧显示并标「不支持」，用户切回图生图即可直接再用 */}
+      {(supportsReferenceInput || displayIncomingNodes.length > 0) ? (
         <div style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <DockReferencesSection
             nodeId={nodeId}
@@ -1121,15 +1241,16 @@ export function NodeGenerateDock({
             onOpenPicker={canOpenPicker ? (anchor) => setAssetPickerAnchor(anchor) : undefined}
           />
         </div>
-      ) : (
+      ) : null}
+      {!supportsReferenceInput ? (
         <div
           data-no-reference-input=""
           style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 6, color: theme.toolbar.textMuted, fontSize: 12 }}
         >
           <ImageOff size={14} />
-          {t('nodeDock.textOnlyModel', '该模型只支持文生图，不支持参考图（连入的素材不会作为输入）')}
+          {t('nodeDock.textOnlyModel', '当前模型只吃文字：连入的素材这次不参与生成，切回图生图就能直接用。')}
         </div>
-      )}
+      ) : null}
 
       {/* Plan#79 T2：预设标签行（原节点胶囊动作下沉到提示词面板，点击 = 预填提示词）
           形态：输入区上方单行胶囊，可横向换行；非下拉、非模态 */}
@@ -1186,7 +1307,16 @@ export function NodeGenerateDock({
           model={model ?? ''}
           modelOptions={modelOptions}
           paramValues={paramValues ?? {}}
+          imageFallbackSize={mode === 'image'
+            && Number(((node as NodeRecord | null | undefined)?.data as Record<string, unknown> | undefined)?.naturalWidth) > 0
+            && Number(((node as NodeRecord | null | undefined)?.data as Record<string, unknown> | undefined)?.naturalHeight) > 0
+            ? {
+                width: Number(((node as NodeRecord | null | undefined)?.data as Record<string, unknown>).naturalWidth),
+                height: Number(((node as NodeRecord | null | undefined)?.data as Record<string, unknown>).naturalHeight),
+              }
+            : undefined}
           hasImageReference={hasImageReference}
+          imageReferenceCount={imageReferenceCount}
           isRunning={isRunning}
           hasText={hasText}
           textLength={prompt.length}
@@ -1216,8 +1346,8 @@ export function NodeGenerateDock({
           anchorEl={assetPickerAnchor}
           acceptKinds={pickerKinds}
           canvasNodes={pickerCanvasNodes}
-          tabs={['canvas', 'asset', 'subject']}
-          initialTab="canvas"
+          tabs={['historyCanvas', 'subject', 'canvas']}
+          initialTab="historyCanvas"
           onPick={handleSlotPick}
         />
       )}
@@ -1230,8 +1360,8 @@ export function NodeGenerateDock({
           anchorEl={mentionPanelAnchor}
           acceptKinds={pickerKinds}
           canvasNodes={pickerCanvasNodes}
-          tabs={['canvas', 'asset', 'subject']}
-          initialTab="canvas"
+          tabs={['historyCanvas', 'subject', 'canvas']}
+          initialTab="historyCanvas"
           onPick={handleMentionPick}
         />
       )}

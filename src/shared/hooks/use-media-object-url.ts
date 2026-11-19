@@ -23,6 +23,18 @@ import {
   subscribeMediaObjectUrl,
 } from '@zeroexo/plugin-persistence';
 import { resolveMediaBlobChain, type MediaKind, type MediaVariant } from '@/shared/media/resolve-media-blob.js';
+import { dataRootState } from '@/platform/fs.js';
+import { DATA_ROOT_AUTH_NEEDED_EVENT, emitDataRootStateEvent } from '@/platform/data-root-events.js';
+
+/** 兼容旧引用：目录权限确实失效时广播给全局授权弹窗 */
+export { DATA_ROOT_AUTH_NEEDED_EVENT };
+
+/** 读取失败统一分流：服务离线只提示离线，只有真的没权限才弹目录授权 */
+function reportReadFailure(storageKey: string | undefined, reason: string): void {
+  void dataRootState()
+    .then((state) => emitDataRootStateEvent(state, { storageKey, reason }))
+    .catch(() => undefined);
+}
 
 export interface MediaObjectUrlState {
   /** 解析就绪的 blob URL（挂起中为 ''） */
@@ -71,7 +83,11 @@ export function useMediaObjectUrl(
         });
         if (aliveRef.current) {
           if (res.ok) setState({ url: res.url, origin: res.origin as MediaVariant, failed: false, reason: '' });
-          else setState({ url: '', origin: '', failed: true, reason: res.reason });
+          else {
+            setState({ url: '', origin: '', failed: true, reason: res.reason });
+            // 服务掉线 / 文件缺失不拿授权文案糊弄用户，只有目录真的没权限才弹授权
+            if (aliveRef.current) reportReadFailure(storageKey, res.reason);
+          }
         }
       } finally {
         inflightRef.current = false;
@@ -118,7 +134,8 @@ export function useMediaObjectUrl(
   const markError = useCallback((): void => {
     if (!providerKey) return;
     if (healBudgetRef.current <= 0) {
-      setState((s) => ({ ...s, failed: true, reason: '素材加载失败（已自动重试一次仍未恢复）' }));
+      setState((s) => ({ ...s, failed: true, reason: '素材读取失败，请重试' }));
+      reportReadFailure(storageKey, '素材读取失败');
       return;
     }
     healBudgetRef.current -= 1;

@@ -13,9 +13,10 @@
  * 铁律：**任何把资产放进画布的入口都必须走 createSizedAssetNode**，
  * 禁止再写第二套尺寸逻辑（尺寸上限常量本身仍归 packages 的 node-contracts）。
  */
-import { createAssetNode, IMAGE_LONG_SIDE } from '@zeroexo/plugin-nodes';
+import { createAssetNode, IMAGE_LONG_SIDE, IMAGE_FIT_BOX, fitMediaSize } from '@zeroexo/plugin-nodes';
 import type { NodeRecord } from '@zeroexo/core';
 import { readImageDims } from './cas-upload.js';
+import { humanizeAssetTitle } from './upload-asset.js';
 import { resolveMediaBlobChain } from '@/shared/media/resolve-media-blob.js';
 
 /** 建节点入参形状（与 createAssetNode 完全一致，避免第二份类型定义） */
@@ -23,14 +24,13 @@ export type AssetNodePayloadArg = Parameters<typeof createAssetNode>[0];
 /** 画布容器像素尺寸（用于按视口收敛长边） */
 export type CanvasContainerSize = { width: number; height: number };
 
-/** 长边不超过视口短边的 40%（小窗口下再收，100% 缩放时不会占满屏）；下限 80 与节点最小尺寸一致 */
-const IMAGE_VIEWPORT_SHARE = 0.4;
-
-/** 按视口推导本次落图的图片长边：默认契约值 IMAGE_LONG_SIDE(320)，视口过小则按占比收敛 */
-export function pickImageLongSide(containerSize: CanvasContainerSize): number {
-  if (containerSize.width <= 0 || containerSize.height <= 0) return IMAGE_LONG_SIDE;
-  const shareCap = Math.round(Math.min(containerSize.width, containerSize.height) * IMAGE_VIEWPORT_SHARE);
-  return Math.max(80, Math.min(IMAGE_LONG_SIDE, shareCap));
+/**
+ * 统一尺寸规则（2026-11-18）：图片落画布一律按 IMAGE_LONG_SIDE 长边等比铺。
+ * 不再按视口占比缩小——同一比例的图片在同一画布里必须视觉等大，
+ * 只有用户手动缩放后才保留用户的尺寸。
+ */
+export function pickImageLongSide(_containerSize: CanvasContainerSize): number {
+  return IMAGE_LONG_SIDE;
 }
 
 /**
@@ -69,8 +69,21 @@ export async function createSizedAssetNode(
   containerSize: CanvasContainerSize,
 ): Promise<NodeRecord | null> {
   const longSide = pickImageLongSide(containerSize);
-  return createAssetNode(await withNaturalImageSize(payload), position, {
+  // 标题统一在这里收口：拖拽落图与「发送到画布」用同一套命名规则，
+  // 历史记录里遗留的 UUID 机器名也一并洗成「图片 / 视频 / 音频」，人起的名字原样保留。
+  const payload$ = {
+    ...payload,
+    title: humanizeAssetTitle(String(payload.title ?? ''), String(payload.kind ?? 'image')),
+  } as AssetNodePayloadArg;
+  const sized = await withNaturalImageSize(payload$);
+  const node = await createAssetNode(sized, position, {
     maxLongSide: longSide,
-    fallbackSize: { width: longSide, height: longSide },
+    fallbackSize: { width: IMAGE_FIT_BOX.width, height: IMAGE_FIT_BOX.height },
   });
+  // 图片节点统一装进 620×348 展示框：16:9 → 620×348、4:3 → 464×348、9:16 → 196×348。
+  // 与空节点、生成结果、链路快照完全同尺寸，别处不再另写一套。
+  if (node && sized.kind === 'image' && sized.width && sized.height) {
+    node.size = fitMediaSize(Number(sized.width), Number(sized.height), IMAGE_FIT_BOX);
+  }
+  return node;
 }

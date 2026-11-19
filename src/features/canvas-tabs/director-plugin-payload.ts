@@ -7,7 +7,13 @@
 import { durationToFrames, resolveVideoSize } from '@/entities/director-params.js';
 import type { WorkbenchSharedParams } from '@/entities/slot-containers.js';
 import type { WorkbenchShot } from '@/features/canvas-nodes/storyboard/workbench-types.js';
+import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
+import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { resolveRefVisual } from './director-prompt-panel.js'
 import { selectedShotVersion } from './shot-cache.js';
+import { pluginTaskBase } from '@/features/task-center/plugin-task-client.js';
+import { uploadZeroexoReference } from './zeroexo-jobs-client.js';
+import { resolveMediaBlob } from '@/shared/media/resolve-media-blob.js';
 
 export interface PluginSegmentPayload {
   shotId: string;
@@ -62,8 +68,14 @@ export function contiguousRuns(
   return runs;
 }
 
+/**
+ * 提交提示词只认 imagePrompt（分镜结构化提示词唯一来源）。
+ * 2026-11-18 事故：imagePrompt 为空时静默回落 videoPrompt / `第 N 段`，
+ * 结果提交的是一段和分镜、参考图都没关系的自由文本，成片必然对不上；
+ * 现在不回落——空提示词交给 validateRunSelection 的 prompt-not-structured 拒绝。
+ */
 function promptOf(shot: WorkbenchShot): string {
-  return (shot.imagePrompt || shot.videoPrompt || '').trim() || `第 ${shot.number} 段`;
+  return (shot.imagePrompt ?? '').trim();
 }
 
 function sharedNum(shared: WorkbenchSharedParams, key: string, fallback: number): number {
@@ -129,4 +141,76 @@ export function buildDirectorBatchPayload(args: {
   }
 
   return { projectId, clientJobId: taskId, clientId: taskId, kind: 'director_run', segments };
+}
+
+/**
+ * 补齐每段的参考图：导演台插槽里的图必须作为真实参考上传给插件，
+ * 不能只发提示词（2026-11-18 用户实测：概念图与成片构图漂移，根因是 payload 里没有 reference_image）。
+ *
+ * 顺序 = 插槽顺序（Picture1..N），基础状态首图若在槽位 1 就是第一张参考图。
+ * 任一上传失败直接抛错，阻止「无参考生成」把问题掩盖成模型不听话。
+ */
+export async function attachDirectorReferenceImages(
+  payload: PluginBatchPayload,
+  shots: WorkbenchShot[],
+  subjects?: ProductionItem[],
+  subjectTrees?: SubjectTree[],
+): Promise<PluginBatchPayload> {
+  const base = pluginTaskBase();
+  if (!base) throw new Error('ComfyUI 地址未配置，无法上传参考图');
+  const byId = new Map(shots.map((s) => [s.id, s]));
+  for (const segment of payload.segments) {
+    const shot = byId.get(segment.shotId);
+    /**
+     * 2026-11-19 报障：这里原来按 `r.storageKey` 过滤，主体引用（`subject:<id>`、主体状态引用换图后 key 为空）
+     * 会被静默丢掉，上传顺序被压缩 → 提示词里的 @PictureN 与真实上传的第 N 张错位，
+     * 表现就是「成片和分镜参考图对不上」。现在按插槽顺序解析：主体引用用当前封面/状态图，解析不到就报错，不静默降级。
+     */
+    const refs = (shot?.references ?? [])
+      .filter((r) => r.kind === 'image')
+      /**
+       * 按**槽号**上传，而不是按落盘数组顺序：提示词里的 `@PictureN` 指的就是第 N 个槽号，
+       * 数组顺序与 pin 顺序一旦不一致（替换/追加历史数据）就会整体错位。
+       */
+      .slice()
+      .sort((a, b) => {
+        const pa = typeof a.slotNo === 'number' && a.slotNo >= 1 ? a.slotNo : Number.POSITIVE_INFINITY;
+        const pb = typeof b.slotNo === 'number' && b.slotNo >= 1 ? b.slotNo : Number.POSITIVE_INFINITY;
+        return pa - pb;
+      })
+      .slice(0, 9);
+    if (refs.length === 0) continue;
+    const names: string[] = [];
+    for (const [i, ref] of refs.entries()) {
+      const visual = resolveRefVisual(
+        {
+          id: ref.id, kind: 'image', title: ref.title, storageKey: ref.storageKey, url: ref.url,
+          // origin 指纹只要主体类（subject-base / subject-state）；色卡、上传类不上抛
+          origin: (() => {
+            const o = ref.origin;
+            if (!o || !o.rootId || o.kind === 'color-card' || o.kind === 'user-upload') return undefined;
+            return { kind: o.kind, rootId: o.rootId, state: o.state, mediaKey: o.mediaKey };
+          })(),
+        },
+        subjects,
+        subjectTrees,
+      );
+      const key = visual.stale ? undefined : (visual.storageKey ?? ref.storageKey);
+      if (!key) {
+        throw new Error(
+          `第 ${i + 1} 张参考图（${ref.title || ref.id}）已失效：主体/素材被删除或未挂图，`
+          + '请先在插槽里重新放入再生成（不允许跳过该槽位继续跑）',
+        );
+      }
+      const blob = await resolveMediaBlob(key, 'image', 'orig');
+      if (!blob) throw new Error(`参考图读取失败：${ref.title || key}`);
+      const ext = blob.type.includes('webp') ? '.webp' : blob.type.includes('jpeg') ? '.jpg' : '.png';
+      const name = await uploadZeroexoReference(base, blob, `director_${segment.shotId}_${i}${ext}`);
+      if (!name) throw new Error(`参考图上传失败：${ref.title || key}`);
+      names.push(name);
+    }
+    segment.params.reference_image = names[0] ?? '';
+    segment.params.reference_images = names;
+  }
+  return payload;
 }

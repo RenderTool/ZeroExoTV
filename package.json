@@ -1,12 +1,14 @@
 {
   "name": "zeroextv",
-  "version": "0.3.89",
+  "version": "0.3.96",
   "private": true,
   "type": "module",
   "description": "ZeroExo Canvas - Visual node editor",
   "scripts": {
     "version:bump": "node tools/bump-version.mjs && node tools/gen-plugin-manifest.mjs",
     "dev": "vite",
+    "fs": "node mcp-server/dist/index.js --fs-server",
+    "fs:build": "pnpm --filter @zeroexo/mcp-server build",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

@@ -303,7 +303,7 @@ export async function buildDirectorPack(args: BuildPackArgs): Promise<BuiltDirec
     audioMode: 'generate',
     refImageSize: 'match',
     continuityEnabled: globalContinuity,
-    continuityMode: 'guide',
+    continuityMode: 'continue',
     continuityOverlapFrames: overlap,
     continuityRedraw: 0.1,
     continuityKeepTail: true,
@@ -333,7 +333,7 @@ export async function buildDirectorPack(args: BuildPackArgs): Promise<BuiltDirec
 
   const widgets = {
     steps: Number(args.shared.params['steps'] ?? DIRECTOR_PRESETS[args.tier].params['steps'] ?? 8),
-    sampler: String(args.shared.params['sampler'] ?? 'res_multistep'),
+    sampler: String(args.shared.params['sampler'] ?? 'euler'),
     scheduler: String(args.shared.params['scheduler'] ?? 'simple'),
     cfg: Number(args.shared.params['cfg'] ?? 1),
     shift_video: Number(args.shared.params['shift_video'] ?? 12),
@@ -378,7 +378,7 @@ export function buildRunOverrides(args: {
     height: args.height,
     totalFrames: args.totalFrames,
     frameRate,
-    sampler: String(p['sampler'] ?? d['sampler'] ?? 'res_multistep'),
+    sampler: String(p['sampler'] ?? d['sampler'] ?? 'euler'),
     scheduler: String(p['scheduler'] ?? d['scheduler'] ?? 'simple'),
   };
   if (args.runSelection) overrides.runSelection = args.runSelection;

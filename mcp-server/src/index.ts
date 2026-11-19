@@ -39,6 +39,9 @@ import { registerStyleTools } from "./tools/style.js";
 import { registerUpgradeTools } from "./tools/upgrade.js";
 import { registerComfyuiTools } from "./tools/comfyui.js";
 import { registerReleaseTools } from "./tools/release.js";
+import { registerDataRootTools } from "./tools/data-root.js";
+import { startBroker } from "./broker/executor.js";
+import { startClaimWorker } from "./broker/claim-worker.js";
 
 /**
  * 连接即概览：把「当前数据状态」拼进 initialize 的 instructions。
@@ -90,6 +93,7 @@ async function buildServer(ctx: Ctx): Promise<McpServer> {
   registerUpgradeTools(server, ctx);
   registerComfyuiTools(server, ctx);
   registerReleaseTools(server, ctx);
+  registerDataRootTools(server, ctx);
   return server;
 }
 
@@ -201,7 +205,9 @@ async function main(): Promise<void> {
     const portIdx = argv.indexOf("--port");
     if (portIdx >= 0) process.env.ZEROEXO_FS_PORT = argv[portIdx + 1];
     await startFileServer();
-    // 生成任务由 ComfyUI 插件持有/执行；MCP 不再启动 broker 执行器。
+    // 画布图片/主体图片由 MCP 代理提交到 ComfyUI 插件；MCP 侧只跑认领台账归档 worker。
+    startBroker();
+    startClaimWorker();
     return; // server 事件循环保活
   }
 
@@ -211,6 +217,8 @@ async function main(): Promise<void> {
     // 先注册工具再盖印章：否则 server-info 会写 tools:0/toolNames:[]，网页误报「缺 52 个工具」
     await buildServer({ getToken: () => process.env.ZEROEXO_MCP_TOKEN });
     await stampServerInfo(port);
+    startBroker();
+    startClaimWorker();
     // 有会话态：initialize 建立 session，后续请求按 mcp-session-id 复用同一 server。
     const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
     const readBody = async (req: http.IncomingMessage): Promise<string> => {
@@ -295,7 +303,9 @@ async function main(): Promise<void> {
   const ctx: Ctx = { getToken: () => process.env.ZEROEXO_MCP_TOKEN };
   const server = await buildServer(ctx);
   await server.connect(new StdioServerTransport());
-  // 生成任务由 ComfyUI 插件执行；stdio MCP 不再接管任务推进。
+  // stdio 只开 IDE、没开网页时也要把已提交的作业归档进 CAS（认领台账是唯一事实源）。
+  startBroker();
+  startClaimWorker();
   process.stderr.write(`[zeroexo-mcp-server] stdio ready, tools=${TOOL_REGISTRY.length}, dataRoot=${dataRoot()}\n`);
 }
 

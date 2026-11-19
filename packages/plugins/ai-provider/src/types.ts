@@ -225,6 +225,13 @@ export interface VideoNodeData {
   bytes?: number;
   durationMs?: number;
   references?: string[];
+  /**
+   * 视频集合（2026-11-19）：一个视频默认是「视频源 + 引导数据」的集合。
+   * guide 存在即代表该视频自带引导数据；普通视频无 guide 时不显示切换。
+   */
+  guide?: { id: string; frames?: number; sha256?: string; localKey?: string; title?: string };
+  /** 当前生效成员：guide=引导数据（默认），source=视频源本身 */
+  collectionMode?: 'guide' | 'source';
   /** BUG8.5: 视频生成模式(Seedance 专用,影响参考素材连接引导)
    *  - text-to-video: 文生视频(无参考)
    *  - image-to-video: 图生视频(1 张参考图作首帧)

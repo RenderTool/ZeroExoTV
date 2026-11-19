@@ -19,8 +19,9 @@ import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, assembleGeneratorPrompt, collectGeneratorTextSources, contentToDataUrl, buildTemplateParams } from './ai-generation-utils.js';
 import { CanvasOpExecutor } from './canvas-op-executor.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
+import { buildGenerationChain } from '@/features/sub-canvas/generation-chain.js';
 import { LOCAL_VIDEO_MODEL_KEY, generateLocalMiniMaxVideo } from './local-minimax-video.js';
-import { fetchZeroexoJob, zeroexoOutputViewUrl } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
+import { fetchZeroexoJob, friendlyLocalJobError, zeroexoOutputViewUrl } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 // 本地版（Plan#83）：生成任务原本走后端 Agent 调度（agentClient.send + SSE）。
 // 直接负本地渠道（ComfyUI / 外接 API）的提交链路属 Phase 2 T2.4，尚未接入；
@@ -386,6 +387,12 @@ export function useAiGeneration({
             nodeId, kind: 'image', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
             content: first.dataUrl, width: first.width, height: first.height, bytes: first.bytes, mimeType: first.mimeType,
             jobId: first.generationId, model: (nodeData?.model as string) ?? undefined, prompt: fullPrompt,
+            params: { ...(((nodeData as Record<string, unknown> | undefined)?.paramValues ?? {}) as Record<string, unknown>), width: first.width, height: first.height },
+            chain: buildGenerationChain(refs.store.getGraph() as never, nodeId, {
+              prompt: fullPrompt,
+              model: (nodeData?.model as string) ?? undefined,
+              params: { ...(((nodeData as Record<string, unknown> | undefined)?.paramValues ?? {}) as Record<string, unknown>), width: first.width, height: first.height },
+            }),
           }).catch((err) => console.warn('[history] 图片产出落库失败:', err));
           // AI 生成图片:以基准宽度为约束,按图片宽高比计算高度
           if (first.width && first.height) {
@@ -495,6 +502,12 @@ export function useAiGeneration({
             content: url, width: result.width, height: result.height, durationMs: result.durationMs, bytes: result.bytes, mimeType: result.mimeType,
             jobId: result.generationId, model: (nodeData?.model as string) ?? undefined, prompt: fullPrompt,
             guide: guideMeta,
+            params: { ...(((nodeData as Record<string, unknown> | undefined)?.paramValues ?? {}) as Record<string, unknown>), width: result.width, height: result.height },
+            chain: buildGenerationChain(refs.store.getGraph() as never, nodeId, {
+              prompt: fullPrompt,
+              model: (nodeData?.model as string) ?? undefined,
+              params: { ...(((nodeData as Record<string, unknown> | undefined)?.paramValues ?? {}) as Record<string, unknown>), width: result.width, height: result.height },
+            }),
           }).catch((err) => console.warn('[history] 视频产出落库失败:', err));
           // AI 生成视频:以基准宽度为约束,按视频宽高比计算高度
           if (result.width && result.height) {
@@ -606,6 +619,9 @@ export function useAiGeneration({
           ? err.errorType
           : classifyError(err);
         let message = err instanceof Error ? err.message : String(err);
+        // 本机 ComfyUI 的节点缺失/队列拒绝是机器 JSON，直接甩给客户看不懂：
+        // 统一收成一句人话（2026-11-18 用户要求）。
+        if (errorType === 'NETWORK_ERROR') message = friendlyLocalJobError(message) || message;
         refs.commandQueue.execute(
           new UpdateNodeDataCommand(nodeId, {
             status: 'error',
@@ -678,7 +694,7 @@ export function useAiGeneration({
             q.execute(
               new UpdateNodeDataCommand(node.id, {
                 status: 'error',
-                errorDetails: status.error ?? '作业失败',
+                errorDetails: friendlyLocalJobError(status.error) || '作业失败',
                 errorType: 'NETWORK_ERROR',
               } as Record<string, unknown>),
             );
@@ -864,25 +880,55 @@ export function useAiGeneration({
         }
       }
 
-      // 创建占位节点(放置到生成器右侧)
+      // 创建占位节点（固有规则 2026-11-18 用户拍板）：
+      // 点击生成 = **复制一个同级副本**（同一列、放在源节点正下方），沿用源节点同一批上游参考，
+      // 绝不接在源节点下游。源节点保留原产物，新节点独立承担这次生成。
       const placeholderId = `placeholder-${event.nodeId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const genW = genNode.size?.width ?? 340;
+      const genH = genNode.size?.height ?? 240;
+      const phW = 260;
+      const phH = Math.max(180, Math.round(phW * (genH / genW)));
+      const occupied = (graph.nodes as Array<{ id?: string; position?: { x: number; y: number }; size?: { width?: number; height?: number }; _deleted?: boolean }>)
+        .filter((n) => !n._deleted && n.id !== event.nodeId)
+        .map((n) => ({
+          x: n.position?.x ?? 0,
+          y: n.position?.y ?? 0,
+          width: n.size?.width ?? 240,
+          height: n.size?.height ?? 200,
+        }));
+      const collides = (x: number, y: number): boolean =>
+        occupied.some((o) =>
+          x < o.x + o.width + 24 && x + phW + 24 > o.x
+          && y < o.y + o.height + 24 && y + phH + 24 > o.y,
+        );
+      // 同级：保持源节点横坐标，往下顺排，形成同一列的并行分支
+      let px = genNode.position.x;
+      let py = genNode.position.y + genH + 48;
+      for (let i = 0; i < 12 && collides(px, py); i += 1) {
+        py += phH + 48;
+      }
       q.execute(new AddNodeCommand({
         id: placeholderId,
         type: 'ai-placeholder',
-        position: {
-          x: genNode.position.x + (genNode.size?.width ?? 340) + 48,
-          y: genNode.position.y,
-        },
+        position: { x: px, y: py },
         title: i18n.t('editor.aiGenerating'),
         data: { status: 'generating', generationType: generationMode, targetNodeType: targetType, taskLabel: model || '' },
       }));
 
-      // 连线:生成器.output → 占位节点.input
-      q.execute(new AddEdgeCommand({
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        source: { nodeId: event.nodeId, pinId: 'output' },
-        target: { nodeId: placeholderId, pinId: 'input' },
-      }));
+      // 连线：复制源节点的「上游 → 自己」这批输入边到新节点，新节点用同一批资产生成；
+      // 不建「源节点 → 新节点」这条下游边。
+      const upstreamEdges = (graph.edges as unknown as Array<{
+        source: { nodeId: string; pinId?: string };
+        target: { nodeId: string; pinId?: string };
+        _deleted?: boolean;
+      }>).filter((e) => !e._deleted && e.target?.nodeId === event.nodeId);
+      upstreamEdges.forEach((e, index) => {
+        q.execute(new AddEdgeCommand({
+          id: `edge-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+          source: { nodeId: e.source.nodeId, pinId: e.source.pinId ?? 'output' },
+          target: { nodeId: placeholderId, pinId: e.target.pinId ?? 'input' },
+        }));
+      });
 
       store.setSelection({ selectedNodeIds: new Set([placeholderId]), selectedEdgeIds: new Set() });
 

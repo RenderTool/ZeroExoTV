@@ -113,7 +113,7 @@ export async function acquireMediaObjectUrl(key: string, load: MediaUrlLoader): 
   const again = entries.get(key);
   if (again) return { ok: true, url: again.url, origin: again.origin };
 
-  if (!res) return { ok: false, reason: '素材文件缺失或目录未授权' };
+  if (!res) return { ok: false, reason: '素材读取失败，请重试' };
 
   const entry: Entry = { url: safeCreateObjectUrl(res.blob), origin: res.origin };
   entries.set(key, entry);
@@ -154,6 +154,15 @@ export function subscribeMediaObjectUrl(key: string, cb: () => void): () => void
     cur.delete(cb);
     if (cur.size === 0) listeners.delete(key);
   };
+}
+
+/**
+ * 授权恢复后让所有仍挂载的媒体消费者重新解析一遍。
+ * 清掉 entries 只影响下一次命中；旧 objectURL 不 revoke（可能还有 <img> 在用）。
+ */
+export function invalidateAllMediaObjectUrls(): void {
+  entries.clear();
+  for (const key of Array.from(listeners.keys())) notify(key);
 }
 
 /** 测试专用：重置全部状态（唯一允许 revoke 的入口）。勿在业务代码调用 */

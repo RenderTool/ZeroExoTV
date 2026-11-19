@@ -105,8 +105,36 @@ function writeDismissed(ids: Set<string>): void {
   } catch { /* ignore */ }
 }
 
+/**
+ * 任务队列历史持久化（2026-11-17 用户要求）：
+ * 队列是「历史」不是「本次会话状态」——刷新后必须还在，只有用户点「清空已完成」才消失。
+ * 刷新时仍在 running/queued 的条目（本地登记，插件/broker 侧可能没有）标为已中断，避免永远转圈。
+ */
+const TASKS_KEY = 'zeroexo.taskQueue.tasks';
+function readPersistedTasks(): QueuedTask[] {
+  try {
+    const raw = localStorage.getItem(TASKS_KEY);
+    const parsed = raw ? JSON.parse(raw) as QueuedTask[] : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t) => t && typeof t.id === 'string' && typeof t.title === 'string')
+      .map((t) => (t.status === 'running' || t.status === 'queued'
+        ? { ...t, status: 'cancelled' as TaskStatus, phase: t.phase ?? '已中断' }
+        : t))
+      .slice(0, MAX_TASKS);
+  } catch {
+    return [];
+  }
+}
+function writePersistedTasks(tasks: QueuedTask[], dismissed: Set<string>): void {
+  try {
+    const visible = tasks.filter((t) => !dismissed.has(t.id)).slice(0, MAX_TASKS);
+    localStorage.setItem(TASKS_KEY, JSON.stringify(visible));
+  } catch { /* ignore */ }
+}
+
 export const useTaskQueueStore = create<TaskQueueState>((set) => ({
-  tasks: [],
+  tasks: readPersistedTasks(),
   collapsed: false,
   dismissed: readDismissed(),
 
@@ -160,20 +188,28 @@ export const useTaskQueueStore = create<TaskQueueState>((set) => ({
 
   applyBrokerTasks: (tasks) => set((s) => {
     // 已清空的终态任务不再随 broker 全量同步回来（与 applyPluginTasks 同口径）
-    const locals = s.tasks.filter((t) => t.source !== 'broker');
+    // 2026-11-17 用户实测：画布发起生成后队列里没有任务 —— 本地登记（source='local'）此前被同步整批丢掉，
+    // 这里保留所有本地任务（上传与画布生成），只按 dismissed 过滤。
+    const locals = s.tasks.filter((t) => t.source === 'local' && !s.dismissed.has(t.id));
     const visible = tasks.filter((t) => !s.dismissed.has(t.id));
     const merged = [...visible, ...locals].sort((a, b) => b.startedAt - a.startedAt);
     return { tasks: merged.slice(0, MAX_TASKS) };
   }),
 
   applyPluginTasks: (tasks) => set((s) => {
-    // 插件是生成任务事实源；保留本地非生成任务（上传等）；已清空的终态不再回来
-    const locals = s.tasks.filter((t) => t.source === 'local' && t.kind === 'upload');
+    // 插件是生成任务事实源；保留本地任务（上传 + 画布发起且插件里没有记录的生成），已清空的终态不再回来
+    const locals = s.tasks.filter((t) => t.source === 'local' && !s.dismissed.has(t.id));
     const visible = tasks.filter((t) => !s.dismissed.has(t.id));
     const merged = [...visible, ...locals].sort((a, b) => b.startedAt - a.startedAt);
     return { tasks: merged.slice(0, MAX_TASKS) };
   }),
 }));
+
+// 任何变更都落盘（历史跨刷新保留，只有「清空已完成」才会移除）
+useTaskQueueStore.subscribe((s, prev) => {
+  if (s.tasks === prev.tasks && s.dismissed === prev.dismissed) return;
+  writePersistedTasks(s.tasks, s.dismissed);
+});
 
 /** 未完成（排队/进行中）任务数 */
 export function countActiveTasks(tasks: QueuedTask[]): number {

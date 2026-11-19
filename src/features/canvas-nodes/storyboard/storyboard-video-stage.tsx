@@ -49,6 +49,13 @@ export interface StoryboardVideoStageProps {
   playbackOffsetSec?: number;
   /** 播放请求令牌：每次自增触发中央区从 0 播放（点击备选视频时由宿主自增） */
   autoPlayKey?: number;
+  /** 连播模式：关闭单段循环，播完即回调宿主切下一段（2026-11-16 用户反馈连播不推进） */
+  sequenceChain?: boolean;
+  /** 单段视频真实播完（ended）时回调；连播链路用它推进，不靠时长定时器 */
+  onPlaybackEnded?: () => void;
+  /** 连播进度：当前第几段 / 共几段（1 基）；>0 时舞台右下角常显「X / Y 段」 */
+  sequenceIndex?: number;
+  sequenceTotal?: number;
 
   // ===== 序列播放契约（2026-09-02 征集 #134） =====
   /** 'all'=整轨序列播放（总时长=各片段之和）；'clip'=仅播放选中片段；null/undefined=未播放 */
@@ -154,6 +161,7 @@ function LivePreviewMedia({ preview }: {
 export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   videoStorageKey, videoStatus = 'idle', videoError, emptyLabel,
   isPlaying, playbackOffsetSec = 0, autoPlayKey = 0,
+  sequenceChain = false, onPlaybackEnded, sequenceIndex, sequenceTotal,
   playbackMode, sequenceDuration = 0, sequenceTime = 0,
   onSequenceSeek, onTogglePlay,
   placeholderPrompt, placeholderTitle, placeholderStatus, placeholderDetail, placeholderReason, onFullscreenPlay,
@@ -198,10 +206,12 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
     if (isPlaying) {
       try { v.currentTime = offsetRef.current; } catch { /* ignore */ }
       void v.play().catch(() => { /* 静默：浏览器拦截等 */ });
-    } else {
+    } else if (!sequenceChain) {
       v.pause();
     }
-  }, [isPlaying, videoStorageKey, resolvedSrc]);
+    // 连播模式下 isPlaying 恒为 false（主时钟没在走），起播由下面的 autoPlay 效果负责；
+    // 这里如果照旧 pause，会给刚 remount 的下一段视频立刻按暂停 → 连播卡在第一段。
+  }, [isPlaying, videoStorageKey, resolvedSrc, sequenceChain]);
 
   // 暂停态游标 scrub（2026-08-31 约定）：拖拽/点击游标、拨帧后立即显示对应帧
   const applyPausedSeek = useCallback(() => {
@@ -360,12 +370,15 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
           controls={false}
           preload="metadata"
           muted={muted}
-          loop
+          loop={!sequenceChain}
           // Plan#83 A 修正：hideControls 模式下禁用点击播放 / 双击全屏
           onClick={hideControls ? undefined : togglePlay}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false);
+            if (sequenceChain) onPlaybackEnded?.();
+          }}
           onTimeUpdate={(e) => setCurTime(e.currentTarget.currentTime)}
           onDurationChange={(e) => setDuration(e.currentTarget.duration)}
           onLoadedMetadata={applyPausedSeek}
@@ -570,6 +583,23 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
           {paramsLabel}
         </span>
       )}
+
+      {/* 连播段号：第 X / Y 段（连播期间常显，不遮控制条；用户 2026-11-19 要求） */}
+      {sequenceChain && sequenceTotal ? (
+        <span
+          data-sequence-indicator
+          aria-hidden
+          style={{
+            position: 'absolute', left: 8, top: 6, zIndex: 3,
+            padding: '1px 6px', borderRadius: 6,
+            fontSize: 10, lineHeight: '14px', color: 'rgba(255,255,255,0.92)',
+            background: 'rgba(0,0,0,0.45)', fontVariantNumeric: 'tabular-nums',
+            pointerEvents: 'none', userSelect: 'none',
+          }}
+        >
+          {Math.min(sequenceIndex ?? 0, sequenceTotal) || 1} / {sequenceTotal} 段
+        </span>
+      ) : null}
 
       {/* 自研控制条（OpenCut 风：底部渐变 + 播放/时间/进度/静音/全屏） */}
       {showControlBar && (

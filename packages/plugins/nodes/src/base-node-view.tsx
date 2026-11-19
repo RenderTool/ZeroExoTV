@@ -411,7 +411,7 @@ export function AIStateView({
           : 0))
       : 0;
     return (
-      <div style={{ ...aiContainerStyle, background: backgroundColor, gap: 10, position: 'relative' }}>
+      <div style={{ ...aiContainerStyle, background: backgroundColor, gap: 10, position: 'relative', pointerEvents: 'none' }}>
         {/* 实时预览：把采样中的帧铺满节点，骨架叠在上面（弱化但不遮死） */}
         {previewImage ? (
           <img

@@ -35,11 +35,21 @@ export interface PluginTask {
 }
 
 async function request<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${base.replace(/\/+$/, "")}${path}`, {
-    ...init,
-    signal: AbortSignal.timeout(15_000),
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-  });
+  const url = `${base.replace(/\/+$/, "")}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(15_000),
+      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new McpError(
+      "IO_ERROR",
+      `无法连接 ComfyUI 插件：${base.replace(/\/+$/, "")}（${reason}）。请确认 ComfyUI 已启动、插件已加载。`,
+    );
+  }
   const body = (await res.json().catch(() => null)) as (T & { ok?: boolean; error?: string }) | null;
   if (!res.ok || body?.ok === false) {
     throw new McpError("IO_ERROR", body?.error || `插件任务接口失败 HTTP ${res.status}`);
@@ -88,3 +98,47 @@ export async function submitPluginTask(
   if (!task) throw new McpError("IO_ERROR", `插件任务创建后读取失败: ${created.jobId}`);
   return task;
 }
+
+/** 单图作业（qwen_image_edit / krea2_t2i / moss_image_t2i）：MCP 只代理提交，生成在插件端 */
+export interface PluginImageJobStatus {
+  ok: boolean;
+  jobId: string;
+  state: PluginTaskState;
+  outputs?: Array<{ kind?: string; path?: string }>;
+  error?: string | null;
+  progress?: { step?: number; totalSteps?: number } | null;
+}
+
+export async function submitImageJob(
+  payload: Record<string, unknown>,
+  base?: string,
+): Promise<{ jobId: string; state: PluginTaskState; error?: string | null }> {
+  const b = base ?? (await resolveComfyBase());
+  const created = await request<{ jobId: string; state?: PluginTaskState; error?: string | null }>(
+    b,
+    "/zeroexo/v1/jobs",
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  if (!created?.jobId) throw new McpError("IO_ERROR", "插件未返回 jobId");
+  return { jobId: created.jobId, state: created.state ?? "queued", error: created.error ?? null };
+}
+
+export async function getImageJob(jobId: string, base?: string): Promise<PluginImageJobStatus | null> {
+  const b = base ?? (await resolveComfyBase());
+  try {
+    const res = await request<PluginImageJobStatus>(b, `/zeroexo/v1/jobs/${encodeURIComponent(jobId)}`);
+    return res;
+  } catch (err) {
+    if (err instanceof McpError && /404|not found|不存在/i.test(err.message)) return null;
+    throw err;
+  }
+}
+
+export async function cancelImageJob(jobId: string, base?: string): Promise<void> {
+  const b = base ?? (await resolveComfyBase());
+  await request<{ ok?: boolean }>(b, `/zeroexo/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+    body: "{}",
+  }).catch(() => undefined);
+}
+

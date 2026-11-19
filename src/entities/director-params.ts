@@ -465,7 +465,7 @@ export const DIRECTOR_PARAM_SCHEMA: DirectorParamField[] = [
   { key: 'ref_max_size', label: '参考图最大边', type: 'int', default: 864, min: 32, max: 8192, step: 32, scope: 'shared', source: 'nodes/director_common.py L63', verified: true },
   { key: 'total_frames', label: '总帧数', type: 'int', default: 124, min: 5, max: 100000, step: 1, scope: 'shared', source: 'nodes/director_common.py L64-72', verified: true },
   { key: 'steps', label: '采样步数', type: 'int', default: 8, min: 1, max: 200, step: 1, scope: 'shared', source: 'nodes/director.py L161-172', verified: true },
-  { key: 'sampler', label: '采样器', type: 'enum', default: 'res_multistep', options: [
+  { key: 'sampler', label: '采样器', type: 'enum', default: 'euler', options: [
     { value: 'res_multistep', label: 'res_multistep' }, { value: 'euler', label: 'euler' },
     { value: 'euler_ancestral', label: 'euler_ancestral' }, { value: 'ddim', label: 'ddim' },
     { value: 'dpmpp_2m', label: 'dpmpp_2m' }, { value: 'uni_pc', label: 'uni_pc' },
@@ -491,9 +491,9 @@ export const DIRECTOR_PARAM_SCHEMA: DirectorParamField[] = [
     { value: '5', label: '5 帧' }, { value: '22', label: '22 帧' },
     { value: '39', label: '39 帧' }, { value: '56', label: '56 帧' },
   ], scope: 'shared', source: 'director/h3_motion_context.py L30-31,42-49（仅 5/22/39/56）', verified: true },
-  { key: 'continuityMode', label: '引导方式', type: 'enum', default: 'guide', options: [
+  { key: 'continuityMode', label: '引导方式', type: 'enum', default: 'continue', options: [
     { value: 'guide', label: 'guide（运动上下文）' }, { value: 'continue', label: 'continue（引导+重绘）' },
-  ], scope: 'shared', source: 'director/segment_continuity.py L125-145', verified: true },
+  ], scope: 'shared', source: 'director/segment_continuity.py L125-145（默认 引导+重绘）', verified: true },
   { key: 'continuityRedraw', label: '重绘幅度', type: 'float', default: 0.10, min: 0, max: 0.95, step: 0.01, scope: 'shared', source: 'director/segment_continuity.py L148-164', verified: true },
   { key: 'continuityKeepTail', label: '保完整（对齐余量）', type: 'bool', default: true, scope: 'shared', source: 'director/segment_continuity.py L167-181', verified: true },
   { key: 'exportMode', label: '导出模式', type: 'enum', default: 'all', options: [
@@ -576,6 +576,8 @@ export interface RunShotLike {
   /** cancelled/interrupted = 用户取消 / 异常退出残留自愈降级（2026-11-05，与 WorkbenchShot.status 同步放宽） */
   status: 'pending' | 'generating' | 'done' | 'failed' | 'cancelled' | 'interrupted';
   imagePrompt?: string;
+  /** 自由文本视频提示词（老数据/手写）：只用于提示「本段没有结构化提示词」，不再作为提交内容 */
+  videoPrompt?: string;
   references?: DirectorAssetRef[];
   continuation?: { enabled: boolean };
   /**
@@ -599,7 +601,13 @@ export interface SharedParamsLike {
 
 export interface RunReadinessIssue {
   shotId?: string;
-  code: 'asset-overflow' | 'frame-overflow' | 'continuation-blocked' | 'empty-prompt' | 'subject-image-missing';
+  code:
+    | 'asset-overflow' | 'frame-overflow' | 'continuation-blocked' | 'empty-prompt'
+    | 'subject-image-missing'
+    /** 只有自由文本 videoPrompt、没有分镜结构化 imagePrompt（2026-11-18 串台事故后加） */
+    | 'prompt-not-structured'
+    /** 提示词里的 @引用 解析不到任何素材槽位（主体/图片已删） */
+    | 'mention-unresolved';
   message: string;
 }
 
@@ -643,14 +651,8 @@ export function validateRunSelection(args: {
   const sharedAssets = args.shared.enabled ? args.shared.assets : [];
 
   /** 无图主体槽位检查（shared 池 + 当前段池统一过一遍） */
-  const checkSubjectSlots = (shot: RunShotLike) => {
+  const checkSubjectSlots = (shot: RunShotLike, slots: AssignAssetSlotsResult) => {
     if (!args.subjectCoverOf) return;
-    let slots: AssignAssetSlotsResult;
-    try {
-      slots = assignAssetSlots({ shared: sharedAssets, segment: shot.references ?? [], tier: args.tier });
-    } catch {
-      return; // 溢出已由 asset-overflow 上报
-    }
     for (const ref of [...sharedAssets, ...(shot.references ?? [])]) {
       const subjectId = parseBareSubjectRef(ref.id);
       if (!subjectId) continue;
@@ -664,15 +666,41 @@ export function validateRunSelection(args: {
     }
   };
 
+  /**
+   * @引用必须落到有效槽位（2026-11-18）：提示词里写了 @天穹残塔 / @沈篁 / @霜，
+   * 但槽位只有 1 张有效图、其余失效时，旧实现照样提交 → 成片必然和分镜不符。
+   */
+  const checkMentions = (shot: RunShotLike, slots: AssignAssetSlotsResult) => {
+    const text = shot.imagePrompt ?? '';
+    if (!text.includes('@')) return;
+    const refs = [...sharedAssets, ...(shot.references ?? [])];
+    const labels = new Set(Object.values(slots.byAssetId).map((s) => s.label));
+    const titles = refs.map((r) => (r.title ?? '').trim()).filter(Boolean);
+    const tokens = Array.from(text.matchAll(/@([^\s@，。；、,.;:：（）()<>「」]+)/g), (m) => m[1]!).filter(Boolean);
+    const unresolved = tokens.filter((t) => {
+      if (labels.has(t)) return false;
+      return !titles.some((title) => title.includes(t) || t.includes(title));
+    });
+    if (!unresolved.length) return;
+    issues.push({
+      shotId: shot.id, code: 'mention-unresolved',
+      message: `片段 ${shot.number}：提示词里的 ${unresolved.map((t) => `@${t}`).join('、')} 找不到可用素材槽位（对应主体或图片已被删除，请重新插入引用）`,
+    });
+  };
+
   for (const shot of selected) {
+    let slots: AssignAssetSlotsResult | undefined;
     try {
-      assignAssetSlots({ shared: sharedAssets, segment: shot.references ?? [], tier: args.tier });
+      slots = assignAssetSlots({ shared: sharedAssets, segment: shot.references ?? [], tier: args.tier });
     } catch (err) {
       if (err instanceof DirectorSlotOverflowError) {
         issues.push({ shotId: shot.id, code: 'asset-overflow', message: `片段 ${shot.number}：${err.message}` });
       } else throw err;
     }
-    checkSubjectSlots(shot);
+    if (slots) {
+      checkSubjectSlots(shot, slots);
+      checkMentions(shot, slots);
+    }
     const frames = durationToFrames(shot.duration);
     if (frames > MAX_GEN_FRAMES) {
       issues.push({
@@ -693,8 +721,15 @@ export function validateRunSelection(args: {
         });
       }
     }
-    if (!shot.imagePrompt?.trim()) {
-      issues.push({ shotId: shot.id, code: 'empty-prompt', message: `片段 ${shot.number}：提示词为空` });
+    const prompt = (shot.imagePrompt ?? '').trim();
+    if (!prompt) {
+      const legacy = (shot.videoPrompt ?? '').trim();
+      issues.push(legacy
+        ? {
+            shotId: shot.id, code: 'prompt-not-structured',
+            message: `片段 ${shot.number}：只有自由文本视频提示词、没有分镜结构化提示词（不会提交这段自由文本，避免产出与分镜/参考图无关的成片）；请先由分镜生成提示词`,
+          }
+        : { shotId: shot.id, code: 'empty-prompt', message: `片段 ${shot.number}：提示词为空` });
     }
   }
   return issues;

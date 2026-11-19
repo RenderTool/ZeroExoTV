@@ -15,10 +15,30 @@ export const TEXT_DEFAULT_SIZE = { width: 261, height: 348 };
 export const GENERATOR_DEFAULT_SIZE = { width: 620, height: 348 };
 export const IMAGE_DEFAULT_SIZE = { width: 620, height: 348 };
 /**
- * 图片节点统一长边上限（2026-11-05 用户拍板）：
- * 「发送到画布」建节点与图片 onload 纠偏都以 320 为上限，节点容器比例与图片一致，不留 letterbox。
+ * 图片节点统一尺寸规则（2026-11-18 用户定稿）：
+ * 所有图片节点都等比装进同一个 620×348 的展示框——
+ * 16:9 → 620×348、4:3 → 464×348、1:1 → 348×348、9:16 → 196×348。
+ * 同一比例的图片在任何入口（拖入/替换/生成/发送/链路快照）视觉尺寸完全一致；
+ * 用户手动缩放后保留自己的尺寸。
  */
-export const IMAGE_LONG_SIDE = 320;
+export const IMAGE_LONG_SIDE = 620;
+export const IMAGE_FIT_BOX = { width: 620, height: 348 };
+
+/** 按真实宽高等比装进统一展示框（短边不低于 minShort，极端长条也保持可读） */
+export function fitMediaSize(
+  naturalWidth: number,
+  naturalHeight: number,
+  box: { width: number; height: number } = IMAGE_FIT_BOX,
+  minShort = 120,
+): { width: number; height: number } {
+  if (!naturalWidth || !naturalHeight) return { width: box.width, height: box.height };
+  const scale = Math.min(box.width / naturalWidth, box.height / naturalHeight);
+  let width = Math.max(minShort, Math.round(naturalWidth * scale));
+  let height = Math.max(minShort, Math.round(naturalHeight * scale));
+  if (width > box.width) { width = box.width; height = Math.round(box.width * (naturalHeight / naturalWidth)); }
+  if (height > box.height) { height = box.height; width = Math.round(box.height * (naturalWidth / naturalHeight)); }
+  return { width, height };
+}
 export const VIDEO_DEFAULT_SIZE = { width: 620, height: 348 };
 /** 媒体类统一最小尺寸(等比锁节点的下限) */
 export const MEDIA_MIN_SIZE = { width: 80, height: 80 };

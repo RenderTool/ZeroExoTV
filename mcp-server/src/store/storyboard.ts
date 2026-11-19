@@ -241,7 +241,9 @@ function applyImageToTree(tree: TreeLike, input: SubjectImageInput): void {
   const tag = (input.stateTag ?? "").trim();
   if (!tag || tag === "定妆" || tag === "基础状态" || tag === "基础形态") {
     base.media = [{ key: input.storageKey, type: "image", prompt: input.prompt, ...(input.origin ? { origin: input.origin } : {}) }];
-    if (input.prompt) base.fullPrompt = input.prompt;
+    // 基础状态提示词是主体规范模板（set_subject_profile 写入），不能被一次“反推图片描述”
+    // 覆盖；否则后续参考生图会丢掉固定模板，模型自己加侧面/多机位。
+    if (input.prompt && !String(base.fullPrompt ?? "").trim()) base.fullPrompt = input.prompt;
     if (!base.state) base.state = tag === "定妆" ? "" : base.state;
     return;
   }

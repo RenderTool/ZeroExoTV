@@ -15,13 +15,14 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { CommandQueue, GraphModel, NodeRecord } from '@zeroexo/core';
+import { resolveNodeSize, type CommandQueue, type GraphModel, type NodeRecord } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
 import { normalizeNodesToOrigin } from '@/features/sub-canvas/canvas-copy.js';
 import { setGeneratingPreviewCanvas } from '@zeroexo/plugin-nodes';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { MAIN_CANVAS_DOC_ID, setCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
+import { useReadOnlyCanvasDocStore } from '@/shared/readonly-canvas-doc.js';
 import {
   getCanvas,
   isCanvasConflict,
@@ -56,6 +57,8 @@ export interface CanvasDocEditor {
 export interface UseCanvasDocumentSwitchOptions {
   projectId: string;
   editor: CanvasDocEditor | null;
+  /** 画布容器（切换文档后按内容重新取景，避免新文档节点落在屏幕左上角） */
+  containerRef?: { readonly current: HTMLElement | null };
 }
 
 const COPY_SAVE_DEBOUNCE_MS = 500;
@@ -66,7 +69,36 @@ function viewportOf(graph: GraphModel): { x: number; y: number; k: number } {
   return graph.viewport ?? EMPTY_VIEWPORT;
 }
 
-export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocumentSwitchOptions): void {
+/** 按图内容取景（与首次进入画布的 fit-to-view 同一口径）：节点永远落在视口中间，不贴左上角 */
+function fitGraphToView(
+  ed: CanvasDocEditor,
+  container: { readonly current: HTMLElement | null } | undefined,
+): void {
+  const rect = container?.current?.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return;
+  const nodes = ed.store.getGraph().nodes as NodeRecord[];
+  if (nodes.length === 0) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const node of nodes) {
+    const nx = node.position?.x ?? 0;
+    const ny = node.position?.y ?? 0;
+    const { width, height } = resolveNodeSize(node);
+    if (nx < minX) minX = nx;
+    if (ny < minY) minY = ny;
+    if (nx + width > maxX) maxX = nx + width;
+    if (ny + height > maxY) maxY = ny + height;
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+  ed.store.focusOnBounds(
+    { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) },
+    { width: rect.width, height: rect.height },
+    0,
+    0,
+    0.86,
+  );
+}
+
+export function useCanvasDocumentSwitch({ projectId, editor, containerRef }: UseCanvasDocumentSwitchOptions): void {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
@@ -229,9 +261,11 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         // 先声明「当前文档 = 主画布」再换图：Yjs 推送守卫按此判断，副本内容绝不进主文档
         setCurrentCanvasDocId(MAIN_CANVAS_DOC_ID);
         setGeneratingPreviewCanvas(MAIN_CANVAS_DOC_ID);
+        useReadOnlyCanvasDocStore.getState().setReadOnlyCid(null);
         ed.core.commandQueue.replaceState(graph);
         ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
         ed.store.setViewport(viewportOf(graph));
+        fitGraphToView(ed, containerRef);
         ed.plugins.persistence?.resume();
       } else {
         // 先停主画布自动保存，再换图（顺序反了会把副本书写进主画布键）
@@ -241,6 +275,7 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
           // 文件已被外部删除：回主画布，不猜、不重建
           setCurrentCanvasDocId(MAIN_CANVAS_DOC_ID);
           setGeneratingPreviewCanvas(MAIN_CANVAS_DOC_ID);
+          useReadOnlyCanvasDocStore.getState().setReadOnlyCid(null);
           ed.plugins.persistence?.resume();
           activateTab(CANVAS_TAB_KEY);
           message.warning(t('canvasCopy.missing', '画布副本文件不存在（可能已被外部删除）'));
@@ -249,12 +284,21 @@ export function useCanvasDocumentSwitch({ projectId, editor }: UseCanvasDocument
         // 换图前先切文档作用域：副本是另一份文档，不得把它的节点/生成态写进主画布 Y.Doc
         setCurrentCanvasDocId(cid);
         setGeneratingPreviewCanvas(cid);
+        // 只读历史链路：新文档带 readOnly；旧文档 metadata 不可靠（早期副本写成 selection），
+        // 再按 cid 前缀 scchain 兜底（只有「查看提示词」链路画布用这个 id）。
+        // 用户自建的普通子画布两者都不满足，照常可编辑。
+        const meta = got.graph.metadata as { readOnly?: boolean; savedFrom?: string } | undefined;
+        useReadOnlyCanvasDocStore.getState().setReadOnlyCid(
+          meta?.readOnly === true || meta?.savedFrom === 'generation-chain' || cid.startsWith('scchain') ? cid : null,
+        );
         // 子画布统一从原点打开：旧副本也归一化一次，避免继承主画布世界坐标造成偏移
         normalizeNodesToOrigin(got.graph.nodes as NodeRecord[]);
         got.graph.viewport = { x: 0, y: 0, k: 1 };
         ed.core.commandQueue.replaceState(got.graph);
         ed.store.setSelection({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
         ed.store.setViewport({ x: 0, y: 0, k: 1 });
+        // 副本节点已归一化到原点：直接 0/0 会把内容甩到左上角，必须按内容取景
+        fitGraphToView(ed, containerRef);
         dirtyRef.current = true; // 归一化后的坐标需要在下次保存时落盘
         stampRef.current = got.stamp;
         conflictRef.current = false;

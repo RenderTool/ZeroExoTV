@@ -59,4 +59,33 @@ describe('resolveSubjectCover 封面回落链', () => {
     expect(resolveSubjectCover(null)).toEqual({ key: null, source: 'none' });
     expect(resolveSubjectCover(undefined)).toEqual({ key: null, source: 'none' });
   });
+
+  /**
+   * 2026-11-18 用户口径：默认基础状态 = 封面。
+   * 基础状态没图时封面必须为空（图标占位），不允许拿其它状态图冒充；
+   * 只有用户显式把别的状态设为封面（coverKey）才例外。
+   */
+  describe('基础状态即封面（传 baseKeys）', () => {
+    const all = ['k-base', 'k-state2'];
+
+    it('基础状态有图 → 默认取基础状态首图，不按候选顺序抢别的状态', () => {
+      expect(resolveSubjectCover({ coverKey: null, images: [] }, all, ['k-base']))
+        .toEqual({ key: 'k-base', source: 'default' });
+    });
+
+    it('基础状态没图 → 封面为空，不借别的状态图（禁止「基础空、封面有图」）', () => {
+      expect(resolveSubjectCover({ coverKey: null, images: [] }, all, []))
+        .toEqual({ key: null, source: 'none' });
+    });
+
+    it('用户显式切封面到其它状态 → 手动封面生效', () => {
+      expect(resolveSubjectCover({ coverKey: 'k-state2', images: [] }, all, ['k-base']))
+        .toEqual({ key: 'k-state2', source: 'manual' });
+    });
+
+    it('手动封面被删 → 回落到基础状态首图（不是别的状态）', () => {
+      expect(resolveSubjectCover({ coverKey: 'k-gone', images: [] }, all, ['k-base']))
+        .toEqual({ key: 'k-base', source: 'default' });
+    });
+  });
 });

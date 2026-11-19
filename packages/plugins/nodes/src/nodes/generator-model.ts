@@ -232,7 +232,12 @@ export function computeReferenceCompatibility(
       continue;
     }
     const modelSupportsType = opts.supportedInputTypes.includes(inputType);
-    const modeMatches = opts.generationMode === inputType;
+    // 模型明确声明了自己能吃什么（image/video/audio）时，只按它的能力判断；
+    // 只有模型没有任何媒体能力信息（例如只吃文本的纯文生图模型）才退回「按生成模式判断」。
+    const hasMediaCapability = opts.supportedInputTypes.some(
+      (t) => t === 'image' || t === 'video' || t === 'audio',
+    );
+    const modeMatches = !hasMediaCapability && opts.generationMode === inputType;
     map[n.id] = modelSupportsType || modeMatches;
   }
   return map;

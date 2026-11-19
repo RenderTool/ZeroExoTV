@@ -110,9 +110,33 @@ export async function getCanvas(root: string, projectId: string, canvasId: strin
   assertSafeCanvasId(canvasId);
   if (canvasId === MAIN_CANVAS_ID) {
     const { doc, graph } = await readMainCanvas(root, projectId);
+    await hydrateDataRefs(root, projectId, graph);
     return { ...doc, graph };
   }
   return docOf(await readJsonIfExists<unknown>(paths.canvas(projectId, canvasId, root)));
+}
+
+/**
+ * 主画布节点 data 过大时前端会拆成 `_dataRef` 分片（storageKey / prompt / generation 都在分片里）。
+ * 不还原分片，MCP 读到的新生成节点就是空壳，无法把结果当参考图继续图生图。
+ */
+async function hydrateDataRefs(
+  root: string,
+  projectId: string,
+  graph: CanvasGraph,
+): Promise<void> {
+  const nodes = (Array.isArray(graph.nodes) ? graph.nodes : []) as Array<Record<string, unknown>>;
+  for (const node of nodes) {
+    const data = node.data as Record<string, unknown> | undefined;
+    const ref = data?.["_dataRef"];
+    if (typeof ref !== "string" || !ref) continue;
+    const shard = await readJsonIfExists<{ value?: Record<string, unknown> }>(
+      paths.mainGraphDataFile(projectId, ref, root),
+    );
+    if (shard?.value && typeof shard.value === "object") {
+      node.data = { ...shard.value };
+    }
+  }
 }
 
 /** 列项目内全部画布：1 号恒在首位；脏文件跳过并 warn，不阻断整个列表 */

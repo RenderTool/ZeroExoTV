@@ -12,6 +12,7 @@ import { Modal, Button, InputNumber } from 'antd';
 import { RotateCcw } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { readImageMeta } from '../utils/image-meta.js';
+import { detectSeamBands, detectSeamBreaks } from '../utils/seam-detect.js';
 import { MAX_SPLIT_PIECES, type SplitParams, type ImageMeta } from '../types.js';
 
 export interface SplitDialogProps {
@@ -55,6 +56,8 @@ export function SplitDialog({
   const [columnBreaks, setColumnBreaks] = useState<number[]>(() => uniformBreaks(2));
   const [rowBreaks, setRowBreaks] = useState<number[]>(() => uniformBreaks(2));
   const [image, setImage] = useState<ImageMeta | null>(null);
+  /** 接缝吸附结果（只在吸附成功时才用，避免把「没接缝」的图硬切歪） */
+  const [seamSnapped, setSeamSnapped] = useState(false);
   const imgBoxRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ axis: 'col' | 'row'; index: number } | null>(null);
 
@@ -89,6 +92,66 @@ export function SplitDialog({
       cancelled = true;
     };
   }, [dataUrl, open]);
+
+  /**
+   * 打开时先做「整轴接缝带」自动识别（2026-11-19 用户报障：三视图切出来还是碎片）：
+   * 命中 N 条接缝 = 画面有 N+1 格 → 直接把行/列数与分割线设成真实分格，
+   * 不再用 2×2 均匀网格从主体身上切过去。没有接缝才退回 2×2 默认。
+   */
+  useEffect(() => {
+    if (!open || !dataUrl) return;
+    let cancelled = false;
+    void (async () => {
+      const [xB, yB] = await Promise.all([
+        detectSeamBands(dataUrl, 'x').catch(() => ({ boundaries: [], panels: 1 })),
+        detectSeamBands(dataUrl, 'y').catch(() => ({ boundaries: [], panels: 1 })),
+      ]);
+      if (cancelled) return;
+      if (xB.panels <= 1 && yB.panels <= 1) return;
+      let cols = Math.min(MAX_GRID_SIZE, xB.panels);
+      let rows = Math.min(MAX_GRID_SIZE, yB.panels);
+      while (cols * rows > MAX_SPLIT_PIECES) {
+        if (cols >= rows && cols > 1) cols -= 1;
+        else if (rows > 1) rows -= 1;
+        else break;
+      }
+      setColumns(cols);
+      setRows(rows);
+      setColumnBreaks(cols === xB.panels ? xB.boundaries : uniformBreaks(cols));
+      setRowBreaks(rows === yB.panels ? yB.boundaries : uniformBreaks(rows));
+      setSeamSnapped(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, dataUrl]);
+
+  /**
+   * 接缝吸附（2026-11-18 用户口径）：
+   * 「切分」不该按均匀网格硬切主体，应沿画面里那条轻微接缝把完整图片分开。
+   * 每次换行/列先尝试吸附；找不到明显接缝就退回均匀线（不硬猜）。
+   * 手动拖拽后不再覆盖用户的手调结果（effect 只依赖网格与图，不依赖 breaks）。
+   */
+  useEffect(() => {
+    if (!open || !dataUrl) return;
+    let cancelled = false;
+    void (async () => {
+      const [cols, rows2] = await Promise.all([
+        detectSeamBreaks(dataUrl, 'x', columns).catch(() => [] as number[]),
+        detectSeamBreaks(dataUrl, 'y', rows).catch(() => [] as number[]),
+      ]);
+      if (cancelled) return;
+      const snapped = cols.some((b, i) => Math.abs(b - (i + 1) / columns) > 0.005)
+        || rows2.some((b, i) => Math.abs(b - (i + 1) / rows) > 0.005);
+      if (!snapped) return;
+      setColumnBreaks(cols.length ? cols : uniformBreaks(columns));
+      setRowBreaks(rows2.length ? rows2 : uniformBreaks(rows));
+      setSeamSnapped(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, dataUrl, rows, columns]);
 
   const updateRows = useCallback((value: number) => {
     // 行数上限同时受总块数约束：floor(64 / 当前列数)
@@ -176,7 +239,8 @@ export function SplitDialog({
   );
   const subtitle = (
     <div style={{ fontSize: 12, color: theme.toolbar.textMuted, marginBottom: 12 }}>
-      按网格拆分,子节点自动排列到画布 · 可拖拽分割线微调 · 单次最多 64 块
+      按网格拆分,子节点自动排列到画布 · 已自动吸附画面接缝（切不动可拖拽分割线微调） · 单次最多 64 块
+      {seamSnapped ? ' · 当前分割线已落在接缝上' : ''}
     </div>
   );
 

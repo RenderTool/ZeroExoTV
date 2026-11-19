@@ -450,14 +450,16 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   // 触发：subjectTrees（上游主体树）变化 / shots 变化（重连分镜后）/ 打开时全量校验一次。
   // detectStaleRefs 对 references 中带 subject 指纹的项产出失效清单，写回 references[].stale；
   // 用户上传素材（无 origin / user-upload）永不被标红。检测收敛：结果一致不再写回（防循环）。
-  const subjectTreesForCheck = (data.subjectTrees ?? []) as unknown as Array<{
+  const subjectTreesForCheck = (data.subjectTrees ?? undefined) as unknown as Array<{
     rootId: string;
     name: string;
     baseState?: { referenceImages?: Array<{ key?: string }> };
     states?: Array<{ id: string; state?: string; media?: Array<{ key?: string }> }>;
-  }>;
+  }> | undefined;
   useEffect(() => {
-    if (subjectTreesForCheck.length === 0) return;
+    // undefined = 主体数据尚未加载；空数组 = 已加载且项目内确实没有主体，
+    // 此时带 origin 的引用必须判失效（不能因为空数组直接跳过检测）。
+    if (!subjectTreesForCheck) return;
     if (data.shots.length === 0) return;
     let changed = false;
     const nextShots = data.shots.map((shot) => {
@@ -839,8 +841,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
       .filter(Boolean)
       .join(', ');
     const shotWithModel = overrideModel ? { ...shot, model: overrideModel } : shot;
-    const promptShot = subjectText
-      ? { ...shotWithModel, videoPrompt: `${shotWithModel.videoPrompt || ''} ${subjectText}`.trim() }
+    const promptShot = subjectText && (shotWithModel.imagePrompt ?? '').trim()
+      ? { ...shotWithModel, imagePrompt: `${shotWithModel.imagePrompt} ${subjectText}`.trim() }
       : shotWithModel;
 
     const generatedTitle = shot.description?.trim() || `#${shot.number}`;
@@ -859,7 +861,7 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
           trimEnd: sourceDuration,
           source: 'generated',
           title: generatedTitle,
-          prompt: promptShot.videoPrompt,
+          prompt: promptShot.imagePrompt ?? '',
           model: overrideModel ?? shot.model,
           generationId,
           createdAt: new Date().toISOString(),
@@ -1317,7 +1319,7 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                 // 2026-11-04：已完成镜头显示只读提示词摘要（提示词区不留空壳）；
                 // 无提示词时传 ''（非 undefined）→  merged-tab 渲染「无提示词」占位
                 promptReadonlyText={currentShot?.clipState === 'completed'
-                  ? (currentShot.media?.prompt || currentShot.videoPrompt || currentShot.imagePrompt || '')
+                  ? (currentShot.media?.prompt || currentShot.imagePrompt || currentShot.videoPrompt || '')
                   : undefined}
                 entities={(data.entities ?? []) as StoryboardEntity[]}
                 promptSubjectChips={shotSubjects}

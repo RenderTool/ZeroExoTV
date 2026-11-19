@@ -473,10 +473,15 @@ async function runDirector(taskId: string, base: string): Promise<void> {
     }
     const segments: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; params: Record<string, unknown> }> = [];
     for (const p of planned) {
-      const refImage = (p.shot.references ?? []).find((r) => r.kind === "image" && r.storageKey);
-      const refName = refImage?.storageKey
-        ? await uploadRef(base, refImage.storageKey, `zxb_${p.shot.id}`)
-        : "";
+      const refImages = (p.shot.references ?? [])
+        .filter((r) => r.kind === "image" && r.storageKey)
+        .slice(0, 9);
+      const refNames: string[] = [];
+      for (const ref of refImages) {
+        if (!ref.storageKey) continue;
+        const name = await uploadRef(base, ref.storageKey, `zxb_${p.shot.id}_${refNames.length}`);
+        if (name) refNames.push(name);
+      }
       segments.push({
         shotId: p.shot.id,
         guide: { mode: p.mode, ...(p.guideId ? { id: p.guideId } : {}) },
@@ -492,7 +497,9 @@ async function runDirector(taskId: string, base: string): Promise<void> {
           frame_rate: 24,
           guide_frames: guideFrames,
           use_low_vram: lowVram,
-          ...(refName ? { reference_image: refName, reference_images: refName } : {}),
+          ...(refNames[0]
+            ? { reference_image: refNames[0], reference_images: refNames }
+            : {}),
         },
       });
     }
@@ -1000,6 +1007,30 @@ const MIME_BY_EXT: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
 };
 
+/** 简单时间戳：MM-DD HH:mm（资产命名用） */
+function shortStamp(d = new Date()): string {
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * 有意义的资产名：取提示词首句，去掉 @引用 / <标签> / 技术词，截到 18 字。
+ * 资产名不允许出现无意义编号（如 claimId 尾号）。
+ */
+function semanticImageName(prompt: string | undefined, fallback: string): string {
+  const raw = (prompt ?? "").replace(/\r/g, "").replace(/<[^>]*>/g, " ");
+  const first = raw.split(/\n|。|！|；|;/)[0] ?? "";
+  const cleaned = first
+    .replace(/@\S+(\s*·\s*\S+)?/g, " ")
+    .replace(/[“”"'（）()【】\[\]]/g, " ")
+    .replace(/无字幕|无水印|无文字|8K|4K|超清|高清|竖版|横版|16:9|9:16|1:1/g, " ")
+    .replace(/[,，、:：]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return fallback;
+  return cleaned.length > 18 ? cleaned.slice(0, 18) : cleaned;
+}
+
 async function landImage(
   taskId: string,
   segIndex: number,
@@ -1028,7 +1059,7 @@ async function landImage(
   const model = req.model ?? "moss";
   await appendAssetRecord(root, {
     id: `asset-${crypto.randomBytes(6).toString("hex")}`,
-    title: req.title?.trim() || `MCP 图片 ${segIndex}`,
+    title: req.title?.trim() || `${semanticImageName(req.prompt, "MCP 图片")} · ${shortStamp()}`,
     kind: "image",
     tags: [],
     bytes: buf.length,
@@ -1076,7 +1107,7 @@ function resolveSeed(value: unknown): number {
 
 // ===== 存储键读取 =====
 
-async function readStorageBuffer(storageKey: string): Promise<Buffer | null> {
+export async function readStorageBuffer(storageKey: string): Promise<Buffer | null> {
   if (!storageKey) return null;
   if (storageKey.startsWith("data:")) {
     const m = /^data:[^;,]+;base64,(.*)$/s.exec(storageKey);
@@ -1089,7 +1120,7 @@ async function readStorageBuffer(storageKey: string): Promise<Buffer | null> {
 }
 
 /** 改图传 sourceNodeId：从项目画布里找该节点的 storageKey */
-async function resolveCanvasNodeStorageKey(projectId: string, nodeId: string): Promise<string | null> {
+export async function resolveCanvasNodeStorageKey(projectId: string, nodeId: string): Promise<string | null> {
   const root = dataRoot();
   const list = await listCanvases(root, projectId).catch(() => []);
   const ids = [list.find((c) => c.id === "main")?.id ?? "main", ...list.map((c) => c.id)];

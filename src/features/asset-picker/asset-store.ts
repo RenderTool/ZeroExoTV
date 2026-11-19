@@ -13,7 +13,8 @@ import localforage from 'localforage';
 import { nanoid } from 'nanoid';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
-import { hasCasEntry, isCasStorageKey, registerCasRef, releaseCas } from '@/entities/cas-store.js';
+import { hasCasEntry, registerCasRef, releaseCas } from '@/entities/cas-store.js';
+import { forgetDeletedKeys, isDeletedKey, markDeletedKeys } from '@/entities/deleted-asset-tombstones.js';
 import { readFile as fsReadFile, writeFile as fsWriteFile, removeFile as fsRemoveFile } from '@/platform/fs.js';
 import type { Asset, AssetKind, AssetScope } from './index.js';
 
@@ -420,6 +421,19 @@ function sanitizeAssetsList(list: Asset[]): { list: Asset[]; changed: boolean } 
   return { list: out, changed };
 }
 
+/**
+ * 墓碑命中哨兵：addAsset 命中删除墓碑时**不落库**，返回带此标记的对象。
+ * 为什么不是返回 null：addAsset 被大量既有调用/测试当作「必有资产」使用，
+ * 改签名会让 30+ 处无关代码类型报错；这里保留签名，让真正需要区分结果的
+ * 调用方（自动落库、useAssets、导出到素材库）用 isTombstoneSkip 判断。
+ */
+const TOMBSTONE_SKIP = Symbol('zeroexo.tombstoneSkip');
+
+/** 该 addAsset 结果是否只是墓碑跳过（未落库） */
+export function isTombstoneSkip(a: Asset): boolean {
+  return (a as unknown as Record<symbol, boolean>)[TOMBSTONE_SKIP] === true;
+}
+
 export async function addAsset(input: CreateAssetInput, opts?: { source?: string }): Promise<Asset> {
   const scope = resolveScope(input);
   // 公共库只收四类素材资产（image/video/audio/text），业务类型创建请求在此兜底拒绝
@@ -439,6 +453,21 @@ export async function addAsset(input: CreateAssetInput, opts?: { source?: string
     favorite: false,
     ...scope,
   };
+  // 墓碑闸门（2026-11-16）：addAssets 有同款闸门，但 addAsset（单条）此前没有——
+  // 实测「删除 → 刷新 → 导演台任务恢复落库」经 history-autoland 的 addAsset 绕过闸门重建记录。
+  // 与 addAssets 同语义：命中直接不落库，并释放上传阶段预注册的 CAS ref（否则引用计数永不归零）。
+  const tombstoneKey = getStorageKeyOfAsset(input);
+  if (tombstoneKey && (await isDeletedKey(tombstoneKey))) {
+    if (input.cas && input.id) {
+      await releaseCas(input.cas.hash, { assetId: input.id }).catch((err) => {
+        console.warn('[asset-store] 墓碑命中释放 CAS ref 失败:', err);
+      });
+    }
+    // 必须带墓碑哨兵：此前直接 return asset 让调用方（history-autoland → landPluginSegment →
+    // onSegmentDone）误以为落库成功，把已删内容的版本与 shot.media 又合并回工作台——
+    // 这正是「删除后片段历史/媒体复活」的第二条路（2026-11-16 实测）。
+    return { ...asset, [TOMBSTONE_SKIP]: true } as Asset;
+  }
   const list = await readAll();
   list.push(asset);
   await writeAll(list);
@@ -450,22 +479,59 @@ export async function addAsset(input: CreateAssetInput, opts?: { source?: string
  * 批量新增素材元数据（单次读写，避免逐条读写导致的竞态问题）
  * 幂等:同一 storageKey(后端 CAS 文件)已存在时跳过创建,复用已有记录,避免重复入库
  * @param inputs 由 upload-asset 服务构造的输入数组
- * @returns 新创建的 Asset 数组(去重跳过的记录不会出现在结果中)
+ * @param report 可选上报桶（三态提示用）：caller 能知道自己拿到的是新建、去重命中还是墓碑跳过，
+ *   避免把「已存在」和「上传成功」压成同一句（2026-11-16 用户实测的核心困惑）
+ * @returns 新创建的 Asset 数组 + 去重命中的既有 Asset（墓碑跳过的两条都不出现）
  */
-export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
+export async function addAssets(
+  inputs: CreateAssetInput[],
+  report?: { created: Asset[]; dedupedExisting: Asset[]; skippedTombstone: string[] },
+  opts?: { reviveDeleted?: boolean },
+): Promise<Asset[]> {
   if (inputs.length === 0) return [];
   const list = await readAll();
   const nowStr = now();
-  // 预建已有 storageKey 集合,用于去重判断(文本类无 storageKey,天然不参与)
-  const existingKeys = new Set<string>();
+  /**
+   * 内容键索引（2026-11-17 用户实测）：此前去重是「全局按 storageKey」，
+   * 公共资产页上传一张内容已存在于**项目作用域**（或别的项目）的图时，会判「已复用」
+   * 并返回那条项目记录——但公共资产页只列 scope==='library'，于是提示「已复用」而列表不出现。
+   * 正确口径：去重只在**同一作用域内**成立（library 全局 / project 同 projectId）；
+   * 跨作用域命中则为本作用域新建一条记录，共用同一 CAS 文件（不复制字节）。
+   */
+  const byKey = new Map<string, Asset[]>();
   for (const a of list) {
     const key = getStorageKeyOfAsset(a);
-    if (key) existingKeys.add(key);
+    if (!key) continue;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(a); else byKey.set(key, [a]);
   }
+  /** 同作用域判定：公共库=全局；项目=同 projectId */
+  const inSameScope = (a: Asset, scope: { scope: 'project' | 'library'; projectId?: string }): boolean => {
+    const s = a.scope ?? 'library';
+    if (s !== scope.scope) return false;
+    return scope.scope === 'library' ? true : a.projectId === scope.projectId;
+  };
   const created: Asset[] = [];
+  /** 去重命中返回的既有资产：调用方必须能拿到句柄并刷新列表，
+   *  否则「内容已存在」会表现为「上传完成但列表里看不到」（2026-11-16 实测）。 */
+  const dedupedExisting: Asset[] = [];
   for (const input of inputs) {
     const key = getStorageKeyOfAsset(input);
-    if (key && existingKeys.has(key)) {
+    // 墓碑闸门（2026-11-16）：用户删过的内容键不再自动新建记录，
+    // 否则「删除 → 刷新 → 同内容又出现」永远修不掉。撤销删除会清墓碑。
+    // 例外（2026-11-17 用户实测）：用户手动点上传又选了同一个文件 = 明确要它回来，
+    // 此时清墓碑并正常入账；只有自动链路（历史回填 / 插件落库 / 跨作用域提升）才拦。
+    if (key && (await isDeletedKey(key))) {
+      if (opts?.reviveDeleted) {
+        await forgetDeletedKeys([key]);
+      } else {
+        report?.skippedTombstone.push(key);
+        continue;
+      }
+    }
+    const scope = resolveScope(input);
+    const existing = key ? (byKey.get(key) ?? []).find((a) => inSameScope(a, scope)) : undefined;
+    if (existing) {
       // CAS 防漏（2026-11-04）：上传阶段已用预生成 id 注册过 ref，但记录被去重跳过
       // → 必须释放该悬空 ref，否则 refCount 永不归零、文件永远无法回收
       if (input.cas && input.id) {
@@ -473,9 +539,9 @@ export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
           console.warn('[asset-store] 跳过重复资产时释放 CAS ref 失败:', err);
         });
       }
+      dedupedExisting.push(existing);
       continue;
     }
-    const scope = resolveScope(input);
     // 公共库只收四类素材资产（image/video/audio/text），业务类型创建请求在此兜底拒绝
     if (scope.scope === 'library') assertLibraryKind(input.kind);
     const asset: Asset = {
@@ -495,7 +561,11 @@ export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
     };
     created.push(asset);
     list.push(asset);
-    if (key) existingKeys.add(key);
+    if (key) {
+      // 本批新建的也要进索引，保证同一批里后出现的同作用域重复文件能被去重
+      const bucket = byKey.get(key);
+      if (bucket) bucket.push(asset); else byKey.set(key, [asset]);
+    }
   }
   // 追加而非 unshift，保持 createdAt 降序排序由 readAll 保证
   await writeAll(list);
@@ -503,7 +573,12 @@ export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
   for (const a of created) {
     nodeActionBus.emit('assets:created', { nodeId: '', assetId: a.id, kind: a.kind });
   }
-  return created;
+  // 去重命中的既有资产也返回给调用方（不再静默丢句柄）
+  if (report) {
+    report.created.push(...created);
+    report.dedupedExisting.push(...dedupedExisting);
+  }
+  return [...created, ...dedupedExisting];
 }
 
 /**
@@ -586,7 +661,8 @@ export async function removeAssets(ids: string[]): Promise<Asset[]> {
   const cascadeCloudIds = new Set<string>();
   for (const t of directTargets) {
     const k = getStorageKeyOfAsset(t);
-    if (k && !isCasStorageKey(k)) cascadeKeys.add(k);
+    // 内容键（含 cas: 键）用于「版本卡 id ≠ 记录 id」时的兜底匹配；同内容只有一条记录
+    if (k) cascadeKeys.add(k);
     if (t.cloudId) cascadeCloudIds.add(t.cloudId);
   }
   const deleted: Asset[] = [];
@@ -594,16 +670,19 @@ export async function removeAssets(ids: string[]): Promise<Asset[]> {
   for (const a of list) {
     const k = getStorageKeyOfAsset(a);
     const hit = idSet.has(a.id)
-      || (!!k && !isCasStorageKey(k) && cascadeKeys.has(k))
+      // 2026-11-16：历史「版本卡」的 id 是片段缓存版本 id（ver-…），不是资产记录 id，
+      // 仅按 id 匹配会一条都删不到 → 表现为「删了刷新又回来」。这里补一条按内容键匹配：
+      // 目标对象带的 storageKey 与记录一致时，删这一条记录本身（同内容只有一个记录，已由 addAssets 去重）。
+      || (!!k && cascadeKeys.has(k))
       || (!!a.cloudId && cascadeCloudIds.has(a.cloudId));
     if (hit) deleted.push(a);
     else remaining.push(a);
   }
   await writeAll(remaining);
-  // 2026-11-15 数据安全（用户现场事故）：删除素材记录**绝不释放/删除 CAS 物理文件**。
-  // 同一份 CAS 还可能被画布节点、导演台 shot.cache/media、主体库引用，而那些引用不在
-  // asset refs 里；release 到 0 会把文件删掉，表现为「删一条画布历史，画布节点/导演台全失效」。
-  // 物理文件只由独立的孤儿清理（扫描全量引用后）回收；这里与函数注释的「仅删元数据」保持一致。
+  // 墓碑：把本次删掉的记录内容键记下，防止刷新/自动落库把同一内容重新建回来
+  await markDeletedKeys(deleted.map((a) => getStorageKeyOfAsset(a))).catch(() => undefined);
+  // 2026-11-16 CAS 对账：【紧急停用】扫描覆盖面未审计即上线导致媒体被误回收，
+  // 删除恢复为「只删记录不动文件」；对账模块保留待修复（见 cas-reconcile.ts）。
   return deleted;
 }
 
@@ -652,6 +731,8 @@ export async function restoreAssets(assets: Asset[]): Promise<Asset[]> {
     list.push(a);
   }
   if (restored.length > 0) {
+    // 撤销删除：清除墓碑，否则恢复出来的记录下次 addAssets 会被墓碑挡住
+    await forgetDeletedKeys(restored.map((a) => getStorageKeyOfAsset(a))).catch(() => undefined);
     await writeAll(list);
     for (const a of restored) {
       nodeActionBus.emit('assets:created', { nodeId: '', assetId: a.id, kind: a.kind });

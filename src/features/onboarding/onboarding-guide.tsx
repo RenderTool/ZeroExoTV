@@ -8,17 +8,14 @@
  *
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开。
  */
-import { useCallback, useEffect, useState } from 'react';
-import { App, AutoComplete, Button, Collapse, Input, Modal, Tag } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { App, Button, Input, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen, SlidersHorizontal } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { pickRoot, rootName, currentDataRootPath, switchDataRoot } from '@/platform/fs.js';
-import { buildBootstrapCommand, detectBootstrapPlatform } from '@/features/mcp-settings/mcp-bootstrap.js';
+import { pickRoot, rootName, currentDataRootPath, switchDataRoot, pickDataRoot, migrateDataRoot, pickDirectoryPath } from '@/platform/fs.js';
 import {
-  buildStdioConfig,
-  ensureIdeToken,
   loadServerInfo,
   mcpServerMissingTools,
   type ServerInfo,
@@ -30,26 +27,22 @@ import {
 import { fetchBridgeModels } from '@/features/canvas-tabs/comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connection.js';
 import { applyConnectionResult } from '@/features/canvas-tabs/comfyui-auto-connect.js';
+import { ModelMappingModal } from '@/features/canvas-tabs/model-mapping-modal.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
+/** MCP 自己的安装目录（用户可选，单独一个目录，绝不和资源目录混用） */
+const MCP_DIR_KEY = 'zeroexo.mcp.installDir';
+
+/** 默认建议：资源目录的同级目录，避免默认塞进数据根里 */
+function defaultMcpDir(dataRoot: string | null): string {
+  if (!dataRoot) return '';
+  const trimmed = dataRoot.replace(/[\\/]+$/, '');
+  const idx = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'));
+  const parent = idx > 2 ? trimmed.slice(0, idx) : trimmed;
+  return `${parent}\\ZeroExo-MCP`;
+}
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
 const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
-
-/** 每个槽位只推荐一个；连接后拿云端列表逐项核对是否有这个文件 */
-const RECOMMENDED_MODELS = {
-  unet: 'minimax_h3_hybrid_fl2va_ref2va_b15-49-int8.safetensors',
-  videoVae: 'minimax_h3_video_vae_fp16.safetensors',
-  audioVae: 'minimax_h3_audio_vae_fp32.safetensors',
-  clip: 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
-} as const;
-
-/** 机器档位 → 推荐用法（只讲能不能做，不讲量化术语） */
-const MODEL_RECOMMENDATIONS: Array<{ vram: string; local: string; cloud: string }> = [
-  { vram: '8 GB', local: '只做图片：QwenImage2.1 / Krea2 / MossImage。视频用云端。', cloud: 'H3 云端' },
-  { vram: '12–16 GB', local: '图片都能用；视频只做短片段、低分辨率。', cloud: 'H3 云端' },
-  { vram: '24 GB', local: '图片都能用；视频可做完整片段，模型选带「推荐」的。', cloud: 'H3 云端 / 2K' },
-  { vram: '32 GB+', local: '视频可做完整片段；本地仍然出不了 2K。', cloud: '2K' },
-];
 
 export function isOnboardingDone(): boolean {
   try {
@@ -95,9 +88,10 @@ function StepCard({
         {done ? <CheckCircle2 size={18} /> : <Circle size={18} />}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{index}. {title}</span>
-          {done ? <Tag color="success" style={{ marginInlineEnd: 0 }}>已完成</Tag> : null}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {/* 2026-11-18 用户要求：标题固定一行，明确写 Agent（例如豆包），不能换行 */}
+          <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{index}. {title}</span>
+          {done ? <Tag color="success" style={{ marginInlineEnd: 0, flexShrink: 0 }}>已完成</Tag> : null}
         </div>
         {children}
       </div>
@@ -111,41 +105,6 @@ const hintStyle = (theme: ThemeConfig): React.CSSProperties => ({
   lineHeight: 1.7,
 });
 
-/** 模型名可下拉选，也可手动输入（云端/第三方命名不一致时兜底） */
-function ModelNamePicker({
-  value, options, placeholder, onCommit, slot,
-}: {
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  placeholder: string;
-  onCommit: (value: string) => void;
-  slot: string;
-}): React.ReactElement {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => { setDraft(value); }, [value]);
-  const commit = (): void => {
-    const next = draft.trim();
-    if (next && next !== value) onCommit(next);
-  };
-  return (
-    <AutoComplete
-      value={draft}
-      options={options}
-      data-onboarding-model={slot}
-      placeholder={placeholder}
-      onChange={(next) => setDraft(next)}
-      onSelect={(next: string) => { setDraft(next); onCommit(next); }}
-      onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
-      showSearch
-      // 当前值就是完整模型名时，默认过滤会只剩它自己，用户看不到云端其它模型。
-      // 这里始终展示云端完整列表；输入内容仍可通过 onChange 改成任意模型名。
-      filterOption={() => true}
-      style={{ flex: 1, minWidth: 0 }}
-    />
-  );
-}
-
 export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () => void }): React.ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -153,17 +112,16 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const endpoint = useComfyuiEndpointStore();
 
   const [root, setRoot] = useState<string | null>(null);
-  const [rootPathInput, setRootPathInput] = useState('');
   const [address, setAddress] = useState(endpoint.address || DEFAULT_COMFYUI);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [testOk, setTestOk] = useState(false);
+  const [installingMcp, setInstallingMcp] = useState(false);
+  const [mcpCopied, setMcpCopied] = useState(false);
+  const [mcpDir, setMcpDir] = useState<string>('');
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
-  const [mcpToken, setMcpToken] = useState<string | null>(null);
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
-  const [refreshingModels, setRefreshingModels] = useState(false);
-  const models = useComfyuiConnectionStore((s) => s.models);
-  const availableModels = useComfyuiConnectionStore((s) => s.availableModels);
-  const setModel = useComfyuiConnectionStore((s) => s.setModel);
+  const [modelPageOpen, setModelPageOpen] = useState(false);
   const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
 
   const pluginZipUrl = `${import.meta.env.BASE_URL}downloads/ComfyUI_ZeroExoNodes.zip`;
@@ -171,14 +129,17 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!open) return;
     setRoot(rootName() ?? null);
-    setRootPathInput(currentDataRootPath() ?? '');
     setAddress(endpoint.address || DEFAULT_COMFYUI);
+    setMcpCopied(false);
+    const rootPath = currentDataRootPath();
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(MCP_DIR_KEY); } catch { saved = null; }
+    setMcpDir(saved || defaultMcpDir(rootPath));
     void (async () => {
       try {
         const info = await loadServerInfo();
         setServerInfo(info);
         setMcpStaleTools(mcpServerMissingTools(info));
-        if (info) setMcpToken(await ensureIdeToken());
       } catch {
         setServerInfo(null);
       }
@@ -193,84 +154,164 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         if (!info) return;
         setServerInfo(info);
         setMcpStaleTools(mcpServerMissingTools(info));
-        setMcpToken(await ensureIdeToken().catch(() => null));
       }).catch(() => undefined);
     }, 3000);
     return () => window.clearInterval(timer);
   }, [open, serverInfo]);
 
+  /** 安装目录合法性：不能是 C 盘，不能和数据根混用（也不许是数据根的子目录） */
+  const mcpDirError = (() => {
+    const dir = mcpDir.trim();
+    if (!dir) return '尚未选择 MCP 安装目录';
+    if (/^c:/i.test(dir)) return '不能装在 C 盘';
+    const rootPath = currentDataRootPath();
+    if (rootPath) {
+      const a = dir.replace(/[\\/]+$/, '').toLowerCase();
+      const b = rootPath.replace(/[\\/]+$/, '').toLowerCase();
+      if (a === b || a.startsWith(`${b}\\`) || a.startsWith(`${b}/`)) {
+        return '不能和资源目录混用，请另选一个独立目录';
+      }
+    }
+    return null;
+  })();
+
+  const pickMcpDir = useCallback(async () => {
+    try {
+      const picked = await pickDirectoryPath();
+      if (!picked) return;
+      setMcpDir(picked);
+      try { localStorage.setItem(MCP_DIR_KEY, picked); } catch { /* 隐私模式忽略 */ }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '选择安装目录失败');
+    }
+  }, [message]);
+
+  /**
+   * 换目录只保留两步（2026-11-17 用户要求）：点一次 → 系统原生目录对话框选目录 →
+   * 直接问「取消 / 仅切换 / 迁移并切换」，不再让人手填路径再点「切换到此目录」。
+   * 询问框是页面内自绘 Modal（跟随明暗主题），不用 Modal.confirm：
+   * confirm 的白底在暗色下不跟随主题，且只有两个按钮位。
+   */
+  type RootAction = 'cancel' | 'switch' | 'migrate';
+  const [rootAsk, setRootAsk] = useState<{ current: string; next: string; projects: number; assets: number } | null>(null);
+  const rootAskResolve = useRef<((v: RootAction) => void) | null>(null);
+  const askRootAction = useCallback(
+    (payload: { current: string; next: string; projects: number; assets: number }): Promise<RootAction> => (
+      new Promise<RootAction>((resolve) => {
+        rootAskResolve.current = resolve;
+        setRootAsk(payload);
+      })
+    ),
+    [],
+  );
+  const answerRootAsk = useCallback((value: RootAction) => {
+    setRootAsk(null);
+    const resolve = rootAskResolve.current;
+    rootAskResolve.current = null;
+    resolve?.(value);
+  }, []);
+
   const chooseRoot = useCallback(async () => {
     try {
-      const pickedName = await pickRoot();
-      const current = currentDataRootPath();
-      if (current) {
-        const sep = current.includes('\\') ? '\\' : '/';
-        const parent = current.replace(/[\\/][^\\/]*$/, '');
-        const guess = `${parent}${sep}${pickedName}`;
-        setRootPathInput(guess);
-        message.info(t('onboarding.rootGuess', '已按所选目录名推测为 {{path}}；确认后点「切换到此目录」', { path: guess }));
+      const picked = await pickDataRoot();
+      if (picked && picked !== 'offline') {
+        const current = currentDataRootPath();
+        if (current && current === picked.path) {
+          message.info(t('onboarding.rootSame', '新目录与当前目录相同，无需切换'));
+          return;
+        }
+        if (current) {
+          const action = await askRootAction({
+            current,
+            next: picked.path,
+            projects: picked.projects,
+            assets: picked.assets,
+          });
+          if (action === 'cancel') {
+            message.info(`已取消：数据仍在 ${current}`);
+            return;
+          }
+          if (action === 'migrate') {
+            message.loading({ content: '正在迁移数据…', key: 'root-migrate', duration: 0 });
+            await migrateDataRoot(current, picked.path);
+            message.success({ content: '已迁移并切换，正在重新加载…', key: 'root-migrate' });
+          } else {
+            await switchDataRoot(picked.path);
+            message.success({ content: '已切换目录，正在重新加载…', key: 'root-switch' });
+          }
+        } else {
+          await switchDataRoot(picked.path);
+          message.success(t('onboarding.rootSwitched', '数据目录已切换，正在重新加载…'));
+        }
+        window.location.reload();
         return;
       }
-      setRoot(rootName() ?? null);
-      setRootPathInput('');
-      message.success(t('onboarding.rootSelected', '存储目录已指定'));
+      // 本地服务离线：只能授权浏览器句柄（拿不到绝对路径），此时才走浏览器目录选择
+      if (picked === 'offline') {
+        const pickedName = await pickRoot();
+        setRoot(pickedName);
+        message.success(t('onboarding.rootSelected', '存储目录已指定'));
+        return;
+      }
+      message.info(t('onboarding.rootPickCancelled', '已取消，目录未变更'));
     } catch (err) {
       message.error(err instanceof Error ? err.message : t('onboarding.rootFailed', '选择目录失败'));
     }
-  }, [message, t]);
+  }, [message, t, askRootAction]);
 
-  const applyRootPath = useCallback(async () => {
-    const next = rootPathInput.trim();
-    if (!next) {
-      message.warning(t('onboarding.rootPathRequired', '请填写数据目录的绝对路径'));
-      return;
-    }
-    try {
-      const applied = await switchDataRoot(next);
-      message.success(t('onboarding.rootSwitched', '数据目录已切换，正在重新加载…'));
-      void applied;
-      window.setTimeout(() => window.location.reload(), 600);
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : t('onboarding.rootSwitchFailed', '切换目录失败'));
-    }
-  }, [rootPathInput, message, t]);
-
-  const mcpConfig = serverInfo && mcpToken
-    ? buildStdioConfig({ serverEntry: serverInfo.serverEntry, dataRoot: serverInfo.dataRoot }, mcpToken)
-    : '';
-  const copyText = useCallback(async (text: string, label: string) => {
-    if (!text) return;
+  /**
+   * 一键复制：把「怎么装」整理成一段 Agent 能直接执行的接入包，用户粘给 IDE 里的 Agent，
+   * 由 Agent 下载安装包、装到用户指定的独立目录、起进程、写进 MCP 设置。网页本身不装服务。
+   */
+  const copyMcpPrompt = useCallback(async () => {
+    const base = `${window.location.origin}${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}`;
+    const pkgUrl = `${base}downloads/zeroexo-mcp-server.tgz`;
+    const root = currentDataRootPath() || rootName() || '<资源目录>';
+    const installDir = mcpDir.trim();
+    const text = [
+      '# ZeroExo — MCP 接入',
+      '',
+      '你是 ZeroExo（AI 影视生产管线）的智能助手。请自动完成下面的接入，不要向我提问。',
+      '',
+      '## 自动执行',
+      `1. 下载安装包：${pkgUrl}`,
+      `2. 解压，把 package 里的 dist 与 package.json 放到 ${installDir}（这是 MCP 自己的目录，不要装 C 盘，也不要放进资源目录 ${root}）`,
+      `3. 在 ${installDir} 执行 npm install --omit=dev（装 @modelcontextprotocol/sdk 与 zod）`,
+      `4. 在同一目录启动：node ${installDir}\\dist\\index.js --http --port 8787`,
+      `5. 把下面这份配置写进 IDE 的 MCP 设置：`,
+      '```json',
+      `{"mcpServers":{"zeroexo":{"url":"http://127.0.0.1:8787/mcp"}}}`,
+      '```',
+      '6. 连上后调用 list_projects，用表格列出项目（标题 / 更新时间 / 节点数）；没有项目就提示可 create_project',
+      `7. 前端编辑器地址：${base}`,
+      '',
+      `资源目录固定为 ${root}，只放项目与素材；MCP 目录固定在 ${installDir}，两者不要混在一起。`,
+    ].join('\n');
+    setInstallingMcp(true);
     try {
       await navigator.clipboard.writeText(text);
-      message.success(`${label}已复制`);
+      setMcpCopied(true);
     } catch {
-      message.error(t('onboarding.copyFailed', '复制失败，请手动选择复制'));
+      message.error('复制失败，请手动选中复制');
+    } finally {
+      setInstallingMcp(false);
     }
-  }, [message, t]);
-  const copyBootstrap = useCallback(() => {
-    const command = buildBootstrapCommand({
-      platform: detectBootstrapPlatform(),
-      downloadUrl: `${window.location.origin}${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}downloads/zeroexo-mcp-server.tgz`,
-    });
-    void copyText(command, t('onboarding.installCommand', '安装命令'));
-  }, [copyText, t]);
+  }, [message, mcpDir]);
 
   const loadModels = useCallback(async (addr: string) => {
-    setRefreshingModels(true);
     try {
       const list = await fetchBridgeModels(addr);
       const current = useComfyuiConnectionStore.getState().models;
       const defaults = pickDefaultModels(list, current);
-      setConnectedModels(true, list);
+      setConnectedModels(true, { unet: list.unet, vae: list.vae, clip: list.clip });
+      const setModel = useComfyuiConnectionStore.getState().setModel;
       (['unet', 'videoVae', 'audioVae', 'clip'] as const).forEach((slot) => {
         if (defaults[slot]) setModel(slot, defaults[slot]);
       });
     } catch {
       setConnectedModels(true);
-    } finally {
-      setRefreshingModels(false);
     }
-  }, [setConnectedModels, setModel]);
+  }, [setConnectedModels]);
 
   useEffect(() => {
     if (open && endpoint.connected && endpoint.address) void loadModels(endpoint.address);
@@ -291,64 +332,42 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             ? t('onboarding.backendDirect', '直连桥接')
             : t('onboarding.backendOpenAI', 'OpenAI 兼容口');
         setTestResult(`${t('onboarding.comfyOk', '已连接')}：${backendLabel}${applied.bridgeMissing ? '（模型列表读取失败，可点刷新）' : ''}`);
+        setTestOk(true);
       } else {
         setTestResult(res.message);
+        setTestOk(false);
       }
     } catch (err) {
       setTestResult(err instanceof Error ? err.message : t('onboarding.comfyFailed', '连接失败'));
+      setTestOk(false);
     } finally {
       setTesting(false);
     }
   }, [address, t, loadModels]);
 
   const comfyDone = endpoint.connected;
-  const advanceRoot = currentDataRootPath();
 
-  /** 只列 MiniMax H3 对应版本；云端/第三方仓库的普通 VAE 不混进来 */
-  const isCompatModel = (slot: string, name: string): boolean => {
-    if (slot === 'unet') return /minimax_h3|fasth3/i.test(name);
-    if (slot === 'videoVae') return /minimax_h3.*video_vae|h3.*video_vae|video_vae.*h3/i.test(name);
-    if (slot === 'audioVae') return /minimax_h3.*audio_vae|h3.*audio_vae|audio_vae.*h3/i.test(name);
-    if (slot === 'clip') return /qwen3vl.*minimax_h3|qwen3vl.*h3|h3.*qwen3vl/i.test(name);
-    return true;
-  };
-  /** 模型四件套：只给当前 ComfyUI 实际返回的文件名，推荐项加后缀，用户仍可自由改选 */
-  const modelSlots: Array<{ slot: 'unet' | 'videoVae' | 'audioVae' | 'clip'; label: string; list: string[] }> = [
-    { slot: 'unet', label: t('onboarding.modelUnet', '视频主模型'), list: availableModels.unet.filter((n) => isCompatModel('unet', n)) },
-    { slot: 'videoVae', label: t('onboarding.modelVideoVae', '视频 VAE'), list: availableModels.vae.filter((n) => isCompatModel('videoVae', n)) },
-    { slot: 'audioVae', label: t('onboarding.modelAudioVae', '音频 VAE'), list: availableModels.vae.filter((n) => isCompatModel('audioVae', n)) },
-    { slot: 'clip', label: t('onboarding.modelClip', '文本编码器'), list: availableModels.clip.filter((n) => isCompatModel('clip', n)) },
-  ];
-  const vaeListEmpty = (availableModels.vae.length > 0
-    && (!modelSlots.find((s) => s.slot === 'videoVae')?.list.length
-      || !modelSlots.find((s) => s.slot === 'audioVae')?.list.length));
-  const currentVaeUnsupported = (Boolean(models.videoVae) && !isCompatModel('videoVae', models.videoVae))
-    || (Boolean(models.audioVae) && !isCompatModel('audioVae', models.audioVae));
-  const cloudListFor = (slot: keyof typeof RECOMMENDED_MODELS): string[] => (
-    slot === 'unet' ? availableModels.unet : slot === 'clip' ? availableModels.clip : availableModels.vae
-  );
-  /** 当前连接里是否真的有推荐的这个文件（未连接 = 未核对） */
-  const recommendedState = (slot: keyof typeof RECOMMENDED_MODELS): 'available' | 'missing' | 'unknown' => {
-    const list = cloudListFor(slot);
-    if (list.length === 0) return 'unknown';
-    return list.includes(RECOMMENDED_MODELS[slot]) ? 'available' : 'missing';
-  };
-  const modelOptionLabel = (slot: keyof typeof RECOMMENDED_MODELS, name: string): string => (
-    name === RECOMMENDED_MODELS[slot] ? `${name}（推荐）` : name
-  );
 
   return (
+    <>
     <Modal
       open={open}
       onCancel={onClose}
       centered
       width={680}
+      // 2026-11-17 用户实测：指引弹窗被画布浮层压住、且暗色主题下仍是白底 —— 统一抬层 + 跟随主题色
+      zIndex={5000}
       title={t('onboarding.title', '使用指引')}
-      styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
+      styles={{
+        root: { background: theme.toolbar.background, color: theme.toolbar.text },
+        header: { background: theme.toolbar.background, color: theme.toolbar.text, borderBottom: `1px solid ${theme.toolbar.border}` },
+        body: { maxHeight: '72vh', overflowY: 'auto', color: theme.toolbar.text },
+        footer: { background: theme.toolbar.background, borderTop: `1px solid ${theme.toolbar.border}` },
+      }}
       footer={(
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11, color: theme.toolbar.textMuted }}>
-            {t('onboarding.footerHint', '随时可从主页底部「使用指引」再次打开')}
+            {t('onboarding.footerHint', '随时可再打开')}
           </span>
           <Button type="primary" onClick={onClose}>{t('onboarding.start', '开始创作')}</Button>
         </div>
@@ -365,86 +384,62 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               {root ?? t('onboarding.rootNone', '尚未选择')}
             </span>
           </div>
-          {advanceRoot ? (
-            <Collapse
-              ghost
-              size="small"
-              items={[{
-                key: 'advanced-root',
-                label: <span style={{ fontSize: 12 }}>{t('onboarding.advanced', '高级选项')}</span>,
-                children: (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Input
-                      size="small"
-                      value={rootPathInput}
-                      onChange={(e) => setRootPathInput(e.target.value)}
-                      placeholder={t('onboarding.rootPathPlaceholder', '绝对路径，例如 D:\\ZeroExo')}
-                      style={{ width: 320 }}
-                    />
-                    <Button size="small" onClick={() => void applyRootPath()}>
-                      {t('onboarding.switchRoot', '切换到此目录')}
-                    </Button>
-                  </div>
-                ),
-              }]}
-            />
-          ) : null}
         </StepCard>
 
-        {/* 2 MCP：默认只给一个复制按钮；完整配置/密钥收进高级选项 */}
-        <StepCard index={2} title={t('onboarding.stepMcp', '接入 MCP（给 Agent IDE）')} done={Boolean(serverInfo)} theme={theme}>
+        {/* 2 MCP：一键自动安装并启动，用户不用复制命令、不用粘配置 */}
+        <StepCard index={2} title={t('onboarding.stepMcp', '接入 Agent（例如豆包）')} done={Boolean(serverInfo)} theme={theme}>
           <span style={hintStyle(theme)}>
             {serverInfo
-              ? t('onboarding.stepMcpHint', '复制配置，粘到 Agent IDE 的 MCP 设置里。')
-              : t('onboarding.stepMcpFirstRun', '先复制安装命令，在终端跑一次；成功后这里会自动识别。')}
+              ? t('onboarding.stepMcpHint', '点击下方「一键复制」按钮，然后到豆包等 Agent 的对话框粘贴，它会自己装好。')
+              : t('onboarding.stepMcpFirstRun', '点击下方「一键复制」按钮，然后到豆包等 Agent 的对话框粘贴，它会自己装好并启动。')}
           </span>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Button size="small" icon={<FolderOpen size={13} />} onClick={() => void pickMcpDir()}>
+              {mcpDir
+                ? t('onboarding.mcpDirChange', '重新选择')
+                : t('onboarding.mcpDirPick', '选择目录')}
+            </Button>
+            {/* 2026-11-18 用户要求：第 2 步的目录选择要和第 1 步同一套样式（按钮 + 路径文字，不做输入框） */}
+            <span
+              data-testid="onboarding-mcp-dir"
+              style={{
+                ...hintStyle(theme),
+                maxWidth: 360,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                ...(mcpDirError ? { color: '#dc2626' } : {}),
+              }}
+            >
+              {mcpDir || t('onboarding.mcpDirNone', '尚未选择')}
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: mcpDirError ? '#dc2626' : theme.toolbar.textMuted, lineHeight: 1.6 }}>
+            {mcpDirError
+              ? mcpDirError
+              : t('onboarding.mcpDirWarn', '别放 C 盘，也别和第一步的资源目录放一起。')}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Button
               size="small"
               type="primary"
               icon={<Copy size={13} />}
-              onClick={() => {
-                if (serverInfo) void copyText(mcpConfig, t('onboarding.copyMcp', 'MCP 配置'));
-                else copyBootstrap();
-              }}
+              loading={installingMcp}
+              disabled={Boolean(mcpDirError)}
+              onClick={() => void copyMcpPrompt()}
+              data-testid="onboarding-copy-mcp"
             >
-              {serverInfo
-                ? t('onboarding.copyMcp', '复制 MCP 配置')
-                : t('onboarding.copyBootstrap', '复制安装命令')}
+              {t('onboarding.mcpCopy', '一键复制')}
             </Button>
+            {mcpCopied ? (
+              <span style={{ fontSize: 12, color: '#16a34a' }}>{t('onboarding.mcpCopied', '已复制，粘给 Agent 就行')}</span>
+            ) : null}
           </div>
           {mcpStaleTools.length > 0 ? (
             <span style={{ fontSize: 12, color: '#d97706' }}>
               检测到 MCP 服务是旧版本（缺 {mcpStaleTools.length} 个工具）：重启 IDE 里的 MCP 服务后再生效。
             </span>
           ) : null}
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'advanced-mcp',
-              label: <span style={{ fontSize: 12 }}>{t('onboarding.advancedKeys', '高级选项（密钥 / 完整配置）')}</span>,
-              children: (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <textarea
-                    readOnly
-                    value={mcpConfig || t('onboarding.mcpNotReady', 'MCP 未就绪，暂无可复制配置')}
-                    style={{
-                      width: '100%', minHeight: 92, resize: 'vertical', boxSizing: 'border-box',
-                      fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5,
-                      color: theme.toolbar.text, background: theme.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
-                      border: `1px solid ${theme.toolbar.border}`, borderRadius: 8, padding: 8,
-                    }}
-                  />
-                  <div>
-                    <Button size="small" disabled={!mcpConfig} onClick={() => void copyText(mcpConfig, t('onboarding.copyMcp', 'MCP 配置'))}>
-                      {t('onboarding.copyMcp', '复制 MCP 配置')}
-                    </Button>
-                  </div>
-                </div>
-              ),
-            }]}
-          />
         </StepCard>
 
         {/* 3 ComfyUI */}
@@ -477,86 +472,59 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             </Button>
           </div>
           {testResult ? (
-            <span style={{ fontSize: 12, color: comfyDone ? '#16a34a' : '#dc2626' }}>{testResult}</span>
+            <span style={{ fontSize: 12, color: testOk ? '#16a34a' : '#dc2626' }}>{testResult}</span>
           ) : null}
-          {/* 模型四件套：推荐归推荐，选择权留给用户；列表来自当前 ComfyUI */}
-          <div data-onboarding-model-picker style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 600 }}>{t('onboarding.modelPickTitle', '模型选择')}</span>
-              <Button
-                type="link"
-                size="small"
-                loading={refreshingModels}
-                onClick={() => void loadModels(address)}
-                style={{ padding: 0, fontSize: 11, height: 'auto' }}
-              >
-                {t('onboarding.modelRefresh', '刷新列表')}
-              </Button>
-            </div>
-            {modelSlots.map(({ slot, label, list }) => {
-              const recState = recommendedState(slot);
-              return (
-                <div key={slot} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 76, flexShrink: 0, fontSize: 11, color: theme.toolbar.textMuted }}>{label}</span>
-                    <ModelNamePicker
-                      slot={slot}
-                      value={models[slot] || ''}
-                      options={list.map((name) => ({ value: name, label: modelOptionLabel(slot, name) }))}
-                      placeholder={list.length ? t('onboarding.modelPick', '选择或输入模型名') : t('onboarding.modelEmpty', '连接后读取列表，也可手动输入')}
-                      onCommit={(value) => setModel(slot, value)}
-                    />
-                  </div>
-                  <div style={{ paddingLeft: 84, fontSize: 10.5, lineHeight: 1.5, color: theme.toolbar.textMuted }}>
-                    {t('onboarding.recommendPrefix', '推荐：')}{RECOMMENDED_MODELS[slot]}{' '}
-                    {recState === 'available' ? (
-                      <span style={{ color: '#16a34a' }}>{t('onboarding.recAvailable', '当前连接已有')}</span>
-                    ) : recState === 'missing' ? (
-                      <span style={{ color: '#d97706' }}>{t('onboarding.recMissing', '非云端推荐版本')}</span>
-                    ) : (
-                      <span>{t('onboarding.recUnknown', '连接后核对')}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            <span style={hintStyle(theme)}>
-              {t('onboarding.modelPickHint', '每个槽位只选一个。推荐项会标出当前连接是否已有；没有就换同槽位其它 h3 版本，或手动输入模型名。视频/音频 VAE 必须是 MiniMax H3 专用版本，第三方量化只要文件名带 h3 也可以。')}
-            </span>
-            {(vaeListEmpty || currentVaeUnsupported) ? (
-              <span data-onboarding-vae-warning style={{ fontSize: 11, lineHeight: 1.65, color: '#d97706' }}>
-                {t('onboarding.vaeWarning', '当前连接里没有可用的 MiniMax H3 视频/音频 VAE（或当前选中的不是 H3 版本）。请更换为文件名带 h3 的兼容版本；第三方量化版也可以，但不要选 LTX/Wan 的普通 VAE。')}
-              </span>
-            ) : null}
-          </div>
-          {/* 机器档位 → 推荐用法（只讲能不能做，不讲量化术语） */}
-          <div data-model-recommendations style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ fontSize: 12, fontWeight: 600 }}>{t('onboarding.modelGuide', '机器配置推荐')}</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, lineHeight: 1.5 }}>
-              <thead>
-                <tr style={{ color: theme.toolbar.textMuted, textAlign: 'left' }}>
-                  <th style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{t('onboarding.vram', '显存')}</th>
-                  <th style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{t('onboarding.localPick', '本地推荐')}</th>
-                  <th style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{t('onboarding.cloudPick', '云端 / 远程')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MODEL_RECOMMENDATIONS.map((row) => (
-                  <tr key={row.vram}>
-                    <td style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{row.vram}</td>
-                    <td style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{row.local}</td>
-                    <td style={{ padding: '3px 6px', borderBottom: `1px solid ${theme.toolbar.border}` }}>{row.cloud}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <span style={hintStyle(theme)}>
-              {t('onboarding.modelGuideHint', '不知道怎么选就选带「推荐」的那一项，其他版本不用管。8GB 机器先做图片，视频走云端。')}
-            </span>
+          {/* 模型、机器信息、显存策略统一收在「高级」页，这里只留一个入口（与连接面板同一文案） */}
+          <div data-onboarding-model-picker style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button size="small" icon={<SlidersHorizontal size={13} />} onClick={() => setModelPageOpen(true)}>
+              {t('director.advancedModels', '高级')}
+            </Button>
           </div>
         </StepCard>
       </div>
     </Modal>
+    <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
+    {rootAsk && (
+      <div
+        style={{
+          position: 'fixed', inset: 0, zIndex: 5400,
+          background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        onPointerDown={(e) => { if (e.target === e.currentTarget) answerRootAsk('cancel'); }}
+      >
+        <div
+          style={{
+            width: 460, maxWidth: '92vw', boxSizing: 'border-box',
+            background: theme.toolbar.background, color: theme.toolbar.text,
+            borderRadius: 10, border: `1px solid ${theme.toolbar.border}`,
+            boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+            padding: '16px 20px 14px',
+          }}
+        >
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
+            {t('onboarding.rootAskTitle', '切换数据目录')}
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+            <div>
+              {t('onboarding.rootAskCurrent', '当前目录：')}{rootAsk.current}（{rootAsk.projects} {t('onboarding.rootAskProjects', '个项目')}、{rootAsk.assets} {t('onboarding.rootAskAssets', '条资产')}）
+            </div>
+            <div>
+              {t('onboarding.rootAskNext', '新目录：')}{rootAsk.next}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: theme.toolbar.textMuted }}>
+              {t('onboarding.rootAskHint', '迁移 = 把当前数据复制到新目录；仅切换 = 直接从空的新目录开始，旧数据留在原处不动。')}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+            <Button onClick={() => answerRootAsk('cancel')}>{t('onboarding.rootAskCancel', '取消')}</Button>
+            <Button onClick={() => answerRootAsk('switch')}>{t('onboarding.rootAskSwitch', '仅切换目录')}</Button>
+            <Button type="primary" onClick={() => answerRootAsk('migrate')}>{t('onboarding.rootAskMigrate', '迁移并切换')}</Button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

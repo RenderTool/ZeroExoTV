@@ -13,10 +13,12 @@
  */
 
 import { stageCasUpload } from '@/features/asset-picker/services/cas-upload.js';
-import { addAsset } from '@/features/asset-picker/asset-store.js';
+import { addAsset, isTombstoneSkip } from '@/features/asset-picker/asset-store.js';
 import type { GuideMeta, HistorySource } from '@/features/asset-picker/index.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { cacheGuideLocally } from '@/shared/utils/guide-file.js';
+import { isCasStorageKey, parseCasStorageKey, registerCasRef } from '@/entities/cas-store.js';
+import type { GenerationChain } from '@/features/sub-canvas/generation-chain.js';
 
 export interface AutoLandInput {
   nodeId: string;
@@ -48,6 +50,11 @@ export interface AutoLandInput {
    * 缺省 canvas（画布节点生成）；导演台每段落库必须显式传 director。
    */
   originSource?: HistorySource;
+  /**
+   * 本次生成的引用链（2026-11-18）：只含本次上游资产 + 产物 + 参数。
+   * 落库后随资产记录持久化，供只读子画布与同款复刻；产物 storageKey 由落库方补齐。
+   */
+  chain?: GenerationChain;
 }
 
 export interface AutoLandBlobInput extends Omit<AutoLandInput, 'content'> {
@@ -83,6 +90,18 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
   if (landingInFlight.has(landingKey)) return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
   landingInFlight.add(landingKey);
   try {
+    // 生成引用链：产物节点的 storageKey 只在落库后才知道，这里补进链里。
+    // 链只保留本次生成自己的上下游资产 + 产物，不复制整张主画布。
+    const chain = input.chain
+      ? {
+          ...input.chain,
+          nodes: input.chain.nodes.map((n) => (
+            n.id === input.nodeId
+              ? { ...n, data: { ...n.data, storageKey: staged.storageKey } }
+              : n
+          )),
+        }
+      : undefined;
     const generation = {
       jobId: input.jobId,
       provider: input.provider,
@@ -94,13 +113,14 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
       durationSec: input.durationMs != null ? Math.round((input.durationMs / 1000) * 100) / 100 : undefined,
       frames: input.frames,
       createdAt: new Date().toISOString(),
+      ...(chain ? { chain } : {}),
     };
     const originSource: HistorySource = input.originSource ?? 'canvas';
     const data: Parameters<typeof addAsset>[0]['data'] =
       input.kind === 'image'
         ? { kind: 'image', dataUrl: '', storageKey: staged.storageKey, width: input.width, height: input.height, originNodeId: input.nodeId, origin: 'generation', originSource, generation }
         : { kind: 'video', url: '', storageKey: staged.storageKey, width: input.width, height: input.height, durationMs: input.durationMs, originNodeId: input.nodeId, origin: 'generation', originSource, generation, ...(guideMeta ? { guide: guideMeta } : {}) };
-    await addAsset(
+    const created = await addAsset(
       {
         id: staged.id,
         cas: staged.cas,
@@ -114,6 +134,22 @@ export async function autoLandGenerationBlob(input: AutoLandBlobInput): Promise<
       },
       { source: 'autoland' },
     );
+    // 墓碑命中（addAsset 返回哨兵）：内容已被用户删除，不得当作落库成功返回，
+    // 否则调用方会把版本/媒体合并回节点或片段，造成「删除后复活」（2026-11-16 实测）。
+    if (isTombstoneSkip(created)) return null;
+    // 生成引用链自己钉住 CAS 引用：主画布节点全删光后，历史链的参考图/产物也不能被回收。
+    // 一条链 = 一个固定身份 chain:<assetId>，只加不摘；同款/继续编辑复制出的新节点各自登记，互不干扰。
+    if (chain) {
+      const chainRefId = `chain:${created.id}`;
+      for (const n of chain.nodes) {
+        const key = typeof n.data.storageKey === 'string' ? n.data.storageKey : '';
+        if (!isCasStorageKey(key)) continue;
+        const parsed = parseCasStorageKey(key);
+        if (!parsed) continue;
+        await registerCasRef(parsed.hash, { assetId: chainRefId, projectId, kind: 'reconcile' })
+          .catch((err) => console.warn('[history] 生成链 CAS 引用登记失败:', err));
+      }
+    }
     return { storageKey: staged.storageKey, ...(guideMeta ? { guide: guideMeta } : {}) };
   } finally {
     landingInFlight.delete(landingKey);

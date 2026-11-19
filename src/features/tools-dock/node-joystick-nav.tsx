@@ -60,6 +60,68 @@ interface RayHit {
   rectH: number;
 }
 
+/** 指针到节点边缘的最大偏离容差（屏幕 px）：超出才回落射线求交 */
+const POINTER_SNAP_PX = 36;
+
+/**
+ * 取目标节点：**指针附近优先**。
+ * 用户实测反馈：只按射线求交时，必须让红线精确穿过目标，稍偏一点就打不中，
+ * 且路径上若有空白节点会先被拦下——「根本无法正确命中附近的节点」。
+ * 所以先按「指针到节点边缘的最近距离」取目标（指针落在节点内距离为 0），
+ * 只有指针离所有节点都超过容差（远距瞄准）才回落到射线求交。
+ */
+function pickTarget(
+  anchorX: number,
+  anchorY: number,
+  followX: number,
+  followY: number,
+  viewport: { x: number; y: number; k: number },
+  canvasLeft: number,
+  canvasTop: number,
+  nodes: NodeRecord[],
+  currentNodeId: string,
+  getExtension?: (nodeId: string) => NodeTypeExtension | undefined,
+): RayHit | null {
+  const k = viewport.k;
+  const px = (anchorX + followX - canvasLeft - viewport.x) / k;
+  const py = (anchorY + followY - canvasTop - viewport.y) / k;
+
+  let best: { node: NodeRecord; dist: number; cx: number; cy: number; w: number; h: number } | null = null;
+  for (const n of nodes) {
+    if (n.id === currentNodeId || n.type === 'group') continue;
+    const size = resolveNodeSize(n, getExtension?.(n.id));
+    const minX = n.position.x;
+    const minY = n.position.y;
+    const maxX = minX + size.width;
+    const maxY = minY + size.height;
+    // 指针夹到矩形上得到最近点；距离 0 = 指针在节点内
+    const cx = Math.min(Math.max(px, minX), maxX);
+    const cy = Math.min(Math.max(py, minY), maxY);
+    const dist = Math.hypot(px - cx, py - cy);
+    if (!best || dist < best.dist) best = { node: n, dist, cx, cy, w: size.width, h: size.height };
+  }
+
+  if (!best) return null;
+  // 指针离最近的节点也远：退回射线求交（远距瞄准仍可用）
+  if (best.dist * k > POINTER_SNAP_PX) {
+    return castRayToNode(
+      anchorX, anchorY, followX, followY,
+      viewport, canvasLeft, canvasTop, nodes, currentNodeId, getExtension,
+    );
+  }
+
+  const { node, cx, cy, w, h } = best;
+  return {
+    id: node.id,
+    hitX: cx * k + viewport.x + canvasLeft - anchorX,
+    hitY: cy * k + viewport.y + canvasTop - anchorY,
+    rectX: node.position.x * k + viewport.x + canvasLeft - anchorX,
+    rectY: node.position.y * k + viewport.y + canvasTop - anchorY,
+    rectW: w * k,
+    rectH: h * k,
+  };
+}
+
 /**
  * 以 anchor→follow 为射线，对节点 AABB 做 slab 求交，返回首个命中（最小 t）
  * 排除当前节点与组节点；视口为均匀缩放，屏幕方向即世界方向
@@ -179,15 +241,20 @@ export function NodeJoystickNav({
   const isDark = mode === 'dark';
 
   // 画布容器屏幕偏移：viewport.x/y 是画布容器内坐标基准，而本 overlay 用 fixed 屏幕系定位，
-  // 世界↔屏幕换算两端必须补上容器偏移，否则目标框/求交点与节点错位（用户实测反馈）
+  // 世界↔屏幕换算两端必须补上容器偏移，否则目标框/求交点与节点错位（用户实测反馈）。
+  // 多个画布页签同时存在时按「包含导航按钮的那个容器」来取，避免用到隐藏副本的矩形。
   const [canvasOrigin, setCanvasOrigin] = useState({ x: 0, y: 0 });
   useLayoutEffect(() => {
-    const rect = document.querySelector('[data-canvas-viewport]')?.getBoundingClientRect();
+    const els = Array.from(document.querySelectorAll('[data-canvas-viewport]'));
+    const rect = els
+      .map((el) => el.getBoundingClientRect())
+      .find((r) => anchorX >= r.left && anchorX <= r.right && anchorY >= r.top && anchorY <= r.bottom)
+      ?? els[0]?.getBoundingClientRect();
     if (rect) setCanvasOrigin({ x: rect.left, y: rect.top });
-  }, []);
+  }, [anchorX, anchorY]);
 
-  // 射线求交：首个命中节点（预览虚线 + hover 态的数据源）
-  const hit = useMemo(() => castRayToNode(
+  // 目标节点：指针附近优先，远距回落到射线求交（预览虚线 + hover 态的数据源）
+  const hit = useMemo(() => pickTarget(
     anchorX, anchorY, follow.x, follow.y,
     viewport, canvasOrigin.x, canvasOrigin.y, graph.nodes, nodeId, getExtension,
   ), [anchorX, anchorY, follow.x, follow.y, viewport, canvasOrigin.x, canvasOrigin.y, graph.nodes, nodeId, getExtension]);

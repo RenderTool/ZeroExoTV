@@ -17,6 +17,55 @@ export interface StylePreset {
 
 export const STYLE_PRESETS: StylePreset[] = [
   {
+    id: "combo-sci-fi-3d-pbr",
+    nameZh: "科幻3D·超写实PBR",
+    nameEn: "Sci-Fi 3D + Hyperreal PBR",
+    category: "combo",
+    promptZh: "[主体], 科幻 3D 硬表面建模, 超写实 PBR 材质(金属粗糙度与清漆层, 次表面散射, 微划痕), 体积光与雾, 冷白主光配青蓝轮廓光, 高密度细节但版式干净",
+    promptEn: "[subject], 科幻 3D 硬表面建模, 超写实 PBR 材质(金属粗糙度与清漆层, 次表面散射, 微划痕), 体积光与雾, 冷白主光配青蓝轮廓光, 高密度细节但版式干净",
+  },
+  {
+    id: "combo-anime-pbr",
+    nameZh: "动漫造型·PBR材质（皮克斯向）",
+    nameEn: "Anime Shapes + PBR (Pixar-like)",
+    category: "combo",
+    promptZh: "[主体], 皮克斯/迪士尼向 3D 动画造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深",
+    promptEn: "[subject], 皮克斯/迪士尼向 3D 动画造型, 比例夸张但结构可信, 基于物理的 PBR 材质(柔和次表面散射, 布料绒感, 干净反射), 柔和全球光照, 大光圈浅景深",
+  },
+  {
+    id: "combo-real-film",
+    nameZh: "实拍摄影·电影胶片",
+    nameEn: "Live-Action + Film Stock",
+    category: "combo",
+    promptZh: "[主体], 实拍摄影质感, 柯达 5219 电影胶片颗粒, 35mm 定焦, 自然窗光与实用光源, 轻微高光溢出, 低饱和高对比",
+    promptEn: "[subject], 实拍摄影质感, 柯达 5219 电影胶片颗粒, 35mm 定焦, 自然窗光与实用光源, 轻微高光溢出, 低饱和高对比",
+  },
+  {
+    id: "combo-cel-shaded",
+    nameZh: "赛璐璐动画·电影光",
+    nameEn: "Cel Shading + Cinematic Light",
+    category: "combo",
+    promptZh: "[主体], 二维赛璐璐上色, 硬边阴影与手绘高光, 电影级三点布光, 纸面微颗粒, 干净的线条与分色",
+    promptEn: "[subject], 二维赛璐璐上色, 硬边阴影与手绘高光, 电影级三点布光, 纸面微颗粒, 干净的线条与分色",
+  },
+  {
+    id: "combo-stop-motion",
+    nameZh: "定格动画·实物微缩",
+    nameEn: "Stop-Motion Miniature",
+    category: "combo",
+    promptZh: "[主体], 定格动画微缩布景, 黏土与织物手工质感, 逐帧轻微抖动感, 微距浅景深, 棚拍实用灯",
+    promptEn: "[subject], 定格动画微缩布景, 黏土与织物手工质感, 逐帧轻微抖动感, 微距浅景深, 棚拍实用灯",
+  },
+  {
+    id: "combo-ink-3d",
+    nameZh: "水墨·体积渲染",
+    nameEn: "Ink Wash + Volumetric",
+    category: "combo",
+    promptZh: "[主体], 水墨笔触与留白, 体积雾与光束渲染, 宣纸纹理, 淡彩矿物颜料, 写意而不失结构",
+    promptEn: "[subject], 水墨笔触与留白, 体积雾与光束渲染, 宣纸纹理, 淡彩矿物颜料, 写意而不失结构",
+  },
+
+  {
     id: "wes-anderson",
     nameZh: "韦斯·安德森",
     nameEn: "Wes Anderson",

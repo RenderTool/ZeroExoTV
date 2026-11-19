@@ -96,7 +96,7 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
 
         {/* 分类 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 20px 10px', flexWrap: 'wrap' }}>
-          {(['all', 'director', 'mainstream', 'animation', 'genre'] as const).map((key) => {
+          {(['all', 'director', 'mainstream', 'animation', 'genre', 'combo'] as const).map((key) => {
             const active = category === key && !favoritesOnly;
             return (
               <button

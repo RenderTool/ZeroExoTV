@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Checkbox, Modal, Typography } from 'antd';
 import { countBrowserItems } from './migrate.js';
 import { activateRoot } from './root-flow.js';
-import { restoreRoot, withPermissionPrompt } from './fs.js';
+import { getSavedRootName, restoreRoot, withPermissionPrompt } from './fs.js';
 
 const { Text } = Typography;
 
@@ -32,10 +32,13 @@ export function RootGate({ open, onActivated }: RootGateProps): React.ReactEleme
   const [migrate, setMigrate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 上次用过的目录名：有它就只留一个「继续使用」主按钮，不再让人在两个等权按钮之间做选择 */
+  const [savedName, setSavedName] = useState<string | null>(null);
   const supported = fsaSupported();
 
   useEffect(() => {
     if (!open) return;
+    void getSavedRootName().then(setSavedName).catch(() => setSavedName(null));
     void countBrowserItems().then((n) => {
       setItems(n);
       setMigrate(n > 0);
@@ -98,29 +101,50 @@ export function RootGate({ open, onActivated }: RootGateProps): React.ReactEleme
   return (
     <Modal
       open={open}
-      title="选择数据目录"
+      title={savedName ? '继续使用数据目录' : '选择数据目录'}
       closable={false}
       // antd 6：maskClosable 已废弃，改用 mask.closable
       mask={{ closable: false }}
       keyboard={false}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={() => void handleRestore()} loading={busy}>
-            使用上次目录
-          </Button>
-          <Button type="primary" onClick={() => void handlePick()} loading={busy} disabled={!supported}>
-            选择文件夹
-          </Button>
-        </div>
+        savedName ? (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => void handlePick()} disabled={!supported} type="text">
+              换个文件夹
+            </Button>
+            <Button type="primary" onClick={() => void handleRestore()} loading={busy} disabled={!supported}>
+              继续使用 {savedName}
+            </Button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button type="primary" onClick={() => void handlePick()} loading={busy} disabled={!supported}>
+              选择文件夹
+            </Button>
+          </div>
+        )
       }
       centered
     >
-      <Text>项目文件都保存在你选的文件夹里，方便备份和迁移。</Text>
-      <div style={{ marginTop: 8 }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          建议新建一个空文件夹，例如 D:\ZeroExoData（不要放在网盘同步目录里）。
-        </Text>
-      </div>
+      {savedName ? (
+        <>
+          <Text>上次用的是「{savedName}」，点一次「继续使用」即可，不用重新挑目录。</Text>
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              浏览器重启后需要点一次把读写权限交给网页，这是浏览器的安全限制，跳过不了。
+            </Text>
+          </div>
+        </>
+      ) : (
+        <>
+          <Text>项目文件都保存在你选的文件夹里，方便备份和迁移。</Text>
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              建议新建一个空文件夹，例如 D:\ZeroExoData（不要放在网盘同步目录里）。
+            </Text>
+          </div>
+        </>
+      )}
       {!supported ? (
         <div style={{ marginTop: 10, color: '#c5221f', fontSize: 13 }}>
           当前浏览器不支持本地目录读写，请使用 Chrome 或 Edge

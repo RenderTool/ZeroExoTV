@@ -81,8 +81,104 @@ export function restoreGenerationEdge(args: {
   }));
 }
 
-export async function insertAssetToCanvas(args: InsertAssetToCanvasArgs): Promise<InsertAssetToCanvasResult> {
-  const { commandQueue, store, containerSize, payload, seq } = args;
+/** 生成引用链快照（资产记录 generation.chain 的结构子集） */
+export interface GenerationChainSnapshot {
+  nodes: Array<{
+    id: string;
+    type: string;
+    title?: string;
+    position?: { x: number; y: number };
+    size?: { width: number; height: number };
+    data?: Record<string, unknown>;
+  }>;
+  edges?: Array<{
+    id?: string;
+    source: { nodeId: string; pinId?: string };
+    target: { nodeId: string; pinId?: string };
+  }>;
+}
+
+/**
+ * 「发送到画布 / 拖拽到画布」的生成链路落画布（2026-11-18 用户口径）：
+ * 历史产物带到画布时必须连同**提示词、参数、上游参考资产和连线**一起还原，
+ * 不是只落一张孤立图片；发送到资产/分镜/主体仍走单资产语义。
+ * 节点 id 全部换新，链路整体按包围盒移到落点，避免与现有画布节点冲突。
+ */
+export function insertGenerationChainToCanvas(args: {
+  commandQueue: CommandQueue | null;
+  store: CanvasInsertStore | null;
+  chain: GenerationChainSnapshot;
+  containerSize: { width: number; height: number };
+  seq: number;
+  /** 拖拽落点（链路包围盒左上角）；不传则按视口中心级联槽位 */
+  origin?: { x: number; y: number };
+}): { ok: true; nodeIds: string[]; focusNodeId: string } | { ok: false; reason: string } {
+  const { commandQueue, store, chain, containerSize, seq, origin } = args;
+  if (!commandQueue || !store) return { ok: false, reason: 'canvas-not-ready' };
+  if (!chain.nodes.length) return { ok: false, reason: 'empty-chain' };
+  const vp = store.getViewport();
+  const hasSize = containerSize.width > 0 && containerSize.height > 0;
+  const off = hasSize ? CASCADE_OFFSETS[seq % CASCADE_OFFSETS.length]! : CASCADE_OFFSETS[0]!;
+  const center = {
+    x: (containerSize.width / 2 - vp.x) / vp.k + off.x,
+    y: (containerSize.height / 2 - vp.y) / vp.k + off.y,
+  };
+  const bbox = chain.nodes.reduce((acc, n) => {
+    const x = n.position?.x ?? 0;
+    const y = n.position?.y ?? 0;
+    return {
+      minX: Math.min(acc.minX, x),
+      minY: Math.min(acc.minY, y),
+      maxX: Math.max(acc.maxX, x + (n.size?.width ?? 0)),
+      maxY: Math.max(acc.maxY, y + (n.size?.height ?? 0)),
+    };
+  }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const anchor = origin ?? {
+    x: center.x - (bbox.maxX - bbox.minX) / 2,
+    y: center.y - (bbox.maxY - bbox.minY) / 2,
+  };
+  const dx = anchor.x - (Number.isFinite(bbox.minX) ? bbox.minX : 0);
+  const dy = anchor.y - (Number.isFinite(bbox.minY) ? bbox.minY : 0);
+  const hash = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const idMap = new Map<string, string>();
+  chain.nodes.forEach((n, i) => idMap.set(n.id, `chain-${hash}-${i}`));
+  const orderedIds: string[] = [];
+  chain.nodes.forEach((n) => {
+    const newId = idMap.get(n.id)!;
+    orderedIds.push(newId);
+    commandQueue.execute(new AddNodeCommand({
+      id: newId,
+      type: n.type,
+      title: n.title,
+      position: {
+        x: (n.position?.x ?? 0) + dx,
+        y: (n.position?.y ?? 0) + dy,
+      },
+      ...(n.size ? { size: n.size } : {}),
+      data: { ...(n.data ?? {}), __readonly: undefined },
+    } as never));
+  });
+  (chain.edges ?? []).forEach((e, i) => {
+    const sourceId = idMap.get(e.source?.nodeId);
+    const targetId = idMap.get(e.target?.nodeId);
+    if (!sourceId || !targetId) return;
+    commandQueue.execute(new AddEdgeCommand({
+      id: `edge-${hash}-${i}`,
+      source: { nodeId: sourceId, pinId: e.source.pinId ?? 'image' },
+      target: { nodeId: targetId, pinId: e.target.pinId ?? 'prompt' },
+    } as never));
+  });
+  const focusNodeId = orderedIds[orderedIds.length - 1]!;
+  store.setSelection({ selectedNodeIds: new Set(orderedIds), selectedEdgeIds: new Set() });
+  try {
+    navigateToView('canvas', { nodeId: focusNodeId });
+  } catch {
+    // 节点已建；导航失败由调用方照常提示，不影响链路落库
+  }
+  return { ok: true, nodeIds: orderedIds, focusNodeId };
+}
+
+export async function insertAssetToCanvas(args: InsertAssetToCanvasArgs): Promise<InsertAssetToCanvasResult> {  const { commandQueue, store, containerSize, payload, seq } = args;
   if (!commandQueue || !store) return { ok: false, reason: 'canvas-not-ready' };
   try {
     const vp = store.getViewport();

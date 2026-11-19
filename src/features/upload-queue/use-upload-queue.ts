@@ -13,6 +13,7 @@ import { useCallback } from 'react';
 import { AddNodeCommand } from '@zeroexo/core';
 import type { NodeRecord, CommandQueue } from '@zeroexo/core';
 import { createAssetNode } from '@zeroexo/plugin-nodes';
+import { createSizedAssetNode } from '@/features/asset-picker/services/asset-node-size.js';
 import { arrangeNodes } from '@zeroexo/plugin-layout';
 import type { LayoutNode } from '@zeroexo/plugin-layout';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
@@ -90,7 +91,10 @@ export function useUploadQueue(
 
           const input = await uploadAsset(file);
           const payload = createPayloadFromInput(input);
-          const node = await createAssetNode(payload, { x: 0, y: 0 });
+          // 媒体统一走尺寸入口（图片按真实宽高 + 长边上限等比 fit），文本仍按原契约
+          const node = payload.kind === 'image' || payload.kind === 'video'
+            ? await createSizedAssetNode(payload, { x: 0, y: 0 }, { width: 0, height: 0 })
+            : await createAssetNode(payload, { x: 0, y: 0 });
           return { input, node };
         });
 

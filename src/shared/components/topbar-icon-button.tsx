@@ -13,6 +13,7 @@ import {
   ChevronsRight,
   FolderOpen,
   Github,
+  History,
   Keyboard,
   Languages,
   PanelsTopLeft,
@@ -48,6 +49,7 @@ export const TOPBAR_ICONS = {
   shortcuts: Keyboard,
   settings: SquareMousePointer,
   hierarchy: PanelsTopLeft,
+  history: History,
   collapse: ChevronsLeft,
   expand: ChevronsRight,
 } satisfies Record<string, LucideIcon>;

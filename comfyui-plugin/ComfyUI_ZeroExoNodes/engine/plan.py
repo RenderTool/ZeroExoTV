@@ -287,7 +287,7 @@ class DirectorPlan:
     continuity_enabled: bool = False
     continuity_overlap_frames: int = 0
     # "guide" (motion-context keyframes) | "continue" (引导+重绘 / latent remask).
-    continuity_mode: str = "guide"
+    continuity_mode: str = "continue"
     continuity_redraw: float = 0.10
     # Keep sample-trim remainder (~12f) instead of cropping back to UI length.
     continuity_keep_tail: bool = True
@@ -1154,7 +1154,7 @@ def plan_summary(plan: DirectorPlan) -> str:
             ]
             keep_note = ", keep full" if getattr(plan, "continuity_keep_tail", True) else ""
             lines.append(
-                f"Segment continuity: ON ({getattr(plan, 'continuity_mode', 'guide')} "
+                f"Segment continuity: ON ({getattr(plan, 'continuity_mode', 'continue')} "
                 f"motion context {plan.continuity_overlap_frames}f{keep_note})"
             )
             if pinned:
@@ -1208,7 +1208,7 @@ def plan_summary(plan: DirectorPlan) -> str:
         ]
         keep_note = ", keep full" if getattr(plan, "continuity_keep_tail", True) else ""
         lines.append(
-            f"Segment continuity: ON ({getattr(plan, 'continuity_mode', 'guide')} "
+            f"Segment continuity: ON ({getattr(plan, 'continuity_mode', 'continue')} "
             f"motion context {plan.continuity_overlap_frames}f{keep_note} "
             "→ pin previous tail + trim prefix; t2v/i2v/fl2v/r2v/v2v/rv2v)"
         )

@@ -216,7 +216,7 @@ export class InteractionController {
     this.resizeConfigAccessor = accessor;
   }
 
-  /** 注入节点锁定访问器(由 app 调用,生成中节点返回 true → 禁止移动/缩放) */
+  /** 注入节点锁定访问器(由 app 调用,生成中节点返回 true → 禁止缩放/删除；拖动位置仍允许) */
   setNodeLockedAccessor(accessor: ((nodeId: string) => boolean) | null): void {
     this.nodeLockedAccessor = accessor;
   }
@@ -226,7 +226,7 @@ export class InteractionController {
     this.helperLinesCallback = callback;
   }
 
-  /** 判断节点是否锁定(生成中不可移动/缩放) */
+  /** 判断节点是否锁定(生成中:禁止缩放/删除,允许拖动位置) */
   isNodeLocked(nodeId: string): boolean {
     return this.nodeLockedAccessor?.(nodeId) ?? false;
   }
@@ -325,8 +325,8 @@ export class InteractionController {
       }
     }
 
-    // 生成中节点锁定:禁止拖拽移动(仍允许选中以查看/取消)
-    if (this.isNodeLocked(nodeId)) return;
+    // 生成中节点：允许拖动位置（用户明确要求「生成过程中也能排版」），
+    // 只有删除与缩放仍锁定（缩放会改动出图展示框，生成回写时容易尺寸错乱）。
 
     // 开始拖拽(选中集的所有节点)
     // 若注入了 expandDragIdsHook(group 插件),扩展拖拽集以包含组子孙(BFS 同步)

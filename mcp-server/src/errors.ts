@@ -37,6 +37,12 @@ export type McpErrorCode =
   | "JOB_ID_CONFLICT"
   | "GIT_FAILED"
   | "VERIFY_FAILED"
+  /** 分镜/提示词质检未过（<7 分或存在阻断项），用户明确认可可 userOverride 放行（2026-11-19） */
+  | "QUALITY_GATE_FAILED"
+  /** 剧本未入库就想拆分镜/写提示词（2026-11-19） */
+  | "SCRIPT_NOT_READY"
+  /** 前置门：剧本未定稿 / 主体未完善（2026-11-19 升级为硬门禁） */
+  | "PREFLIGHT_GATE_FAILED"
   | "GITHUB_FAILED";
 
 export class McpError extends Error {

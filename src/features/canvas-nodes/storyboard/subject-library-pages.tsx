@@ -31,12 +31,12 @@
  * - 层级按项目记忆（view-prefs.subjectPages），popstate 还原层级。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, DragEvent, ReactNode } from 'react';
 import { App as AntdApp, Button, Checkbox, Dropdown, Input, Popover, Switch, Tooltip } from 'antd';
 import {
   ArrowLeft,
-  Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Plus, Search,
-  Shapes, Square, Star, Trash2, Undo2, UserRound, Wand2, ImageOff,
+  Check, CheckSquare, ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon, ImagePlus, MapPin, Package, Pencil, Plus, Search, Send,
+  Shapes, Square, Star, Trash2, Undo2, UserRound,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -61,6 +61,7 @@ import {
 import {
 } from '@/shared/components/masonry-grid.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
+import { MediaLightbox } from '@/shared/components/media-lightbox.js';
 import { KREA2_MODEL_KEY, KREA2_MODEL_LABEL, LOCAL_IMAGE_MODEL_KEY, LOCAL_IMAGE_MODEL_LABEL, MOSS_MODEL_KEY, MOSS_MODEL_LABEL } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { ThemeProvider } from '@zeroexo/plugin-theme';
 import { DockFooterBar } from '@/features/tools-dock/dock-footer-bar.js';
@@ -84,6 +85,7 @@ import {
   findTreeForItem,
   firstCoverMediaKeyOfState,
   nextStateStep,
+  subjectBaseCoverKeys,
   subjectCoverCandidates,
   type SubjectNodeMediaRef,
   type SubjectTreeNode,
@@ -114,10 +116,6 @@ import {
   useSubjectGenerationStore,
 } from './subject-generation';
 import { SubjectMediaThumb, useSubjectMediaAlive } from './subject-media-preview';
-import {
-  SUBJECT_STATE_CARD_GAP,
-  SUBJECT_STATE_CARD_MIN_WIDTH,
-} from './subject-card-metrics';
 import {
   SUBJECT_BASE_STATE_ID,
   SUBJECT_PAGE_HISTORY_KEY,
@@ -656,7 +654,6 @@ function SubjectGridCard({
           }}>
             <span style={{ lineHeight: 1, display: 'inline-flex' }}>{coverGlyph}</span>
             <span style={{ fontSize: 10, lineHeight: '14px' }}>{t('subject.cardCoverEmpty', '暂无封面图')}</span>
-            <span style={{ fontSize: 10, lineHeight: '14px', color: theme.toolbar.accent }}>{t('subject.cardCoverHint', '点开可生成')}</span>
           </div>
         )}
         {multiSelect && (
@@ -819,8 +816,8 @@ function StateJobMediaOverlay({ jobKey }: { jobKey: string }): React.ReactElemen
 function StateGridCard({
   stateId, title, thumbKey, thumbKind, emptyLabel, deadText, theme, isCover, editMode, editPanel,
   onClick, onToggleCover, onDelete, onToggleEdit,
-  onRename, onCanvasGenerate, onSendMediaToCanvas, jobKey, persistedJob,
-  onReplaceMedia, onRemoveMedia, hasMedia,
+  onRename, onSendMediaToCanvas, jobKey, persistedJob,
+  onReplaceMedia, hasMedia,
   onSwapMedia,
 }: {
   stateId: string;
@@ -863,29 +860,64 @@ function StateGridCard({
 }): React.ReactElement {
   const { t } = useTranslation();
   const [hover, setHover] = useState(false);
-  const [focus, setFocus] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
   useEffect(() => { setDraftTitle(title); }, [title]);
   const alive = useSubjectMediaAlive(thumbKey ?? undefined);
   const dead = thumbKey ? !alive : false;
-  const active = hover || focus;
   const commitRename = (): void => {
     const v = draftTitle.trim();
     if (v && v !== title) onRename?.(v);
   };
-  const actionButtons = (
-    <>
-      {onCanvasGenerate && (
-        <Tooltip title={t('subject.canvasGenerate', '画布生成')}>
+  /**
+   * 卡片外露的关键动作只有这几枚图标（2026-11-19 用户定稿）：
+   * 编辑（= 提示词生成面板）/ 设封面 / 换素材 / 发送到画布 / 删除状态。
+   * 其余动作（去画布生成等）一律收进编辑面板，卡上不再挂「更多」菜单，避免与面板重复。
+   * 图标行放在**卡片外面**（信息行右侧），不进封面、也不靠 hover 才露出来。
+   */
+  const replaceAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const keyActions = (
+    <div data-state-actions style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+      {onToggleEdit && (
+        <Tooltip title={t('subject.editState', '编辑')}>
           <IconButton
             theme={theme}
             size="sm"
-            aria-label={t('subject.canvasGenerate', '画布生成')}
-            data-state-action="canvas-generate"
-            onClick={(e) => { e.stopPropagation(); onCanvasGenerate(); }}
+            aria-label={t('subject.editState', '编辑')}
+            data-state-action="edit"
+            onClick={(e) => { e.stopPropagation(); onToggleEdit(); }}
           >
-            <Wand2 size={13} />
+            <Pencil size={13} />
+          </IconButton>
+        </Tooltip>
+      )}
+      {onToggleCover && (
+        <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
+          <IconButton
+            theme={theme}
+            size="sm"
+            aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
+            data-state-action="cover"
+            onClick={(e) => { e.stopPropagation(); onToggleCover(); }}
+          >
+            <Star size={13} style={isCover ? { fill: '#f5c518', color: '#f5c518' } : undefined} />
+          </IconButton>
+        </Tooltip>
+      )}
+      {onReplaceMedia && (
+        <Tooltip title={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}>
+          <IconButton
+            ref={replaceAnchorRef}
+            theme={theme}
+            size="sm"
+            aria-label={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
+            data-state-action="replace-media"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (replaceAnchorRef.current) onReplaceMedia(replaceAnchorRef.current);
+            }}
+          >
+            <ImagePlus size={13} />
           </IconButton>
         </Tooltip>
       )}
@@ -898,67 +930,91 @@ function StateGridCard({
             data-state-action="send-media-canvas"
             onClick={(e) => { e.stopPropagation(); onSendMediaToCanvas(); }}
           >
-            <ImagePlus size={13} />
+            <Send size={13} />
           </IconButton>
         </Tooltip>
       )}
-      <Tooltip title={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}>
-        <IconButton
-          theme={theme}
-          size="sm"
-          aria-label={isCover ? t('subject.coverCancel', '取消封面') : t('subject.setAsCover', '设为封面')}
-          data-state-action="cover"
-          data-cover-active={isCover ? '1' : undefined}
-          style={isCover ? { color: theme.toolbar.accent } : undefined}
-          onClick={(e) => { e.stopPropagation(); onToggleCover?.(); }}
-        >
-          <Star size={13} fill={isCover ? theme.toolbar.accent : 'none'} />
-        </IconButton>
-      </Tooltip>
       {onDelete && (
         <Tooltip title={t('subject.deleteThisState', '删除此状态')}>
           <IconButton
             theme={theme}
             size="sm"
             aria-label={t('subject.deleteThisState', '删除此状态')}
-            data-state-action="delete"
+            data-state-action="delete-state"
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            style={{ color: theme.toolbar.danger }}
           >
             <Trash2 size={13} />
           </IconButton>
         </Tooltip>
       )}
-    </>
+    </div>
   );
+
+  const actionButtons = keyActions;
+  /**
+   * 编辑态的「收起编辑」挪到卡片**外面**，只用图标（2026-11-19 用户要求）。
+   * 编辑态不再外露「更多」菜单：换图 / 移除素材 / 发送图片到画布在编辑面板里已有入口，
+   * 两套并列就是功能重复（2026-11-19 用户反馈）。
+   */
+  const floatActions = editMode && onToggleEdit ? (
+    <div
+      data-state-float-actions
+      style={{
+        position: 'absolute', top: -18, right: 0, zIndex: 4,
+        display: 'flex', alignItems: 'center', gap: 2,
+      }}
+    >
+      <Tooltip title={t('subject.closeEdit', '收起编辑')}>
+        <IconButton
+          theme={theme}
+          size="sm"
+          aria-label={t('subject.closeEdit', '收起编辑')}
+          data-state-action="collapse"
+          onClick={(e) => { e.stopPropagation(); onToggleEdit(); }}
+        >
+          <ChevronUp size={13} />
+        </IconButton>
+      </Tooltip>
+    </div>
+  ) : null;
+  const beginDrag = (e: DragEvent<HTMLDivElement>): void => {
+    if (!hasMedia || editMode) { e.preventDefault(); return; }
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-zeroexo-subject-state', stateId);
+  };
   return (
     <div
       data-state-card={stateId}
       role="button"
       tabIndex={0}
       aria-label={title}
-      title={hasMedia ? t('subject.dragToSwap', '拖动到另一个状态，可交换两张图片') : undefined}
-      draggable={Boolean(hasMedia)}
-      onDragStart={(e) => {
-        if (!hasMedia) return;
-        e.stopPropagation();
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('application/x-zeroexo-subject-state', stateId);
-      }}
-      onDragOver={(e) => {
-        if (!hasMedia) return;
-        e.preventDefault();
-        e.stopPropagation();
-        e.dataTransfer.dropEffect = 'move';
-      }}
-      onDrop={(e) => {
-        if (!hasMedia) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const source = e.dataTransfer.getData('application/x-zeroexo-subject-state');
-        if (source && source !== stateId) onSwapMedia?.(source);
-      }}
+        // 拖动只在非编辑态生效：编辑态里要能正常选中提示词文本
+        draggable={Boolean(hasMedia) && !editMode}
+        // 图片默认自带 draggable，指针落在封面上时拖的是 img 而不是卡片：
+        // 用 capture 统一写入状态 id，空状态才接得到这次拖拽（2026-11-18 用户实测）。
+        onDragStartCapture={beginDrag}
+        onDragStart={beginDrag}
+        onDragOver={(e) => {
+          if (editMode) return;
+          // 空状态也要接住拖拽：把图片拖到空插槽是「移动到该状态」，
+          // 之前这里按 hasMedia 直接 return，空插槽永远接不了图（2026-11-18 用户实测）。
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          if (editMode) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const source = e.dataTransfer.getData('application/x-zeroexo-subject-state');
+          if (source && source !== stateId) onSwapMedia?.(source);
+        }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return;
+        // 2026-11-19 用户定稿（回滚上一版）：点主体状态卡 = 直接进入编辑态（提示词生成页），
+        // 不再先开大图查看器；编辑面板内的输入/按钮都 stopPropagation，不会误触。
         if (onToggleEdit) onToggleEdit(); else onClick();
       }}
       onKeyDown={(e) => {
@@ -971,28 +1027,32 @@ function StateGridCard({
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onFocus={() => setFocus(true)}
-      onBlur={() => setFocus(false)}
       style={{
         display: 'flex', flexDirection: 'column', gap: UI_CARD_GAP,
-        width: '100%', minWidth: SUBJECT_STATE_CARD_MIN_WIDTH,
+        // 2026-11-19：卡片宽度只由栅格决定（minmax(220px,1fr)），不再设 minWidth，
+        // 否则 260 的最小宽会顶穿 220 的列宽，出现「两张卡互相压边、图标跑到邻卡上」。
+        width: '100%', minWidth: 0,
         cursor: 'pointer', outline: 'none', color: theme.toolbar.text,
         /* 编辑态拉通整行：编辑区不再挤在 240px 卡里（2026-11-12 用户指令）；
            置顶（order -1）避免网格在整行卡片前留一个空列 */
         ...(editMode ? {
+          position: 'relative',
           gridColumn: '1 / -1', order: -1,
-          border: `1px solid ${theme.toolbar.accent}66`,
+          marginTop: 10,
+          // 编辑态不再用强调色描边（用户 2026-11-18：红色 hover 框很丑），只留中性细边
+          border: `1px solid ${theme.toolbar.border}`,
           borderRadius: 10,
           background: theme.mode === 'dark' ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.025)',
           padding: '8px 10px 12px',
         } : {}),
       }}
     >
+      {floatActions}
       {!editMode && (
       <CardShell
         theme={theme}
         data-state-cover
-        hovered={active}
+        // hover 不再画红框，也不挂整卡 title：原生悬浮提示会污染提示词区域（2026-11-18 用户反馈）
         style={{
           width: '100%', aspectRatio: '16 / 9',
         }}
@@ -1018,10 +1078,10 @@ function StateGridCard({
       </CardShell>
       )}
       <div data-state-info style={{
-        display: 'flex', flexDirection: 'column', gap: 2,
+        display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, maxWidth: '100%',
         paddingLeft: UI_CARD_INFO_PADDING_X, paddingRight: UI_CARD_INFO_PADDING_X,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: 24, gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', height: 24, gap: 8, minWidth: 0 }}>
           {editing ? (
             <Input
               size="small"
@@ -1059,75 +1119,25 @@ function StateGridCard({
               {title}
             </span>
           )}
-          {/* 编辑态一行收口：名称 + 动作 + 收起编辑都在同一行（2026-11-13 用户指令） */}
-          {!editMode && (
-            <>
-              <span data-state-ready style={dead ? { color: theme.toolbar.danger, fontSize: 11, flexShrink: 0 } : { flexShrink: 0 }}>
-                {dead ? deadText : ''}
-              </span>
-              <div
-                data-state-actions
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
-                  opacity: active ? 1 : 0, transition: 'opacity .2s',
-                }}
-              >
-                {actionButtons}
-              </div>
-            </>
-          )}
-          {editMode && (
-            <>
-              <div
-                data-state-actions
-                style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}
-              >
-                {onReplaceMedia && (
-                  <Tooltip title={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}>
-                    <IconButton
-                      theme={theme}
-                      size="sm"
-                      aria-label={hasMedia ? t('subject.changeImage', '换图') : t('subject.uploadMedia', '上传图片')}
-                      data-media-action="replace"
-                      onClick={(e) => { e.stopPropagation(); onReplaceMedia(e.currentTarget); }}
-                    >
-                      <ImagePlus size={13} />
-                    </IconButton>
-                  </Tooltip>
-                )}
-                {hasMedia && onRemoveMedia && (
-                  <Tooltip title={t('subject.removeMedia', '移除素材')}>
-                    <IconButton
-                      theme={theme}
-                      size="sm"
-                      aria-label={t('subject.removeMedia', '移除素材')}
-                      data-media-action="remove"
-                      onClick={(e) => { e.stopPropagation(); onRemoveMedia(); }}
-                    >
-                      <ImageOff size={13} />
-                    </IconButton>
-                  </Tooltip>
-                )}
-                {actionButtons}
-                <Button
-                  size="small"
-                  type="default"
-                  data-state-action="collapse"
-                  icon={<ChevronUp size={13} />}
-                  onClick={(e) => { e.stopPropagation(); if (onToggleEdit) onToggleEdit(); else onClick(); }}
-                  style={{
-                    flexShrink: 0, fontWeight: 600,
-                    color: theme.toolbar.text,
-                    borderColor: theme.toolbar.border,
-                    background: theme.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                  }}
-                >
-                  {t('subject.closeEdit', '收起编辑')}
-                </Button>
-              </div>
-            </>
+          {(
+            <span data-state-ready style={dead ? { color: theme.toolbar.danger, fontSize: 11, flexShrink: 0 } : { flexShrink: 0 }}>
+              {dead ? deadText : ''}
+            </span>
           )}
         </div>
+        {/* 动作行：与主体库封面卡同构——图标在文字区、默认隐藏、hover 浮出；
+            单独占一行右对齐，避免 5 枚图标把 220 宽的卡顶穿（2026-11-19 用户反馈图标压到邻卡）。 */}
+        {!editMode && (
+          <div
+            data-state-actions
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2,
+              height: 22, opacity: hover ? 1 : 0, transition: 'opacity .2s',
+            }}
+          >
+            {actionButtons}
+          </div>
+        )}
       </div>
       {editMode && editPanel}
     </div>
@@ -1172,6 +1182,7 @@ function SubjectGenFooter({
             modelOptions={SUBJECT_MODEL_OPTIONS}
             paramValues={paramValues}
             hasImageReference={Boolean(referenceKey)}
+            imageReferenceCount={referenceKey ? 1 : 0}
             isRunning={running}
             hasText={Boolean(prompt.trim())}
             textLength={prompt.length}
@@ -1220,6 +1231,27 @@ function StateEditPanel({
   const { message: antdMessage } = AntdApp.useApp();
   const slotMedia = slotMediaOf(tree, node.id);
   const slotKind = slotMediaKind(slotMedia);
+  /** 点大图开统一查看器（media-lightbox），条目 = 当前媒体 + 历史图片，可左右翻阅 */
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const viewerItems = useMemo(() => {
+    const toLightKind = (k?: 'image' | 'audio' | 'video'): 'image' | 'video' =>
+      (k === 'video' ? 'video' : 'image');
+    const list: Array<{ id: string; title: string; kind: 'image' | 'video'; storageKey: string; source: string }> = [];
+    if (slotMedia?.key) {
+      list.push({
+        id: `slot-${node.id}`, title: node.state || t('subject.mediaPending', '待补媒体'),
+        kind: toLightKind(slotKind), storageKey: slotMedia.key, source: '主体库',
+      });
+    }
+    (node.mediaHistory ?? []).forEach((ref, i) => {
+      if (!ref?.key) return;
+      list.push({
+        id: `hist-${ref.key}-${i}`, title: `${node.state || ''} 历史图片 ${i + 1}`.trim(),
+        kind: toLightKind(slotMediaKind(ref)), storageKey: ref.key, source: '主体库 · 历史图片',
+      });
+    });
+    return list;
+  }, [slotMedia, slotKind, node.id, node.state, node.mediaHistory, t]);
   const promptValue = node.fullPrompt || node.deltaPrompt || '';
   /** 提示词本地撤销栈：每次提交/覆盖前压入上一版，最多 20 版（2026-11-13 用户要求） */
   const promptHistoryRef = useRef<string[]>([]);
@@ -1249,6 +1281,12 @@ function StateEditPanel({
   const genParams = resolveSubjectGenParams(node);
   const model = node.imageModel ?? LOCAL_IMAGE_MODEL_KEY;
   const referenceKey = genParams.referenceKeys[0] ?? '';
+  // 「继承基础状态」= 把基础状态首图作为真实引用传给模型，并在插槽里显示这张引用；
+  // 不是只存一个布尔值（用户 2026-11-18 报开关没效果）。
+  const baseRefKey = !isBase && genParams.useBaseRef
+    ? firstCoverMediaKeyOfState((tree.states ?? []).find((n) => n.id === SUBJECT_BASE_STATE_ID)?.media)
+    : '';
+  const baseRefId = 'base-state-ref';
   /** 画布参数弹层的数据形状（Qwen=宽高/1K·2K，Moss/Krea=比例+百万像素） */
   const footerParamValues: Record<string, unknown> = model === MOSS_MODEL_KEY
     ? { aspect: genParams.aspect, megapixels: genParams.megapixels, steps: genParams.steps, cfg: genParams.cfg, seed: genParams.seed, sizeMode: 'custom' }
@@ -1355,17 +1393,28 @@ function StateEditPanel({
           <div data-subject-ref-add>
             <ReferenceSlotBar
               theme={theme}
-              items={referenceKey
-                ? [{
+              items={[
+                // 勾选「引用基础状态」时基础封面是第一张参考图，必须排在插槽最前面
+                ...(baseRefKey ? [{
+                  id: baseRefId,
+                  storageKey: baseRefKey,
+                  title: t('subject.genUseBaseRef', '引用基础状态'),
+                  compatible: true,
+                }] : []),
+                ...(referenceKey && referenceKey !== baseRefKey ? [{
                   id: referenceKey,
                   storageKey: referenceKey,
                   title: t('subject.referenceMaterial', '参考素材'),
                   compatible: true,
-                }]
-                : []}
+                }] : []),
+              ]}
               onAdd={onAddReference}
               addTitle={t('subject.referenceAdd', '添加参考素材（画布 / 资产 / 主体）')}
-              onRemove={onRemoveReference}
+              onRemove={(id) => {
+                // 基础状态那张引用没有「删除」语义，点 X = 关掉「引用基础状态」开关
+                if (id === baseRefId) commitGenParams({ useBaseRef: false });
+                else onRemoveReference();
+              }}
             />
           </div>
           {!isBase && (
@@ -1388,17 +1437,36 @@ function StateEditPanel({
           data-media-slot
           style={{ width: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}
         >
-          <CardShell theme={theme} style={{ width: '100%', height: 300, position: 'relative' }}>
-            <SubjectMediaThumb
-              storageKey={slotMedia?.key}
-              kind={slotKind}
-              dark={isDark}
-              fill
-              fit="contain"
-              emptyLabel={t('subject.mediaPending', '待补媒体')}
+          <div
+            data-media-view-trigger
+            onClick={(e) => {
+              // 点大图 = 用统一查看器看详情（不再改变素材本身）
+              if (!slotMedia?.key && viewerItems.length === 0) return;
+              e.stopPropagation();
+              setViewerIndex(0);
+            }}
+            style={{ cursor: viewerItems.length > 0 ? 'zoom-in' : undefined }}
+          >
+            <CardShell theme={theme} style={{ width: '100%', height: 300, position: 'relative' }}>
+              <SubjectMediaThumb
+                storageKey={slotMedia?.key}
+                kind={slotKind}
+                dark={isDark}
+                fill
+                fit="contain"
+                emptyLabel={t('subject.mediaPending', '待补媒体')}
+              />
+              <StateJobMediaOverlay jobKey={jobKey} />
+            </CardShell>
+          </div>
+          {viewerIndex !== null && viewerItems.length > 0 && (
+            <MediaLightbox
+              items={viewerItems}
+              index={viewerIndex}
+              onIndexChange={setViewerIndex}
+              onClose={() => setViewerIndex(null)}
             />
-            <StateJobMediaOverlay jobKey={jobKey} />
-          </CardShell>
+          )}
           {(node.mediaHistory?.length ?? 0) > 0 && (
             <div data-media-history>
               <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
@@ -1600,13 +1668,15 @@ function StateEditPanel({
  */
 function SubjectStateGrid({ children }: { children: ReactNode }): React.ReactElement {
   // 2026-11-12 用户要求：主体外面不用瀑布流；详情页用固定卡片网格，每张卡尺寸一致。
+  // 2026-11-19 用户口径：状态卡栅格必须与主体封面页完全同一套（minmax(220px, 1fr) / gap 16），
+  // 否则同一抽屉里会出现「一会儿两列、一会儿一列」。
   return (
     <div
       data-subject-state-grid
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-        gap: SUBJECT_STATE_CARD_GAP,
+        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+        gap: 16,
         alignContent: 'start',
       }}
     >
@@ -1819,7 +1889,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         // 会命中同一棵树 → 改一条的类型/集数/封面串到另一条。类型仍以树字段为准。
         const tree = findTreeForItem(trees, it, productionItems ?? []);
         // 封面：条目 images + 树媒体候选（2026-11-06「把某个状态当封面」）
-        const cover = resolveSubjectCover(it, subjectCoverCandidates(tree));
+        // 2026-11-18：默认封面只认基础状态首图；基础状态空 = 封面空（不再拿别的状态图顶）
+        const cover = resolveSubjectCover(it, subjectCoverCandidates(tree), subjectBaseCoverKeys(tree));
         const allKeys = (it.images ?? []).map((r) => r.storageKey);
         const imageKeys = cover.key ? [cover.key, ...allKeys.filter((k) => k !== cover.key)] : allKeys;
         const kind = tree ? (tree.kind as ProductionItemKind | undefined) : it.kind;
@@ -1997,7 +2068,12 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         const pid = projectId ?? undefined;
         // 只动本条目绑定的那棵树（2026-11-06）：旧版按 name 剔除会把同名另一条主体的树一起删掉
         const bound = findTreeForItem(treesRef.current, card, productionItems ?? []);
-        if (pid && bound) void releaseSubjectStateMediaRefs({ trees: [bound], projectId: pid });
+        if (pid && bound) {
+          void releaseSubjectStateMediaRefs({ trees: [bound], projectId: pid });
+          // 删除主体必须同时清掉分镜/导演台里对它的引用，否则插槽会一直显示旧图
+          void removeSubjectReferences(pid, bound.rootId);
+          useSubjectMediaLinkEventStore.getState().emit({ rootId: bound.rootId, stateId: '' });
+        }
         onDeleteItem?.(card.id);
         commitTrees(bound ? treesRef.current.filter((x) => x.rootId !== bound.rootId) : treesRef.current);
         if (levelRef.current.view !== 'list') applyLevel({ view: 'list' }, { push: false, replace: true });
@@ -2020,7 +2096,10 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         const pid = projectId ?? undefined;
         const tr = treesRef.current.find((x) => x.rootId === rootId);
         if (pid && tr) void releaseSubjectStateMediaRefs({ trees: [tr], projectId: pid, rootId, stateId: node.id });
-        if (pid) void removeSubjectReferences(pid, rootId, node.id);
+        if (pid) {
+          void removeSubjectReferences(pid, rootId, node.id);
+          useSubjectMediaLinkEventStore.getState().emit({ rootId, stateId: node.id });
+        }
         commitTrees(treesRef.current.map((x) => (
           x.rootId === rootId ? { ...x, states: (x.states ?? []).filter((n) => n.id !== node.id) } : x
         )));
@@ -2047,6 +2126,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             void releaseSubjectStateMediaRefs({ trees: [tree], projectId: pid, rootId: tree.rootId, stateId: st.id });
           }
           void removeSubjectReferences(pid, tree.rootId);
+          useSubjectMediaLinkEventStore.getState().emit({ rootId: tree.rootId, stateId: '' });
         }
         commitTrees(treesRef.current.filter((x) => x.rootId !== tree.rootId));
         if (item) onDeleteItem?.(item.id);
@@ -2195,7 +2275,13 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
         const bound = picked
           .map((c) => findTreeForItem(treesRef.current, c, items))
           .filter((tr): tr is SubjectTree => Boolean(tr));
-        if (pid && bound.length > 0) void releaseSubjectStateMediaRefs({ trees: bound, projectId: pid });
+        if (pid && bound.length > 0) {
+          void releaseSubjectStateMediaRefs({ trees: bound, projectId: pid });
+          for (const tr of bound) {
+            void removeSubjectReferences(pid, tr.rootId);
+            useSubjectMediaLinkEventStore.getState().emit({ rootId: tr.rootId, stateId: '' });
+          }
+        }
         const rootIds = new Set(bound.map((tr) => tr.rootId));
         commitTrees(rootIds.size > 0 ? treesRef.current.filter((tr) => !rootIds.has(tr.rootId)) : treesRef.current);
         const ids = picked.map((c) => c.id);
@@ -2217,7 +2303,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     [productionItems],
   );
   const coverKeyOfTree = useCallback(
-    (tree: SubjectTree): string | null => resolveSubjectCover(itemOfTree(tree), subjectCoverCandidates(tree)).key,
+    (tree: SubjectTree): string | null =>
+      resolveSubjectCover(itemOfTree(tree), subjectCoverCandidates(tree), subjectBaseCoverKeys(tree)).key,
     [itemOfTree],
   );
   const stateMediaKey = (tree: SubjectTree, stateId: string): string | null =>
@@ -2287,7 +2374,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     }
   }, [projectId, commitTrees, antdMessage, t]);
 
-  /** 拖拽交换：两个状态各自的首图互换，其他媒体/历史不动；封面 key 跟着图走 */
+  /** 拖拽交换 / 移动到空状态：首图互换；目标是空状态时把源图移过去，其他媒体/历史不动 */
   const swapMedia = useCallback((rootId: string, sourceStateId: string, targetStateId: string) => {
     if (sourceStateId === targetStateId) return;
     const tree = treesRef.current.find((tr) => tr.rootId === rootId);
@@ -2296,18 +2383,25 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     const target = (tree.states ?? []).find((n) => n.id === targetStateId);
     if (!source || !target) return;
     const sourceFirst = (source.media ?? [])[0];
+    if (!sourceFirst?.key) return;
     const targetFirst = (target.media ?? [])[0];
-    if (!sourceFirst?.key || !targetFirst?.key) return;
     const next = treesRef.current.map((tr) => tr.rootId !== rootId ? tr : {
       ...tr,
       states: (tr.states ?? []).map((n) => {
-        if (n.id === sourceStateId) return { ...n, media: [targetFirst, ...(n.media ?? []).slice(1)] };
-        if (n.id === targetStateId) return { ...n, media: [sourceFirst, ...(n.media ?? []).slice(1)] };
+        if (n.id === sourceStateId) {
+          // 目标有图：互换首图；目标是空状态：源图移走，源首图移除（其余媒体保留）
+          return targetFirst?.key
+            ? { ...n, media: [targetFirst, ...(n.media ?? []).slice(1)] }
+            : { ...n, media: [...(n.media ?? []).slice(1)] };
+        }
+        if (n.id === targetStateId) return { ...n, media: [sourceFirst, ...(n.media ?? [])] };
         return n;
       }),
     });
     commitTrees(next);
-    antdMessage.success(t('subject.mediaSwapped', '已交换两个状态的图片'));
+    antdMessage.success(targetFirst?.key
+      ? t('subject.mediaSwapped', '已交换两个状态的图片')
+      : t('subject.mediaMoved', '已把图片移动到该状态'));
   }, [commitTrees, antdMessage, t]);
 
   /** 从状态媒体历史恢复一张旧图（只换引用，不复制文件） */
@@ -2477,37 +2571,10 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           </SubjectPageHeader>
         )}
 
-        {/* 主操作统一放顶部（2026-11-06 用户指令：原来埋在最底下每次找半天） */}
-        {embedded && onAddSubject && (
-          <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
-            <AddTile
-              label={t('storyboard.addSubject', '添加主体')}
-              icon={<Plus size={16} />}
-              onClick={onAddSubject}
-              theme={theme}
-              dataAttr={{ 'data-subject-add': '' }}
-            />
-          </div>
-        )}
-
-        {/* 工具栏：抽屉内与素材分段逐行同源（共享 ToolbarRow：8/20/10 内距 + SearchBox 高 26）。
-            2026-11-06 用户指出图1/图2 布局差异：旧版把 chips+搜索塞进一列、再把集筛选
-            marginLeft:auto 挤在同一行右侧，窄抽屉里被右边缘裁成半截。现：chips 一行、
-            搜索+多选+集筛选一行，与素材分段同一结构同一高度。 */}
+        {/* 统一顺序（2026-11-16 用户指令）：标题 → Tab → 搜索栏 + 批量操作 → 分类标签 → 内容 */}
         {embedded ? (
           <>
             <ToolbarRow>
-              <CategoryChips
-                items={[
-                  { key: 'all', label: t('subject.kindAll', '全部'), count: episodeCards.length },
-                  ...KIND_OPTIONS.map((k) => ({ key: k as string, label: kindLabelOf(k, t), count: counts[k] })),
-                ]}
-                active={activeKind}
-                onChange={(k) => setSubjectActiveKind((k ?? 'all') as 'all' | ProductionItemKind)}
-                theme={theme}
-              />
-            </ToolbarRow>
-            <ToolbarRow style={{ paddingTop: 0 }}>
               <SearchBox
                 value={search}
                 onChange={setSearch}
@@ -2522,6 +2589,29 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
               <ToolbarRow style={{ paddingTop: 0 }} dataAttr={{ 'data-subject-batch-bar': '' }}>
                 {batchActions}
               </ToolbarRow>
+            )}
+            <ToolbarRow style={{ paddingTop: 0 }}>
+              <CategoryChips
+                items={[
+                  { key: 'all', label: t('subject.kindAll', '全部'), count: episodeCards.length },
+                  ...KIND_OPTIONS.map((k) => ({ key: k as string, label: kindLabelOf(k, t), count: counts[k] })),
+                ]}
+                active={activeKind}
+                onChange={(k) => setSubjectActiveKind((k ?? 'all') as 'all' | ProductionItemKind)}
+                theme={theme}
+              />
+            </ToolbarRow>
+            {/* 主操作（添加主体）进入内容区顶部 */}
+            {onAddSubject && (
+              <div style={{ padding: `10px ${pagePad}px 10px`, flexShrink: 0 }}>
+                <AddTile
+                  label={t('storyboard.addSubject', '添加主体')}
+                  icon={<Plus size={16} />}
+                  onClick={onAddSubject}
+                  theme={theme}
+                  dataAttr={{ 'data-subject-add': '' }}
+                />
+              </div>
             )}
           </>
         ) : (
@@ -2571,8 +2661,8 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                 gap: 16,
                 width: '100%',
                 maxWidth: maxWidthFor(LIST_MAX_WIDTH),
-                margin: '0 auto',
-                paddingBottom: 16,
+                margin: 0,
+                padding: `0 ${pagePad}px 16px`,
                 boxSizing: 'border-box',
               }}
             >
@@ -2596,10 +2686,13 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
             <div
               data-subject-health
               style={{
-                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, margin: '8px 0',
+                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, margin: `8px ${pagePad}px`,
+                /* 2026-11-16 用户要求：这类提示常驻底部，不夹在列表中间 */
+                position: 'sticky', bottom: 0, zIndex: 3,
                 padding: '8px 10px', borderRadius: 8,
                 border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`,
-                background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                background: isDark ? 'rgba(24,24,24,0.96)' : 'rgba(255,255,255,0.96)',
+                backdropFilter: 'blur(6px)',
               }}
             >
               {subjectHealth.noPrompt.length > 0 && (
@@ -2696,7 +2789,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
           </span>
         </SubjectPageHeader>
         {/* 「添加新状态」保持原来的整宽虚线格，不改成页头主按钮 */}
-        <div style={{ padding: `12px ${pagePad}px 4px`, flexShrink: 0 }}>
+        <div style={{ padding: `10px ${pagePad}px 10px`, flexShrink: 0 }}>
           <AddTile
             label={t('subject.addState', '添加新状态')}
             icon={<Plus size={16} />}
@@ -2771,12 +2864,22 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                       ? (next) => renameTree(openTree.rootId, next)
                       : (next) => updateNode(openTree.rootId, node.id, { state: next })}
                     onCanvasGenerate={() => {
+                      // 参考插槽里的图（勾选基础状态时基础封面排第一）要作为上游引用一起进画布并连线，
+                      // 不能只发一句提示词（2026-11-18 用户要求：与「一键同款」同一原理）。
+                      const genParams = resolveSubjectGenParams(node);
+                      const baseKey = !isBase && genParams.useBaseRef
+                        ? firstCoverMediaKeyOfState((openTree.states ?? []).find((n) => n.id === SUBJECT_BASE_STATE_ID)?.media)
+                        : '';
+                      const refKeys = [
+                        ...(baseKey ? [baseKey] : []),
+                        ...genParams.referenceKeys.filter((key) => Boolean(key) && key !== baseKey),
+                      ];
                       nodeActionBus.emit('subject:sendStateToCanvas', {
                         nodeId: '',
                         name: isBase ? openTree.name : (node.state?.trim() || openTree.name),
                         prompt: node.fullPrompt || node.deltaPrompt || '',
                         storageKey: first?.key,
-                        referenceStorageKey: resolveSubjectGenParams(node).referenceKeys[0],
+                        referenceStorageKeys: refKeys,
                       });
                     }}
                     onSendMediaToCanvas={() => {
@@ -2784,6 +2887,7 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
                       nodeActionBus.emit('subject:sendMediaToCanvas', {
                         nodeId: '',
                         name: isBase ? openTree.name : (node.state?.trim() || openTree.name),
+                        prompt: node.fullPrompt || node.deltaPrompt || '',
                         storageKey: first.key,
                       });
                     }}
@@ -2828,3 +2932,4 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     </>
   );
 });
+

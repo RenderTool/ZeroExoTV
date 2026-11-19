@@ -23,9 +23,8 @@
 
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Popover, Select, Space, Tooltip, Typography } from 'antd';
-import { fetchBridgeModels } from './comfyui-bridge-client.js';
-import { pickDefaultModels, useComfyuiConnectionStore } from './comfyui-connection.js';
+import { Button, Input, Popover, Space, Tooltip, Typography } from 'antd';
+import { ModelMappingModal } from './model-mapping-modal.js';
 import { TopBarIcon, topBarButtonStyle } from '@/shared/components/topbar-icon-button.js';
 import {
   applyConnectionResult,
@@ -35,11 +34,9 @@ import {
   useComfyuiAutoConnect,
   useComfyuiAutoConnectStore,
 } from './comfyui-auto-connect.js';
-import { resolveUseLowVram } from './vram-mode.js';
 import {
   testEndpointConnection,
   useComfyuiEndpointStore,
-  type ComfyuiVramMode,
   type EndpointTestResult,
 } from './comfyui-endpoint.js';
 
@@ -52,11 +49,7 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(ep.address);
   const [testing, setTesting] = useState(false);
-  const [refreshingModels, setRefreshingModels] = useState(false);
-  const modelSel = useComfyuiConnectionStore((s) => s.models);
-  const availableModels = useComfyuiConnectionStore((s) => s.availableModels);
-  const setModel = useComfyuiConnectionStore((s) => s.setModel);
-  const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
+  const [modelPageOpen, setModelPageOpen] = useState(false);
   const [testResult, setTestResult] = useState<EndpointTestResult | null>(null);
   /** 直连测试通过但桥接插件 /zeroexo/h3/* 未响应（一行短提示，测试后出现） */
   const [bridgeWarn, setBridgeWarn] = useState(false);
@@ -92,23 +85,6 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
     ep.applyAddress(draft);
   }, [draft, ep]);
 
-  const reloadModels = useCallback(async () => {
-    if (!ep.address) return;
-    setRefreshingModels(true);
-    try {
-      const models = await fetchBridgeModels(ep.address);
-      const defaults = pickDefaultModels(models, modelSel);
-      setConnectedModels(true, { unet: models.unet, vae: models.vae, clip: models.clip });
-      for (const slot of ['unet', 'videoVae', 'audioVae', 'clip'] as const) {
-        setModel(slot, defaults[slot]);
-      }
-    } catch {
-      setConnectedModels(true);
-    } finally {
-      setRefreshingModels(false);
-    }
-  }, [ep.address, modelSel, setConnectedModels, setModel]);
-
   const statusWord = !ep.connected
     ? null
     : ep.backend === 'direct'
@@ -116,27 +92,6 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
       : ep.backend === 'zeroexo'
         ? t('director.endpointStatusZeroexo', '已连接 · 插件')
         : t('director.endpointStatusOpenai');
-
-  const machine = ep.machine ?? (testResult?.kind === 'ok' ? testResult.machine : undefined);
-  const autoLow = resolveUseLowVram(machine, 'auto');
-  const effectiveLow = resolveUseLowVram(machine, ep.vramMode);
-  const gb = (bytes?: number): string =>
-    typeof bytes === 'number' && Number.isFinite(bytes) ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : '—';
-  const vramTotal = machine?.vramTotalBytes;
-  const vramModeOptions: Array<{ value: ComfyuiVramMode; label: string }> = [
-    { value: 'auto', label: t('director.vramAuto', '自动') },
-    { value: 'low', label: t('director.vramLow', '低显存') },
-    { value: 'high', label: t('director.vramHigh', '高显存') },
-  ];
-  const vramSummary = !machine
-    ? t('director.vramUnknown', '未读取到机器显存，自动按低显存保守运行')
-    : ep.vramMode === 'auto'
-      ? autoLow
-        ? t('director.vramAutoLow', '自动：低显存（检测到 {{vram}}）', { vram: gb(vramTotal) })
-        : t('director.vramAutoHigh', '自动：高显存（检测到 {{vram}}）', { vram: gb(vramTotal) })
-      : effectiveLow
-        ? t('director.vramForcedLow', '手动：强制低显存')
-        : t('director.vramForcedHigh', '手动：强制高显存');
 
   const connectionState = ep.connected
     ? 'connected'
@@ -216,94 +171,15 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
           {t('director.comfyBridgeMissing')}
         </Text>
       )}
-      {(testResult?.kind === 'ok' || ep.connected) && (
-        <div data-testid="comfyui-machine-info" style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4, borderTop: '1px solid rgba(128,128,128,0.18)' }}>
-          <Text strong style={{ fontSize: 12 }}>
-            {t('director.machineInfo', '连接机器')}
-          </Text>
-          {machine ? (
-            <div data-testid="comfyui-machine-specs" style={{ fontSize: 11, color: 'var(--ant-color-text-secondary, #888)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span data-testid="comfyui-gpu-name">{machine.gpuName ?? 'GPU'} {machine.gpuType ? `· ${machine.gpuType}` : ''}</span>
-              <span data-testid="comfyui-vram">
-                {t('director.vramTotal', '显存')} {gb(machine.vramTotalBytes)}
-                {typeof machine.vramFreeBytes === 'number' ? `（${t('director.vramFree', '空闲')} ${gb(machine.vramFreeBytes)}）` : ''}
-              </span>
-              {typeof machine.ramTotalBytes === 'number' && (
-                <span>{t('director.ramTotal', '内存')} {gb(machine.ramTotalBytes)}</span>
-              )}
-              {machine.comfyuiVersion && <span>ComfyUI {machine.comfyuiVersion}</span>}
-            </div>
-          ) : (
-            <Text type="secondary" style={{ fontSize: 11 }} data-testid="comfyui-machine-missing">
-              {t('director.machineUnknown', '未读取到机器信息（/system_stats 被拦截或旧版 ComfyUI）')}
-            </Text>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{t('director.vramStrategy', '显存策略')}</Text>
-            <Select
-              data-testid="comfyui-vram-mode"
-              size="small"
-              value={ep.vramMode}
-              options={vramModeOptions}
-              onChange={(mode) => ep.setVramMode(mode)}
-              style={{ flex: 1 }}
-              popupMatchSelectWidth={false}
-            />
-          </div>
-          <Text type={ep.vramMode === 'auto' ? 'secondary' : 'warning'} style={{ fontSize: 11 }} data-testid="comfyui-vram-summary">
-            {vramSummary}
-          </Text>
-          {ep.vramMode === 'high' && autoLow && (
-            <Text type="danger" style={{ fontSize: 11 }} data-testid="comfyui-vram-risk">
-              {t('director.vramHighRisk', '检测到的显存低于 16GB，强制高显存可能 OOM；后果由你自行承担')}
-            </Text>
-          )}
-        </div>
-      )}
-      {(ep.connected || availableModels.unet.length > 0 || availableModels.vae.length > 0) && (
-        <div
-          data-testid="comfyui-model-config"
-          style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 6, borderTop: '1px solid rgba(128,128,128,0.18)' }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text strong style={{ fontSize: 12 }}>{t('director.modelConfig', '模型配置')}</Text>
-            <Button
-              type="link"
-              size="small"
-              loading={refreshingModels}
-              style={{ padding: 0, fontSize: 11 }}
-              onClick={() => void reloadModels()}
-            >
-              {t('director.modelRefresh', '刷新列表')}
-            </Button>
-          </div>
-          {([
-            ['unet', t('director.modelUnet', '视频主模型'), availableModels.unet],
-            ['videoVae', t('director.modelVideoVae', '视频 VAE'), availableModels.vae],
-            ['audioVae', t('director.modelAudioVae', '音频 VAE'), availableModels.vae],
-            ['clip', t('director.modelClip', '文本编码器'), availableModels.clip],
-          ] as const).map(([slot, label, options]) => (
-            <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Text style={{ width: 76, flexShrink: 0, fontSize: 11 }}>{label}</Text>
-              <Select
-                size="small"
-                data-testid={`comfyui-model-${slot}`}
-                value={modelSel[slot] || undefined}
-                placeholder={options.length ? t('director.modelPick', '选择模型') : t('director.modelEmpty', '连接后读取列表')}
-                options={options.map((name) => ({ value: name, label: name }))}
-                onChange={(value) => setModel(slot, value)}
-                showSearch
-                optionFilterProp="label"
-                style={{ flex: 1, minWidth: 0 }}
-                popupMatchSelectWidth={false}
-              />
-            </div>
-          ))}
-          {availableModels.unet.length === 0 && (
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {t('director.modelListHint', '点「刷新列表」从当前 ComfyUI 读取 diffusion_models / vae / text_encoders。')}
-            </Text>
-          )}
+      {(ep.connected || testResult?.kind === 'ok') && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 6, borderTop: '1px solid rgba(128,128,128,0.18)' }}>
+          <Button
+            size="small"
+            data-testid="comfyui-advanced-models"
+            onClick={() => setModelPageOpen(true)}
+          >
+            {t('director.advancedModels', '高级')}
+          </Button>
         </div>
       )}
 
@@ -332,7 +208,14 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
     </div>
   );
 
-  if (inline) return content;
+  if (inline) {
+    return (
+      <>
+        {content}
+        <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -382,6 +265,7 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
         </Button>
       </Tooltip>
     </Popover>
+    <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
     </>
   );
 }

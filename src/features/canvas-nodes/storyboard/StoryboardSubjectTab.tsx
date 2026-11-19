@@ -20,8 +20,9 @@ import { AuthorizedImage } from '@/shared/components/authorized-media.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { StoryboardSubjectTree } from './StoryboardSubjectTree';
 import { SubjectLibraryPages } from './subject-library-pages';
-import { createSubjectTree, findTreeForItem } from './subject-tree-types';
+import { createSubjectTree, findTreeForItem, subjectBaseCoverKeys, subjectCoverCandidates } from './subject-tree-types';
 import { releaseSubjectStateMediaRefs } from './subject-state-media';
+import { removeSubjectReferences } from './subject-reference-cleanup';
 import type { SubjectTree, ProjectColorCard } from './subject-tree-types';
 import { buildBaseStatePrompt } from './subject-prompt-templates';
 import { ENTITY_KIND_META } from './storyboard-utils';
@@ -109,8 +110,10 @@ const LegacyStoryboardSubjectTab = memo(function StoryboardSubjectTab({
     return (productionItems ?? [])
       .filter((it) => it && it.name && it.name.trim())
       .map((it) => {
-        // 封面唯一解析入口（手动 coverKey → 第一个状态图 → 无）
-        const cover = resolveSubjectCover(it);
+        // 封面唯一解析入口（手动 coverKey → 基础状态首图 → 无）
+        // 2026-11-18 用户口径：基础状态没图时封面就是空，不能拿别的状态图冒充
+        const bound = findTreeForItem(subjectTree ?? [], it, productionItems ?? []);
+        const cover = resolveSubjectCover(it, subjectCoverCandidates(bound), subjectBaseCoverKeys(bound));
         const allKeys = (it.images ?? []).map((r) => r.storageKey);
         // 卡片封面 = imageKeys 首位（PromptCard 契约）：解析后的封面置顶
         const imageKeys = cover.key
@@ -223,6 +226,9 @@ const LegacyStoryboardSubjectTab = memo(function StoryboardSubjectTab({
         const bound = findTreeForItem(subjectTree ?? [], card, productionItems ?? []);
         if (pid && bound) {
           void releaseSubjectStateMediaRefs({ trees: [bound], projectId: pid });
+          // 主体删除后，分镜/导演台里的引用必须同步失效，不能继续显示已删除主体的旧图
+          void removeSubjectReferences(pid, bound.rootId);
+          useSubjectMediaLinkEventStore.getState().emit({ rootId: bound.rootId, stateId: '' });
         }
         onDeleteItem?.(card.id);
         // 同步移除对应主体树
@@ -534,7 +540,7 @@ function SubjectDetailView({
       width="calc(100vw - 32px)"
       style={{ maxWidth: 1400 }}
       centered
-      destroyOnClose
+      destroyOnHidden
       title={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 0 }}>
           {/* 头部行：封面缩略 + 名称 + 分类徽章 + 恢复默认 */}

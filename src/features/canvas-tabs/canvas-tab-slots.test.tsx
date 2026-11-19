@@ -151,12 +151,13 @@ import { StoryboardTabContent } from './storyboard-tab-content';
 import { WorkbenchTabContent } from './workbench-tab-content';
 import {
   ensureProjectMounts,
+  ensureStoryboardContainer,
   ensureWorkbenchContainer,
   readStoryboardContainer,
   readWorkbenchContainer,
   type ContainersIO,
 } from '@/entities/slot-containers';
-import { readScript } from '@/entities/script-store';
+import { ensureScript, readScript } from '@/entities/script-store';
 
 const GraphProvider = (ReactGraphStoreContext as unknown as {
   Provider: React.ComponentType<{ value: unknown; children?: ReactNode }>;
@@ -289,6 +290,30 @@ describe('单测 C：项目级挂载存在且不写 graph', () => {
     expect(second.storyboard.created).toBe(false);
     expect(second.workbench.created).toBe(false);
     expect(memfs.size).toBe(sizeAfterFirst);
+  });
+
+  it('剧本文件存在但解析失败：拒绝按空剧本重建，原文件不被覆盖', async () => {
+    const path = 'projects/p-script-corrupt/entities/script.json';
+    const corrupt = { schemaVersion: 1, broken: true };
+    memfs.set(path, corrupt);
+    await expect(ensureScript('p-script-corrupt')).rejects.toThrow('拒绝按空剧本重建');
+    expect(memfs.get(path)).toBe(corrupt);
+  });
+
+  it('主体库文件存在但解析失败：拒绝按空容器重建，原文件不被覆盖', async () => {
+    const path = 'projects/p-story-corrupt/entities/storyboard.json';
+    const corrupt = { schemaVersion: 1, broken: true };
+    memfs.set(path, corrupt);
+    await expect(ensureStoryboardContainer('p-story-corrupt', io)).rejects.toThrow('拒绝按空容器重建');
+    expect(memfs.get(path)).toBe(corrupt);
+  });
+
+  it('导演台文件存在但解析失败：拒绝按空容器重建，原文件不被覆盖', async () => {
+    const path = 'projects/p-workbench-corrupt/entities/workbench.json';
+    const corrupt = { schemaVersion: 1, broken: true };
+    memfs.set(path, corrupt);
+    await expect(ensureWorkbenchContainer('p-workbench-corrupt', io)).rejects.toThrow('拒绝按空容器重建');
+    expect(memfs.get(path)).toBe(corrupt);
   });
 });
 

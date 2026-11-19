@@ -16,6 +16,65 @@ export const DATA_ROOT_FILE = path.join(os.homedir(), ".zeroexo", "data-root.txt
 
 let fileRoot: string | null | undefined;
 
+/** 数据根变更记录（写在**新根**里，不落 C 盘）：Agent 据此感知「刚迁移过」，并知道旧根在哪 */
+export interface RootHistoryEntry {
+  root: string;
+  replacedAt: string;
+  replacedBy: string;
+}
+
+export function rootHistoryPath(root = dataRoot()): string {
+  return path.join(root, ".lf", "zeroexo", "app_meta", "data-root-history.json");
+}
+
+export function readRootHistory(root = dataRoot()): RootHistoryEntry[] {
+  try {
+    const raw = fs.readFileSync(rootHistoryPath(root), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is RootHistoryEntry => !!v && typeof (v as RootHistoryEntry).root === "string");
+  } catch {
+    return [];
+  }
+}
+
+function appendRootHistory(root: string, prev: string): void {
+  try {
+    const file = rootHistoryPath(root);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const list = readRootHistory(root);
+    const next = [
+      { root: prev, replacedAt: new Date().toISOString(), replacedBy: root },
+      ...list.filter((e) => path.resolve(e.root) !== path.resolve(prev)),
+    ].slice(0, 10);
+    fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf8");
+  } catch {
+    // 记录失败不影响切换本身
+  }
+}
+
+/**
+ * 当前运行的 MCP 安装位置（真值来自进程入口 argv[1]）：
+ * installDir = 包含 dist/index.js 的包目录；installBase = 其所在的数据根与相对安装路径。
+ * 只有装在 `<数据根>\.mcp-server\next` 这种形态才返回 installBase（仓库里跑 dev 的没有）。
+ */
+export function installDir(): string | null {
+  const entry = process.argv[1] ?? "";
+  if (!/dist[\\/]index\.js$/.test(entry)) return null;
+    return path.dirname(path.dirname(entry));
+}
+
+export function installBase(): { root: string; rel: string } | null {
+  const entry = process.argv[1] ?? "";
+  const marker = `${path.sep}.mcp-server${path.sep}`;
+  const idx = entry.indexOf(marker);
+  if (idx < 0) return null;
+  const root = entry.slice(0, idx);
+  const seg = entry.slice(idx + marker.length).split(path.sep)[0];
+  if (!root || !seg) return null;
+  return { root, rel: path.join(".mcp-server", seg) };
+}
+
 function persistedRoot(): string | null {
   if (fileRoot !== undefined) return fileRoot;
   try {
@@ -29,6 +88,7 @@ function persistedRoot(): string | null {
 
 /** 运行时切换数据根（仅 fs-server 的 /root 接口调用；必须已校验为绝对路径） */
 export function setDataRoot(next: string): void {
+  const prev = rootOverride ?? persistedRoot() ?? null;
   rootOverride = next;
   fileRoot = next;
   try {
@@ -37,10 +97,16 @@ export function setDataRoot(next: string): void {
   } catch {
     // 写不了用户目录也不影响本进程切换
   }
+  if (prev && path.resolve(prev) !== path.resolve(next)) appendRootHistory(next, prev);
 }
 
 export function dataRoot(): string {
-  return rootOverride ?? persistedRoot() ?? process.env.ZEROEXO_DATA_ROOT ?? "D:\\Test";
+  // 测试进程只认临时根：不能用 setDataRoot（它会写 ~/.zeroexo/data-root.txt，
+  // 把用户真实数据根改成临时测试目录，2026-11-18 实测踩到）。
+  const testRoot = (process.env.VITEST === "true" || process.env.NODE_ENV === "test")
+    ? process.env.ZEROEXO_DATA_ROOT
+    : undefined;
+  return rootOverride ?? testRoot ?? persistedRoot() ?? process.env.ZEROEXO_DATA_ROOT ?? "D:\\Test";
 }
 
 export function frontendBaseUrl(): string {
@@ -85,6 +151,11 @@ export const paths = {
    */
   mainGraphFile(projectId: string, root = dataRoot()) {
     const encoded = encodeURIComponent(`zeroexo:graph:${projectId}`);
+    return path.join(root, ".lf", "zeroexo", "graph_data", `${encoded}.json`);
+  },
+  /** 主画布节点的大字段分片（前端把过大的 node.data 拆到 `_dataRef`，键名同 localforage） */
+  mainGraphDataFile(projectId: string, nodeId: string, root = dataRoot()) {
+    const encoded = encodeURIComponent(`zeroexo:graph:${projectId}:data:${nodeId}`);
     return path.join(root, ".lf", "zeroexo", "graph_data", `${encoded}.json`);
   },
   casIndex(root = dataRoot()) {

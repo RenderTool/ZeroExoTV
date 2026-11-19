@@ -483,7 +483,22 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
 
   useImperativeHandle(ref, () => ({
     insertAtCaret(text: string) {
-      insertAt(text, currentCaretOffset());
+      const at = currentCaretOffset();
+      // 2026-11-19 用户报障：先用 @ 唤起选择器、再点条目插入，会变成「@ @沈鸢·基础状态」。
+      // 插入的是「@label 」本身，所以要把触发用的那个 @（以及它后面的查询词）一起吃掉。
+      if (text.startsWith('@')) {
+        const base = valueRef.current ?? '';
+        const before = base.slice(0, at);
+        const trigger = /@[^\s@]*$/.exec(before);
+        if (trigger) {
+          const start = at - trigger[0].length;
+          const next = `${base.slice(0, start)}${text}${base.slice(at)}`;
+          caretRef.current = start + text.length;
+          emitChange(next, start + text.length);
+          return;
+        }
+      }
+      insertAt(text, at);
     },
   }), [insertAt, currentCaretOffset]);
 
@@ -729,7 +744,9 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
             key={i}
             data-mention-owned=""
             data-mention-label={seg.label}
+            data-mention-pending={slot ? undefined : ''}
             contentEditable={false}
+            title={slot ? undefined : '该引用当前未关联：把同一槽位重新填上素材后自动恢复，直接生成时按 @名称 文本传递'}
             onMouseEnter={(e) => {
               if (!slot) return;
               const rect = e.currentTarget.getBoundingClientRect();
@@ -741,6 +758,7 @@ export const MentionEditor = memo(forwardRef<MentionEditorHandle, {
               padding: '0 2px 0 2px', margin: '0 1px', borderRadius: 4,
               background: 'rgba(255,255,255,0.08)', verticalAlign: '-4px',
               fontSize: 13, lineHeight: '20px', userSelect: 'none',
+              ...(slot ? null : { opacity: 0.6, outline: '1px dashed rgba(255,255,255,0.35)', textDecoration: 'line-through' }),
             }}
           >
             {slot?.kind === 'image' ? (

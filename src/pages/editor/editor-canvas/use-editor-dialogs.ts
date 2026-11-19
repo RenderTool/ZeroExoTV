@@ -22,7 +22,7 @@ import i18n from '@/i18n/config';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { stashPendingFocus } from '@/features/canvas-assets/store.js';
-import { insertAssetToCanvas } from './insert-asset-to-canvas.js';
+import { insertAssetToCanvas, insertGenerationChainToCanvas } from './insert-asset-to-canvas.js';
 import type { EditorRefs } from './use-editor-state.js';
 
 /**
@@ -284,6 +284,28 @@ export function useEditorDialogs({
 
       // 常规资产（图片/视频/音频/文本）
       const asset = item.data as Asset;
+      // 历史产物带生成引用链：发送到画布 = 完整链路（提示词/参数/上游参考/连线）一起落，
+      // 不是只落一张孤立图片（2026-11-18 用户口径；发送到资产/分镜/主体仍走单资产）。
+      const generationChain = (asset as unknown as {
+        generation?: { chain?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> } };
+      }).generation?.chain;
+      if (generationChain?.nodes?.length) {
+        try {
+          const res = insertGenerationChainToCanvas({
+            commandQueue: refs.commandQueue,
+            store: refs.store,
+            chain: generationChain as never,
+            containerSize: state.containerSize,
+            seq: insertSeqRef.current++,
+          });
+          if (res.ok) message.success('已发送完整生成链路到画布');
+          else message.error(`发送到画布失败：${res.reason}`);
+        } catch (err) {
+          message.error(`发送到画布失败：${err instanceof Error ? err.message : '未知错误'}`);
+        }
+        setAssetPickerOpen(false);
+        return;
+      }
       const payload = toInsertPayload(asset);
       // FIX-5: text 超长拦截（防超大文本塞进节点拖垮协作同步）
       if (payload.kind === 'text' && payload.content.length > TEXT_MAX_LENGTH) {

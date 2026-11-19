@@ -40,6 +40,8 @@ export interface GeneratorPromptEditorHandle {
   syncDOM: (text: string, refs: { id: string; name: string; url?: string; type: string }[]) => void;
   /** 将指定素材对应的 badge 降级为纯文本 */
   downgradeReferenceToText: (ref: { id: string; name: string }) => string | null;
+  /** 标记引用是否仍关联：不删除 badge，只把失效的标成待关联（重新连入同一素材即自动恢复） */
+  markInvalidReferences: (validIds: string[]) => void;
   /** 提取输入框纯文本（badge span 转换为 @name） */
   getPlainText: () => string | null;
   /** 关闭 @ 弹层状态（外部面板自关时同步编辑器内部状态） */
@@ -113,6 +115,11 @@ export interface GeneratorPromptEditorProps {
   /** @ 弹窗背景色/边框色(不传时按 textColor 亮度自动推断;明暗主题下应由宿主传入主题色) */
   popupBackground?: string;
   popupBorderColor?: string;
+  /**
+   * 解析参考素材的缩略图/预览 URL（宿主注入，与「参考槽位缩略图」同一条 storageKey 链路）。
+   * 传了才会补齐 badge 缩略图与悬停大图预览；不传则只按 item.url 渲染。
+   */
+  resolvePreviewUrl?: (item: ReferenceItem) => Promise<string | null>;
 }
 
 /**
@@ -208,6 +215,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       onMentionPanelChange,
       popupBackground,
       popupBorderColor,
+      resolvePreviewUrl,
     },
     ref,
   ) {
@@ -215,6 +223,10 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
     const mentionPopupRef = useRef<HTMLDivElement>(null);
     const [mentionFilter, setMentionFilter] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
+    /** @ 块悬停大图预览（fixed + portal，与导演台编辑器同一交互：分镜能看到的缩略图/大图这里也要有） */
+    const [badgePreview, setBadgePreview] = useState<{ url: string; title: string; x: number; y: number } | null>(null);
+    const resolvePreviewRef = useRef(resolvePreviewUrl);
+    resolvePreviewRef.current = resolvePreviewUrl;
 
     // ref 缓存
     const promptTextRef = useRef('');
@@ -266,6 +278,70 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
     referencesRef.current = references;
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
+
+    /** 悬停 @ 块 → 弹出素材大图预览（2026-11-17 用户实测：分镜 @ 能看缩略图+大图，画布提示词只剩图标） */
+    const handleBadgeHover = useCallback((e: React.MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('[data-ref-id]') as HTMLElement | null;
+      if (!target) {
+        setBadgePreview(null);
+        return;
+      }
+      const id = target.getAttribute('data-ref-id') || '';
+      const item = referencesRef.current.find((r) => r.id === id);
+      if (!item || item.type === 'text' || item.type === 'script' || item.type === 'storyboard' || item.type === 'generator') {
+        setBadgePreview(null);
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      const base = { title: item.name, x: rect.left + rect.width / 2, y: rect.top };
+      if (item.url) {
+        setBadgePreview({ ...base, url: item.url });
+        return;
+      }
+      const resolver = resolvePreviewRef.current;
+      if (!resolver) {
+        setBadgePreview(null);
+        return;
+      }
+      void resolver(item)
+        .then((url) => { if (url) setBadgePreview({ ...base, url }); })
+        .catch(() => setBadgePreview(null));
+    }, []);
+
+    /** 补齐 badge 缩略图：引用只有 storageKey 时按同一条媒体档位链解析，替换掉图标 */
+    const hydrateBadgeThumbs = useCallback(() => {
+      const el = promptInputRef.current;
+      const resolver = resolvePreviewRef.current;
+      if (!el || !resolver) return;
+      el.querySelectorAll<HTMLElement>('span[data-ref-id]').forEach((badge) => {
+        if (badge.querySelector('img')) return;
+        const id = badge.getAttribute('data-ref-id') || '';
+        const item = referencesRef.current.find((r) => r.id === id);
+        if (!item || item.type !== 'image' && item.type !== 'video') return;
+        void resolver(item).then((url) => {
+          if (!url) return;
+          const live = promptInputRef.current;
+          if (!live) return;
+          const badgeNow = live.querySelector<HTMLElement>(`span[data-ref-id="${id}"]`);
+          if (!badgeNow || badgeNow.querySelector('img')) return;
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = 'width:15px;height:15px;border-radius:3px;object-fit:cover;vertical-align:middle;flex-shrink:0;';
+          // HTML 文档里内联 SVG 的 tagName 是小写 'svg'（不是 'SVG'），只能比较小写，
+          // 否则会走 insertBefore 分支 → 图标和缩略图同时出现（用户截图 2026-11-17）
+          const icons = Array.from(badgeNow.children).filter((c) => c.tagName.toLowerCase() === 'svg');
+          if (icons.length > 0) {
+            const iconSvg = icons[0]!;
+            iconSvg.replaceWith(img);
+            icons.slice(1).forEach((extra) => extra.remove());
+          } else if (!badgeNow.querySelector('img')) {
+            badgeNow.insertBefore(img, badgeNow.firstChild);
+          }
+        }).catch(() => { /* 解析失败保持图标 */ });
+      });
+    }, []);
     // 外部面板模式（ref 模式规避闭包过期）
     const onMentionPanelChangeRef = useRef(onMentionPanelChange);
     onMentionPanelChangeRef.current = onMentionPanelChange;
@@ -364,8 +440,10 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         const searchStr = mentionFilterRef.current;
         hideMentionPanel();
         insertContent(buildBadgeHtml(target), searchStr);
+        // 引用只有 storageKey 时补缩略图（buildBadgeHtml 只能同步拿到 url）
+        requestAnimationFrame(() => hydrateBadgeThumbs());
       },
-      [insertContent, hideMentionPanel],
+      [insertContent, hideMentionPanel, hydrateBadgeThumbs],
     );
 
     /** 全量同步 contentEditable 内容 */
@@ -393,6 +471,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         el.innerHTML = html;
         promptTextRef.current = text;
         onLengthChange?.(text.length);
+        requestAnimationFrame(() => hydrateBadgeThumbs());
         const sel = window.getSelection();
         if (sel) {
           const range = document.createRange();
@@ -402,7 +481,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           sel.addRange(range);
         }
       },
-      [onLengthChange],
+      [onLengthChange, hydrateBadgeThumbs],
     );
 
     /** 将指定素材对应的 badge 降级为纯文本 */
@@ -423,6 +502,26 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       },
       [onLengthChange],
     );
+
+    /**
+     * 引用失效时**不拆 badge**（2026-11-17 用户要求）：
+     * badge 是占位，槽位重新连入同一素材就自动恢复关联；真正发任务时失效引用不参与参考输入，
+     * 提示词里留下的 `@名称` 按文本传递（需要时用户可用 IDE 的 `@图片N` 占位写法）。
+     */
+    const markInvalidReferences = useCallback((validIds: string[]): void => {
+      const el = promptInputRef.current;
+      if (!el) return;
+      const valid = new Set(validIds);
+      el.querySelectorAll<HTMLElement>('span[data-ref-id]').forEach((badge) => {
+        const id = badge.getAttribute('data-ref-id') || '';
+        const invalid = !valid.has(id);
+        badge.classList.toggle('ref-pending', invalid);
+        badge.style.opacity = invalid ? '0.6' : '';
+        badge.style.textDecoration = invalid ? 'line-through' : '';
+        if (invalid) badge.title = '该引用当前未关联：重新连入同一素材后自动恢复，直接生成时按 @名称 文本传递';
+        else if (badge.title) badge.removeAttribute('title');
+      });
+    }, []);
 
     /** 提取输入框纯文本 */
     const getPlainText = useCallback((): string | null => {
@@ -462,10 +561,11 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         insertReference,
         syncDOM,
         downgradeReferenceToText,
+        markInvalidReferences,
         getPlainText,
         closeMentionPanel: hideMentionPanel,
       }),
-      [insertReference, syncDOM, downgradeReferenceToText, getPlainText, hideMentionPanel],
+      [insertReference, syncDOM, downgradeReferenceToText, markInvalidReferences, getPlainText, hideMentionPanel],
     );
 
     // 初始化内容
@@ -499,6 +599,13 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         missing.map((r) => ({ id: r.id, name: r.name, url: r.url, type: r.type })),
       );
     }, [references, readOnly, syncDOM]);
+
+    // references 就绪后补齐已存在的 badge 缩略图（重开面板时 url 可能尚未解析）
+    useEffect(() => {
+      if (readOnly) return;
+      const t = setTimeout(() => hydrateBadgeThumbs(), 0);
+      return () => clearTimeout(t);
+    }, [references, readOnly, hydrateBadgeThumbs]);
 
     // ref 缓存
     const ceStateRef = useRef({
@@ -538,6 +645,8 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           contentEditable={!readOnly}
           suppressContentEditableWarning
           onClick={handleBadgeClick}
+          onMouseOver={handleBadgeHover}
+          onMouseLeave={() => setBadgePreview(null)}
           onInput={(e: React.FormEvent<HTMLDivElement>) => {
             if (readOnly) return;
             const inputE = e.nativeEvent as InputEvent;
@@ -646,7 +755,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           }}
         />
       ),
-      [readOnly, fontSize, lh, textColor, minHeight, maxHeight, handleBadgeClick],
+      [readOnly, fontSize, lh, textColor, minHeight, maxHeight, handleBadgeClick, handleBadgeHover],
     );
 
     // 主题亮度判定(textColor 深 → 浅色主题 → 弹窗实心白;反之深色实心)
@@ -849,6 +958,40 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                   </button>
                 ))
               )}
+            </div>
+          </div>,
+          document.body,
+        )}
+
+        {/* @ 块悬停大图预览：与导演台编辑器同款（fixed + portal，不参与 contentEditable 布局） */}
+        {badgePreview && createPortal(
+          <div
+            data-badge-preview
+            style={{
+              position: 'fixed',
+              left: Math.max(8, badgePreview.x - 92),
+              top: Math.max(8, badgePreview.y - 178),
+              zIndex: 4000,
+              padding: 6,
+              borderRadius: 8,
+              background: mentionBg,
+              border: `1px solid ${mentionBorder}`,
+              boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
+              pointerEvents: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              color: textColor,
+            }}
+          >
+            <img
+              src={badgePreview.url}
+              alt={badgePreview.title}
+              draggable={false}
+              style={{ width: 184, height: 120, borderRadius: 6, objectFit: 'contain', background: thumbFallbackBg }}
+            />
+            <div style={{ fontSize: 11, maxWidth: 184, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {badgePreview.title}
             </div>
           </div>,
           document.body,

@@ -17,11 +17,17 @@ import { appendAssetRecord, assetsLibraryFile, type LibraryAsset } from "../stor
 import { mutateWorkbench, readWorkbench } from "../store/workbench.js";
 import { defTool, guardDryRunConfirm, type Ctx } from "./_register.js";
 import { hasContinuityPlan } from "../lib/continuity.js";
-import { GUIDE_FRAME_OPTIONS, VIDEO_ASPECT } from "../broker/params.js";
-import { cacheGuideFile } from "../broker/comfy.js";
+import { GUIDE_FRAME_OPTIONS, VIDEO_ASPECT, resolveVideoSize, snapGuide } from "../broker/params.js";
+import { durationToFrames } from "../lib/shot-prompt.js";
+import { resolveGuide } from "../broker/shot-cache.js";
+import { readStoryboard } from "../store/storyboard.js";
+import { readScript } from "../store/script.js";
+import { reviewProject, reviewSummaryText } from "../lib/shot-review.js";
+import { checkScriptReadiness, checkSubjectReadiness } from "../lib/readiness.js";
+import { submitPluginTask } from "../broker/plugin-client.js";
+import { cacheGuideFile, resolveComfyBase } from "../broker/comfy.js";
 import type { WorkbenchShot } from "../store/workbench.js";
 
-const COMFY_BASE = (): string => process.env.ZEROEXO_COMFY_BASE ?? "http://127.0.0.1:8188";
 const GUIDE_ID_RE = /^gd_[A-Za-z0-9_-]{4,64}$/;
 
 /** 从 ComfyUI 的 /view 下载云端产物（MCP 与云 ComfyUI 不在同一台机器时，不能直接读绝对路径） */
@@ -105,7 +111,7 @@ interface JobStatus {
   params?: Record<string, unknown>;
 }
 
-async function fetchJob(jobId: string, base = COMFY_BASE()): Promise<JobStatus> {
+async function fetchJob(jobId: string, base: string): Promise<JobStatus> {
   const res = await fetch(`${base}/zeroexo/v1/jobs/${encodeURIComponent(jobId)}`);
   if (!res.ok) throw new McpError("IO_ERROR", `作业查询失败 HTTP ${res.status}: ${jobId}`);
   return (await res.json()) as JobStatus;
@@ -122,6 +128,123 @@ async function cacheGuideFromCloud(base: string, guide: GuideInfo | null | undef
 async function exists(p: string | undefined): Promise<boolean> {
   if (!p) return false;
   try { await fs.stat(p); return true; } catch { return false; }
+}
+
+/** 导演台插件批次 payload：与网页 director-plugin-payload.ts 同口径（连续 run + 起始 guide + 段内 chain）。 */
+function boundaryEnabled(shots: WorkbenchShot[], index: number): boolean {
+  const shot = shots[index];
+  if (!shot || index <= 0) return false;
+  return shot.continuation ? shot.continuation.enabled === true : true;
+}
+
+function contiguousRuns(shots: WorkbenchShot[], selectedIds: readonly string[]): number[][] {
+  const selected = new Set(selectedIds);
+  const runs: number[][] = [];
+  let current: number[] = [];
+  for (let i = 0; i < shots.length; i += 1) {
+    const shot = shots[i]!;
+    if (!selected.has(shot.id)) {
+      if (current.length) runs.push(current);
+      current = [];
+      continue;
+    }
+    if (current.length === 0) {
+      current = [i];
+      continue;
+    }
+    const prev = current[current.length - 1]!;
+    if (prev === i - 1 && boundaryEnabled(shots, i) && !shot.guide?.id) {
+      current.push(i);
+    } else {
+      runs.push(current);
+      current = [i];
+    }
+  }
+  if (current.length) runs.push(current);
+  return runs;
+}
+
+function shotPrompt(shot: WorkbenchShot): string {
+  return (shot.imagePrompt || shot.videoPrompt || '').trim() || `第 ${shot.number} 段`;
+}
+
+function buildDirectorPluginPayload(args: {
+  projectId: string;
+  taskId: string;
+  shots: WorkbenchShot[];
+  selectedIds: readonly string[];
+  shared: Record<string, unknown>;
+}): {
+  payload: Record<string, unknown>;
+  plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }>;
+} {
+  const { projectId, taskId, shots, selectedIds, shared } = args;
+  const aspect = String(shared.aspect ?? "16:9");
+  const size = resolveVideoSize(aspect, Number(shared.scaleFactor ?? 1));
+  const num = (key: string, fallback: number): number => {
+    const n = Number(shared[key]);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const steps = num("steps", 8);
+  const cfg = num("cfg", 1);
+  const seed = num("seed", 0);
+  const guideFrames = snapGuide(shared.continuityOverlapFrames);
+  const segments: Array<Record<string, unknown>> = [];
+  const plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }> = [];
+
+  for (const run of contiguousRuns(shots, selectedIds)) {
+    const headIdx = run[0]!;
+    const head = shots[headIdx]!;
+    const resolved = head.guide?.id
+      ? { id: head.guide.id }
+      : boundaryEnabled(shots, headIdx)
+        ? resolveGuide(shots, headIdx)
+        : { id: "" };
+    const startGuide: { mode: "initial" | "chain" | "none"; id?: string } = resolved.id
+      ? { mode: "initial", id: resolved.id }
+      : { mode: "none" };
+    run.forEach((idx, k) => {
+      const shot = shots[idx]!;
+      const frames = durationToFrames(Number(shot.duration) || 5);
+      const guide = k === 0 ? startGuide : { mode: "chain" as const };
+      segments.push({
+        shotId: shot.id,
+        guide,
+        params: {
+          prompt: shotPrompt(shot),
+          negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ""),
+          width: size.width,
+          height: size.height,
+          frames,
+          steps,
+          cfg,
+          seed,
+          frame_rate: 24,
+          guide_frames: guideFrames,
+          live_tae_preview: true,
+          liveTaePreview: true,
+        },
+      });
+      plan.push({ shotId: shot.id, guide, frames, durationSec: Number((frames / 24).toFixed(3)) });
+    });
+  }
+
+  return {
+    payload: {
+      projectId,
+      clientJobId: taskId,
+      clientId: taskId,
+      kind: "director_run",
+      segments,
+    },
+    plan,
+  };
+}
+
+let directorTaskSeq = 0;
+function newDirectorTaskId(): string {
+  directorTaskSeq += 1;
+  return `tsk_mcp_${Date.now().toString(36)}_${directorTaskSeq.toString(36)}`;
 }
 
 export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
@@ -245,7 +368,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
   // ===== T3：触发生成（核心） =====
   defTool(server, ctx, {
     name: "request_director_run",
-    description: "导演台生成已下沉到 ComfyUI 插件：本工具不再提交/执行生成，只做延续法校验；请在网页发起运行，MCP 只查询插件任务状态。",
+    description: "提交导演台批次任务到 ComfyUI 插件：MCP 直接创建插件任务（任务表可被网页与 MCP 共同查询），按连续段提交，run 内 chain 续接；dryRun 先出段/帧/秒/guide 表，confirm 才提交。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -253,21 +376,57 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       baseUrl: z.string().optional(),
       dryRun: z.boolean().optional(),
       confirm: z.boolean().optional(),
+      userOverride: z.boolean().optional().describe("用户已看过质检结论并明确认可继续（用户权限高于质检门）"),
     },
     handler: async (args) => {
-      guardDryRunConfirm(args);
+      guardDryRunConfirm(args, { requireOne: true });
       const wb = await readWorkbench(dataRoot(), args.projectId);
       if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
-      const selectedIds = args.selectedIds?.length ? args.selectedIds : wb.shots.map((s) => s.id);
-      if (selectedIds.length === 0) throw new McpError("VALIDATION", "导演台没有片段");
-      if (args.dryRun) return { written: false, dryRun: true, projectId: args.projectId, selectedIds };
+      const allShots = wb.shots as unknown as WorkbenchShot[];
+      const requested = args.selectedIds?.length ? args.selectedIds : allShots.map((s) => s.id);
+      const selectedIds = requested.filter((id) => allShots.some((s) => s.id === id));
+      if (selectedIds.length === 0) throw new McpError("VALIDATION", "导演台没有可运行的片段");
+      // 质检门（2026-11-19 用户要求）：剧本未入库 / 主体缺图 / 提示词不合格 → 不许提交。
+      // 用户权力更高：明确认可后传 userOverride:true 放行，并把结论原样留痕。
+      if (!args.dryRun) {
+        const sb = await readStoryboard(dataRoot(), args.projectId);
+        const script = await readScript(dataRoot(), args.projectId);
+        const review = reviewProject(wb, sb, { scriptHasEpisodes: (script?.episodes ?? []).length > 0 });
+        const scriptReady = checkScriptReadiness(script);
+        const subjectReady = checkSubjectReadiness(sb, (wb?.shots ?? []) as never);
+        const readinessErrors = [
+          ...scriptReady.issues.filter((i) => i.level === "error"),
+          ...subjectReady.issues.filter((i) => i.level === "error"),
+        ];
+        const scoped = {
+          ...review,
+          shots: review.shots.filter((s) => selectedIds.includes(s.shotId)),
+        };
+        if (!args.userOverride && (!scriptReady.ready || !subjectReady.ready)) {
+          throw new McpError(
+            "PREFLIGHT_GATE_FAILED",
+            `前置门未过：\n${readinessErrors.map((i) => `  - ${i.message}（${i.fix ?? ""}）`).join("\n")}\n\n`
+            + "先把剧本定稿、把出镜主体补图；用户明确认可后传 userOverride:true。",
+          );
+        }
+        if (!scoped.ok && !args.userOverride) {
+          throw new McpError(
+            "QUALITY_GATE_FAILED",
+            `${reviewSummaryText(scoped)}\n\n先按 fix 修（set_shot_prompt / apply_shot_prompts / 补主体图），再 review_shots；`
+            + "若用户已看过并明确认为可以出片，带 userOverride:true 重试（用户权限高于质检门）。",
+          );
+        }
+        if (!scoped.ok && args.userOverride) {
+          const failed = scoped.shots.filter((s) => !s.pass);
+          console.warn(`[quality-gate] userOverride 放行 ${scoped.shots.length} 段，未过线 ${failed.length} 段（项目 ${args.projectId}）`);
+        }
+      }
       // 延续法准入（2026-11-11 用户事故；2026-11-15 改为批次模型）：
       // 只要求「做过延续法计划」。起始段没有缓存 guide 不算错误（首次生成第一段本来就没有），
       // 执行器会按 none 生成；run 内续接由插件批次内循环完成，不逐段发送 guide。
       const continuityOn = wb.sharedParams?.params?.continuityEnabled === true;
       if (continuityOn) {
-        const shots = wb.shots as unknown as WorkbenchShot[];
-        const selected = shots.filter((s) => selectedIds.includes(s.id));
+        const selected = allShots.filter((s) => selectedIds.includes(s.id));
         const unplanned = selected.filter((s) => !hasContinuityPlan(s as never));
         if (unplanned.length > 0) {
           throw new McpError(
@@ -277,18 +436,44 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           );
         }
       }
-      // 生成执行已下沉到 ComfyUI 插件；MCP 只保留项目操作与任务状态查询。
-      // 这里不再创建 MCP 任务（broker 已停用），避免提交后无人执行。
-      throw new McpError(
-        "VALIDATION",
-        "导演台生成已交给 ComfyUI 插件：请由网页发起运行；MCP 只负责查询插件任务状态（list_generation_tasks / get_generation_task）。",
-      );
+      const taskId = newDirectorTaskId();
+      const built = buildDirectorPluginPayload({
+        projectId: args.projectId,
+        taskId,
+        shots: allShots,
+        selectedIds,
+        shared: (wb.sharedParams?.params ?? {}) as Record<string, unknown>,
+      });
+      if (args.dryRun) {
+        return {
+          written: false,
+          dryRun: true,
+          projectId: args.projectId,
+          taskId,
+          selectedIds,
+          totalFrames: built.plan.reduce((sum, s) => sum + s.frames, 0),
+          segments: built.plan,
+        };
+      }
+      // 插件任务表是唯一事实源：网页刷新、MCP get_generation_task / cancel_generation_task 都读它。
+      const task = await submitPluginTask(built.payload, args.baseUrl);
+      return {
+        written: true,
+        projectId: args.projectId,
+        taskId: task.taskId,
+        state: task.state,
+        currentSegment: task.currentSegment ?? null,
+        doneCount: task.doneCount ?? 0,
+        totalCount: task.totalCount ?? built.plan.length,
+        segments: built.plan,
+        hint: "任务已提交到 ComfyUI 插件；用 get_generation_task / list_generation_tasks 查进度，用 cancel_generation_task 取消。",
+      };
     },
   });
 
   defTool(server, ctx, {
     name: "run_generation",
-    description: "已停用：导演台生成由 ComfyUI 插件执行，请在网页发起运行；MCP 只查询任务状态。",
+    description: "已停用：请改用 request_director_run（MCP 已支持直接提交导演台批次任务），本工具保留仅为兼容旧调用。",
     bits: ["workbench.write"],
     schema: {
       projectId: z.string(),
@@ -304,7 +489,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       if (!wb) throw new McpError("NOT_FOUND", `导演台不存在: ${args.projectId}`);
       throw new McpError(
         "VALIDATION",
-        "run_generation 已停用：导演台生成由 ComfyUI 插件执行，请由网页发起运行。",
+        "run_generation 已停用：请改用 request_director_run（MCP 已支持直接提交导演台批次任务）。",
       );
     },
   });
@@ -314,7 +499,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
     description: "查询单个 ComfyUI 作业状态（state/outputs/guide/guideSource/guideInPath/error）。",
     bits: ["workbench.read"],
     schema: { jobId: z.string(), baseUrl: z.string().optional() },
-    handler: async (args) => fetchJob(args.jobId, args.baseUrl ?? COMFY_BASE()),
+    handler: async (args) => fetchJob(args.jobId, await resolveComfyBase(args.baseUrl)),
   });
 
   defTool(server, ctx, {
@@ -323,7 +508,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
     bits: ["workbench.read"],
     schema: { jobIds: z.array(z.string()), baseUrl: z.string().optional() },
     handler: async (args) => {
-      const base = args.baseUrl ?? COMFY_BASE();
+      const base = await resolveComfyBase(args.baseUrl);
       const jobs = await Promise.all(args.jobIds.map(async (jobId) => {
         try { return { jobId, ...(await fetchJob(jobId, base)) }; }
         catch (err) { return { jobId, state: "error", error: err instanceof Error ? err.message : String(err) }; }
@@ -350,7 +535,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
     handler: async (args) => {
       guardDryRunConfirm(args);
       const root = dataRoot();
-      const base = args.baseUrl ?? COMFY_BASE();
+      const base = await resolveComfyBase(args.baseUrl);
       interface SyncRow {
         jobId: string; shotId: string; skipped?: boolean; state?: string;
         error?: string | null; videoPath?: string; storageKey?: string;
@@ -571,7 +756,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       baseUrl: z.string().optional(),
     },
     handler: async (args) => {
-      const base = args.baseUrl ?? COMFY_BASE();
+      const base = await resolveComfyBase(args.baseUrl);
       const checks: Array<Record<string, unknown>> = [];
       for (const jobId of args.jobIds) {
         let j: JobStatus;

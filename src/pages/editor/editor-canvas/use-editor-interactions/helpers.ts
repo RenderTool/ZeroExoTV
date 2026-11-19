@@ -7,11 +7,55 @@
 
 import type { NodeRecord } from '@zeroexo/core';
 import { resolveNodeSize } from '@zeroexo/core';
-import { resolveContentUrl } from '@zeroexo/plugin-nodes';
+import { resolveContentUrl, IMAGE_FIT_BOX, fitMediaSize } from '@zeroexo/plugin-nodes';
 import { getMediaBlob } from '@/platform/media.js';
 import { fetchGuideBlob } from '@/shared/utils/guide-file.js';
 import { downloadFilesAsZip } from '@/features/asset-picker/services/download-asset.js';
 import { serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
+
+// 画布提示词面板常见的比例档位 → 宽/高比值（与参数面板同一张表）
+const IMAGE_ASPECT_RATIO: Record<string, number> = {
+  '1:1': 1, '4:3': 4 / 3, '3:4': 3 / 4, '16:9': 16 / 9, '9:16': 9 / 16,
+  '2:3': 2 / 3, '3:2': 3 / 2, '21:9': 21 / 9, '3:2 ': 3 / 2,
+};
+
+/**
+ * 参数面板的 size / aspect → 真正提交给生成器的像素尺寸。
+ * 2026-11-17 用户实测：面板选 1:1，出图仍是宽的 —— 本地链路此前只读 nodeData.width/height（旧值），
+ * 参数面板里的选择根本没进请求。规则：size（如 "1024x1024"）优先，其次 aspect 比例（1024 基准、16 对齐）。
+ */
+export function resolveRequestedImageSize(
+  pv: Record<string, unknown> | undefined,
+  fallback?: { width: number; height: number },
+): { width: number; height: number } {
+  // 参数面板（Qwen/Moss/Krea2）改尺寸时写的是数值 width/height；
+  // 历史上还残留过 size:"1024x768" 字符串，若优先读它，用户重新选 9:16 也会按旧值出 4:3。
+  // 因此数值尺寸先行，size 字符串只作为没有数值时的兜底。
+  const pw = Number(pv?.width);
+  const ph = Number(pv?.height);
+  if (Number.isFinite(pw) && Number.isFinite(ph) && pw > 0 && ph > 0) return { width: pw, height: ph };
+  const sizeStr = typeof pv?.size === 'string' ? pv.size : '';
+  const matched = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(sizeStr);
+  if (matched) {
+    const w = Number(matched[1]);
+    const h = Number(matched[2]);
+    if (w > 0 && h > 0) return { width: w, height: h };
+  }
+  const aspect = typeof pv?.aspect === 'string' ? pv.aspect.trim() : '';
+  const ratio = aspect ? IMAGE_ASPECT_RATIO[aspect] : undefined;
+  if (ratio) {
+    const align = (n: number): number => Math.max(64, Math.round(n / 16) * 16);
+    // 参数面板还可选「百万像素」档（2 = 约 200 万像素）：按比例换算长边，缺省 1024
+    const mp = Number(pv?.megapixels);
+    const pixels = Number.isFinite(mp) && mp > 0 ? mp * 1_048_576 : 1024 * 1024;
+    const longSide = align(Math.sqrt(pixels * Math.max(1, ratio)));
+    return ratio >= 1
+      ? { width: longSide, height: align(longSide / ratio) }
+      : { width: align(longSide * ratio), height: longSide };
+  }
+  if (fallback?.width && fallback?.height) return { width: fallback.width, height: fallback.height };
+  return { width: 1024, height: 1024 };
+}
 
 // ===== 反推提示词预设 =====
 export const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
@@ -58,22 +102,12 @@ export function fitImageNodeSize(
   currentWidth: number,
   naturalWidth: number,
   naturalHeight: number,
-  maxLong = 320,
+  _maxLong = 0,
   minShort = 120,
 ): { width: number; height: number } {
   if (!naturalWidth || !naturalHeight) return { width: currentWidth, height: currentWidth };
-  const ratio = naturalHeight / naturalWidth;
-  let width = Math.min(maxLong, Math.max(minShort, Math.round(currentWidth)));
-  let height = Math.round(width * ratio);
-  if (height > maxLong) {
-    height = maxLong;
-    width = Math.round(maxLong / ratio);
-  }
-  if (height < minShort) {
-    height = minShort;
-    width = Math.round(minShort / ratio);
-  }
-  return { width: Math.max(1, width), height: Math.max(1, height) };
+  // 统一规则（2026-11-18）：等比装进 620×348 展示框，与空节点/拖入/替换/发送完全同一尺寸。
+  return fitMediaSize(naturalWidth, naturalHeight, IMAGE_FIT_BOX, minShort);
 }
 
 /** 下载单个节点内容（withGuide=true 时附带本机 H3 引导数据 .safetensors） */export async function downloadNodeAsFile(
@@ -180,14 +214,21 @@ export function storyboardColumnAnchor(
 export async function contentToDataUrl(content: string): Promise<string> {
   if (content.startsWith('data:')) return content;
   if (content.startsWith('blob:')) {
-    const res = await fetch(content);
-    const blob = await res.blob();
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    // blob: 地址刷新/被回收后会失效，fetch 直接抛 TypeError: Failed to fetch。
+    // 参考图转换失败只能返回空串（上层退回 storageKey），绝不能把整次生成打断。
+    try {
+      const res = await fetch(content);
+      if (!res.ok) return '';
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return '';
+    }
   }
   return content;
 }

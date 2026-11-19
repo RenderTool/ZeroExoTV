@@ -419,7 +419,7 @@ def execute_director_plan_core(
     cfg: float = 1.0,
     seed: int = 0,
     steps: int = 25,
-    sampler: str = "res_multistep",
+    sampler: str = "euler",
     scheduler: str = "simple",
     sigmas=None,
     shift_video: float = 12.0,

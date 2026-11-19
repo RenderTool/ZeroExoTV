@@ -27,6 +27,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   modelOptions,
   paramValues,
   hasImageReference = false,
+  imageReferenceCount = 0,
   isRunning,
   hasText,
   textLength = 0,
@@ -39,6 +40,7 @@ export const DockFooterBar = memo(function DockFooterBar({
   mentionRequired,
   dropUp = false,
   hideModelSelect = false,
+  imageFallbackSize,
   trailing,
 }: {
   nodeId: string;
@@ -47,6 +49,10 @@ export const DockFooterBar = memo(function DockFooterBar({
   modelOptions: StyledSelectOption[];
   paramValues: Record<string, any>;
   hasImageReference?: boolean;
+  /** 有效输入图数量（多图参考生成时不能提供「原图」选项） */
+  imageReferenceCount?: number;
+  /** 节点已有产物时的真实宽高：无显式尺寸时面板与出图都按它回退（节点框尺寸不参与生图） */
+  imageFallbackSize?: { width: number; height: number };
   isRunning: boolean;
   hasText: boolean;
   textLength?: number;
@@ -111,7 +117,7 @@ export const DockFooterBar = memo(function DockFooterBar({
         mode === 'video' && model === LOCAL_VIDEO_MODEL_KEY ? (
           <LocalH3ParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} />
         ) : mode === 'image' && model === LOCAL_IMAGE_MODEL_KEY ? (
-          <LocalQwenParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} hasReference={hasImageReference} />
+          <LocalQwenParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} hasReference={hasImageReference} referenceCount={imageReferenceCount} fallbackSize={imageFallbackSize} />
         ) : mode === 'image' && model === KREA2_MODEL_KEY ? (
           <Krea2ParamForm paramValues={paramValues} onChange={(patch) => onParamValuesChange(patch)} theme={theme} />
         ) : mode === 'image' && model === MOSS_MODEL_KEY ? (

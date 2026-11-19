@@ -301,20 +301,20 @@ def _segment_identity_fingerprint(seg: SegmentPlan, plan: DirectorPlan) -> dict[
         "continuity_overlap": plan.continuity_overlap_frames if plan.continuity_enabled else 0,
         "continuity_from_prev": bool(getattr(seg, "continuity_from_prev", True)),
         "continuity_mode": (
-            str(getattr(plan, "continuity_mode", "guide") or "guide")
+            str(getattr(plan, "continuity_mode", "continue") or "continue")
             if plan.continuity_enabled
             else "off"
         ),
         "continuity_redraw": (
             round(clamp_seam_min_mask(getattr(plan, "continuity_redraw", 0.10)), 2)
             if plan.continuity_enabled
-            and str(getattr(plan, "continuity_mode", "guide") or "guide") == "continue"
+            and str(getattr(plan, "continuity_mode", "continue") or "continue") == "continue"
             else 0
         ),
         "continuity_pipeline": (
             CONTINUE_PIPELINE_ID
             if plan.continuity_enabled
-            and str(getattr(plan, "continuity_mode", "guide") or "guide") == "continue"
+            and str(getattr(plan, "continuity_mode", "continue") or "continue") == "continue"
             else CONTINUITY_PIPELINE_ID
         ),
     }

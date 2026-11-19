@@ -4,7 +4,7 @@
  * 与视频节点共用同一套参数面板语言（SettingGroup + AspectRatioPicker + 25px 输入行），
  * 但保留图片自己的语义：跟随原图 / 2K 尺寸 / 优化提示词 / 透明背景 / 步数/贴合度/修改幅度/种子。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { InputNumber } from 'antd';
 import { ChevronDown, ChevronRight, Expand, Image as ImageIcon, Scan } from 'lucide-react';
@@ -49,19 +49,51 @@ export function LocalQwenParamForm({
   onChange,
   theme,
   hasReference = false,
+  referenceCount = 0,
+  fallbackSize,
 }: {
   paramValues: Record<string, any>;
   onChange: (patch: Record<string, any>) => void;
   theme: ThemeConfig;
   hasReference?: boolean;
+  /** 有效输入图数量：多图 = 多图参考生成，不允许「原图」；只有恰好 1 张才允许跟随原图 */
+  referenceCount?: number;
+  /**
+   * 没有显式尺寸时的回退：有产物用产物真实宽高，没有产物用 4:3(1024×768)。
+   * 2026-11-18：节点框尺寸只用于展示，禁止再拿它当出图尺寸（曾把 348×348 的展示框夹成 352×352 提交）。
+   */
+  fallbackSize?: { width: number; height: number };
 }): React.ReactElement {
   const { t } = useTranslation();
   const storedMode = typeof paramValues.sizeMode === 'string' ? paramValues.sizeMode : '';
-  const sourceMode = hasReference && (storedMode === 'source' || !storedMode);
-  const fallback = sizeForRatio('4:3', '1k');
-  const clamped = clampQwenSize(Number(paramValues.width ?? fallback.width), Number(paramValues.height ?? fallback.height));
+  // 多图输入 = 多图参考生成，不存在「原图比例」；只有恰好一张输入图时，才允许跟随原图做编辑。
+  const canUseSource = hasReference && referenceCount === 1;
+  // 参考图只做生成引导，不参与出图尺寸（2026-11-17 用户纠正）：有参考图也不再默认「原图」，
+  // 必须由用户显式选择「原图」时才跟随原图尺寸。
+  const sourceMode = canUseSource && storedMode === 'source';
+  const defaultSize = sizeForRatio('4:3', '1k');
+  const fallback = fallbackSize && fallbackSize.width > 0 && fallbackSize.height > 0
+    ? clampQwenSize(fallbackSize.width, fallbackSize.height)
+    : defaultSize;
+  const storedSize = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(typeof paramValues.size === 'string' ? paramValues.size : '');
+  const storedW = storedSize ? Number(storedSize[1]) : 0;
+  const storedH = storedSize ? Number(storedSize[2]) : 0;
+  const baseW = Number(paramValues.width) > 0 ? Number(paramValues.width) : storedW > 0 ? storedW : fallback.width;
+  const baseH = Number(paramValues.height) > 0 ? Number(paramValues.height) : storedH > 0 ? storedH : fallback.height;
+  const clamped = clampQwenSize(baseW, baseH);
   const width = clamped.width;
   const height = clamped.height;
+  // 面板上看到什么，生成就必须用什么：没有显式尺寸时把回退值写回节点，
+  // 否则「显示 4:3」只是 UI 假象，提交仍会落到节点框尺寸。
+  useEffect(() => {
+    if (sourceMode) return;
+    if (Number(paramValues.width) > 0 && Number(paramValues.height) > 0) return;
+    const w = storedW > 0 ? storedW : fallback.width;
+    const h = storedH > 0 ? storedH : fallback.height;
+    onChange({ sizeMode: 'custom', width: w, height: h, size: `${w}x${h}` });
+    // 只在首次拿到无显式参数时补一次；后续由用户操作驱动
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const steps = Number(paramValues.steps ?? QWEN_DEFAULT_STEPS);
   const cfg = Number(paramValues.cfg ?? 1);
   const denoise = Number(paramValues.denoise ?? 1);
@@ -90,16 +122,23 @@ export function LocalQwenParamForm({
   const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 } as const;
   const inputStyle = { width: 120, height: 25 } as const;
 
+  // 每次改尺寸都把 width/height/size 三个字段一起写全：
+  // 提交链路里 size("1024x768") 优先级最高，只写 width/height 会留下旧的 size 字符串，
+  // 表现就是「面板明明选了 9:16，出图还是 4:3」。
+  const emitSize = (w: number, h: number): void => {
+    onChange({ sizeMode: 'custom', width: w, height: h, size: `${w}x${h}` });
+  };
+
   const pickQuality = (quality: '1k' | '2k'): void => {
     const ratioKey = selectedAspect || nearestAspect;
     const size = sizeForRatio(ratioKey, quality);
-    onChange({ sizeMode: 'custom', ...size });
+    emitSize(size.width, size.height);
   };
 
   const pickSize = (key: string): void => {
     const quality = activeQuality === '2k' ? '2k' : '1k';
     const size = sizeForRatio(key, quality);
-    onChange({ sizeMode: 'custom', ...size });
+    emitSize(size.width, size.height);
   };
 
   return (
@@ -116,7 +155,7 @@ export function LocalQwenParamForm({
             <span style={labelStyle}>{t('nodeDock.qwenQuality', '尺寸档位')}</span>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
               {([
-                { key: 'source', label: t('nodeDock.qwenSource', '原图'), icon: <ImageIcon size={16} />, disabled: !hasReference },
+                { key: 'source', label: t('nodeDock.qwenSource', '原图'), icon: <ImageIcon size={16} />, disabled: !canUseSource },
                 { key: '1k', label: '1K', icon: <Scan size={16} />, disabled: false },
                 { key: '2k', label: '2K', icon: <Expand size={16} />, disabled: false },
               ] as const).map((item) => {
@@ -189,7 +228,7 @@ export function LocalQwenParamForm({
                 onChange={(v) => {
                   if (typeof v === 'number' && Number.isFinite(v)) {
                     const next = clampQwenSize(v, height);
-                    onChange({ sizeMode: 'custom', ...next });
+                    emitSize(next.width, next.height);
                   }
                 }}
                 className="director-input-number"
@@ -206,7 +245,7 @@ export function LocalQwenParamForm({
                 onChange={(v) => {
                   if (typeof v === 'number' && Number.isFinite(v)) {
                     const next = clampQwenSize(width, v);
-                    onChange({ sizeMode: 'custom', ...next });
+                    emitSize(next.width, next.height);
                   }
                 }}
                 className="director-input-number"

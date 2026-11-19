@@ -22,8 +22,32 @@
 import localforage from 'localforage';
 import { FS_DRIVER, registerFsDriver } from './disk-driver.js';
 import { MEMORY_DRIVER, registerMemoryDriver } from './memory-driver.js';
-import { isAuthorized, writeRaw, readRaw } from './fs.js';
+import { isAuthorized, writeRaw, readRaw, ensureDir } from './fs.js';
 import { probeHttpFs } from './http-fs.js';
+
+/** 数据根标准目录（2026-11-16 空目录冷启动契约：只建不删，幂等）
+ *  projects/<pid>、assets/<pid> 由建项目时按需展开，这里只保证顶层存在。 */
+const DATA_ROOT_DIRS = [
+  '.lf/zeroexo/app_state',
+  '.lf/zeroexo/app_meta',
+  'entities',
+  'media/cas',
+  'media/guides',
+  'projects',
+  'assets',
+  'cache',
+] as const;
+
+async function bootstrapDataRoot(): Promise<void> {
+  if (!(await isAuthorized().catch(() => false))) return;
+  for (const dir of DATA_ROOT_DIRS) {
+    try {
+      await ensureDir(dir);
+    } catch (err) {
+      console.warn(`[boot] 创建数据目录失败：${dir}`, err);
+    }
+  }
+}
 
 /** 迁移器用的旁路标记：强制不注入磁盘驱动（源实例只用 IndexedDB 读旧数据） */
 const FORCE_NO_FS = Symbol.for('zeroexo.forceNoFs');
@@ -92,6 +116,11 @@ export const bootReady: Promise<void> = (async () => {
   }
   await memoryDriverReady;
   await fsDriverReady;
+  try {
+    await bootstrapDataRoot();
+  } catch {
+    /* 目录创建失败不阻断启动，错误在上层 UI 可见 */
+  }
   try {
     await ensureRootMarker();
   } catch {

@@ -140,6 +140,8 @@ export function ThumbImage({
       : `${kindLabel}源未就绪（storageKey 未解析到文件）`;
   const failed = hardFailed || media.failed;
   const mediaUnresolved = kind !== 'image' && (!src || failed);
+  // 64px 小格里只显示「视频不可用」；完整可操作原因放 title，避免一长串文字把格子撑爆。
+  const shortUnresolvedReason = media.failed ? `${kindLabel}不可用` : unresolvedReason;
   return (
     <span
       data-thumb={storageKey ?? url}
@@ -159,6 +161,9 @@ export function ThumbImage({
             loop
             playsInline
             preload="metadata"
+            // 2026-11-19 用户要求：缩略/预览视频不要出现浏览器原生「画中画」按钮
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback"
             autoPlay={playable}
             onError={() => {
               if (storageKey) media.markError();
@@ -191,7 +196,7 @@ export function ThumbImage({
       ) : mediaUnresolved ? (
         <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '0 6px', textAlign: 'center' }}>
           {icon}
-          <span style={{ fontSize: 10, lineHeight: '13px', opacity: 0.75 }}>{unresolvedReason}</span>
+          <span style={{ fontSize: 10, lineHeight: '13px', opacity: 0.75 }}>{shortUnresolvedReason}</span>
         </span>
       ) : icon}
     </span>

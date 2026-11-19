@@ -84,7 +84,7 @@ export const DIRECTOR_SHARED_DEFAULTS: Record<string, unknown> = {
   ref_max_size: 864,
   total_frames: 124,
   steps: 8,
-  sampler: "res_multistep",
+  sampler: "euler",
   scheduler: "simple",
   shift_video: 12.0,
   shift_audio: 3.0,

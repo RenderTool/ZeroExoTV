@@ -1,9 +1,9 @@
 {
-  "version": "0.3.89",
+  "version": "0.3.96",
   "files": [
     {
       "path": "__init__.py",
-      "sha256": "b88ff4d92663dd0d8cd2bade513b417ac6cb5704a27bf222436c6dfc13f15149"
+      "sha256": "2d90c65ce0182171ffa84e398deff4f2a9214439956f2f417d3ee9584b1964c2"
     },
     {
       "path": "bridge/__init__.py",
@@ -23,7 +23,7 @@
     },
     {
       "path": "bridge/graph_build.py",
-      "sha256": "526530c4567acc919ac4dafa91fdb5e84d008ebbc6177bc18c2bda888b36b8ff"
+      "sha256": "6a12625350658776a9710088d268346564087c68e22f647e967664095bb8dfbc"
     },
     {
       "path": "bridge/jobs.py",
@@ -55,7 +55,7 @@
     },
     {
       "path": "engine/executor_core.py",
-      "sha256": "ab3aa695ec2d28ec5b59444b270682dce07afc8a23acf790d691354d003febb3"
+      "sha256": "8a00ace8e406317082cda385822a0fafcae22d3317cfe07d39fe32cb0520a3d5"
     },
     {
       "path": "engine/external_groups.py",
@@ -131,7 +131,7 @@
     },
     {
       "path": "engine/plan.py",
-      "sha256": "559b5948d4ebb938fddefe0d76589aabbf6e70989666d89f27774c12e613b73c"
+      "sha256": "55d5301a1901d284dde0cc7b4013b244705b3370ab0f118b70a11e4e32b0c269"
     },
     {
       "path": "engine/preview_encoder.py",
@@ -167,11 +167,11 @@
     },
     {
       "path": "engine/segment_cache.py",
-      "sha256": "8cde494c0bcd04f3e8a44ec754c4772928098ba1abb9d1924815e68de494a724"
+      "sha256": "44f9eb3a1883c7dc1fa66a69d34d0f3a170d3fed92745568ad62b20fe85cfa33"
     },
     {
       "path": "engine/segment_continuity.py",
-      "sha256": "4fe6be7bd251edbe2211f94ab90b7716348fd78c58b6441853657d2c052053f2"
+      "sha256": "d0bab97203764d83ecb5cdcfa8ac785868d799ae3ca5852a2b80a1ff93b2d082"
     },
     {
       "path": "engine/segment_loras.py",
@@ -307,7 +307,7 @@
     },
     {
       "path": "ref_video.py",
-      "sha256": "5aae5f00178cd2cadf1f8d6a7d9dc6606f6a6a65c4dd0978d07e7740b66175ce"
+      "sha256": "e2b89102b63596b6b83cf0c643ed4f6cbd95744b66df9110bed4cca7b1121cde"
     },
     {
       "path": "self_update.py",
@@ -315,7 +315,7 @@
     },
     {
       "path": "task_store.py",
-      "sha256": "028758a8ff5b46e13e6d5f0935246856e774a2c16213ff4a843e5a6b2559d1eb"
+      "sha256": "9194be991feb612ec7c37247b04a718ff27f511040202c1d9c9a4f8e3dd9d68c"
     },
     {
       "path": "templates/krea2_t2i.json",

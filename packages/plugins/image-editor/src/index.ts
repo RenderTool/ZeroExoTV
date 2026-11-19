@@ -38,9 +38,12 @@ export {
 export {
   cropDataUrl,
   splitDataUrl,
+  splitCells,
   upscaleDataUrl,
   resolveUpscaleSize,
 } from './utils/image-ops.js';
+
+export { detectSeamBreaks } from './utils/seam-detect.js';
 
 export { readImageMeta, loadImage } from './utils/image-meta.js';
 

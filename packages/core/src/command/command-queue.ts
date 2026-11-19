@@ -27,6 +27,12 @@ export class CommandQueue {
   private eventBus: EventBus;
   /** 合并策略列表(按注册顺序尝试,第一个返回非 null 的生效) */
   private mergeStrategies: MergeStrategy[] = [];
+  /**
+   * 只读锁（2026-11-18）：历史生成链路这类只读画布上，
+   * 只允许无破坏性的命令（拖动位置、拖角改尺寸、图片尺寸纠偏），
+   * 增删节点/连线、粘贴等一律丢弃。写在队列层，任何 UI 入口都绕不过去。
+   */
+  private readOnly = false;
 
   constructor(state: GraphModel, eventBus: EventBus, capacity = 50) {
     this.state = state;
@@ -34,7 +40,34 @@ export class CommandQueue {
     this.capacity = capacity;
   }
 
+  /** 开关只读锁（画布文档切换时由宿主设置） */
+  setReadOnly(value: boolean): void {
+    this.readOnly = value;
+  }
+
+  private static readonly READONLY_SAFE = new Set([
+    'MoveNodeCommand',
+    'MoveNodesCommand',
+    'ResizeNodeCommand',
+    'UpdateNodeDataCommand',
+  ]);
+
+  private isAllowedInReadOnly(command: Command): boolean {
+    if (!this.readOnly) return true;
+    const name = command.constructor?.name ?? '';
+    if (CommandQueue.READONLY_SAFE.has(name)) return true;
+    if (name === 'BatchCommand') {
+      const inner = (command as unknown as { commands?: Command[] }).commands ?? [];
+      return inner.every((c) => CommandQueue.READONLY_SAFE.has(c?.constructor?.name ?? ''));
+    }
+    return false;
+  }
+
   execute(command: Command): void {
+    if (!this.isAllowedInReadOnly(command)) {
+      console.warn('[readonly-canvas] 已拦下写操作:', command?.id ?? 'unknown');
+      return;
+    }
     const context: CommandContext = { eventBus: this.eventBus };
     // 合并策略: 先撤销 prev 恢复到合并前状态,再执行合并命令
     // 避免 prev delta 被双重应用。
@@ -68,6 +101,7 @@ export class CommandQueue {
   }
 
   undo(): void {
+    if (this.readOnly) return;
     const command = this.past.pop();
     if (command) {
       const context: CommandContext = { eventBus: this.eventBus };
@@ -78,6 +112,7 @@ export class CommandQueue {
   }
 
   redo(): void {
+    if (this.readOnly) return;
     const command = this.future.pop();
     if (command) {
       const context: CommandContext = { eventBus: this.eventBus };

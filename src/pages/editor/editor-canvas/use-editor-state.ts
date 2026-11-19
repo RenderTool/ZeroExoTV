@@ -28,6 +28,9 @@ import type { CanvasGraphPayload } from '@/shared/hooks/use-doc-sync.js';
 import { useEditorSync } from './use-editor-sync.js';
 import { useEditorCollab } from './use-editor-collab.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
+import { listDeletedKeys } from '@/entities/deleted-asset-tombstones.js';
+import { pathForStorageKey, stat } from '@/platform/fs.js';
+import { saveCanvasSnapshot } from '@/platform/history-snapshots.js';
 import { createColorCardExtension } from '@/features/canvas-nodes/color-card/color-card-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
 import { setCurrentCanvasId } from '@/shared/current-canvas-id.js';
@@ -226,6 +229,14 @@ export function useEditorState(canvasId: string): {
 
     // 设置项目 ID(per-project graph 存储:key = zeroexo:graph:{canvasId})
     ed.plugins.persistence?.setProjectId(canvasId);
+    // 2026-11-18 数据安全：主 graph 只在「当前文档 = 主画布」时才允许写盘。
+    // 子画布/链路画布切过来时内容不得回写主键——否则用户整套节点会被那份副本覆盖。
+    ed.plugins.persistence?.setShouldPersist?.(() => getCurrentCanvasDocId() === MAIN_CANVAS_DOC_ID);
+    // 2026-11-19 数据安全：主画布每次写盘成功后再落一份磁盘历史版本（空图不落/签名去重/轮转），
+    // 这样即使某个页面实例写出旧图，用户的成果也能从 history/ 里回滚。
+    ed.plugins.persistence?.setSnapshotHook?.((graph, pid) => {
+      if (pid) void saveCanvasSnapshot(pid, graph).catch(() => undefined);
+    });
     // Plan#69: 注入当前画布 ID 供直连 /ai/generate 的模块归属产出历史
     setCurrentCanvasId(canvasId);
     // 2026-11-04 剧本实体化：剧本唯一事实源 = projects/<id>/entities/script.json，
@@ -387,6 +398,51 @@ export function useEditorState(canvasId: string): {
         if (!isMountedRef.current) return;
 
         isInitialized = true;
+
+        // 僵尸节点清理（2026-11-17 用户要求）：素材被删除后，画布上引用它的媒体节点
+        // 只剩一个空黑框，刷新也不会消失。按墓碑内容键在加载后一次性摘掉这些节点，
+        // 并顺带删除它们的连线（RemoveNodeCommand 自带邻边清理）。
+        void (async () => {
+          try {
+            const deletedKeys = await listDeletedKeys();
+            if (!isMountedRef.current) return;
+            // 安全阀：先确认数据目录可读（CAS 文件是否在盘只有真读一次才知道）。
+            // 读不到盘就整轮跳过，绝不把「读不到」当成「文件已删」批量清节点。
+            const probe = await stat('entities/storyboard.json').catch(() => null);
+            if (!probe) return;
+            const graph = store.getGraph();
+            const candidates = (graph.nodes as Array<{ id: string; type: string; data?: Record<string, unknown> }>)
+              .filter((n) => {
+                const data = n.data ?? {};
+                const key = typeof data.storageKey === 'string' ? data.storageKey : '';
+                if (key && deletedKeys.has(key)) return true;
+                // 无内容键、只剩 blob: 直链的媒体节点：刷新后 blob 已失效 → 永久空黑框
+                const rawUrl = typeof data.content === 'string' ? data.content : typeof data.url === 'string' ? data.url : '';
+                return !key && rawUrl.startsWith('blob:');
+              });
+            // 墓碑/清空规则之外，再按物理文件核对一次（2026-11-17 用户实测：
+            // 被删素材的文件早就不在 CAS，节点仍以空黑框/旧缩略图留在画布与 @ 面板里）
+            const deadByFile: typeof candidates = [];
+            for (const n of graph.nodes as Array<{ id: string; type: string; data?: Record<string, unknown> }>) {
+              if (candidates.some((c) => c.id === n.id)) continue;
+              const key = typeof n.data?.storageKey === 'string' ? n.data.storageKey : '';
+              if (!key.startsWith('cas:')) continue;
+              const p = pathForStorageKey(key);
+              if (!p) continue;
+              const s = await stat(p).catch(() => null);
+              if (!s) deadByFile.push(n);
+            }
+            const deadNodes = [...candidates, ...deadByFile];
+            if (!deadNodes.length) return;
+            commandQueue.execute(new BatchCommand(
+              deadNodes.map((n) => new RemoveNodeCommand(n.id)),
+              'sweep-deleted-media-nodes',
+            ));
+            console.info(`[editor] 已清理 ${deadNodes.length} 个失效素材的画布节点`);
+          } catch (err) {
+            console.warn('[editor] 清理失效素材节点失败:', err);
+          }
+        })();
 
         // 自动聚焦
         // Plan#79 T6：**有视口记录则直接还原**，不再无条件 fit-to-view（问题：刷新后视角被拉远）。
@@ -1032,6 +1088,18 @@ export function useEditorState(canvasId: string): {
           toRemove.add(did);
         }
       }
+      // 生成中的节点可以移动，但不能删除：任务还在跑，删节点会断开任务归属并丢结果。
+      const runningIds = new Set(
+        scene
+          .filter((n) => ((n.data ?? {}) as Record<string, unknown>).status === 'loading')
+          .map((n) => n.id),
+      );
+      const blockedIds = [...toRemove].filter((id) => runningIds.has(id));
+      if (blockedIds.length > 0) {
+        message.warning(t('editor.runningNodeCannotDelete', '生成中的节点不能删除（可移动）'));
+        return;
+      }
+      if (toRemove.size === 0) return;
       const removedNodes = scene.filter((n) => toRemove.has(n.id));
       const removedKeys = collectImageStorageKeys(removedNodes);
       const removedMediaKeys = collectVideoAudioStorageKeys(removedNodes);
@@ -1056,6 +1124,10 @@ export function useEditorState(canvasId: string): {
       const groupCtrl = editor.plugins.group?.getController();
       const scene = groupCtrl?.getScene() ?? editor.store.getGraph().nodes;
       if (scene.length === 0) return;
+      if (scene.some((n) => ((n.data ?? {}) as Record<string, unknown>).status === 'loading')) {
+        message.warning(t('editor.runningNodeCannotDelete', '生成中的节点不能删除（可移动）'));
+        return;
+      }
       const removedKeys = collectImageStorageKeys(scene);
       const removedMediaKeys = collectVideoAudioStorageKeys(scene);
       if (groupCtrl) {
@@ -1156,9 +1228,9 @@ export function useEditorState(canvasId: string): {
     return () => { if (timer) clearTimeout(timer); unsub(); };
   }, [state.editor?.store, canvasId]);
 
-  /** 每个画布一个视口键 */
+  /** 每个画布文档一个视口键（同一项目的主画布 / 副本 / 临时链路画布互不串视角） */
   function viewportStorageKey(id: string): string {
-    return `zeroexo:canvas-viewport:${id}`;
+    return `zeroexo:canvas-viewport:${id}:${getCurrentCanvasDocId() ?? MAIN_CANVAS_DOC_ID}`;
   }
 
   /** 读取并校验上次视口；非法/越界一律忽略 → 回落 fit-to-view */

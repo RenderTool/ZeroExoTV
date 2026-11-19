@@ -37,7 +37,9 @@ import { ErrorBoundary } from '@/shared/components/index.js';
 import { CanvasPage } from '@/pages/home/canvas-page.js';
 import { AppearanceDialog, LanguageDialog } from '@/shared/components/index.js';
 import { RootGate } from '@/platform/RootGate.js';
-import { restoreRoot } from '@/platform/fs.js';
+import { DataRootRecoverGate } from '@/platform/DataRootRecoverGate.js';
+import { dataRootState } from '@/platform/fs.js';
+import { ServiceOfflineGate } from '@/platform/ServiceOfflineGate.js';
 import {
   PROJECTS_LIST_PATH,
   setWatchTarget,
@@ -48,9 +50,9 @@ import {
 } from '@/platform/watcher.js';
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
-import { applySavedDataRoot } from '@/platform/fs.js';
 import { publishMcpRequiredManifest } from '@/platform/mcp-manifest.js';
 import { purgeOrphanMedia } from '@/entities/orphan-media.js';
+import { purgeOrphanGuides } from '@/entities/guide-purge.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
 import { useComfyuiAutoConnect } from '@/features/canvas-tabs/comfyui-auto-connect.js';
 
@@ -143,11 +145,21 @@ export function App(): React.ReactElement {
   const { theme } = useTheme();
   const { t, i18n } = useTranslation();
 
-  // 必须先选数据目录才能进主界面（本版本不用浏览器存储）
+  // 必须先有可用的数据根才能进主界面（本版本不用浏览器存储）
   const [rootReady, setRootReady] = useState<boolean | null>(null);
+  /** 数据权威在本地服务（8790）却掉线：走服务离线门，不落「选择文件夹」首启门 */
+  const [serviceOffline, setServiceOffline] = useState(false);
+  /**
+   * 启动判定（2026-11-18）：只有真的 unauthorized 才拦到首启门。
+   * 本地服务离线（数据本来就在 8790 的数据根）不是授权问题——服务离线门提示重连，
+   * 否则会出现「已授权成功又被要求重新选目录」，而选完也不对路。
+   */
   useEffect(() => {
-    void restoreRoot(false)
-      .then((name) => setRootReady(!!name))
+    void dataRootState()
+      .then((state) => {
+        setServiceOffline(state === 'service-offline');
+        setRootReady(state === 'ok');
+      })
       .catch(() => setRootReady(false));
   }, []);
 
@@ -159,8 +171,9 @@ export function App(): React.ReactElement {
   // 把「前端要求的 MCP 工具清单」写给 MCP：旧版服务连上来时，Agent 工具自己就会提示更新
   useEffect(() => {
     if (!rootReady) return;
-    // 上次在网页里切换过的数据目录：服务重启后自动重新应用（否则会悄悄回到默认根）
-    void applySavedDataRoot();
+    // 数据根只认服务端配置（data-root.txt）：网页不再用 localStorage 里可能过期的路径覆盖它，
+    // 否则换目录/测试后旧值会把整套项目悄悄切到另一个磁盘根（表现为项目列表消失、画布空白）。
+    void publishMcpRequiredManifest();
   }, [rootReady]);
 
   useEffect(() => {
@@ -168,8 +181,17 @@ export function App(): React.ReactElement {
     void publishMcpRequiredManifest();
   }, [rootReady]);
 
+  // CAS 引用对账巡检（2026-11-16）：【紧急停用】对账的扫描覆盖面未审计完成即上线，
+  // 出现主体/历史媒体被误回收（引用已失效）。恢复前必须先修复 cas-reconcile 的
+  // ref 身份覆盖与项目清单完整性两个漏洞，并经用户确认。
+  useEffect(() => {
+    if (!rootReady) return;
+    void 0;
+  }, [rootReady]);
+
   // 孤立媒体定时清理（2026-11-11 用户要求：不要回收站，即时清理）：
   // 每天最多跑一次，直接删掉「没有任何引用」的 CAS 文件与索引外残留；有引用的绝不动。
+  // 2026-11-16 起日常回收由上方 reconcileCasRefs 驱动（含引用摘除），此处保留兜底。
   useEffect(() => {
     if (!rootReady) return;
     const KEY = 'zeroexo:orphan-media:lastRun';
@@ -188,15 +210,38 @@ export function App(): React.ReactElement {
     })();
   }, [rootReady]);
 
+  // 引导缓存回收（2026-11-17）：导演台引导帧一帧几百 MB，删项目/删片段后必须回收。
+  // 每天最多一次；任何项目读不到 → guide-purge 自己整轮跳过，不会误删。
+  useEffect(() => {
+    if (!rootReady) return;
+    const KEY = 'zeroexo:guide-purge:lastRun';
+    const DAY = 24 * 60 * 60 * 1000;
+    const last = Number(window.localStorage.getItem(KEY) ?? 0);
+    if (Number.isFinite(last) && Date.now() - last < DAY) return;
+    void (async () => {
+      try {
+        const res = await purgeOrphanGuides();
+        window.localStorage.setItem(KEY, String(Date.now()));
+        if (res.removed > 0) console.info(`[guide-purge] 已回收 ${res.removed} 个无引用引导缓存`);
+        if (res.skipped) console.info(`[guide-purge] 本轮跳过：${res.skipped}`);
+      } catch {
+        // 目录未授权 / 离线：下次再试
+      }
+    })();
+  }, [rootReady]);
+
   // 数据目录授权可能在会话中失效（权限被撤销 / 句柄丢失）——
   // 定期 + 窗口聚焦时复查：失效就重新弹首启门（否则本地存储全部报
   // 「No available storage method found」，界面半死不活）
   useEffect(() => {
     if (!rootReady) return;
     const check = (): void => {
-      void restoreRoot(false)
-        .then((name) => { if (!name) setRootReady(false); })
-        .catch(() => setRootReady(false));
+      void dataRootState()
+        .then((state) => {
+          setServiceOffline(state === 'service-offline');
+          setRootReady(state === 'ok');
+        })
+        .catch(() => { /* 探测异常不降级门禁：误判会把用户赶回选目录页 */ });
     };
     const timer = window.setInterval(check, 15000);
     window.addEventListener('focus', check);
@@ -444,9 +489,14 @@ export function App(): React.ReactElement {
           </ErrorBoundary>
         </AppLayout>
           </>
+        ) : serviceOffline ? (
+          <ServiceOfflineGate onUseBrowserRoot={() => setServiceOffline(false)} />
         ) : (
           <RootGate open onActivated={() => setRootReady(true)} />
         )}
+
+        {/* 运行期目录权限失效：只在 isAuthorized=false 时弹出，不拿长文案让用户自己找 */}
+        <DataRootRecoverGate />
 
         {/* 换肤弹窗(全局唯一) */}
         {appearanceOpen ? (

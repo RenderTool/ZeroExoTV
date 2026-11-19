@@ -50,7 +50,7 @@ export interface AssetLibraryToolbarProps {
   onChildClick: (key: string | null) => void;
   onSearchChange: (value: string) => void;
   onMultiSelectToggle: () => void;
-  onUploadMaterial: (files: FileList) => void;
+  onUploadMaterial: (files: FileList | File[]) => void;
   /** 上传文件选择器 ref（与页面右键菜单「上传素材」共用同一入口） */
   materialFileInputRef: { current: HTMLInputElement | null };
   onNewScript: () => void;
@@ -406,10 +406,10 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
       accept="image/*,video/*,audio/*,text/plain,.txt,.md"
       style={{ display: 'none' }}
       onChange={(e) => {
-        if (e.target.files) {
-          onUploadMaterial(e.target.files);
-        }
+        // 快照后再清空：FileList 是活的，清空 input 会把它一起清掉（异步链路读到 0 个文件）
+        const files = e.target.files ? Array.from(e.target.files) : [];
         e.target.value = '';
+        if (files.length > 0) onUploadMaterial(files);
       }}
     />
   );

@@ -27,7 +27,7 @@
  * 冻结成果保留：唯一槽位函数 assignAssetSlots、帧数学、clampScaleFactor/resolveVideoSize、
  * 提示词内 @ 一律以槽位号引用（`@PictureN`），同资产可重复 @，删除槽位同步移除引用文本。
  */
-import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
 import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
@@ -54,18 +54,21 @@ import {
 } from '@/entities/director-params.js';
 import type { WorkbenchSharedParams } from '@/entities/slot-containers.js';
 import { useAssets } from '@/features/asset-picker/use-assets.js';
+import { listDeletedKeys } from '@/entities/deleted-asset-tombstones.js';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import type { WorkbenchShot, WorkbenchShotReference } from '@/features/canvas-nodes/storyboard/workbench-types.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { SUBJECT_BASE_STATE_ID, subjectBaseCoverKeys } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { MentionEditor, type MentionEditorHandle, type MentionSlotView } from './mention-editor.js';
 import { useContext } from 'react';
 import { ReactGraphStoreContext } from '@zeroexo/plugin-render-react';
 import { ThumbImage } from './thumb-image.js';
 import { getGuideMeta } from '@/features/asset-picker/guide.js';
 import { isGeneratedAsset } from '@/features/asset-picker/asset-store.js';
+import { filterHistoryAssets } from '@/features/canvas-assets/history-utils.js';
 import { useCasUpload } from '@/features/canvas-assets/use-cas-upload.js';
 import {
   AssetPickPanel,
@@ -111,27 +114,15 @@ function shotRefToDirectorRef(r: WorkbenchShotReference): DirectorAssetRef | nul
 const KIND_ICON = { image: ImageIcon, video: Film, audio: Music } as const;
 const KIND_NAME: Record<DirectorAssetRef['kind'], string> = { image: '图片', video: '视频', audio: '音频' };
 
-/**
- * 槽位移除时把提示词里该槽位的 `@Label ` 提及降级为纯文本（保留可读 Label 字样、去掉 @ 引用关系），
- * 不允许留下指向空槽位的悬空 @ 块（2026-11-04 槽位移除指令 req3）。
- */
-export function degradeMentionText(text: string, label: string): string {
-  const re = new RegExp(`@${label}(?!\\d) ?`, 'g');
-  return text.replace(re, `${label} `).replace(/ {2,}/g, ' ');
-}
-
 /** 槽位移除 toast 固定 key（2026-11-04 第十三条）：连续移除时新提示替换旧提示，不堆叠 */
 const REMOVE_SLOT_TOAST_KEY = 'director-slot-remove';
 
-/** 整主体占槽（2026-11-04 @ 浮层指令C）：稳定 id `subject:<subjectId>`，不绑定某张状态图 */
-function subjectToRef(item: ProductionItem): DirectorAssetRef {
-  return {
-    id: `subject:${item.id}`,
-    kind: 'image',
-    title: item.name,
-    originScope: 'project',
-  };
-}
+/**
+ * 主体引用口径（2026-11-18 用户纠正）：主体只是根，本身**不代表任何图片**；
+ * 「录入资产默认落基础状态，基础状态就是封面」，所以封面是状态图 / 基础状态这一级的属性，
+ * 不是主体这一级的属性。@ 面板点主体只展开状态列表，绝不隐式把封面塞进槽位。
+ * 历史 `subject:<id>` 引用仍能解析（见 resolveRefVisual），但新写入一律走 `subject:<id>:<storageKey>`。
+ */
 
 /**
  * 引用 → 当前可视资源（唯一解析点，禁止各处各算）：
@@ -143,37 +134,99 @@ export function resolveRefVisual(
   ref: DirectorAssetRef,
   subjects?: ProductionItem[],
   subjectTrees?: SubjectTree[],
-): { url?: string; storageKey?: string; subject?: ProductionItem } {
+): { url?: string; storageKey?: string; subject?: ProductionItem; stale?: boolean } {
+  const treesLoaded = subjectTrees !== undefined;
+  /**
+   * 2026-11-19 报障：主体被删后重建，itemId 必然变化（时间戳随机），旧引用按 id 查不到就被判失效，
+   * 用户视角就是「主体我已经放回去了，插槽还是失效」。所以 id 查不到时按「标题名字/别名」回查一次，
+   * 名字命中即视为同一主体（标题形如「霜」「霜-受伤」）。
+   */
+  const byTitle = (): SubjectTree | undefined => {
+    const title = (ref.title ?? '').trim();
+    if (!title || !treesLoaded) return undefined;
+    return subjectTrees!.find((t) =>
+      [t.name, ...(t.aliases ?? [])].some((n) => n && (title === n || title.startsWith(`${n}-`))),
+    );
+  };
+  const findTree = (rootId?: string): SubjectTree | undefined => {
+    const byId = rootId
+      ? subjectTrees!.find((t) => t.rootId === rootId || t.itemId === rootId)
+      : undefined;
+    return byId ?? byTitle();
+  };
   // 主体来源：按 origin 回查当前树/状态，主体换图后自动用新图
   const origin = ref.origin;
-  if (origin) {
-    const tree = subjectTrees?.find((t) => t.rootId === origin.rootId || t.itemId === origin.rootId);
-    if (tree) {
-      const state = origin.kind === 'subject-base'
-        ? tree.states[0]
+  if (origin && treesLoaded) {
+    const tree = findTree(origin.rootId);
+    if (!tree) return { stale: true };
+    if (origin.kind === 'subject-base') {
+      const base = tree.states.find((st) => st.id === SUBJECT_BASE_STATE_ID) ?? tree.states[0];
+      // 基础状态没挂图时，主体图可能被挂在「概念/定妆」等状态上：按 origin.mediaKey 回查整棵树，
+      // 仍找不到才判失效。不能返回空对象把槽位显示成黑块（用户看到的就是「空素材」）。
+      const inBase = base?.media?.find((m) => m.type !== 'audio') ?? base?.media?.[0];
+      const byKey = tree.states
+        .flatMap((st) => st.media ?? [])
+        .find((m) => m.type !== 'audio' && m.key === origin.mediaKey);
+      const anyMedia = tree.states.flatMap((st) => st.media ?? []).find((m) => m.type !== 'audio');
+      const media = inBase ?? byKey ?? anyMedia;
+      return media?.key ? { storageKey: media.key } : { stale: true };
+    }
+    if (origin.kind === 'subject-state') {
+      const originNodeId = (origin as { nodeId?: string }).nodeId;
+      const state = originNodeId
+        ? tree.states.find((st) => st.id === originNodeId)
         : tree.states.find((st) => st.state === origin.state);
-      const media = state?.media?.find((m) => m.type !== 'audio') ?? state?.media?.[0];
-      if (media?.key) return { storageKey: media.key };
+      const inState = state?.media?.find((m) => m.type !== 'audio') ?? state?.media?.[0];
+      const byKey = tree.states
+        .flatMap((st) => st.media ?? [])
+        .find((m) => m.type !== 'audio' && m.key === origin.mediaKey);
+      const media = inState ?? byKey;
+      return media?.key ? { storageKey: media.key } : { stale: true };
     }
   }
-  // 旧引用没有 origin：按 id/title 找到同一主体状态，取当前图
+  // 旧引用没有 origin：按 id 回查主体树当前状态图
+  if (ref.id.startsWith('subject-state:')) {
+    const parts = ref.id.split(':');
+    const itemId = parts[1];
+    const oldKey = parts.slice(2).join(':');
+    const tree = treesLoaded ? findTree(itemId) : undefined;
+    if (tree) {
+      const state = tree.states.find((st) => st.media?.some((m) => m.key === oldKey))
+        ?? tree.states.find((st) => st.state && ref.title?.endsWith(st.state))
+        ?? (ref.title?.endsWith('基础状态') || oldKey === SUBJECT_BASE_STATE_ID ? tree.states[0] : undefined);
+      const media = state?.media?.find((m) => m.type !== 'audio') ?? state?.media?.[0];
+      if (media?.key) return { storageKey: media.key };
+      return {};
+    }
+    if (treesLoaded) return { stale: true };
+  }
   if (ref.id.startsWith('subject:')) {
     const parts = ref.id.split(':');
     const itemId = parts[1];
     const oldKey = parts.slice(2).join(':');
-    const tree = subjectTrees?.find((t) => t.itemId === itemId || t.rootId === itemId);
+    const tree = treesLoaded ? findTree(itemId) : undefined;
     if (tree) {
       const state = tree.states.find((st) => st.media?.some((m) => m.key === oldKey))
         ?? tree.states.find((st) => st.state && ref.title?.endsWith(st.state))
-        ?? (ref.title?.endsWith('基础状态') ? tree.states[0] : undefined);
+        ?? tree.states[0];
       const media = state?.media?.find((m) => m.type !== 'audio') ?? state?.media?.[0];
       if (media?.key) return { storageKey: media.key };
+      return {};
     }
+    if (treesLoaded) return { stale: true };
   }
   const subjectId = parseBareSubjectRef(ref.id);
   if (subjectId) {
-    const subject = subjects?.find((s) => s.id === subjectId);
-    const key = subject ? resolveSubjectCover(subject).key : null;
+    const subject = subjects?.find((s) => s.id === subjectId)
+      // 主体重建后 id 变了：按名字回查，保持引用可用
+      ?? (treesLoaded ? (() => {
+        const tree = byTitle();
+        return subjects?.find((s) => tree && (s.id === tree.itemId || s.name === tree.name));
+      })() : undefined);
+    if (!subject) return treesLoaded ? { stale: true } : {};
+    // 2026-11-18：默认基础状态 = 封面；基础状态没图就判失效，不拿别的状态图顶
+    const tree = subjectTrees?.find((t) => t.itemId === subjectId || t.rootId === subjectId) ?? (treesLoaded ? byTitle() : undefined);
+    const key = resolveSubjectCover(subject, undefined, tree ? subjectBaseCoverKeys(tree) : undefined).key;
     return { storageKey: key ?? undefined, subject };
   }
   return { url: ref.url, storageKey: ref.storageKey };
@@ -218,14 +271,17 @@ export interface DirectorPromptPanelProps {
 }
 
 /** 主体状态图 → 图片素材（占一个图片槽位，走 assignAssetSlots 唯一编号路径） */
-function subjectImageToRef(item: ProductionItem, img: ProductionItemImage): DirectorAssetRef {
+function subjectImageToRef(item: ProductionItem, img: ProductionItemImage, baseKeys?: string[]): DirectorAssetRef {
   const stateName = img.stateTag ?? img.tags[0] ?? '剧照';
+  const isCover = resolveSubjectCover(item, undefined, baseKeys).key === img.storageKey;
   return {
     id: `subject:${item.id}:${img.storageKey}`,
     kind: 'image',
-    title: `${item.name}·${stateName}`,
+    title: `${item.name}·${stateName}${isCover ? '（封面）' : ''}`,
     storageKey: img.storageKey,
     originScope: 'project',
+    // 具体状态图必须带来源指纹，删状态/删主体时能精确清掉，且换封面后按 state 回查最新图
+    origin: { kind: 'subject-state', rootId: item.id, state: stateName, mediaKey: img.storageKey },
   };
 }
 
@@ -253,11 +309,32 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   /** @ 面板「导入资产」：与素材抽屉同一条 CAS 链（只落 CAS，导入后 useAssets 订阅自动刷新） */
   const uploadAssets = useCasUpload();
 
-  /** 画布上的媒体节点（仅 image / video / audio；文本等非媒体一律不列） */
+  /** 画布页签 = 仅画布上物理存在的媒体节点（连线语义；生成产物统一进「历史」页签，2026-11-16 用户口径） */
   const graphStore = useContext(ReactGraphStoreContext);
+  /**
+   * 墓碑集合（2026-11-16 用户实测）：画布节点只在节点删除时消失，删资产记录不动节点，
+   * 于是「已删除的历史图片」仍会出现在 @ 面板「画布」页签。这里按墓碑键过滤：
+   * 内容一旦被用户删除，任何列表（画布/历史/资产）都不再出现它。资产列表变化时刷新集合。
+   */
+  const [tombstones, setTombstones] = useState<Set<string>>(() => new Set());
+  // graph 变更（含删节点）必须让「画布」页签重算：store 是稳定对象，只靠 graphStore 引用做 memo
+  // 依赖会一直拿到删除前的旧列表（僵尸节点复现的根因之一）。
+  const [graphRev, setGraphRev] = useState(0);
+  useEffect(() => {
+    const off = graphStore?.subscribeGraph?.(() => setGraphRev((v) => v + 1));
+    return off;
+  }, [graphStore]);
+  useEffect(() => {
+    let alive = true;
+    void listDeletedKeys().then((keys) => { if (alive) setTombstones(keys); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [allAssets]);
   const canvasMedia = useMemo<DirectorAssetRef[]>(() => {
-    const nodes = graphStore?.getGraph?.().nodes ?? [];
+    // 画布页签只认「物理存在」的节点：graph 里被删的节点是 _deleted 墓碑，
+    // 不过滤就会把早就删掉的图继续列出来（用户反复报的「僵尸节点」）。
+    const nodes = (graphStore?.getGraph?.().nodes ?? []).filter((n) => !(n as { _deleted?: boolean })._deleted);
     const out: DirectorAssetRef[] = [];
+    const seen = new Set<string>();
     for (const n of nodes) {
       const d = (n.data ?? {}) as { storageKey?: string; content?: string; url?: string; kind?: string };
       const kind = n.type === 'image' || n.type === 'video' || n.type === 'audio'
@@ -267,6 +344,11 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
       const storageKey = d.storageKey;
       const url = d.content || d.url;
       if (!storageKey && !url) continue;
+      if (storageKey && tombstones.has(storageKey)) continue;
+      // 同一份 CAS 内容在画布上可能挂在多个节点：画布页签按内容去重，不重复列同一张图
+      const dedupeKey = storageKey || url || String(n.id);
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
       out.push({
         id: `canvas:${n.id}`,
         kind,
@@ -277,18 +359,58 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
       });
     }
     return out;
-  }, [graphStore]);
+  }, [graphStore, tombstones, graphRev]);
+
+  /** 历史页签：画布历史 + 分镜历史（与抽屉历史记录同一条 filterHistoryAssets 链：仅生成产物 + 本项目 + CAS 去重） */
+  const historyMedia = useMemo<{ canvas: DirectorAssetRef[]; director: DirectorAssetRef[] }>(() => {
+    const toRefs = (source: 'canvas' | 'director'): DirectorAssetRef[] =>
+      filterHistoryAssets(allAssets, currentProjectId, 'all', source)
+        .filter((a) => {
+          const kind = (a.data as { kind?: string }).kind;
+          return kind === 'image' || kind === 'video' || kind === 'audio';
+        })
+        .map((a) => {
+          const d = a.data as { storageKey?: string; title?: string; kind?: string };
+          const kind = d.kind as DirectorAssetRef['kind'];
+          return {
+            id: `history:${a.id}`,
+            kind,
+            title: d.title || a.title || `${kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}历史`,
+            storageKey: d.storageKey,
+            url: undefined,
+            originScope: 'project' as const,
+          };
+        });
+    return { canvas: toRefs('canvas'), director: toRefs('director') };
+  }, [allAssets, currentProjectId]);
 
   const tier: DirectorModelTier = shared.presetId;
   const caps = DIRECTOR_ASSET_CAPS[tier];
 
   const mentionCandidates = useMemo(
     () => allAssets.filter((a) => (a.data.kind === 'image' || a.data.kind === 'video' || a.data.kind === 'audio')
-      && !isGeneratedAsset(a)
-      // 2026-11-12：project 作用域只列本项目素材，避免别的项目/已删素材串进来
-      && (a.scope !== 'project' || !a.projectId || a.projectId === currentProjectId)),
-    [allAssets, currentProjectId],
+      // 2026-11-16 口径：资产页签 = 公共资产（生成产物属历史页签，项目私产不混入）
+      && a.scope === 'library'
+      && !isGeneratedAsset(a)),
+    [allAssets],
   );
+
+  /**
+   * 主体素材优先（2026-11-18 用户实测）：同一张 CAS 图同时存在于「主体库」和「资产页」时，
+   * 资产页不再重复列出，避免用户点两次把同一张图占成两个槽位。
+   */
+  const subjectMediaKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of subjects ?? []) {
+      for (const img of item.images ?? []) if (img.storageKey) keys.add(img.storageKey);
+    }
+    for (const tree of subjectTrees ?? []) {
+      for (const state of tree.states ?? []) {
+        for (const media of state.media ?? []) if (media.key) keys.add(media.key);
+      }
+    }
+    return keys;
+  }, [subjects, subjectTrees]);
 
   const segmentAssets = useMemo(
     () => (shot.references ?? []).map(shotRefToDirectorRef).filter((r): r is DirectorAssetRef => r !== null),
@@ -346,14 +468,28 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   }, [slotInfo, segmentAssets, subjects, subjectTrees]);
 
   const persistRef = useCallback((ref: DirectorAssetRef) => {
+    /**
+     * 2026-11-19 报障「插槽已修复，提示词里还是失效」根因之一：
+     * 外部送来的引用自带 `slotNo`（素材抽屉/画布侧的全局序号，可能是 3、5），直接钉进本镜头会留下空洞
+     * （实测镜头 2 的图片槽 = 1/3/5），提示词里早写好的 `@Picture2` 找不到槽 → 显示「失效」，
+     * `@Picture3` 还会指到第 2 张上传图（成片与提示词错位）。
+     * 现在新增槽位一律按「该类最小空号」重新分配，外部 slotNo 只当顺序参考，不直接落库。
+     */
+    let slotNo = ref.slotNo;
+    try {
+      const trial = assignAssetSlots({ shared: [], segment: [...segmentAssets, { ...ref, slotNo: undefined }], tier });
+      slotNo = trial.byAssetId[ref.id]?.slot ?? slotNo;
+    } catch {
+      // 溢出/异常时保留原值，由调用方（insertRef）负责提示
+    }
     const shotRef: WorkbenchShotReference = {
       id: ref.id, kind: ref.kind, title: ref.title, storageKey: ref.storageKey, url: ref.url,
     };
     (shotRef as WorkbenchShotReference & { originScope?: string }).originScope = ref.originScope;
     shotRef.origin = ref.origin;
-    shotRef.slotNo = ref.slotNo;
+    shotRef.slotNo = slotNo;
     onShotChange({ references: [...(shot.references ?? []), shotRef] });
-  }, [shot.references, onShotChange]);
+  }, [shot.references, onShotChange, segmentAssets, tier]);
 
   /**
    * @ 入栈（B 组语义）：
@@ -366,6 +502,19 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     if (existing) {
       editorRef.current?.insertAtCaret(`@${existing.label} `);
       return;
+    }
+    // 同一张图（同 storageKey）已经在别的槽位 → 直接用那个槽号，不再新占一格。
+    // 主体库图与资产页裸图 id 不同，但内容相同；不按内容去重就会出现「同图两个插槽」。
+    const sameContent = ref.storageKey
+      ? segmentAssets.find((a) => a.storageKey === ref.storageKey && resolveRefVisual(a, subjects, subjectTrees).stale !== true)
+      : undefined;
+    if (sameContent) {
+      const label = slotInfo.byAssetId[sameContent.id];
+      if (label) {
+        editorRef.current?.insertAtCaret(`@${label} `);
+        message.info(t('director.slotSameContent', '这张图已在 {{slot}}，直接复用该槽位', { slot: label }));
+        return;
+      }
     }
     try {
       // 先校验再落库（不静默截断）；溢出直接抛 DirectorSlotOverflowError
@@ -382,13 +531,15 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         }));
       } else throw err;
     }
-  }, [segmentAssets, tier, slotInfo, kindUsed, caps, persistRef, message, t]);
+  }, [segmentAssets, tier, slotInfo, kindUsed, caps, persistRef, message, t, subjects, subjectTrees]);
 
   /** 替换槽位：同位置替换（槽位号、顺序、所有 @ 引用自动跟新资产；pin 保留原槽号） */
   const replaceSlotAssetAt = useCallback((targetId: string, newRef: DirectorAssetRef) => {
     const pinned: DirectorAssetRef = {
       ...newRef,
-      slotNo: newRef.slotNo ?? slotInfo.byAssetId[targetId]?.slot,
+      // 替换永远沿用被替换槽的槽号（新素材自带的 slotNo 是外部序号，不能顶掉原位置，
+      // 否则提示词 @PictureN 与新位置错位）
+      slotNo: slotInfo.byAssetId[targetId]?.slot ?? newRef.slotNo,
     };
     const refs = [...(shot.references ?? [])];
     const idx = refs.findIndex((r) => r.id === targetId);
@@ -421,21 +572,31 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         message.info(t('director.slotDuplicated', '该资产已在槽位中，请选择其他资产'));
         return;
       }
+      const sameContent = ref.storageKey
+        ? segmentAssets.find((a) => a.id !== replaceTarget && a.storageKey === ref.storageKey)
+        : undefined;
+      if (sameContent) {
+        const label = slotInfo.byAssetId[sameContent.id] ?? '';
+        message.info(t('director.slotSameContent', '这张图已在 {{slot}}，同一张图不能占两个槽位', { slot: label }));
+        return;
+      }
       replaceSlotAsset(ref);
     } else {
       insertRef(ref);
     }
     setAssetPanelOpen(false);
-  }, [replaceTarget, slotInfo, message, t, replaceSlotAsset, insertRef]);
+  }, [replaceTarget, slotInfo, segmentAssets, message, t, replaceSlotAsset, insertRef]);
 
-  /** 槽位移除：只解引用（资产仍在项目库/公共库）；提示词 @ 块降级为纯文本；其余槽位靠 pin 保持原号 */
+  /**
+   * 槽位移除：只解引用（资产仍在项目库/公共库）。
+   * 2026-11-17 用户最终口径：提示词里的 @ 块**保留为占位**（不降级成文本），
+   * 用户把同一槽位重新填上素材就自动关联回来；直接发任务时按 `@名称` 文本参与生成。
+   */
   const removeAsset = useCallback((assetId: string) => {
-    const label = slotInfo.byAssetId[assetId]?.label;
     onShotChange({
       references: (shot.references ?? []).filter((r) => r.id !== assetId),
-      ...(label ? { imagePrompt: degradeMentionText(shot.imagePrompt ?? '', label) } : {}),
     });
-  }, [slotInfo, shot.references, shot.imagePrompt, onShotChange]);
+  }, [shot.references, onShotChange]);
 
   /**
    * 槽位移除入口（2026-11-04 第十三条，替代第三条 req5 的 Modal 轻确认）：
@@ -518,12 +679,15 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     const Icon = KIND_ICON[a.kind];
     // `subject:<id>` 整主体占槽走封面回落链（补图后自动解析）；无图主体 = 占位格（图标+名称+槽号）
     const visual = resolveRefVisual(a, subjects, subjectTrees);
+    const isStale = visual.stale === true;
     const guide = a.kind === 'video' ? guideMetaOfRef(a) : undefined;
     return (
       <span
         key={a.id}
         data-slot={slot?.label}
         data-slot-filled={a.id}
+        data-slot-stale={isStale ? '1' : undefined}
+        title={isStale ? t('director.refStale', '引用已失效：原主体或状态已删除') : undefined}
         onClick={() => { setReplaceTarget(a.id); setAssetPanelOpen(true); }}
         onPointerDown={(e) => e.stopPropagation()}
         onDragOver={(e) => {
@@ -570,7 +734,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         onDragEnd={() => { draggingSlotRef.current = false; }}
         style={{
           position: 'relative', width: 64, height: 64, borderRadius: 8, flexShrink: 0,
-          border: `1px solid ${palette.chipBorder}`, background: palette.chipBg,
+          border: `1px ${isStale ? 'dashed' : 'solid'} ${isStale ? palette.danger : palette.chipBorder}`,
+          background: palette.chipBg,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
         }}
       >
@@ -598,6 +763,19 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
           />
         ) : (
           <Icon size={18} style={{ opacity: 0.75 }} />
+        )}
+        {isStale && (
+          <span
+            data-slot-stale-label={a.id}
+            style={{
+              position: 'absolute', left: 3, bottom: 3, zIndex: 3,
+              padding: '0 4px', height: 14, borderRadius: 3,
+              background: palette.danger, color: '#fff',
+              fontSize: 9, lineHeight: '14px', fontWeight: 600, pointerEvents: 'none',
+            }}
+          >
+            {t('director.refStaleShort', '失效')}
+          </span>
         )}
         {/* 移除入口：右上角 18px ×，未 hover 不可见不占位；触屏 hover:none 常驻 */}
         <button
@@ -706,7 +884,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
   // 段间引导：段 1 置灰；其余段缺省 true（与节点 segment_continuity 语义一致）
   const continuityDisabled = shotIndex === 0;
   const continuityOn = !continuityDisabled && (shot.continuation?.enabled ?? true);
-  const continuityMode = String(shared.params['continuityMode'] ?? 'guide');
+  const continuityMode = String(shared.params['continuityMode'] ?? 'continue');
   const overlapFrames = snapContinuityOverlap(Number(shared.params['continuityOverlapFrames'] ?? 22));
   const continuityRedraw = Number(shared.params['continuityRedraw'] ?? 0.1);
 
@@ -864,8 +1042,12 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
 
   /** @ 面板资产候选：资产库 → 素材引用（唯一映射）；替换模式只列同类型且未在其它槽位的资产 */
   const candidateRefs = useMemo(
-    () => mentionCandidates.map(assetToDirectorRef).filter((r): r is DirectorAssetRef => r !== null),
-    [mentionCandidates],
+    () => mentionCandidates
+      .map(assetToDirectorRef)
+      .filter((r): r is DirectorAssetRef => r !== null)
+      // 主体库已有同内容图 → 资产页不再列，统一从「主体」页签取（带来源指纹，可自动跟随换图）
+      .filter((r) => !r.storageKey || !subjectMediaKeys.has(r.storageKey)),
+    [mentionCandidates, subjectMediaKeys],
   );
   const pickerCandidates = useMemo(() => {
     if (!replaceTarget) return candidateRefs;
@@ -873,6 +1055,16 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     if (!target) return candidateRefs;
     return candidateRefs.filter((r) => r.kind === target.kind && !isDuplicate(r.id));
   }, [replaceTarget, candidateRefs, segmentAssets, isDuplicate]);
+
+  /** 点已填插槽打开面板时，定位到该插槽当前主体（用户可直接切该主体的其它状态） */
+  const focusSubjectId = useMemo(() => {
+    const ref = replaceTarget ? segmentAssets.find((a) => a.id === replaceTarget) : undefined;
+    if (!ref) return undefined;
+    if (ref.origin?.rootId) return ref.origin.rootId;
+    if (ref.id.startsWith('subject-state:')) return ref.id.split(':')[1];
+    if (ref.id.startsWith('subject:')) return ref.id.split(':')[1];
+    return undefined;
+  }, [replaceTarget, segmentAssets]);
 
   /** 引导是视频槽的变体：同一格在「源视频 / 引导」间切换，不另开独立素材列表 */
   const assetById = useMemo(() => new Map(allAssets.map((a) => [a.id, a])), [allAssets]);
@@ -1328,7 +1520,9 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
             <AssetPickPanel
               candidates={pickerCandidates}
               canvasMedia={canvasMedia}
-              initialTab="asset"
+              historyMedia={historyMedia}
+              initialTab="subject"
+              focusSubjectId={focusSubjectId}
               subjects={subjects ?? []}
               subjectTrees={subjectTrees ?? []}
               episodeContext={episodeContext}
@@ -1338,8 +1532,10 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
               isKindFull={isKindFull}
               onPickAsset={handlePanelPick}
               onPickCanvasMedia={handlePanelPick}
-              onPickSubject={(item) => handlePanelPick(subjectToRef(item))}
-              onPickSubjectImage={(item, img) => handlePanelPick(subjectImageToRef(item, img))}
+              onPickSubjectImage={(item, img) => {
+                const tree = subjectTrees?.find((t) => t.itemId === item.id || t.rootId === item.id);
+                handlePanelPick(subjectImageToRef(item, img, tree ? subjectBaseCoverKeys(tree) : undefined));
+              }}
               onPickSubjectState={handlePanelPick}
               onClose={() => setAssetPanelOpen(false)}
               onUploadFiles={(files) => { void uploadAssets(files); }}

@@ -128,7 +128,7 @@ DEFAULT_CONTINUITY_REDRAW = 0.10
 
 
 def resolve_continuity_mode(timeline: dict | None) -> str:
-    """Global 引导 / 引导+重绘 strategy. Default guide. Ignored when continuity is off."""
+    """Global 引导 / 引导+重绘 strategy. Default 引导+重绘（continue）. Ignored when continuity is off."""
     output = (timeline or {}).get("output") if isinstance(timeline, dict) else None
     if not isinstance(output, dict):
         return CONTINUITY_MODE_GUIDE

@@ -6,7 +6,7 @@
  *
  * 本模块是服务端唯一一份：
  * - 每种主体的必填字段（缺一个就拒绝写入，并列出缺哪些）；
- * - 由字段拼出的标准提示词（角色 = 三视图；场景 = 单视角空场景轴图，2×2 宫格仅显式要求；道具 = 单品参考图）；
+ * - 由字段拼出的标准提示词（角色 = 正面特写 + 正背全身定妆参考图；场景 = 单视角空场景轴图，2×2 宫格仅显式要求；道具 = 单品参考图）；
  * - 身份锚点句（写进 ProductionItem.note，供后续分镜提示词逐字复用）。
  */
 
@@ -25,6 +25,23 @@ const CHARACTER_REQUIRED = [
   "脸型", "发型", "身材", "头身比", "年龄", "性格",
   "变装", "上身着装", "下身着装", "鞋子",
 ] as const;
+
+/**
+ * 非人角色（兽/机械体）必填：不穿衣服，服装三件与变装对它们只会把提示词写成
+ * 「穿战术靴的白化雪豹」，所以这几项不要求；改要求「附着物」（机械义肢/鞍具等）由 显著特征 交代。
+ */
+const CREATURE_REQUIRED = [
+  "时代基底", "国家朝代", "物种", "族裔", "类型基底", "显著特征",
+  "脸型", "发型", "身材", "头身比", "年龄", "性格",
+] as const;
+
+const HUMAN_SPECIES = /人|人类|华夏|族裔.*人/;
+/** 物种写的是兽类/机械体时按非人角色出图（白化雪豹、军犬、机械狼…） */
+function isCreature(profile: SubjectProfile): boolean {
+  const species = v(profile, "物种");
+  if (!species) return false;
+  return !HUMAN_SPECIES.test(species) && /豹|虎|狼|狮|犬|猫|兽|熊|马|象|蛇|鹰|鸟|龙|鱼|虫|机械/.test(species);
+}
 
 const SCENE_REQUIRED = [
   "时代基底", "地点", "建筑风格", "空间结构", "地面", "墙面", "光源",
@@ -59,10 +76,16 @@ function v(profile: SubjectProfile, key: string): string {
   return (profile[key] ?? "").trim();
 }
 
+/** 年龄字段容错：模型常把「27岁」整句填进来，再拼「岁」会变成「27岁岁」 */
+function ageText(profile: SubjectProfile): string {
+  return v(profile, "年龄").replace(/岁$/, "");
+}
+
 /** 缺失字段（中文名，直接回给 Agent/用户） */
 export function missingProfileFields(kind: SubjectKindInput, profile: SubjectProfile): string[] {
   const k = normKind(kind);
-  return REQUIRED[k].filter((key) => !v(profile, key));
+  const required = k === "character" && isCreature(profile) ? CREATURE_REQUIRED : REQUIRED[k];
+  return required.filter((key) => !v(profile, key));
 }
 
 /** 身份锚点句（角色 = 一行外观锁；场景/道具 = 地点/名称一句话） */
@@ -75,14 +98,30 @@ export function buildSubjectAnchor(kind: SubjectKindInput, profile: SubjectProfi
     return `${v(profile, "名称")}：${v(profile, "材质")}，${v(profile, "颜色")}，${v(profile, "尺寸")}，${v(profile, "状态")}`;
   }
   return `${v(profile, "时代基底")}·${v(profile, "国家朝代")}，${v(profile, "物种")}·${v(profile, "族裔")}，`
-    + `${v(profile, "年龄")}岁${v(profile, "类型基底")}，${v(profile, "显著特征")}；`
+    + `${ageText(profile)}岁${v(profile, "类型基底")}，${v(profile, "显著特征")}；`
     + `${v(profile, "脸型")}；${v(profile, "发型")}；${v(profile, "身材")}（头身比 ${v(profile, "头身比")}）`;
 }
 
-/** 全剧风格块：有全剧预设 → 一行风格片段；没有 → 具体默认（不再写「按剧本…定」） */
-function styleBlock(stylePrompt?: string): string {
+/** 全剧风格块：有全剧预设 → 一行风格片段；没有 → 按主体类型给具体默认（禁止给道具写皮肤/布料） */
+function styleBlock(stylePrompt?: string, kind: ProfileKind = "character"): string {
   const custom = (stylePrompt ?? "").trim();
   if (custom) return `风格：${custom}`;
+  if (kind === "prop") {
+    return [
+      "风格：写实电影道具参考图",
+      "灯光：均匀柔光 + 单侧塑形光，突出材质与边缘",
+      "色彩：真实材质本色，低饱和",
+      "质感：真实金属/聚合物/木材/皮革纹理，磨损与做旧自然",
+    ].join("\n");
+  }
+  if (kind === "scene") {
+    return [
+      "风格：写实电影场景参考图",
+      "灯光：自然光 + 环境光遮蔽，方向明确",
+      "色彩：场景固有色，低饱和",
+      "质感：真实建筑与自然环境材质，光影过渡自然",
+    ].join("\n");
+  }
   return [
     "风格：写实电影定妆照",
     "灯光：自然柔光为主，侧光塑形",
@@ -104,52 +143,85 @@ export function buildMinimalSubjectPrompt(
   const desc = (note ?? "").trim() || `${name}（${kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具"}）`;
   if (kind === "scene") {
     return `专业电影级场景参考图。场景：${name}。${desc}
-空场景，画面中不得出现人物、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印；保持空间结构与材质真实。\n${styleBlock(stylePrompt)}`;
+空场景，画面中不得出现人物、人物外貌描述、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印；保持空间结构与材质真实。\n${styleBlock(stylePrompt, "scene")}`;
   }
   if (kind === "prop") {
     return `专业电影级道具参考图。道具：${name}。${desc}
-单品居中，无人物、无手、无文字水印；材质与做旧程度与描述一致。\n${styleBlock(stylePrompt)}`;
+单品居中，无人物、无手、无文字水印；材质与做旧程度与描述一致；不写角色外貌。\n${styleBlock(stylePrompt, "prop")}`;
   }
   return `专业电影级角色定妆参考图（单人）。角色：${name}。${desc}
-画面只出现这一个角色，同一张脸、同一套服装；禁止第二个人、多人合照、模特合集、候选人群像。\n${styleBlock(stylePrompt)}`;
+画面只出现这一个角色，同一张脸、同一套服装；禁止第二个人、多人合照、模特合集、候选人群像。\n${styleBlock(stylePrompt, "character")}`;
 }
 
-/** 角色模板：sheet = 三视图；single/white-bg = 单张定妆照（白底用于快速抠图） */
+/** 角色模板：sheet = 正面特写 + 正背全身（画面数量写死）；single/white-bg = 单张定妆照 */
 export function buildCharacterPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
   const earring = v(profile, "耳饰");
-  const person = `人设：${v(profile, "时代基底")}，${v(profile, "国家朝代")}，${v(profile, "物种")}，${v(profile, "族裔")}，${v(profile, "类型基底")}，${v(profile, "年龄")}岁。
+  const creature = isCreature(profile);
+  const person = creature
+    ? `角色描述：${v(profile, "时代基底")}·${v(profile, "国家朝代")}，${v(profile, "物种")}·${v(profile, "族裔")}，${ageText(profile)}岁${v(profile, "类型基底")}。
+显著特征：${v(profile, "显著特征")}。
+头部：${v(profile, "脸型")}。
+毛发：${v(profile, "发型")}。
+体量：${v(profile, "身材")}；头身比 ${v(profile, "头身比")}。
+性格：${v(profile, "性格")}。`
+    : `角色描述：${v(profile, "时代基底")}·${v(profile, "国家朝代")}，${v(profile, "物种")}·${v(profile, "族裔")}，${ageText(profile)}岁${v(profile, "类型基底")}。
 显著特征：${v(profile, "显著特征")}。
 脸型：${v(profile, "脸型")}。
-发型：${v(profile, "发型")}。${earring ? `\n耳饰：${earring}。` : ""}
+发型：${v(profile, "发型")}。${earring ? `耳饰：${earring}。` : ""}
 身材：${v(profile, "身材")}；头身比 ${v(profile, "头身比")}。
 性格：${v(profile, "性格")}。
 服装（${v(profile, "变装")}）：上身着装 ${v(profile, "上身着装")}；下身着装 ${v(profile, "下身着装")}；鞋子 ${v(profile, "鞋子")}。`;
-  const common = `体态：自然放松站姿（非 T-pose / A-pose），重心微移，手臂自然下垂，杜绝僵硬模型感。
-镜头与质感：85mm 人像镜头，浅景深；极致写实皮肤与骨相，真实布料纹理、自然褶皱、缝线细节、哑光材质；电影级布光。
-${styleBlock(stylePrompt)}`;
   const whiteBg = mode === "white-bg";
+  // 与前端 subject-prompt-templates.ts 的 characterFrontBack 保持同一份规范：
+  // 背景纯白、固定 3 个画面、正面特写 + 正面全身 + 背面全身，禁止侧面/额外机位。
   const background = whiteBg
-    ? "背景与排版：纯白(#FFFFFF)无缝背景，无任何道具、无文字水印；人物完整抠像边缘清晰，柔和接触阴影。"
-    : "背景与排版：纯净中性灰(#C8C8C8)无缝背景纸，无任何道具；极简无衬线字体标注 FRONT 正面 | BACK 背面。";
+    ? "背景与排版：纯白无缝背景（#FFFFFF），无任何道具、无文字水印；主体完整抠像边缘清晰，柔和接触阴影。"
+    : "背景与排版：纯白无缝背景纸（#FFFFFF），无任何道具；极简无衬线字体标注 FRONT 正面 | BACK 背面。";
+  /** 非人角色：禁用「真人演员 / 人像镜头 / 人体解剖」这类把人往人形拽的措辞 */
+  const consistency = creature
+    ? "角色一致性：严格锁定同一只动物（同一副骨相、同一套毛色与同一处机械义肢）。三个画面只允许出现这一只动物，禁止第二只同款、豹群、群像、旁人虚影。"
+    : "角色一致性：严格锁定同一真人演员。三个画面必须是同一张脸、同一套服装；画面中只允许出现这一个角色，禁止第二个人、多人合照、模特合集、候选人群像、旁人虚影。";
+  const posture = creature
+    ? "体态：四足自然站姿，重心微移，尾巴自然下垂，杜绝标本摆拍感与人立姿态。"
+    : "体态：自然放松站姿（非 T-pose / A-pose），重心微移，手臂自然下垂，杜绝僵硬模型感。";
+  const lens = creature
+    ? "镜头与质感：200mm 长焦，浅景深；真实毛发层次与骨相，机械义肢的金属、线束与磨损细节；电影级布光。"
+    : "镜头与质感：85mm 人像镜头，浅景深；极致写实皮肤与骨相，真实布料纹理、自然褶皱、缝线细节、哑光材质；电影级布光。";
+  const quality = creature
+    ? "质量标签：AAA 级电影制作质量，超高分辨率，写实动物解剖结构，非动漫，非游戏渲染。"
+    : "质量标签：AAA 级电影制作质量，超高分辨率，写实人体解剖结构，专业可打印级精度，非动漫，非游戏渲染。";
+  const closeup = creature
+    ? "左侧特写：头部与肩部特写，微侧15°，琥珀色兽瞳有真实反光，鼻梁与耳廓结构清晰；质感 极致写实毛发与湿润鼻头；镜头 200mm 长焦，浅景深，电影级布光。"
+    : "左侧特写：构图 微侧15°，中性自然表情，真实眼神；质感 极致写实皮肤，强调骨相与真实肤质；镜头 85mm 人像镜头，浅景深，电影级布光。";
   if (mode !== "sheet") {
     return `专业电影级角色定妆照（单人${whiteBg ? "，白底快速图" : ""}）。
-画面布局：16:9 横向构图，单人${whiteBg ? "正面半身/七分身" : "正面七分身"}居中，画面只出现这一个角色（同一张脸、同一套服装）：禁止第二个人、多人合照、模特合集、候选人群像、旁人虚影。禁止侧面视图与多角度拼版。
+画面布局：16:9 横向构图，单人${whiteBg ? "正面半身/七分身" : "正面七分身"}居中，画面只出现这一个角色。
+禁止侧面视图与多角度拼版。
 
 ${person}
-
-${common}
+${consistency}
+${posture}
+${lens}
+${styleBlock(stylePrompt, "character")}
 ${background}
-质量标签：AAA 级电影制作质量，超高分辨率，写实人体解剖结构，非动漫，非游戏渲染。`;
+${quality}`;
   }
-  return `专业电影级角色定妆参考图（三视图：正面特写 + 正面全身 + 背面全身）。
-画面布局：16:9 横向宽银幕构图。画面中固定 3 个画面，数量不得增减：① 左侧 1 个正面大头特写；② 右侧 1 个正面全身；③ 右侧 1 个背面全身。禁止侧面视图、其它机位、第四个人物、多角度拼版。
-画面只允许出现这一个角色（同一张脸、同一套服装）：禁止第二个人、多人合照、模特合集、候选人群像、旁人虚影。
+  return `专业电影级角色定妆参考图（正面特写 + 正背全身）。
+画面布局：16:9 横向宽银幕构图。画面中固定 3 个画面，数量不得增减：① 左侧 1 个正面大头特写；② 右侧 1 个正面全身；③ 右侧 1 个背面全身。禁止侧面视图、其它机位、第四个主体、多角度拼版。
 
 ${person}
+${consistency}
+${posture}
 
-${common}
+${closeup}
+
+右侧全身：只有正面全身与背面全身这 2 个视图；${creature ? "四爪着地、底部平齐，毛色与机械义肢在正背两面保持同一位置" : "身高对齐，底部平齐，真实演员试装照风格；服装 高级电影戏服质感，真实布料纹理、自然褶皱、缝线细节、哑光材质"}。
+
+${styleBlock(stylePrompt, "character")}
+
 ${background}
-质量标签：AAA 级电影制作质量，超高分辨率，写实人体解剖结构，非动漫，非游戏渲染。`;
+
+${quality}`;
 }
 
 /** 场景模板：single（默认）= 单视角空场景轴图；sheet = 2×2 宫格（仅用户明确要四视角时）；white-bg 不适用场景 */
@@ -180,19 +252,31 @@ ${layout}
 ${blockingLine}
 ${lockLine}
 
-硬约束：画面中不得出现人物、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印、标志、文字；不得改变建筑结构。前景/中景/远景只能写固定不可移动的建筑、家具、植被与结构元素，不写苹果/杯子/手机/书这类可移动小物。
-${styleBlock(stylePrompt)}`;
+硬约束：画面中不得出现人物、人物外貌描述、动物、可移动道具、食物/水果（如苹果）、日用品、字幕、水印、标志、文字；不得改变建筑结构。前景/中景/远景只能写固定不可移动的建筑、家具、植被与结构元素，不写苹果/杯子/手机/书这类可移动小物。
+${styleBlock(stylePrompt, "scene")}`;
 }
 
-/** 道具模板：sheet = 单品+细节；single = 单张；white-bg = 白底快速图（电商主图） */
-export function buildPropPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "sheet", stylePrompt?: string): string {
-  const layout = mode === "sheet"
-    ? `画面布局：单品居中、完整入画；右侧/下方允许 1 个细节特写（材质/边缘/工艺），不增加其它物品。`
-    : mode === "white-bg"
+/**
+ * 道具模板（2026-11-18 用户口径：形态由道具自身复杂度决定，不是一刀切单视图）：
+ * - single（默认）：单品单视图，单品居中，不拼版；
+ * - sheet：结构复杂、要交代多部件/工艺/边缘的道具才用——整体 + 1 个细节特写；
+ * - white-bg：白底快速图。
+ */
+export function buildPropPrompt(profile: SubjectProfile, mode: SubjectRenderMode = "single", stylePrompt?: string): string {
+  const whiteBg = mode === "white-bg";
+  const detail = mode === "sheet";
+  const title = detail
+    ? "专业电影级道具参考图（单品 + 细节）"
+    : whiteBg
+      ? "专业电影级道具白底快速图"
+      : "专业电影级道具参考图（单品单视图）";
+  const layout = detail
+    ? `画面布局：单品居中、完整入画；另给 1 个细节特写（材质/边缘/工艺），最多 1 个，不增加其它物品、不出现同款第二件。`
+    : whiteBg
       ? `画面布局：纯白底电商主图，单品居中、完整入画、占画面约 70%，柔和顶部光 + 轻微接触阴影；不要多格拼贴、不要场景道具。`
-      : `画面布局：单品居中、完整入画，中性浅灰背景；单张，不要多格拼贴。`;
-  const bg = mode === "white-bg" ? "纯白(#FFFFFF)" : (v(profile, "背景") || "干净中性灰");
-  return `专业电影级道具参考图（${mode === "white-bg" ? "白底快速图" : "Cinematic Prop Reference Sheet"}）。
+      : `画面布局：16:9 横向构图，单品居中、完整入画，占画面约 70%；单张单视图，不要多格拼贴、不要细节拼版、不要同款第二件。`;
+  const bg = whiteBg ? "纯白(#FFFFFF)" : (v(profile, "背景") || "干净中性灰");
+  return `${title}。
 ${layout}
 道具：${v(profile, "名称")}；尺寸 ${v(profile, "尺寸")}；材质 ${v(profile, "材质")}；颜色 ${v(profile, "颜色")}。
 状态：${v(profile, "状态")}。
@@ -202,7 +286,7 @@ ${layout}
 背景：${bg}。
 
 硬约束：无手、无人物、无文字水印；不得出现同款第二件；材质与做旧程度必须与描述一致。
-${styleBlock(stylePrompt)}`;
+${styleBlock(stylePrompt, "prop")}`;
 }
 
 export interface BuiltSubjectProfile {
@@ -224,7 +308,11 @@ export function buildSubjectProfile(
   const k = normKind(kind);
   const missing = missingProfileFields(k, profile);
   if (missing.length > 0) return { missing, built: null, label: LABEL[k] };
-  const mode: SubjectRenderMode = opts.renderMode ?? (k === "scene" ? "single" : "sheet");
+  // 角色默认要定妆参考图（锁脸+服装）；场景/道具没有多视图的必要，
+  // 默认单张概念图即可——可直接复用已有分镜概念帧，不强制生成轴图/细节图。
+  // 道具形态由复杂度决定（2026-11-18 用户纠正）：默认 single；结构复杂、要多部件/工艺细节时才显式传 sheet。
+  const requested = opts.renderMode;
+  const mode: SubjectRenderMode = requested ?? (k === "character" ? "sheet" : "single");
   const prompt = k === "scene" ? buildScenePrompt(profile, mode, opts.stylePrompt)
     : k === "prop" ? buildPropPrompt(profile, mode, opts.stylePrompt)
       : buildCharacterPrompt(profile, mode, opts.stylePrompt);

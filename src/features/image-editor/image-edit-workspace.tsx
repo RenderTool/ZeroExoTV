@@ -13,7 +13,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Tooltip } from 'antd';
-import { ArrowLeft, Brush, Grid2x2, Paintbrush, Scissors } from 'lucide-react';
+import { ArrowLeft, Grid2x2, Paintbrush, Scissors } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { CommandQueue, NodeRecord } from '@zeroexo/core';
 import { useHydratedContent } from '@zeroexo/plugin-nodes';
@@ -60,7 +60,6 @@ export interface ImageEditWorkspaceProps {
 const TOOLS: { id: ImageEditTool; labelKey: string; fallback: string; icon: React.ReactNode }[] = [
   { id: 'crop', labelKey: 'imageEditor.toolCrop', fallback: '裁剪', icon: <Scissors size={14} /> },
   { id: 'split', labelKey: 'imageEditor.toolSplit', fallback: '分割', icon: <Grid2x2 size={14} /> },
-  { id: 'maskEdit', labelKey: 'imageEditor.toolMask', fallback: '局部', icon: <Brush size={14} /> },
   { id: 'paint', labelKey: 'imageEditor.toolPaint', fallback: '涂抹', icon: <Paintbrush size={14} /> },
 ];
 

@@ -158,12 +158,17 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function readBaseStateDataUrl(tree: SubjectTree): Promise<string | null> {
-  const base = (tree.states ?? []).find((n) => n.id === SUBJECT_BASE_STATE_ID);
-  const key = firstCoverMediaKeyOfState(base?.media);
+  const key = findBaseStateMediaKey(tree);
   if (!key) return null;
   const blob = await resolveMediaBlob(key, 'image', 'orig').catch(() => null);
   if (!blob) return null;
   return blobToDataUrl(blob).catch(() => null);
+}
+
+/** 基础状态当前首图 key（供「继承基础状态」传给模型、并在面板里显示这张引用） */
+function findBaseStateMediaKey(tree: SubjectTree): string {
+  const base = (tree.states ?? []).find((n) => n.id === SUBJECT_BASE_STATE_ID);
+  return firstCoverMediaKeyOfState(base?.media) ?? '';
 }
 
 async function readMediaDataUrl(storageKey: string): Promise<string | null> {
@@ -324,13 +329,21 @@ async function runJob(key: string, input: RunInput): Promise<void> {
       });
     } else {
       const explicitRef = params.referenceKeys[0];
-      // 显式参考素材对基础状态同样生效；只有「自动拿基础图」这一步排除基础状态自身
-      const source = explicitRef
-        ? await readMediaDataUrl(explicitRef)
-        : (!isBase && params.useBaseRef ? await readBaseStateDataUrl(tree) : null);
+      // 参考输入顺序：勾选「引用基础状态」时，基础状态封面永远是**第一张**参考图；
+      // 显式参考素材排第二。没勾选就完全不把基础图塞进参考（用户 2026-11-18 明确口径）。
+      const refs: string[] = [];
+      const baseKey = !isBase && params.useBaseRef ? findBaseStateMediaKey(tree) : '';
+      if (baseKey) {
+        const data = await readBaseStateDataUrl(tree);
+        if (data) refs.push(data);
+      }
+      if (explicitRef && explicitRef !== baseKey) {
+        const data = await readMediaDataUrl(explicitRef);
+        if (data) refs.push(data);
+      }
       result = await generateLocalQwenImage({
         prompt,
-        referenceImages: source ? [source] : undefined,
+        referenceImages: refs.length > 0 ? refs : undefined,
         width: params.width,
         height: params.height,
         params: {

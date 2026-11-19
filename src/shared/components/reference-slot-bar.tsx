@@ -6,7 +6,7 @@
  * 禁止各页面再自造一套「添加参考素材」大按钮或另一套槽位样式。
  */
 import type { CSSProperties, ReactElement, ReactNode } from 'react';
-import { AlertTriangle, Check, FileText, Film, Image as ImageIcon, Music, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, FileText, Film, Image as ImageIcon, Music, Plus, X } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 
@@ -70,7 +70,7 @@ export function ReferenceSlotBar({
           onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
-          <Upload size={15} />
+          <Plus size={15} />
         </button>
       )}
       {items.map((item) => {

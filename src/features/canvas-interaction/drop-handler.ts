@@ -23,7 +23,7 @@ import { uploadAsset, UnsupportedFileTypeError, FileTooLargeError } from '../ass
 // 现统一走尺寸契约单一入口 createSizedAssetNode（与 insertAssetToCanvas 同一函数）。
 import { createSizedAssetNode, type CanvasContainerSize } from '../asset-picker/services/asset-node-size.js';
 // 2026-11-16 用户指令：拖拽落图与「发送到画布」行为一致——历史图生图引用链同样恢复（同一函数，不再各写一份）
-import { restoreGenerationEdge } from '@/pages/editor/editor-canvas/insert-asset-to-canvas.js';
+import { restoreGenerationEdge, insertGenerationChainToCanvas } from '@/pages/editor/editor-canvas/insert-asset-to-canvas.js';
 import type { CreateAssetInput } from '../asset-picker/asset-store.js';
 import { toInsertPayload } from '../asset-picker/components/picker-card.js';
 import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
@@ -146,6 +146,26 @@ export function useDropHandler({
             openCanvasTab({ kind: 'script', id: item.id, title: item.name ?? item.data?.title ?? '剧本' });
             return;
           }
+          const chain = item.type === 'asset'
+            ? (item.data as { generation?: { chain?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> } } })?.generation?.chain
+            : undefined;
+          if (chain?.nodes?.length && refs.commandQueue && refs.store) {
+            // 历史生成产物拖入 = 完整生成链路（提示词/参数/上游参考/连线）一起落画布
+            const res = insertGenerationChainToCanvas({
+              commandQueue: refs.commandQueue,
+              store: refs.store,
+              chain: chain as never,
+              containerSize: containerSize(),
+              seq: 0,
+              origin: pos,
+            });
+            if (res.ok) {
+              refs.store.setSelection({ selectedNodeIds: new Set(res.nodeIds), selectedEdgeIds: new Set() });
+            } else {
+              onError?.('生成链路拖入画布失败，请重试');
+            }
+            return;
+          }
           const node = await buildNodeFromLibraryItem(item, pos, (msg) => onError?.(msg), containerSize());
           if (node) {
             insertNodeAt(node);
@@ -175,6 +195,24 @@ export function useDropHandler({
       if (assetData) {
         try {
           const payload = JSON.parse(assetData) as InsertAssetPayload;
+          const chain = (payload as { generation?: { chain?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> } } })
+            .generation?.chain;
+          if (chain?.nodes?.length && refs.commandQueue && refs.store) {
+            const res = insertGenerationChainToCanvas({
+              commandQueue: refs.commandQueue,
+              store: refs.store,
+              chain: chain as never,
+              containerSize: containerSize(),
+              seq: 0,
+              origin: pos,
+            });
+            if (res.ok) {
+              refs.store.setSelection({ selectedNodeIds: new Set(res.nodeIds), selectedEdgeIds: new Set() });
+            } else {
+              onError?.('生成链路拖入画布失败，请重试');
+            }
+            return;
+          }
           const node = await createSizedAssetNode(payload, pos, containerSize());
           if (node) {
             insertNodeAt(node);

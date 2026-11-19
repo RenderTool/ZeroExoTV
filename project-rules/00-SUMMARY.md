@@ -12,8 +12,10 @@
 | C-03 | 子画布 Sub-Canvas（原 Plan#84，含画布挂载模型） | in-progress | [plans/2026-11-05-sub-canvas.md](plans/2026-11-05-sub-canvas.md) |
 | C-04 | 图片编辑改为独立页签（裁剪/局部/分割） | in-progress | [plans/2026-11-06-image-edit-tab.md](plans/2026-11-06-image-edit-in-node.md) |
 | C-05 | 项目 ZIP 完整迁移（剧本 MD / 主体格式 / 实体还原） | done | [plans/2026-11-11-project-zip-full-migration.md](plans/2026-11-11-project-zip-full-migration.md) |
+| C-06 | 生成引用链 / 同款 / 继续编辑（含尺寸与 CAS） | in-progress | [plans/2026-11-18-generation-replay-chain.md](plans/2026-11-18-generation-replay-chain.md) |
+| C-07 | 分镜与主体资产链路修复（连播/提示词/主体@/授权/服务守护） | in-progress | [plans/2026-11-18-分镜与主体资产链路修复.md](plans/2026-11-18-分镜与主体资产链路修复.md) |
 
-状态：in-progress 3 / done 2 / 待拍板 0 / deprecated 0。
+状态：in-progress 5 / done 2 / 待拍板 0 / deprecated 0。
 
 ## 二、需求征集（32 条，全部 merged）
 

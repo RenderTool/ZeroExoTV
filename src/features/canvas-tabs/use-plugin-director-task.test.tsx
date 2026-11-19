@@ -101,4 +101,47 @@ describe('usePluginDirectorTask', () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(landing.land).toHaveBeenCalled();
   });
+
+  it('轮询连续失败：phase 落 error，不继续假装生成中', async () => {
+    vi.useFakeTimers();
+    const runningTask = {
+      taskId: 'tsk_web_offline',
+      projectId: 'p1',
+      state: 'running',
+      currentSegment: 1,
+      doneCount: 0,
+      totalCount: 1,
+      segments: [{ index: 1, shotId: 's1', state: 'running', prompt: 'p' }],
+    };
+    client.submit.mockResolvedValue(runningTask);
+    client.get.mockRejectedValue(new Error('offline'));
+    const onNotice = vi.fn();
+    const { result } = renderHook(() => usePluginDirectorTask({
+      projectId: 'p1',
+      callbacks: {
+        onSegmentDone: vi.fn(),
+        onSegmentState: vi.fn(),
+        onFollowSegment: vi.fn(),
+        onNotice,
+      },
+    }));
+    await act(async () => {
+      await result.current.startRun({
+        projectId: 'p1',
+        selectedIds: ['s1'],
+        payload: { projectId: 'p1', clientJobId: 'tsk_web_offline', clientId: 'tsk_web_offline', kind: 'director_run', segments: [{ shotId: 's1', guide: { mode: 'none' }, params: {} }] },
+      });
+    });
+    expect(result.current.phase).toBe('running');
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+        await Promise.resolve();
+      });
+    }
+    expect(result.current.phase).toBe('error');
+    expect(result.current.error).toMatch(/ComfyUI/);
+    expect(onNotice).toHaveBeenCalledWith('error', expect.stringMatching(/ComfyUI/));
+    vi.useRealTimers();
+  });
 });

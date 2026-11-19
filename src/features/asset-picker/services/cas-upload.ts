@@ -19,7 +19,7 @@ import { putCas, registerCasRef, releaseCas, sha256Hex, casStorageKey, type CasR
 import { writeFileBlob } from '@/platform/fs.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { resolveMediaUrl } from '@/platform/media.js';
-import { listAssets, addAsset } from '../asset-store.js';
+import { listAssets, addAsset, isTombstoneSkip } from '../asset-store.js';
 import type { Asset, AssetKind, GuideMeta } from '../index.js';
 
 export interface CasStageResult {
@@ -179,7 +179,7 @@ export async function promoteAssetToScope(
         : { kind: 'audio', url: '', storageKey, durationMs: d.durationMs };
 
   try {
-    return await addAsset({
+    const created = await addAsset({
       id,
       cas,
       title: asset.title,
@@ -190,6 +190,8 @@ export async function promoteAssetToScope(
       scope: target,
       ...(projectId ? { projectId } : {}),
     });
+    // 墓碑命中：内容被删过，不当作导出成功（addAsset 已释放本次预注册的 CAS ref）
+    return isTombstoneSkip(created) ? null : created;
   } catch (err) {
     // addAsset 失败时摘掉刚挂的 ref，不遗留悬空引用
     await releaseCas(cas.hash, { assetId: id, projectId: projectId ?? 'library' }).catch(() => undefined);

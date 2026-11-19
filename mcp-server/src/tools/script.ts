@@ -289,12 +289,36 @@ export function registerScriptTools(server: McpServer, ctx: Ctx): void {
 
   defTool(server, ctx, {
     name: "normalize_script",
-    description: "剧本原文 → 标准格式文本 + 报告。不写入项目。推荐在导入前调用（非强制）。",
+    description:
+      "剧本原文 → 标准格式文本 + 报告。不写入项目。推荐在导入前调用（非强制）。" +
+      "识别规则：集标题行「第N集 / EPN」；场次行必须「第N场 / SN」开头（如「第1场 咖啡馆 夜 内」），" +
+      "「1-1」「场景一」这类编号不会被识别；对白行「角色：台词」；主体行「[主体 @名字]」或「@名字」。",
     bits: ["script.read"],
     schema: { content: z.string().min(1) },
     handler: async (args) => {
       const { normalized, report } = normalizeScript(args.content);
-      return { normalized, report };
+      // 空结果是「格式没被识别」，不是「剧本为空」：必须给可执行的原因，否则调用方只会看到空稿
+      const warnings: string[] = [];
+      if (report.episodeCount === 0) {
+        warnings.push("未识别到集标题行：需要「第1集」或「EP1」这样的单独一行");
+      }
+      if (report.sceneCount === 0 && args.content.trim()) {
+        warnings.push(
+          "未识别到任何场次行：场次行必须以「第N场」或「SN」开头（例：第1场 咖啡馆 夜 内），" +
+          "「1-1」「场景一」「S01-1」这类写法不会被识别",
+        );
+      }
+      if (report.discardedSegments.length) {
+        warnings.push(`有 ${report.discardedSegments.length} 段无法归入场次，原样列在 report.discardedSegments，需人工确认后再并入`);
+      }
+      return {
+        normalized,
+        report,
+        warnings,
+        hint: warnings.length
+          ? "按 warnings 逐条修正原文后重新调用本工具；不要拿空稿直接 import_script"
+          : "可直接作为 import_script(mode:'standard') 的 content",
+      };
     },
   });
 

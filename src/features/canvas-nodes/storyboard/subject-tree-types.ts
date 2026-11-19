@@ -395,6 +395,19 @@ export function subjectCoverCandidates(tree: SubjectTree | null | undefined): st
 }
 
 /**
+ * 基础状态的封面候选键（最多 1 个）。
+ * 2026-11-18 用户口径：**默认基础状态 = 封面**。基础状态没图时，封面就必须是空（显示图标占位），
+ * 不能拿别的状态图来冒充当封面 —— 否则会出现「基础状态空、主体却有封面」这种自相矛盾的状态。
+ * 只有用户显式把别的状态设为封面（ProductionItem.coverKey），才允许封面不是基础状态。
+ */
+export function subjectBaseCoverKeys(tree: SubjectTree | null | undefined): string[] {
+  if (!tree) return [];
+  const base = (tree.states ?? []).find((n) => n.id === SUBJECT_BASE_STATE_ID) ?? tree.states?.[0];
+  const key = firstCoverMediaKeyOfState(base?.media);
+  return key ? [key] : [];
+}
+
+/**
  * 条目 ↔ 主体树 唯一绑定（2026-11-06 修复同名串台）。回落链：
  * 1) `tree.itemId === item.id` 直接命中（新建 / 建树即写，改名不断链）；
  * 2) 无 itemId 的老树按名字配对，但**同名条目多于一条时只让第一条继承**，

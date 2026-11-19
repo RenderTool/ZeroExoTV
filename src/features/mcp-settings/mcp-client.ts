@@ -319,8 +319,14 @@ export async function probeHttp(
 
 // ===== 配置块 =====
 
-/** stdio 配置块：command/args/env 全部用 server-info 里的真实绝对路径；token 由 ensureIdeToken 自动注入，复制即可用。 */
+/**
+ * stdio 配置块：command/args 用 server-info 里的真实绝对路径；token 由 ensureIdeToken 自动注入，复制即可用。
+ * 2026-11-17 用户质疑「切换数据目录就要重装 MCP」：数据根**不再写进 env** ——
+ * MCP 进程统一读本机持久配置 `~/.zeroexo/data-root.txt`（与 fs-server 的 POST /root 同一份），
+ * 网页里换目录后 MCP 下次启动自动跟随，无需重新安装或改配置。
+ */
 export function buildStdioConfig(info: Pick<ServerInfo, 'serverEntry' | 'dataRoot'>, token: string): string {
+  void info.dataRoot;
   return JSON.stringify(
     {
       mcpServers: {
@@ -328,7 +334,6 @@ export function buildStdioConfig(info: Pick<ServerInfo, 'serverEntry' | 'dataRoo
           command: 'node',
           args: [info.serverEntry],
           env: {
-            ZEROEXO_DATA_ROOT: info.dataRoot,
             ZEROEXO_MCP_TOKEN: token,
           },
         },

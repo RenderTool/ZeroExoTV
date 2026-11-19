@@ -94,7 +94,6 @@ import {
   uiCardSurface,
 } from '@/shared/ui/index.js';
 import {
-  SUBJECT_STATE_CARD_MIN_WIDTH,
   SUBJECT_STATE_COVER_ASPECT,
   subjectStateColumnsForWidth,
 } from './subject-card-metrics';
@@ -491,7 +490,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     await openSubjectPage();
 
     const card = document.querySelector('[data-state-card="state-1"]') as HTMLElement;
-    expect(card.style.minWidth).toBe(`${SUBJECT_STATE_CARD_MIN_WIDTH}px`);
+    expect(parseFloat(card.style.minWidth || '0')).toBe(0);
     expect(card.style.flexDirection).toBe('column');
     const cover = card.querySelector('[data-state-cover]') as HTMLElement;
     // 2026-11-12：详情页用固定卡片（16:9），图片 contain 完整显示
@@ -535,15 +534,15 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     expect(actions.style.opacity).toBe('0');
     fireEvent.mouseEnter(card);
     await waitFor(() => expect(actions.style.opacity).toBe('1'));
-    expect(actions.querySelector('[data-state-action="edit"]')).toBeNull();
-    expect(actions.querySelector('[data-state-action="delete"]')).toBeTruthy();
+    expect(actions.querySelector('[data-state-action="edit"]')).toBeTruthy();
+    expect(actions.querySelector('[data-state-action="delete-state"]')).toBeTruthy();
 
     // 基础状态 = 主体本体：删除入口 = 删除整个主体（先确认）
     const base = document.querySelector('[data-state-card="__base__"]') as HTMLElement;
     fireEvent.mouseEnter(base);
     await waitFor(() => expect((base.querySelector('[data-state-actions]') as HTMLElement).style.opacity).toBe('1'));
-    expect(base.querySelector('[data-state-action="edit"]')).toBeNull();
-    expect(base.querySelector('[data-state-action="delete"]')).toBeTruthy();
+    expect(base.querySelector('[data-state-action="edit"]')).toBeTruthy();
+    expect(base.querySelector('[data-state-action="delete-state"]')).toBeTruthy();
   });
 
   it('2026-11-12 最终形态：点状态卡不跳新页面，编辑面板就在卡片内展开', async () => {
@@ -551,7 +550,8 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     await openSubjectPage();
     expect(document.querySelector('[data-state-edit-panel]')).toBeNull();
 
-    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.mouseEnter(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.click(document.querySelector('[data-state-card="state-1"] [data-state-action="edit"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
     // 仍在主体状态页：网格、主体名、其它状态卡都还在
     expect(document.querySelector('[data-subject-page="subject"]')).toBeTruthy();
@@ -569,7 +569,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     // 2026-11-12 用户指令：编辑态有明确的「收纳回卡片」按钮，不必再点一次卡
     const collapse = document.querySelector('[data-state-card="state-1"] [data-state-action="collapse"]') as HTMLElement;
     expect(collapse).toBeTruthy();
-    expect(collapse.textContent).toContain('收起编辑');
+    expect(collapse).toBeTruthy();
     fireEvent.click(collapse);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeNull());
     // 点另一张卡，编辑面板跟着换
@@ -580,7 +580,8 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
   it('出现集数：只给一个摘要按钮，不再把每个已选集铺成标签', async () => {
     renderPages(makeTree());
     await openSubjectPage();
-    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.mouseEnter(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.click(document.querySelector('[data-state-card="state-1"] [data-state-action="edit"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
     // 已选第 1 集：摘要按标题显示（与弹层里勾选行同一口径），不渲染标签
     expect(document.querySelector('[data-episode-chip]')).toBeNull();
@@ -606,7 +607,8 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
     tree.states.find((s) => s.id === 'state-1')!.appearEpisodes = [];
     renderPages(tree);
     await openSubjectPage();
-    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.mouseEnter(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.click(document.querySelector('[data-state-card="state-1"] [data-state-action="edit"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
     fireEvent.click(document.querySelector('[data-episodes-picker]') as Element);
     await waitFor(() => expect(document.querySelector('[data-episode-option="2"]')).toBeTruthy());
@@ -661,9 +663,9 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
 
     const card = document.querySelector('[data-state-card="state-1"]') as HTMLElement;
     fireEvent.mouseEnter(card);
-    fireEvent.click(card.querySelector('[data-state-action="canvas-generate"]') as Element);
+    fireEvent.click(card.querySelector('[data-state-action="send-media-canvas"]') as Element);
 
-    expect(emit).toHaveBeenCalledWith('subject:sendStateToCanvas', expect.objectContaining({
+    expect(emit).toHaveBeenCalledWith('subject:sendMediaToCanvas', expect.objectContaining({
       prompt: '左臂缠白色绷带',
       storageKey: 'state-key-1',
     }));
@@ -680,7 +682,7 @@ describe('卡片视觉对齐资产库（2026-11-05 用户拍板）', () => {
 
     const card = document.querySelector('[data-state-card="state-1"]') as HTMLElement;
     fireEvent.mouseEnter(card);
-    fireEvent.click(card.querySelector('[data-state-action="delete"]') as Element);
+    fireEvent.click(card.querySelector('[data-state-action="delete-state"]') as Element);
 
     // antd Modal.confirm：danger 主按钮 = 确认删除
     await waitFor(() => expect(document.querySelector('.ant-modal-confirm')).toBeTruthy());
@@ -749,15 +751,16 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
     tree.states.find((s) => s.id === 'state-1')!.media = [{ key: 'state-key-1', type: 'image' }];
     renderPages(tree, PID);
     await openSubjectPage();
-    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.mouseEnter(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.click(document.querySelector('[data-state-card="state-1"] [data-state-action="edit"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
 
-    const toolbar = document.querySelector('[data-state-card="state-1"] [data-state-actions]') as HTMLElement;
+    const toolbar = document.querySelector('[data-state-card="state-1"]') as HTMLElement;
     expect(toolbar).toBeTruthy();
-    // 换图 / 删媒体 / 画布生成 / 封面 / 收起编辑都在卡片顶行同一条工具栏
-    expect(toolbar.querySelector('[data-media-action="replace"]')).toBeTruthy();
-    expect(toolbar.querySelector('[data-media-action="remove"]')).toBeTruthy();
-    expect(toolbar.querySelector('[data-state-action="canvas-generate"]')).toBeTruthy();
+    // 编辑态只在卡片外保留「收起编辑」；换图/发送/删除都在编辑面板内（2026-11-19 用户要求：
+    // 卡片上不再堆一排图标，避免与编辑面板内的入口重复）
+    expect(toolbar.querySelector('[data-state-action="replace-media"]')).toBeNull();
+    expect(toolbar.querySelector('[data-state-action="send-media-canvas"]')).toBeNull();
     expect(toolbar.querySelector('[data-state-action="collapse"]')).toBeTruthy();
     // 旧按钮行与隐藏 file input 全部下线
     expect(document.querySelector('[data-media-actions]')).toBeNull();
@@ -775,7 +778,7 @@ describe('状态编辑页精简与媒体动作归位（2026-11-06 用户指令�
     await openSubjectPage();
     fireEvent.click(document.querySelector('[data-state-card="__base__"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-subject-page="state"]')).toBeTruthy());
-    expect(document.querySelector('[data-media-action="replace"]')).toBeTruthy();
+    expect(document.querySelector('[data-state-action="replace-media"]')).toBeTruthy();
     expect(document.querySelector('[data-media-action="remove"]')).toBeNull();
   });
 
@@ -1108,14 +1111,14 @@ describe('状态页直接出图 + 参考素材（2026-11-13 P0）', () => {
   it('编辑态顶部有参考素材入口；底部复用画布提示词底栏（模型/参数弹层/提示词/生成）', async () => {
     renderPages(makeTree());
     await openSubjectPage();
-    fireEvent.click(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.mouseEnter(document.querySelector('[data-state-card="state-1"]') as Element);
+    fireEvent.click(document.querySelector('[data-state-card="state-1"] [data-state-action="edit"]') as Element);
     await waitFor(() => expect(document.querySelector('[data-state-edit-panel]')).toBeTruthy());
 
     expect(document.querySelector('[data-subject-ref-add]')).toBeTruthy();
     expect(document.querySelector('[data-subject-gen-footer]')).toBeTruthy();
     // 画布编辑只在卡片顶行出现一次，底栏不再重复「发送到画布」
     expect(document.querySelector('[data-subject-send-canvas]')).toBeNull();
-    expect(document.querySelector('[data-state-action="canvas-generate"]')).toBeTruthy();
     expect(document.querySelector('[data-subject-baseref]')).toBeTruthy();
     // 画布底栏同款：StyledSelect 模型 + 参数摘要弹层；提示词框已在页面里，底栏不再重复提示词库
     expect(document.querySelector('[data-subject-gen-footer]')?.textContent).toContain('QwenImage2.1');

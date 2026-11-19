@@ -7,7 +7,8 @@
  *
  * 数据注入：
  * - 画布：宿主可传 canvasNodes（画布内实时节点）；缺省从项目图读盘过滤可见节点；
- * - 资产：本项目 + 公共库，按 acceptKinds 过滤；
+ *   画布页签 = 画布节点 + 画布历史（本项目生成产物，2026-11-16 用户定口径）；
+ * - 资产：只列公共资产（资产=公共资产，生成产物属于画布历史不混入）；
  * - 主体：主体条目 + 主体树（状态图行），同样按 acceptKinds 过滤；
  * - 上传：落到 CAS 后回调宿主（参考素材不写资产库）。
  */
@@ -18,7 +19,10 @@ import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { filterVisibleNodes } from '@zeroexo/core';
 import { loadProjectGraph } from '@zeroexo/plugin-persistence';
+import { pathForStorageKey, stat } from '@/platform/fs.js';
 import { listAssets } from '@/features/asset-picker/asset-store.js';
+import { listDeletedKeys } from '@/entities/deleted-asset-tombstones.js';
+import { filterHistoryAssets } from '@/features/canvas-assets/history-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
@@ -26,13 +30,11 @@ import {
   migrateSubjectTrees,
   type SubjectTree,
 } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
-import {
-  resolveSubjectCover,
-  type ProductionItem,
-} from '@/features/canvas-nodes/production-manager/production-manager-types.js';
+import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { DirectorAssetRef } from '@/entities/director-params.js';
 import {
   AssetPickPanel,
+  CANVAS_TABS,
   useCardPalette,
   type AssetPickTab,
 } from '@/shared/components/asset-pick-panel.js';
@@ -97,7 +99,7 @@ function kindsToAccept(kinds: AssetSlotKind[]): string {
 
 export const AssetSlotPicker = memo(function AssetSlotPicker({
   open, onClose, theme, projectId, anchorEl, acceptKinds = ['image', 'video', 'audio'],
-  canvasNodes, tabs = ['canvas', 'asset', 'subject'], initialTab, current, onRemoveCurrent,
+  canvasNodes, tabs = CANVAS_TABS, initialTab, current, onRemoveCurrent,
   onPick, onUploadFiles, uploadHint, accept,
 }: AssetSlotPickerProps): React.ReactElement | null {
   const { t } = useTranslation();
@@ -108,7 +110,16 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
   const pid = projectId ?? getCurrentCanvasId() ?? undefined;
 
   const [loadedCanvas, setLoadedCanvas] = useState<AssetSlotCanvasNode[]>([]);
+  /**
+   * 画布页签的最终清单：宿主注入（canvasNodes）与读盘两条来源都要过同一道核对——
+   * 媒体文件已不在盘上的节点不进列表（用户 2026-11-17：@ 面板仍列出早就没有的图片），
+   * 同一 storageKey 重复挂多份只留第一份。读不到盘则原样返回，不误杀。
+   */
+  const [verifiedCanvas, setVerifiedCanvas] = useState<AssetSlotCanvasNode[] | null>(null);
+  /** 资产页签 = 公共资产（scope=library；生成产物属画布历史，2026-11-16 口径） */
   const [assets, setAssets] = useState<Array<{ storageKey: string; kind: AssetSlotKind; title: string; scope: 'project' | 'library' }>>([]);
+  /** 历史页签数据：画布历史 + 分镜历史（与抽屉历史记录同一条 filterHistoryAssets 链） */
+  const [historyAssets, setHistoryAssets] = useState<Array<{ id: string; storageKey: string; kind: AssetSlotKind; title: string; source: 'canvas' | 'director' }>>([]);
   const [subjects, setSubjects] = useState<ProductionItem[]>([]);
   const [trees, setTrees] = useState<SubjectTree[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -128,11 +139,14 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
     if (!open) return;
     let cancelled = false;
     void (async () => {
+      /** 墓碑集合先取：删资产记录不动画布节点，画布页签同样要按内容键过滤（用户实测 2026-11-16） */
+      const deleted = await listDeletedKeys().catch(() => new Set<string>());
       if (canvasNodes === undefined && pid) {
         try {
           const graph = await loadProjectGraph(pid);
           if (graph && Array.isArray(graph.nodes) && !cancelled) {
-            setLoadedCanvas(filterVisibleNodes(graph.nodes).map((n) => {
+            const seen = new Set<string>();
+            const rows = filterVisibleNodes(graph.nodes).map((n) => {
               const node = n as { id: string; type: string; title?: string; data?: Record<string, unknown> };
               const data = node.data ?? {};
               return {
@@ -143,16 +157,44 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
                 url: typeof data.url === 'string' ? data.url : undefined,
                 content: typeof data.content === 'string' ? data.content : undefined,
               };
-            }));
+            }).filter((n) => {
+              if (n.storageKey && deleted.has(n.storageKey)) return false;
+              // 同一内容键在画布上重复挂多份 → 列表只留第一份（用户实测同图 ×3）
+              if (n.storageKey) {
+                if (seen.has(n.storageKey)) return false;
+                seen.add(n.storageKey);
+              }
+              return true;
+            });
+            // 物理文件核对：CAS 文件已丢的节点不进列表（否则 @ 面板会列出“早就没有的图”）
+            // 读不到盘（未授权 / 服务离线）时整轮跳过，绝不把“读不到”当“已删除”。
+            const probeOk = await stat('entities/storyboard.json').catch(() => null);
+            let live = rows;
+            if (probeOk) {
+              const keep: typeof rows = [];
+              for (const row of rows) {
+                if (!row.storageKey || !row.storageKey.startsWith('cas:')) { keep.push(row); continue; }
+                const p = pathForStorageKey(row.storageKey);
+                if (!p) { keep.push(row); continue; }
+                const s = await stat(p).catch(() => null);
+                if (s) keep.push(row);
+              }
+              live = keep;
+            }
+            if (!cancelled) setLoadedCanvas(live);
           }
         } catch { /* 画布读取失败 → 分区空态 */ }
       }
       try {
         const all = await listAssets();
+        const live = all.filter((a) => {
+          const key = (a.data as { storageKey?: string } | undefined)?.storageKey;
+          return !(key && deleted.has(key));
+        });
         if (!cancelled) {
-          setAssets(all
-            .filter((a) => a && kindSet.has(a.kind as AssetSlotKind))
-            .filter((a) => !(a.scope === 'project' && a.projectId && pid && a.projectId !== pid))
+          // 资产页签 = 公共资产（生成产物属画布历史，2026-11-16 用户定口径）
+          setAssets(live
+            .filter((a) => a && kindSet.has(a.kind as AssetSlotKind) && a.scope === 'library')
             .map((a) => {
               const d = a.data as { storageKey?: string } | undefined;
               if (!d?.storageKey) return null;
@@ -160,10 +202,27 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
                 storageKey: d.storageKey,
                 kind: a.kind as AssetSlotKind,
                 title: a.title || (a.kind === 'image' ? '图片' : a.kind === 'video' ? '视频' : '音频'),
-                scope: ((a.scope ?? 'project') === 'library' ? 'library' : 'project') as 'project' | 'library',
+                scope: 'library' as const,
               };
             })
             .filter((x): x is NonNullable<typeof x> => !!x));
+          // 历史页签：画布历史 + 分镜历史（与抽屉历史记录同一条过滤链：仅生成产物 + 本项目 + CAS 去重）
+          const toHistory = (list: ReturnType<typeof filterHistoryAssets>, source: 'canvas' | 'director') =>
+            list
+              .filter((a) => kindSet.has(a.kind as AssetSlotKind))
+              .map((a) => {
+                const d = a.data as { storageKey?: string } | undefined;
+                if (!d?.storageKey) return null;
+                return {
+                  id: a.id,
+                  storageKey: d.storageKey,
+                  kind: a.kind as AssetSlotKind,
+                  title: a.title || (a.kind === 'image' ? '图片' : a.kind === 'video' ? '视频' : '音频'),
+                  source,
+                };
+              })
+              .filter((x): x is NonNullable<typeof x> => !!x);
+          setHistoryAssets([...toHistory(filterHistoryAssets(live, pid ?? null, 'all', 'canvas'), 'canvas'), ...toHistory(filterHistoryAssets(live, pid ?? null, 'all', 'director'), 'director')]);
         }
       } catch { /* 资产读取失败 → 分区空态 */ }
       if (pid) {
@@ -224,7 +283,38 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
     };
   }, [open, closeWithFocus]);
 
-  const sourceCanvas = canvasNodes ?? loadedCanvas;
+  useEffect(() => {
+    if (!open) return;
+    const src = canvasNodes ?? loadedCanvas;
+    let cancelled = false;
+    void (async () => {
+      const probe = await stat('entities/storyboard.json').catch(() => null);
+      if (cancelled) return;
+      if (!probe) { setVerifiedCanvas(src); return; }
+      const seen = new Set<string>();
+      const keep: AssetSlotCanvasNode[] = [];
+      for (const n of src) {
+        const key = n.storageKey;
+        if (key) {
+          if (seen.has(key)) continue;
+          seen.add(key);
+        }
+        if (key && key.startsWith('cas:')) {
+          const p = pathForStorageKey(key);
+          if (p) {
+            const s = await stat(p).catch(() => null);
+            if (!s) continue;
+          }
+        }
+        keep.push(n);
+      }
+      if (!cancelled) setVerifiedCanvas(keep);
+    })();
+    return () => { cancelled = true; };
+  }, [open, canvasNodes, loadedCanvas]);
+
+  const sourceCanvas = verifiedCanvas ?? (canvasNodes ?? loadedCanvas);
+  // 画布页签 = 仅画布上物理存在的媒体节点（连线语义）；生成产物统一进「历史」页签
   const canvasRefs = useMemo<DirectorAssetRef[]>(() => sourceCanvas
     .filter((n) => kindSet.has(n.type as AssetSlotKind))
     .filter((n) => n.storageKey || n.content || n.url)
@@ -237,6 +327,24 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
       originScope: 'project',
     })), [sourceCanvas, kindSet]);
 
+  /** 历史页签：画布历史 + 分镜历史（与抽屉历史记录同一条 filterHistoryAssets 链） */
+  const historyMedia = useMemo<{ canvas: DirectorAssetRef[]; director: DirectorAssetRef[] }>(() => ({
+    canvas: historyAssets.filter((a) => a.source === 'canvas').map((a) => ({
+      id: `history:${a.id}`,
+      kind: a.kind,
+      title: a.title,
+      storageKey: a.storageKey,
+      originScope: 'project' as const,
+    })),
+    director: historyAssets.filter((a) => a.source === 'director').map((a) => ({
+      id: `history:${a.id}`,
+      kind: a.kind,
+      title: a.title,
+      storageKey: a.storageKey,
+      originScope: 'project' as const,
+    })),
+  }), [historyAssets]);
+
   const assetRefs = useMemo<DirectorAssetRef[]>(() => assets.map((a) => ({
     id: `media:${a.storageKey}`,
     kind: a.kind,
@@ -246,11 +354,13 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
   })), [assets]);
 
   const pick = useCallback((ref: DirectorAssetRef, origin: AssetSlotPick['origin']): void => {
-    if (!ref.storageKey) return;
     const fromNodeId = ref.id.startsWith('canvas:') ? ref.id.slice('canvas:'.length) : undefined;
+    // 画布节点按节点 id 复用/连线，不依赖 storageKey：老节点可能只有 blob 内容（无内容键），
+    // 之前一刀切 `!ref.storageKey return` 会让点击画布节点毫无反应（2026-11-17 用户实测）。
+    if (!ref.storageKey && !fromNodeId) return;
     onPick({
       kind: ref.kind,
-      storageKey: ref.storageKey,
+      storageKey: ref.storageKey ?? '',
       title: ref.title ?? '',
       fromNodeId,
       origin: fromNodeId ? 'canvas' : origin,
@@ -300,6 +410,7 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
         initialTab={initialTab}
         allowedKinds={acceptKinds}
         canvasMedia={canvasRefs}
+        historyMedia={historyMedia}
         candidates={assetRefs}
         subjects={subjects}
         subjectTrees={trees}
@@ -310,12 +421,6 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
         onRemoveCurrent={onRemoveCurrent}
         onPickAsset={(ref) => pick(ref, ref.originScope === 'library' ? 'library' : 'project')}
         onPickCanvasMedia={(ref) => pick(ref, 'canvas')}
-        onPickSubject={(item) => {
-          const key = resolveSubjectCover(item).key;
-          if (!key) return;
-          onPick({ kind: 'image', storageKey: key, title: item.name, origin: 'subject' });
-          onClose();
-        }}
         onPickSubjectImage={(item, img) => {
           onPick({
             kind: 'image',

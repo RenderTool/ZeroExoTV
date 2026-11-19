@@ -83,3 +83,8 @@ export async function cancelPluginTask(taskId: string): Promise<PluginTask> {
   });
   return res.task;
 }
+
+/** 真删插件任务事实源（清空已完成用）：只删展示层刷新必复活，必须连插件侧 JSON 一起删 */
+export async function deletePluginTask(taskId: string): Promise<void> {
+  await request<{ deleted: boolean }>(`/zeroexo/v1/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+}

@@ -254,9 +254,9 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     name: "set_subject_profile",
     description:
       "写主体人设模板（2026-11-13 强制约束）：按 kind 提交必填字段，服务端校验后拼出标准提示词——" +
-      "角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 单视角空场景轴图（21:9，默认；2×2 宫格仅用户明确要求）；道具 = 单品参考图。" +
+      "角色 = 三视图模板（16:9 固定 3 画面、同一张脸、只允许这一个角色）；场景 = 单视角空场景轴图（21:9，默认；2×2 宫格仅用户明确要求）；道具 = 默认单张单视图（单品居中），结构复杂、需要交代多部件/工艺的道具才用 sheet 出「整体 + 1 个细节特写」。" +
       "身份锚点句写 item.note，标准提示词写主体树基础状态 fullPrompt/deltaPrompt。字段不全直接拒绝并列出缺项。" +
-      "renderMode 可选：sheet（参考图/定妆：角色三视图 / 场景四视角宫格 / 道具细节图）/ single（场景默认，单张轴图）/ white-bg（白底快速图，道具主图或要抠像的角色）。" +
+      "renderMode 可选：sheet（角色三视图 / 场景四视角宫格 / 复杂道具的整体+1细节）/ single（默认：单张，场景轴图或道具单视图）/ white-bg（白底快速图，道具主图或要抠像的角色）。" +
       "有参考图时必须先 read_asset 看图、按图反推字段，再把 sourceImage 一起传；不要凭想象填。baseVersion = storyboard version。",
     bits: ["subject.write"],
     schema: {
@@ -272,7 +272,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
       sourceImage: z.string().optional()
         .describe("参考图的 storageKey；有图时必须先 read_asset 看过，并按图反推上面这些字段"),
       renderMode: z.enum(["sheet", "single", "white-bg"]).optional()
-        .describe("出图形态：sheet=参考图/定妆（角色三视图 / 场景四视角宫格 / 道具细节图）；single=场景默认，单张轴图；white-bg=白底快速图（道具/需要抠像的角色，纯白底）"),
+        .describe("出图形态：sheet=参考图/定妆（角色三视图 / 场景四视角宫格 / 复杂道具的整体+1细节）/ single=默认，单张（场景轴图、道具单视图）/ white-bg=白底快速图（道具/需要抠像的角色，纯白底）"),
       dryRun: z.boolean().optional(),
     },
     handler: async (args, token) => {
@@ -321,7 +321,7 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
     name: "set_subject_image",
     description:
       "给主体挂状态图（写 ProductionItem.images[] 与 coverKey）。storageKey 来自 upload_asset 返回的 'cas:<hash>.<ext>'；stateTag=状态名（如「定妆」「美艳态」「恶鬼态」）。幂等：同 storageKey 已存在则原地更新。" +
-      "**硬门槛：主体必须先 set_subject_profile 写好人设/标准提示词（基础提示词为空直接 SUBJECT_PROFILE_REQUIRED）；写入前必须先 read_asset 真正看过这张图（服务端只认本次会话读过的图），并把画面反推成 prompt 一起写（人数/同一张脸/服装/背景/构图）。**" +
+      "**门槛：角色必须先 set_subject_profile 写好人设/定妆提示词（基础提示词为空直接 SUBJECT_PROFILE_REQUIRED）；场景/道具如果已有可用概念分镜或概念图，可直接 read_asset 反推 prompt 后挂入，不强制再套模板生成新图。写入前必须先 read_asset 真正看过这张图（服务端只认本次会话读过的图），并把画面反推成 prompt 一起写（人数/同一张脸/服装/背景/构图）。**" +
       "角色图必须单人、同一张脸；多人合照/模特合集/候选人群像/别的角色图一律不许挂；看不到图就停下问用户，不要瞎猜。" +
       "防呆：同一张图已挂在其它主体下时直接拒绝（沈少误挂主演图事故），确需共享才传 allowCrossSubject:true。baseVersion = storyboard version。",
     bits: ["subject.write"],
@@ -378,12 +378,14 @@ export function registerSubjectTools(server: McpServer, ctx: Ctx): void {
         const tree = trees.find((tr) => tr.itemId === args.subjectId)
           ?? trees.find((tr) => !tr.itemId && !!item && tr.name === item.name);
         const base = tree?.states?.find((st) => st.id === "__base__") ?? tree?.states?.[0];
-        if (!base?.fullPrompt?.trim()) {
+        // 角色还没人设/定妆提示词 = 还没走强制字段模板，不许先挂图（否则又是瞎配图）。
+        // 场景/道具允许直接用已有概念分镜/概念图：反推 prompt 就是这张图的事实描述，不强制套模板。
+        if (item?.kind === "character" && !base?.fullPrompt?.trim()) {
           throw new McpError(
             "SUBJECT_PROFILE_REQUIRED",
-            `主体「${item?.name ?? args.subjectId}」还没有人设/标准提示词，禁止先挂图。`
-              + "先按 zeroexo://skills/subjects 1.7 的字段表调 set_subject_profile（角色 16 项 / 场景 / 道具；"
-              + "有参考图先 read_asset 按图反推），生成三视图/场景轴图/道具提示词后再挂图。",
+            `角色「${item?.name ?? args.subjectId}」还没有人设/定妆提示词，禁止先挂图。`
+              + "先按 zeroexo://skills/subjects 1.7 的角色字段表调 set_subject_profile，"
+              + "生成正面特写 + 正背全身定妆提示词后再挂图。",
           );
         }
         if (item?.kind === "scene" && args.emptySceneConfirmed !== true) {

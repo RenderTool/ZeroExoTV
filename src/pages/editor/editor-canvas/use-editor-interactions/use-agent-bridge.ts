@@ -16,7 +16,7 @@ import {
 } from '@zeroexo/core';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, setGeneratingProgress, clearGeneratingProgress, type ReferenceItem } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, setGeneratingPreview, clearGeneratingPreview, setGeneratingProgress, clearGeneratingProgress, fitMediaSize, type ReferenceItem } from '@zeroexo/plugin-nodes';
 import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 import { resolvePlacement } from '@zeroexo/core';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
@@ -26,11 +26,13 @@ import { generateLocalQwenImage } from '../interactions/local-qwen-image.js';
 import { generateKrea2Image } from '../interactions/local-krea2-image.js';
 import { generateMossImage } from '../interactions/local-moss-image.js';
 import { canvasDocNodeKey, getCurrentCanvasDocId } from '@/shared/current-canvas-doc.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
+import { resolveMediaUrl } from '@/platform/media.js';
 import { buildNodeAssetInput } from '@/features/asset-picker/services/upload-asset.js';
 import { autoLandGenerationOutput } from '@/features/canvas-assets/history-autoland.js';
-import { buildTemplateParams, promptTitleSummary, collectInputReferences, formatInputRefs, resolveLocalVideoRequest } from './use-ai-generation.js';
-import { IMAGE_PROMPT_REVERSE_PRESET, contentToDataUrl, fitImageNodeSize } from './helpers.js';
+import { buildGenerationChain } from '@/features/sub-canvas/generation-chain.js';
+import type { GenerationChainInput } from '@/features/sub-canvas/generation-chain.js';
+import { buildTemplateParams, promptTitleSummary, collectInputReferences, compileReferenceImages, formatInputRefs, resolveLocalVideoRequest } from './use-ai-generation.js';
+import { IMAGE_PROMPT_REVERSE_PRESET, contentToDataUrl, fitImageNodeSize, resolveRequestedImageSize } from './helpers.js';
 // 本地版（Plan#83）：前端不含 Agent/LLM。原本「节点生成 = 投递 Agent 会话」，
 // 现改为：图/音/视频直负本地渠道属 Phase 2 T2.4（未接入，调用即报错）；
 // 剧本/分镜类 LLM 产物由外部工具经 MCP 直接读写数据目录。
@@ -67,6 +69,21 @@ const UPSTREAM_LABEL: Record<string, string> = {
 /**
  * Agent 桥接 / AI 生成相关 hooks
  */
+/**
+ * 生成结果命名（画布手动生成与 MCP 代理生成口径统一）：
+ * 节点已有自定义标题就保留，否则用本次提示词摘要；摘要也不足时退到兜底名。
+ */
+function resolveGenerationTitle(
+  nodeData: Record<string, unknown> | undefined,
+  prompt: string,
+  fallback = '',
+): string {
+  const prevSummary = promptTitleSummary(String(nodeData?.prompt ?? ''));
+  const current = typeof nodeData?.title === 'string' ? nodeData.title : '';
+  if (current && current !== prevSummary) return current;
+  return promptTitleSummary(prompt) || current || fallback;
+}
+
 export function useAgentBridgeHooks(
   params: AgentBridgeHookParams,
   nodeAbortControllersRef: React.MutableRefObject<Map<string, any>>,
@@ -163,6 +180,12 @@ export function useAgentBridgeHooks(
               content: url, width: result.width, height: result.height, durationMs: result.durationMs,
               bytes: result.bytes, mimeType: result.mimeType, jobId: result.generationId,
               model: (data.model as string) ?? undefined, prompt: String(data.prompt ?? ''), guide: result.guide,
+              params: { ...localVideo.params, width: result.width, height: result.height },
+              chain: buildGenerationChain(refs.store!.getGraph() as never, nodeId, {
+                prompt: String(data.prompt ?? ''),
+                model: (data.model as string) ?? undefined,
+                params: { ...localVideo.params, width: result.width, height: result.height },
+              }),
             }).catch(() => undefined);
           }).catch(fail);
         } else {
@@ -181,10 +204,12 @@ export function useAgentBridgeHooks(
             : generateLocalQwenImage({ prompt: String(data.prompt ?? ''), params: pv, nodeId, resume, onPreview, onProgress: onStep });
           void run.then((result) => {
             const url = URL.createObjectURL(result.blob);
+            const resultPv = { ...pv, width: result.width, height: result.height, size: `${result.width}x${result.height}` };
             finish({
               content: url, status: 'success', naturalWidth: result.width, naturalHeight: result.height,
               mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
               title: promptTitleSummary(String(data.prompt ?? '')) || (data.title as string) || '',
+              paramValues: resultPv,
               errorDetails: undefined, errorType: undefined,
             });
             void refs.persistence?.save().catch(() => undefined);
@@ -193,6 +218,12 @@ export function useAgentBridgeHooks(
               content: url, width: result.width, height: result.height, bytes: result.bytes,
               mimeType: result.mimeType, jobId: result.generationId,
               model: isMoss ? MOSS_MODEL_KEY : isKrea2 ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY, prompt: String(data.prompt ?? ''),
+              params: resultPv,
+              chain: buildGenerationChain(refs.store!.getGraph() as never, nodeId, {
+                prompt: String(data.prompt ?? ''),
+                model: isMoss ? MOSS_MODEL_KEY : isKrea2 ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY,
+                params: resultPv,
+              }),
             }).then((landed) => {
               if (landed?.storageKey) {
                 finish({ storageKey: landed.storageKey } as Record<string, unknown>);
@@ -232,7 +263,7 @@ export function useAgentBridgeHooks(
     const textPos = resolvePlacement({
       anchor: node,
       size: { width: 280, height: 120 },
-      existingNodes: refs.store.getGraph().nodes.filter((n: any) => !n._deleted),
+      existingNodes: refs.store!.getGraph().nodes.filter((n: any) => !n._deleted),
     });
     refs.commandQueue.execute(new AddNodeCommand({
       id: textNodeId,
@@ -375,6 +406,73 @@ export function useAgentBridgeHooks(
       }
       const provider = refs.aiProvider;
       if (!provider || !refs.commandQueue || !refs.store) return;
+
+      // 2026-11-18 用户口径（同级副本生成，非下游链式）：
+      // 节点已有结果时点「生成」= 在**正下方**新建一个同级节点，拷贝当前节点的提示词/参数/
+      // 内联参考图，并把「当前节点的上游输入边」原样复制到新节点，再由新节点发起生成。
+      // 绝不建「当前节点 → 新节点」的下游边：那是编辑链路，用户要的是同参数再生成一份。
+      if (mode !== 'text') {
+        const target = refs.store!.getGraph().nodes.find((n: any) => n.id === nodeId) as NodeRecord | undefined;
+        const tdata = (target?.data ?? {}) as Record<string, any>;
+        const hasResult = Boolean(tdata.storageKey) || (typeof tdata.content === 'string' && tdata.content !== '' && tdata.status === 'success');
+        if (target && hasResult) {
+          const newNodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const size = { width: target.size?.width ?? 340, height: target.size?.height ?? 260 };
+          const graphNodes = refs.store!.getGraph().nodes.filter((n: any) => !n._deleted) as Array<{
+            id?: string; position?: { x: number; y: number }; size?: { width?: number; height?: number };
+          }>;
+          const collides = (x: number, y: number): boolean => graphNodes.some((n) => {
+            const nx = n.position?.x ?? 0;
+            const ny = n.position?.y ?? 0;
+            const nw = n.size?.width ?? 240;
+            const nh = n.size?.height ?? 200;
+            return x < nx + nw + 24 && x + size.width + 24 > nx && y < ny + nh + 24 && y + size.height + 24 > ny;
+          });
+          let px = target.position.x;
+          let py = target.position.y + (target.size?.height ?? 260) + 48;
+          for (let i = 0; i < 12 && collides(px, py); i += 1) py += size.height + 48;
+          const inherited: Record<string, unknown> = { ...tdata };
+          for (const k of ['content', 'storageKey', 'naturalWidth', 'naturalHeight', 'bytes', 'mimeType', 'durationMs', 'generationId', 'guide', 'localJob', 'errorDetails', 'errorType']) delete inherited[k];
+          inherited.status = 'idle';
+          // 参数要连尺寸一起继承：源节点可能只存了产物、paramValues 里没有显式 width/height，
+          // 此时用产物真实宽高补齐，避免新节点再落到展示框尺寸（348→352 的事故）。
+          const inheritedPv = { ...((tdata.paramValues ?? {}) as Record<string, unknown>) };
+          const sourceOutW = Number(tdata.naturalWidth);
+          const sourceOutH = Number(tdata.naturalHeight);
+          const hasExplicitSize = Number(inheritedPv.width) > 0 && Number(inheritedPv.height) > 0;
+          if (!hasExplicitSize && sourceOutW > 0 && sourceOutH > 0) {
+            inheritedPv.width = sourceOutW;
+            inheritedPv.height = sourceOutH;
+            inheritedPv.size = `${sourceOutW}x${sourceOutH}`;
+            if (typeof inheritedPv.sizeMode !== 'string') inheritedPv.sizeMode = 'custom';
+          }
+          inherited.paramValues = inheritedPv;
+          refs.commandQueue.execute(new AddNodeCommand({
+            id: newNodeId,
+            type: target.type,
+            position: { x: px, y: py },
+            size,
+            data: inherited,
+          } as never));
+          // 复制上游输入边（参考图/参考视频）到新节点，而不是把当前节点接成下游
+          const upstreamEdges = (refs.store!.getGraph().edges as unknown as Array<{
+            source: { nodeId: string; pinId?: string };
+            target: { nodeId: string; pinId?: string };
+            _deleted?: boolean;
+          }>).filter((e) => !e._deleted && e.target?.nodeId === nodeId);
+          upstreamEdges.forEach((e, index) => {
+            refs.commandQueue!.execute(new AddEdgeCommand({
+              id: `edge-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+              source: { nodeId: e.source.nodeId, pinId: e.source.pinId ?? 'output' },
+              target: { nodeId: newNodeId, pinId: e.target.pinId ?? 'prompt' },
+            }));
+          });
+          refs.store.setSelection({ selectedNodeIds: new Set([newNodeId]), selectedEdgeIds: new Set() });
+          // 新节点没有结果，第二轮按普通流程原地生成；参考输入已由复制过来的上游边带上
+          void handlePromptGenerate(newNodeId, mode, prompt, mentionedRefs);
+          return;
+        }
+      }
       // 生成任务归属在发起时固化：之后切画布文档（主↔副本）不得把状态/预览写进另一份文档
       const jobDocId = getCurrentCanvasDocId();
       const jobKey = canvasDocNodeKey(nodeId, jobDocId);
@@ -383,7 +481,7 @@ export function useAgentBridgeHooks(
       const ctl = new AbortController();
       nodeAbortControllersRef.current.set(jobKey, ctl);
 
-      const nodeRec = refs.store.getGraph().nodes.find((n: any) => n.id === nodeId);
+      const nodeRec = refs.store!.getGraph().nodes.find((n: any) => n.id === nodeId);
       const nodeData = (nodeRec?.data ?? {}) as Record<string, any>;
 
       const applyResult = (patch: Record<string, unknown>, mediaSize?: { width: number; height: number; fallbackWidth: number; fallbackHeight: number }): void => {
@@ -418,7 +516,9 @@ export function useAgentBridgeHooks(
         || modelValue.startsWith('zeroexo:minimax')
         || (!modelValue && mode === 'video'));
       const isLocalImageModel = mode === 'image' && (modelValue === LOCAL_IMAGE_MODEL_KEY
-        || modelValue.startsWith('zeroexo:qwen'));
+        || modelValue.startsWith('zeroexo:qwen')
+        // 没有模型值时按本机链路走：本项目没有云端图片渠道，落到 provider 只会报「请求失败」
+        || (!modelValue && mode === 'image'));
       // Krea2 只有线上 ComfyUI 有底模 + RES4LYF 采样器
       const isKrea2Model = mode === 'image' && modelValue === KREA2_MODEL_KEY;
       const isMossModel = mode === 'image' && modelValue === MOSS_MODEL_KEY;
@@ -435,14 +535,43 @@ export function useAgentBridgeHooks(
       // 右下角任务队列（2026-11-10）：画布发起的生成统一登记
       const taskQueue = useTaskQueueStore.getState();
       const taskTitle = promptTitleSummary(prompt) || String(nodeData?.title ?? '') || t('taskQueue.untitled', '未命名任务');
+      // 结果命名：节点已有自定义标题（人工起的名字，如「女主-三视图」）就沿用，
+      // 只有「没有标题」或「标题还是上次的提示词摘要」时才用本次提示词摘要，避免生成一次把名字冲掉。
+      const generationTitle = resolveGenerationTitle(nodeData, prompt, t('taskQueue.untitled', '未命名任务'));
       taskQueue.start({ id: jobKey, kind: mode, title: taskTitle });
+
+      // 参数一确定比例就定了：发起前先把节点改成目标比例，生成中预览不会按旧比例裁切/留黑边
+      if (mode === 'image') {
+        const target = resolveRequestedImageSize(nodeData?.paramValues as Record<string, unknown>, {
+          // 节点框尺寸不参与生图比例：有产物按产物真实宽高，没有产物按面板默认 4:3（1024×768）。
+          width: Number(nodeData?.naturalWidth) || 1024,
+          height: Number(nodeData?.naturalHeight) || 768,
+        });
+        const curW = Number(nodeData?.width) || 0;
+        const curH = Number(nodeData?.height) || 0;
+        if (curW > 0 && curH > 0 && Math.abs(curW / curH - target.width / target.height) > 0.02) {
+          const fit = fitMediaSize(target.width, target.height);
+          const x = Number(nodeData?.x) || 0;
+          const y = Number(nodeData?.y) || 0;
+          refs.commandQueue.execute(new ResizeNodeCommand(
+            nodeId,
+            { x, y, width: curW, height: curH },
+            { x, y, width: fit.width, height: fit.height },
+          ));
+        }
+      }
 
       try {
         const { refImages, refVideos, refAudios, effectivePrompt } = await collectInputReferences(mentionedRefs, prompt);
+        // 首个连入的图片节点 = 本次生成的参考来源，落库时记进 generation，供「查看提示词」还原链路
+        let chainSourceNodeId: string | undefined;
+        let chainSourceStorageKey: string | undefined;
+        // 本次真正提交的输入槽位（1 = @图片1）：顺序与 refImages 一致，历史链据此精确还原上游
+        const refInputs: GenerationChainInput[] = [];
 
         // 连线自动参考图收集
         {
-          const graph = refs.store.getGraph();
+          const graph = refs.store!.getGraph();
           for (const edge of graph.edges) {
             if (edge.target?.nodeId !== nodeId) continue;
             const sourceNode = graph.nodes.find((n: any) => n.id === edge.source?.nodeId);
@@ -452,15 +581,36 @@ export function useAgentBridgeHooks(
               for (const card of cards) {
                 if (card.sourceType !== 'image') continue;
                 const cardData = card.data ?? {};
-                const cardRaw = (cardData.content as string) || (typeof cardData.storageKey === 'string' ? getResourceUrl(cardData.storageKey, 'full') : undefined);
-                if (!cardRaw) continue;
-                try { const srcUrl = await contentToDataUrl(cardRaw); if (srcUrl && !refImages.includes(srcUrl)) refImages.push(srcUrl); } catch { /* skip */ }
+                const key = typeof cardData.storageKey === 'string' ? cardData.storageKey : '';
+                const keyUrl = key ? await resolveMediaUrl(key).catch(() => '') : '';
+                const candidates = [keyUrl, cardData.content as string].filter(Boolean) as string[];
+                for (const candidate of candidates) {
+                  try {
+                    const srcUrl = await contentToDataUrl(candidate);
+                    if (srcUrl && !refImages.includes(srcUrl)) {
+                      refImages.push(srcUrl);
+                      refInputs.push({ slot: refImages.length, nodeId: sourceNode.id, storageKey: key || undefined });
+                      break;
+                    }
+                  } catch { /* skip */ }
+                }
               }
             } else if (sourceNode.type === 'image') {
               const srcData = sourceNode.data as Record<string, unknown> ?? {};
-              const srcContent = (srcData.content as string) || (typeof srcData.storageKey === 'string' ? getResourceUrl(srcData.storageKey, 'full') : undefined);
-              if (!srcContent) continue;
-              try { const srcUrl = await contentToDataUrl(srcContent); if (srcUrl && !refImages.includes(srcUrl)) refImages.push(srcUrl); } catch { /* skip */ }
+              const key = typeof srcData.storageKey === 'string' ? srcData.storageKey : '';
+              const keyUrl = key ? await resolveMediaUrl(key).catch(() => '') : '';
+              const candidates = [keyUrl, srcData.content as string].filter(Boolean) as string[];
+              for (const candidate of candidates) {
+                try {
+                  const srcUrl = await contentToDataUrl(candidate);
+                  if (srcUrl && !refImages.includes(srcUrl)) {
+                    refImages.push(srcUrl);
+                    refInputs.push({ slot: refImages.length, nodeId: sourceNode.id, storageKey: key || undefined });
+                    if (!chainSourceNodeId) { chainSourceNodeId = sourceNode.id; chainSourceStorageKey = key || undefined; }
+                    break;
+                  }
+                } catch { /* skip */ }
+              }
             }
           }
         }
@@ -474,6 +624,26 @@ export function useAgentBridgeHooks(
           if (isLocalImageModel || isKrea2Model || isMossModel) {
             const pv = (nodeData.paramValues ?? {}) as Record<string, unknown>;
             const modelKey = isMossModel ? MOSS_MODEL_KEY : isKrea2Model ? KREA2_MODEL_KEY : LOCAL_IMAGE_MODEL_KEY;
+            // 发起阶段统一编译一次可用输入：按槽位顺序去重、按模型能力截断。
+            // 连线不拦（画布允许自由连），但真正提交时必须是一次编译后的稳定顺序；
+            // krea2 / moss 是纯文生图，参考图不参与，编译结果为空，不会出现「传了但模型没看到」的错觉。
+            const compiled = compileReferenceImages(refImages, isLocalImageModel ? 16 : 0);
+            if (compiled.skipped > 0) {
+              // 有被丢掉的输入就记在节点上，供「查看提示词」溯源看到真实提交情况
+              refs.commandQueue?.execute(new UpdateNodeDataCommand(nodeId, {
+                inputReport: { used: compiled.images.length, skipped: compiled.skipped, model: modelKey },
+              } as Record<string, unknown>));
+            }
+            // 用户实测 2026-11-17：选了 1:1 却出宽幅图 → 本地链路拿的是 nodeData.width/height（旧值），
+            // 必须先把参数面板里的 size / aspect 换算成真实提交尺寸，再交给生成器。
+            // 2026-11-18：节点框尺寸（如 348×348 展示框）绝不能再当出图尺寸；
+            // 无显式参数时：有产物按产物真实宽高，没有产物按面板默认 4:3（1024×768）。
+            const outputW = Number(nodeData.naturalWidth);
+            const outputH = Number(nodeData.naturalHeight);
+            const sizeFallback = outputW > 0 && outputH > 0
+              ? { width: outputW, height: outputH }
+              : { width: 1024, height: 768 };
+            const reqSize = resolveRequestedImageSize(pv, sizeFallback);
             // 本机链路：先用参考图垫底显示，随后被 ComfyUI 推送的采样预览帧替换（首帧不空白）
             if (isLocalImageModel && refImages.length > 0) setGeneratingPreview(nodeId, refImages[0]!, jobDocId);
             // 作业身份写进节点：刷新后据此续接预览/进度（否则刷新即丢）
@@ -492,43 +662,69 @@ export function useAgentBridgeHooks(
               onJobSubmitted: persistJob,
               signal: ctl.signal,
             };
-            const result = await (isMossModel
+            const runLocal = () => (isMossModel
               ? generateMossImage({ prompt: effectivePrompt, aspect: pv.aspect as string | undefined, params: pv, ...callbacks })
               : isKrea2Model
               ? generateKrea2Image({ prompt: effectivePrompt, aspect: pv.aspect as string | undefined, params: pv, ...callbacks })
               : generateLocalQwenImage({
                   prompt: effectivePrompt,
-                  referenceImages: refImages.length > 0 ? refImages : undefined,
-                  width: fallback.size?.width,
-                  height: fallback.size?.height,
+                  referenceImages: compiled.images.length > 0 ? compiled.images : undefined,
+                  width: reqSize.width,
+                  height: reqSize.height,
                   params: pv,
                   ...callbacks,
                 })
-            ).catch((err: unknown) => {
+            );
+            // 2026-11-17 用户实测「图生图要点一次重试才生效」：首次点击失败多为空闲连接被网关关掉
+            // （浏览器对 POST 不重试）。这里对网络类失败自动重试一次，用户点一次就能出图。
+            const result = await runLocal().catch(async (err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (err instanceof Error && err.name === 'AbortError') throw err;
+              if (!/failed to fetch|network|load failed|fetch failed/i.test(msg)) throw err;
+              await new Promise((r) => setTimeout(r, 800));
+              return runLocal();
+            }).catch((err: unknown) => {
               if (err instanceof Error && err.name === 'AbortError') throw err;
               throw new AiError('NETWORK_ERROR', err instanceof Error ? err.message : String(err));
             });
             const url = URL.createObjectURL(result.blob);
+            // 出图完成把真实尺寸回写 paramValues：面板显示与下一次生成都以这次结果为准，
+            // 不再出现「面板 4:3、实际 1:1」或「再点一次又变尺寸」。
+            const resultPv = {
+              ...((nodeData.paramValues ?? {}) as Record<string, unknown>),
+              width: result.width,
+              height: result.height,
+              size: `${result.width}x${result.height}`,
+            };
             applyResult({
               content: url, status: 'success',
               naturalWidth: result.width, naturalHeight: result.height,
-              title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
+              title: generationTitle,
               mimeType: result.mimeType, bytes: result.bytes, generationId: result.generationId,
               errorDetails: undefined, errorType: undefined, localJob: undefined,
+              paramValues: resultPv,
             } as any, { width: result.width, height: result.height, fallbackWidth: 340, fallbackHeight: 240 });
             // 生成结果立即落盘：刷新发生在防抖保存前也不会丢掉节点新图
             void refs.persistence?.save().catch(() => undefined);
             nodeActionBus.emit('canvas:history:created', {
               kind: 'image',
-              title: promptTitleSummary(prompt) || nodeData?.title || '',
+              title: generationTitle,
               generationId: result.generationId,
               prompt: effectivePrompt,
               nodeId,
             });
             void autoLandGenerationOutput({
-              nodeId, kind: 'image', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
+              nodeId, kind: 'image', title: generationTitle,
               content: url, width: result.width, height: result.height, bytes: result.bytes, mimeType: result.mimeType,
               jobId: result.generationId, model: modelKey, prompt: effectivePrompt,
+              sourceNodeId: chainSourceNodeId, sourceStorageKey: chainSourceStorageKey,
+              params: { ...resultPv },
+              chain: buildGenerationChain(refs.store!.getGraph() as never, nodeId, {
+                prompt: effectivePrompt,
+                model: modelKey,
+                params: { ...resultPv },
+                inputs: refInputs,
+              }),
             }).then((landed) => {
               if (landed?.storageKey) {
                 applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
@@ -546,7 +742,7 @@ export function useAgentBridgeHooks(
           // Plan#69: 产物已由后端自动落 Asset 素材库,事件仅通知抽屉刷新产出历史(不再传 blob/dataUrl)
           nodeActionBus.emit('canvas:history:created', {
             kind: 'image',
-            title: promptTitleSummary(prompt) || nodeData?.title || '',
+            title: generationTitle,
             assetId: first.assetId,
             generationId: first.generationId,
             prompt: effectivePrompt,
@@ -557,6 +753,12 @@ export function useAgentBridgeHooks(
             nodeId, kind: 'image', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
             content: first.dataUrl, width: first.width, height: first.height, bytes: first.bytes, mimeType: first.mimeType,
             jobId: first.generationId, model: (nodeData?.model as string) ?? undefined, prompt: effectivePrompt,
+            params: { ...(nodeData?.paramValues as Record<string, unknown> ?? {}), width: first.width, height: first.height },
+            chain: buildGenerationChain(refs.store!.getGraph() as never, nodeId, {
+              prompt: effectivePrompt,
+              model: (nodeData?.model as string) ?? undefined,
+              params: { ...(nodeData?.paramValues as Record<string, unknown> ?? {}), width: first.width, height: first.height },
+            }),
           }).then((landed) => {
             // 写回 CAS storageKey：刷新后节点仍能按 key 重新解析图片（否则只剩会话级 dataURL）
             if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
@@ -628,7 +830,7 @@ export function useAgentBridgeHooks(
           // Plan#69: 产物已由后端自动落 Asset 素材库,事件仅通知抽屉刷新产出历史(不再传 blob URL)
           nodeActionBus.emit('canvas:history:created', {
             kind: 'video',
-            title: promptTitleSummary(prompt) || nodeData?.title || '',
+            title: generationTitle,
             assetId: result.assetId,
             generationId: result.generationId,
             prompt: effectivePrompt,
@@ -637,10 +839,16 @@ export function useAgentBridgeHooks(
           });
           // 本地版（2026-11-04）：无云端资产库 → 前端把产物经 CAS 落成项目资产（历史分组数据底座，失败静默）
           void autoLandGenerationOutput({
-            nodeId, kind: 'video', title: promptTitleSummary(prompt) || (nodeData?.title as string) || '',
+            nodeId, kind: 'video', title: generationTitle,
             content: url, width: result.width, height: result.height, durationMs: result.durationMs, bytes: result.bytes, mimeType: result.mimeType,
             jobId: result.generationId, model: (nodeData?.model as string) ?? undefined, prompt: effectivePrompt,
             guide: guideMeta,
+            params: { ...(nodeData?.paramValues as Record<string, unknown> ?? {}), width: result.width, height: result.height },
+            chain: buildGenerationChain(refs.store!.getGraph() as never, nodeId, {
+              prompt: effectivePrompt,
+              model: (nodeData?.model as string) ?? undefined,
+              params: { ...(nodeData?.paramValues as Record<string, unknown> ?? {}), width: result.width, height: result.height },
+            }),
           }).then((landed) => {
             // 写回 CAS storageKey：刷新后节点仍能按 key 重新解析/下载视频（否则只剩会话级 blob 地址）
             if (landed?.storageKey) applyResult({ storageKey: landed.storageKey } as Record<string, unknown>);
@@ -648,7 +856,7 @@ export function useAgentBridgeHooks(
             if (landed?.guide) applyResult({ guide: landed.guide } as Record<string, unknown>);
           }).catch((err) => console.warn('[history] 视频产出落库失败:', err));
           if (result.lastFrameUrl) {
-            const graph = refs.store.getGraph();
+            const graph = refs.store!.getGraph();
             const videoNode = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
             if (videoNode) {
               const lastFrameId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -664,7 +872,7 @@ export function useAgentBridgeHooks(
           // Plan#69: 产物已由后端自动落 Asset 素材库,事件仅通知抽屉刷新产出历史(不再传 blob URL)
           nodeActionBus.emit('canvas:history:created', {
             kind: 'audio',
-            title: promptTitleSummary(prompt) || nodeData?.title || '',
+            title: generationTitle,
             assetId: result.assetId,
             generationId: result.generationId,
             prompt: effectivePrompt,
@@ -673,8 +881,11 @@ export function useAgentBridgeHooks(
           });
         }
 
-        const titleSummary = promptTitleSummary(prompt);
-        if (titleSummary) refs.commandQueue.execute(new UpdateNodeTitleCommand(nodeId, titleSummary));
+        // 只在标题还不是这个名字时才改名：人工起的名字（如「女主-三视图」）生成后保持不动
+        const currentTitle = String(nodeData?.title ?? '');
+        if (generationTitle && generationTitle !== currentTitle) {
+          refs.commandQueue.execute(new UpdateNodeTitleCommand(nodeId, generationTitle));
+        }
         nodeFailureCountRef.current.delete(nodeId);
         useTaskQueueStore.getState().finish(jobKey, 'success');
       } catch (err) {

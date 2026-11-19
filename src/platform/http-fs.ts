@@ -31,6 +31,42 @@ function baseUrl(): string {
 }
 
 let info: HttpFsInfo | null = null;
+/** 本会话是否成功连过本地数据服务（离线判定用：连过 = 数据权威本来在服务端，不是目录没授权） */
+let everOnline = false;
+
+/**
+ * 数据权威来源（2026-11-18 授权弹框修复）：区分「服务端数据根」与「浏览器目录授权」。
+ * 两者互斥，刷新后仍需知道自己属于哪一路——服务离线不能被当成目录未授权去弹选目录框。
+ */
+const ORIGIN_KEY = 'zeroexo.dataRootOrigin';
+export type DataRootOrigin = 'service' | 'browser';
+
+export function markDataRootOrigin(origin: DataRootOrigin): void {
+  try { localStorage.setItem(ORIGIN_KEY, origin); } catch { /* 隐私模式忽略 */ }
+}
+
+export function dataRootOrigin(): DataRootOrigin | null {
+  try {
+    const v = localStorage.getItem(ORIGIN_KEY);
+    return v === 'service' || v === 'browser' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 本会话连过服务，或上次就是服务模式 → 数据权威在服务端；离线时不许弹目录授权 */
+export function dataRootExpectsService(): boolean {
+  if (everOnline || dataRootOrigin() === 'service') return true;
+  try {
+    // 存量安装：换过数据根 / 配过 httpFsBase 的用户，数据本来就在服务端数据根里
+    return Boolean(
+      (localStorage.getItem('zeroexo.dataRootPath') ?? '').trim()
+      || (localStorage.getItem('zeroexo.httpFsBase') ?? '').trim(),
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 启动期探测（模块加载即发起，不等 bootReady 的 async 链）。
@@ -46,6 +82,17 @@ export function httpFsOnline(): boolean {
 
 export function httpFsInfo(): HttpFsInfo | null {
   return info;
+}
+
+/**
+ * 运行期发现本地数据服务已经掉线（例如用户中途关掉了 MCP / fs-server）：
+ * 立即清掉 online 标记，后续读写回落到 FSA 目录，而不是继续拿旧 baseUrl 发请求把
+ * 所有素材都判成「读取失败」。启动期探测在下次刷新时仍会重新建立。
+ */
+export function markHttpFsOffline(): void {
+  if (!info) return;
+  console.warn(`[http-fs] 运行期服务已掉线，回落到目录授权（base=${info.baseUrl}）`);
+  info = null;
 }
 
 /** 探测（默认两次：首次失败多为冷启动竞态，1.5s 后重试一次）。离线返回 null，不抛错。
@@ -85,6 +132,8 @@ async function probeOnce(): Promise<HttpFsInfo | null> {
     const body = (await res.json()) as { ok?: boolean; dataRoot?: string; rootName?: string };
     if (!body.ok) return null;
     info = { baseUrl: base, dataRoot: body.dataRoot ?? '', rootName: body.rootName ?? '本地数据服务' };
+    everOnline = true;
+    markDataRootOrigin('service');
     console.info(`[http-fs] 在线，数据根 = ${info.dataRoot}（${base}）`);
     return info;
   } catch (e) {
@@ -114,6 +163,67 @@ export async function switchHttpFsRoot(next: string): Promise<HttpFsInfo> {
   return info;
 }
 
+export interface PickedDataRoot {
+  path: string;
+  rootName: string;
+  projects: number;
+  assets: number;
+}
+
+/**
+ * 目录选择（2026-11-17 用户要求）：选目录用**浏览器自带的资源管理器风格选择框**，
+ * 它由浏览器弹出，一定在页面之上。浏览器拿不到绝对路径，所以页面先在选中的目录里写一个
+ * 一次性探针文件，服务端据此反查绝对路径（同名目录靠探针内容区分）。
+ */
+export async function locateHttpFsRoot(name: string, token: string): Promise<string> {
+  if (!info) throw new Error('本地数据服务不在线：无法定位数据目录');
+  const res = await fetch(`${info.baseUrl}/root/locate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, token }),
+  });
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; path?: string; message?: string } | null;
+  if (!res.ok || !body) throw new Error(body?.message ?? `定位数据目录失败（HTTP ${res.status}）`);
+  if (!body.ok || !body.path) throw new Error(body.message ?? '没有定位到所选目录的绝对路径');
+  return body.path;
+}
+
+/** 目录统计：里面已有多少项目/资产，供「迁移还是取消」提示用 */
+export async function statHttpFsRoot(dir: string): Promise<PickedDataRoot> {
+  if (!info) throw new Error('本地数据服务不在线：无法校验数据目录');
+  const res = await fetch(`${info.baseUrl}/root/stat?p=${encodeURIComponent(dir)}`);
+  const body = (await res.json().catch(() => null)) as (PickedDataRoot & { ok?: boolean; message?: string }) | null;
+  if (!res.ok || !body) throw new Error(body?.message ?? `读取目录失败（HTTP ${res.status}）`);
+  if (!body.ok) throw new Error(body.message ?? '读取目录失败');
+  return { path: body.path, rootName: body.rootName, projects: body.projects, assets: body.assets };
+}
+
+/** 一键安装并启动 MCP：装到 <数据根>\.mcp-server\next，不进 C 盘，装完直接拉起服务 */
+export async function installHttpMcp(downloadUrl: string): Promise<void> {
+  if (!info) throw new Error('本地数据服务不在线：无法自动安装 MCP');
+  const res = await fetch(`${info.baseUrl}/mcp/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ downloadUrl }),
+  });
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+  if (!res.ok || !body) throw new Error(body?.message ?? `安装 MCP 失败（HTTP ${res.status}）`);
+  if (!body.ok) throw new Error(body.message ?? '安装 MCP 失败');
+}
+
+/** 迁移数据根：旧根内容复制到新根（不覆盖已有文件），完成后切根 */
+export async function migrateHttpFsRoot(from: string, to: string): Promise<HttpFsInfo> {
+  if (!info) throw new Error('本地数据服务不在线：无法迁移数据目录');
+  const res = await fetch(`${info.baseUrl}/root/migrate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  });
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; dataRoot?: string; rootName?: string; message?: string } | null;
+  if (!res.ok || !body?.ok) throw new Error(body?.message ?? `迁移失败（HTTP ${res.status}）`);
+  info = { ...info, dataRoot: body.dataRoot ?? '', rootName: body.rootName ?? '本地数据服务' };
+  return info;
+}
 
 function err(path: string, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause);

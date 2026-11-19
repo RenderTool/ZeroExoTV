@@ -14,7 +14,7 @@
 import { memo, useCallback, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Upload as UploadIcon, X, Star, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Plus, X, Star, Loader2, Image as ImageIcon } from 'lucide-react';
 import { App as AntdApp } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
@@ -198,7 +198,7 @@ export const ImageGridGallery = memo(function ImageGridGallery({
             onClick={() => fileInputRef.current?.click()}
             title={t('subject.importImage')}
           >
-            <UploadIcon size={16} />
+            <Plus size={16} />
           </button>
         )}
       </div>

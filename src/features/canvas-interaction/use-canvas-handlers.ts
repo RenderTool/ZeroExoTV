@@ -7,6 +7,7 @@
 
 import { useCallback } from 'react';
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from 'react';
+import { useReadOnly } from '@/shared/readonly-context.js';
 import type { EditorRefs } from '@/pages/editor/editor-canvas/use-editor-state.js';
 
 export interface CanvasHandlers {
@@ -51,6 +52,7 @@ export function useCanvasHandlers(
   containerRef: React.RefObject<HTMLDivElement | null>,
 ): CanvasHandlers {
   const ic = refs.interactionController;
+  const readOnly = useReadOnly();
 
   const onCanvasPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     ic?.handleCanvasPointerDown(e.nativeEvent);
@@ -99,6 +101,8 @@ export function useCanvasHandlers(
   // 右键菜单:统一处理(canvas/node/edge)
   const onCanvasContextMenu = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
+    // 只读历史画布：右键（节点/连线/空白）菜单整体不出
+    if (readOnly) return;
     // 先取消正在进行的连线拖拽(避免拖拽连线时右键菜单受干扰)
     refs.connectionController?.cancel();
     const target = e.target as Element;
@@ -130,7 +134,7 @@ export function useCanvasHandlers(
       type: 'canvas',
       worldPosition: { x: worldX, y: worldY },
     });
-  }, [refs, containerRef]);
+  }, [readOnly, refs, containerRef]);
 
   // 组引脚回调(委托 connectionController,支持从组引脚拉出连线)
   const onGroupPinPointerDown = useCallback(

@@ -24,7 +24,7 @@ function escapeHtml(text: string): string {
 function sceneHeadingText(body: string): string {
   const m = body.match(/^第\s*\S+\s*场\s*[:：]?\s*(.*)$/);
   if (!m) return body;
-  const parts = m[1]!.split(/\s*[·・]\s*|\s*[,，]\s*/).map((s) => s.trim()).filter(Boolean);
+  const parts = m[1]!.split(/\s*[·・]\s*|\s*[,，]\s*|\s+/).map((s) => s.trim()).filter(Boolean);
   if (parts.length === 0) return body;
   const location = parts.find((p) => /^(内|外|内景|外景)$/.test(p));
   const time = parts.find((p) => /^(日|夜|晨|昏|日间|白天|夜晚|夜间|夜里)$/.test(p));
@@ -43,7 +43,15 @@ export function plainTextToScriptHtml(text: string): string {
     const body = (md ? md[1]! : line).trim();
 
     // 场景标题：第N场 / INT. / EXT. / 内景 / 外景
-    if (/^第\s*\S+\s*场\s*[:：]/.test(body) || SCENE_PREFIX.test(body)) {
+    // 「第1场 测试室 夜 内」这类没有冒号的标准写法也必须识别，
+    // 否则整场会被归成动作行，scaffold_episode 直接报「没有场景标题」。
+    // 2026-11-19 修复：中文剧本常见「场1 夜 外 老城铜巷」「场景2 · 内 · 日」，
+    // 原来只认「第N场」，这些行会整段变成动作行，导致分镜门禁报「没有场次标题」。
+    if (
+      /^第\s*\S+\s*场(?=$|[\s:：])/.test(body)
+      || /^(场|场景)\s*[0-9一二三四五六七八九十]+(?=$|[\s:：·])/.test(body)
+      || SCENE_PREFIX.test(body)
+    ) {
       out.push(`<p class="script-scene-heading">${escapeHtml(sceneHeadingText(body))}</p>`);
       continue;
     }
@@ -93,7 +101,7 @@ export function toScriptHtml(content: string): string {
  * 正确做法：剧名 → ScriptEntity.title，集名 → Episode.title，正文从第一场开始。
  */
 export function splitScriptMeta(text: string): { title?: string; episodeTitle?: string; body: string } {
-  const isSceneLine = (t: string): boolean => /^(INT\.|EXT\.|第\s*\S+\s*场\s*[:：])/i.test(t);
+  const isSceneLine = (t: string): boolean => /^(INT\.|EXT\.|第\s*\S+\s*场(?=$|[\s:：]))/i.test(t);
   let title: string | undefined;
   let episodeTitle: string | undefined;
   const body: string[] = [];
@@ -105,7 +113,7 @@ export function splitScriptMeta(text: string): { title?: string; episodeTitle?: 
       if (!title) title = text2;
       continue;
     }
-    if (level === 2 && /^(第\s*\S+\s*集|EP\s*\d+)/i.test(text2)) {
+    if ((level === 2 || level === 0) && /^(第\s*\S+\s*集|EP\s*\d+)(?=$|[\s:：])/i.test(text2) && !isSceneLine(text2)) {
       if (!episodeTitle) episodeTitle = text2;
       continue;
     }

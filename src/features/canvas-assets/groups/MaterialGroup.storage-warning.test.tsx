@@ -9,6 +9,7 @@ import { createElement } from 'react';
 
 const fsMock = vi.hoisted(() => ({
   isAuthorized: vi.fn(),
+  dataRootState: vi.fn(),
   restoreRoot: vi.fn(),
   pickRoot: vi.fn(),
   withPermissionPrompt: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -76,6 +77,7 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   fsMock.isAuthorized.mockResolvedValue(false);
+  fsMock.dataRootState.mockResolvedValue('unauthorized');
   fsMock.restoreRoot.mockResolvedValue(null);
   fsMock.pickRoot.mockResolvedValue('data');
   fsMock.withPermissionPrompt.mockImplementation((fn: () => Promise<unknown>) => fn());
@@ -103,6 +105,7 @@ describe('素材空态：目录未就绪不再伪装成空文件夹', () => {
 
   it('已授权且确实无素材 → 仍是普通空态，不误报未授权', async () => {
     fsMock.isAuthorized.mockResolvedValue(true);
+    fsMock.dataRootState.mockResolvedValue('ok');
     renderGroup();
     await waitFor(() => expect(document.querySelector('[data-storage-warning]')).toBeNull());
     expect(document.body.textContent).toContain('assetLibrary.empty');

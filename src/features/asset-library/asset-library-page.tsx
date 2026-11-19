@@ -196,7 +196,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
   }, [setCtxMenuPosition, setCtxMenuItems, ctx.handleOpenItem, ctx.setRenameItemTarget, ctx.setRenameItemName, ctx.setRenameItemOpen, ctx.handleDownloadItem, ctx.setConfirmDelete, t, props.onSendToCanvas, props.embeddedInCanvas, antdMessage]);
 
   // 文件上传回调
-  const handleUploadMaterial = useCallback((files: FileList) => {
+  const handleUploadMaterial = useCallback((files: FileList | File[]) => {
     const dt = new DataTransfer();
     Array.from(files).forEach((f) => dt.items.add(f));
     void ctx.handleUpload(dt.files);

@@ -7,6 +7,7 @@ import { McpError } from "../errors.js";
 import { readScript, splitToSegmentDrafts } from "../store/script.js";
 import { addSegments } from "../store/workbench.js";
 import { defTool, guardDryRunConfirm, guardUserConfirmed, type Ctx } from "./_register.js";
+import { checkScriptReadiness } from "../lib/readiness.js";
 
 export function registerSplitTools(server: McpServer, ctx: Ctx): void {
   defTool(server, ctx, {
@@ -24,6 +25,7 @@ export function registerSplitTools(server: McpServer, ctx: Ctx): void {
       /** 用户已回答拆段方案（段数/时长/是否重拆）——真实落盘必须 true */
       userConfirmed: z.boolean().optional()
         .describe("用户已确认拆段方案（段数/每段时长/对已有片段的处理）。真实落盘必须 true"),
+      userOverride: z.boolean().optional().describe("用户明确要求跳过剧本定稿门（用户权限高于 MCP 规范）"),
     },
     handler: async (args) => {
       guardDryRunConfirm(args, { requireOne: true });
@@ -32,6 +34,16 @@ export function registerSplitTools(server: McpServer, ctx: Ctx): void {
       }
       const script = await readScript(dataRoot(), args.projectId);
       if (!script) throw new McpError("NOT_FOUND", `剧本不存在: ${args.projectId}`);
+      // 前置门（2026-11-19）：剧本未定稿不许拆分镜。
+      const scriptReady = checkScriptReadiness(script);
+      if (!scriptReady.ready && args.dryRun !== true && !args.userOverride) {
+        throw new McpError(
+          "PREFLIGHT_GATE_FAILED",
+          "剧本未定稿，先补再拆：\n"
+            + scriptReady.issues.filter((i) => i.level === "error").map((i) => `  - ${i.message}（${i.fix ?? ""}）`).join("\n")
+            + "\n用户明确要求先拆时传 userOverride:true。",
+        );
+      }
       const ep = script.episodes.find((e) => e.id === args.episodeId);
       if (!ep) throw new McpError("NOT_FOUND", `episode 不存在: ${args.episodeId}`);
 

@@ -85,6 +85,18 @@ def list_tasks(output_root: str, project_id: str | None = None) -> list[dict[str
     return out
 
 
+def delete_task(output_root: str, task_id: str) -> bool:
+    """网页「清空已完成」真删任务事实源（2026-11-16 用户实测：只删展示层刷新必复活）。
+
+    只删持久化 JSON 文件；进行中任务由路由层拒绝，这里不重复判断。
+    """
+    try:
+        os.remove(task_path(output_root, task_id))
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def mark_interrupted(task: dict[str, Any]) -> None:
     """插件重启时：未完成段标 interrupted，已完成段原样保留。"""
     task["state"] = "interrupted"

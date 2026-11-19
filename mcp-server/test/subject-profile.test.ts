@@ -72,21 +72,40 @@ describe("主体强制字段模板（2026-11-13）", () => {
     expect(built!.anchor).toContain(CHARACTER.显著特征);
   });
 
-  it("场景：2×2 空场景宫格 + 字段", () => {
+  it("场景：默认单视角空场景轴图（21:9，不出宫格）", () => {
     const { missing, built } = buildSubjectProfile("scene", SCENE);
     expect(missing).toEqual([]);
-    expect(built!.prompt).toContain("2×2 宫格");
+    expect(built!.prompt).toContain("21:9 单张轴图");
+    expect(built!.prompt).not.toContain("2×2 宫格");
     expect(built!.prompt).toContain("空场景");
     expect(built!.prompt).toContain(SCENE.地面);
     expect(built!.prompt).toContain(SCENE.光源);
   });
 
-  it("道具：单品参考图 + 字段", () => {
+  it("场景 sheet：显式要求四视角才出 2×2 宫格", () => {
+    const { built } = buildSubjectProfile("scene", SCENE, { renderMode: "sheet" });
+    expect(built!.prompt).toContain("2×2 宫格");
+    expect(built!.renderMode).toBe("sheet");
+  });
+
+  it("道具：默认单张概念图，不强制细节拼版", () => {
     const { missing, built } = buildSubjectProfile("prop", PROP);
     expect(missing).toEqual([]);
+    expect(built!.renderMode).toBe("single");
     expect(built!.prompt).toContain("道具参考图");
+    expect(built!.prompt).toContain("单品单视图");
+    expect(built!.prompt).not.toContain("细节特写");
     expect(built!.prompt).toContain(PROP.材质);
     expect(built!.prompt).toContain("无手、无人物");
+  });
+
+  it("道具 sheet：复杂道具才走「整体 + 1 个细节特写」", () => {
+    const { built } = buildSubjectProfile("prop", PROP, { renderMode: "sheet" });
+    expect(built!.renderMode).toBe("sheet");
+    expect(built!.prompt).toContain("单品 + 细节");
+    expect(built!.prompt).toContain("1 个细节特写");
+    expect(built!.prompt).toContain("最多 1 个");
+    expect(built!.prompt).toContain("不出现同款第二件");
   });
 
   it("道具 white-bg：纯白底快速主图（不铺场景/细节拼贴）", () => {

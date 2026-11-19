@@ -242,8 +242,9 @@ const wrapStyle: React.CSSProperties = {
   minHeight: 0,
   display: 'flex',
   flexDirection: 'column',
-  gap: 10,
-  padding: 12,
+  gap: 12,
+  // 与抽屉其它三页同一基准：横幅内距 20px、底部 16px（2026-11-16 四页间距收口）
+  padding: '12px 20px 16px',
 };
 
 const fieldStyle: React.CSSProperties = {

@@ -26,7 +26,7 @@ import type { ThemeConfig } from '@zeroexo/shared';
 import type { TFunction } from 'i18next';
 import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { registerCard, type GridCardRendererProps, type ListCardRendererProps } from './card-registry.js';
-import { SendActionButtons, cardActionBtnStyle } from './card-send-actions.js';
+import { SendActionButtons } from './card-send-actions.js';
 import { AssetScopeBadge } from '@/features/asset-picker/components/scope-badge.js';
 import { assetMayHaveGuide } from '@/features/asset-picker/services/guide-resolve.js';
 import { cardCoverMetrics, CARD_COVER_TRANSITION, useMasonryColumnWidth } from '@/shared/components/masonry-grid.js';
@@ -37,6 +37,7 @@ import {
   uiCardMetaStyle,
   uiCardNameStyle,
   CardShell,
+  IconButton,
   ThumbBadge,
 } from '@/shared/ui/index.js';
 
@@ -320,57 +321,12 @@ function AssetCardGrid({
           transition: 'opacity 0.3s',
           pointerEvents: 'none',
         }} />
-        {/* 操作按钮统一落位：封面右下角（与历史卡同位置，黑色 28×28 图标） */}
-        <div
-          data-asset-card-actions
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: 'absolute', right: 6, bottom: 6, zIndex: 5,
-            display: 'flex', alignItems: 'center', gap: 4,
-            opacity: hovered ? 1 : 0,
-            pointerEvents: hovered ? 'auto' : 'none',
-            transition: 'opacity 0.2s',
-          }}
-        >
-          {showQuickActions && onEditImage && asset.kind === 'image' && (
-            <button
-              type="button"
-              data-card-action="editImage"
-              aria-label={t('assetLibrary.editImage', '编辑')}
-              title={t('assetLibrary.editImage', '编辑')}
-              onClick={(e) => { e.stopPropagation(); onEditImage(); }}
-              style={cardActionBtnStyle}
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-          {showQuickActions && (
-            <SendActionButtons
-              onSendToCanvas={onSendToCanvas}
-              onSendToDirector={onSendToDirector ? () => onSendToDirector('video') : undefined}
-              subjectStorageKey={typeof data.storageKey === 'string' ? data.storageKey : undefined}
-              subjectLabel={asset.title}
-              hasGuide={hasGuide}
-              onSendGuideToDirector={hasGuide && onSendToDirector ? () => onSendToDirector('guide') : undefined}
-              kind={asset.kind}
-              visible={hovered}
-              alwaysVisible
-              t={t}
-            />
-          )}
-          <Dropdown menu={{ items: moreMenuItems }} trigger={['click']} placement="bottomRight">
-            <button
-              type="button"
-              data-card-more
-              aria-label={t('assetLibrary.moreActions', '更多')}
-              title={t('assetLibrary.moreActions', '更多')}
-              onClick={(e) => e.stopPropagation()}
-              style={cardActionBtnStyle}
-            >
-              <MoreHorizontal size={14} />
-            </button>
-          </Dropdown>
-        </div>
+        {/* 操作按钮统一落位：2026-11-19 用户口径——不再浮在封面上，改到卡片信息区（与主体卡一致） */}
+        {false && (
+          <div
+            data-asset-card-actions-overlay
+          />
+        )}
 
       </CardShell>
       <div style={{
@@ -381,8 +337,8 @@ function AssetCardGrid({
         paddingLeft: UI_CARD_INFO_PADDING_X,
         paddingRight: UI_CARD_INFO_PADDING_X,
       }}>
-        {/* 标题行只保留标题；操作按钮统一在封面右下角（历史卡同位） */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: showQuickActions ? 32 : 24 }}>
+        {/* 标题行只保留标题；操作按钮统一在信息区（与主体卡同构） */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: 24 }}>
           <span style={{ ...uiCardNameStyle(theme), flex: 1, minWidth: 0 }}>
             {asset.title}
           </span>
@@ -402,6 +358,57 @@ function AssetCardGrid({
           <span style={uiCardMetaStyle(theme)}>
             {getKindLabel(asset.kind, t)}
           </span>
+          {/* 动作行：与主体卡一致——卡片外、hover 浮出、纯图标（编辑 / 发送 / 更多） */}
+          <div
+            data-asset-card-actions
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? 'auto' : 'none',
+              transition: 'opacity 0.2s',
+            }}
+          >
+            {showQuickActions && onEditImage && asset.kind === 'image' && (
+              <IconButton
+                theme={theme}
+                size="sm"
+                data-card-action="editImage"
+                aria-label={t('assetLibrary.editImage', '编辑')}
+                onClick={(e) => { e.stopPropagation(); onEditImage(); }}
+                style={{ padding: 0 }}
+              >
+                <Pencil size={13} />
+              </IconButton>
+            )}
+            {showQuickActions && (
+              <SendActionButtons
+                onSendToCanvas={onSendToCanvas}
+                onSendToDirector={onSendToDirector ? () => onSendToDirector('video') : undefined}
+                subjectStorageKey={typeof data.storageKey === 'string' ? data.storageKey : undefined}
+                subjectLabel={asset.title}
+                hasGuide={hasGuide}
+                onSendGuideToDirector={hasGuide && onSendToDirector ? () => onSendToDirector('guide') : undefined}
+                kind={asset.kind}
+                visible={hovered}
+                alwaysVisible
+                ghostTheme={theme}
+                t={t}
+              />
+            )}
+            <Dropdown menu={{ items: moreMenuItems }} trigger={['click']} placement="bottomRight">
+              <IconButton
+                theme={theme}
+                size="sm"
+                data-card-more
+                aria-label={t('assetLibrary.moreActions', '更多')}
+                onClick={(e) => e.stopPropagation()}
+                style={{ padding: 0 }}
+              >
+                <MoreHorizontal size={13} />
+              </IconButton>
+            </Dropdown>
+          </div>
         </div>
       </div>
     </div>

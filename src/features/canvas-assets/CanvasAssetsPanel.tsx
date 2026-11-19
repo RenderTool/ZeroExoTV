@@ -12,7 +12,8 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { Layers, FileText, ListChecks, UserRound, History, Clapperboard } from 'lucide-react';
+import { Input, Modal } from 'antd';
+import { Layers, FileText, ListChecks, Clapperboard, Images } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { GroupPlugin } from '@zeroexo/plugin-group';
@@ -20,12 +21,10 @@ import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { useCanvasAssetsPanel } from './store.js';
 import type { DrawerGroup } from './tab-defs.js';
 import { SidebarNav, type GroupTabItem } from './components/common.js';
-import { MaterialGroup } from './groups/MaterialGroup.js';
-import { HistoryGroup } from './groups/HistoryGroup.js';
+import { MergedAssetsGroup } from './groups/MergedAssetsGroup.js';
 import { CanvasStructureGroup } from './groups/CanvasStructureGroup.js';
 import { ScriptMetaGroup } from './groups/ScriptMetaGroup.js';
 import { TaskQueuePanel } from '@/features/task-center/task-queue-panel.js';
-import { SidebarAnimatedIcon } from '@/features/app-sidebar/sidebar-animated-icon.js';
 import type { SendToCanvasItem } from './store.js';
 
 export interface CanvasAssetsPanelProps {
@@ -46,19 +45,15 @@ export { DRAWER_TAB_DEFS } from './tab-defs.js';
 import { DRAWER_TAB_DEFS, resolveDrawerModule } from './tab-defs.js';
 
 const TAB_ICONS: Record<(typeof DRAWER_TAB_DEFS)[number]['key'], { icon: React.ReactNode; activeIcon?: React.ReactNode }> = {
-  // 素材分组两态图标：激活 PackageOpen / 未激活 Package（仅视觉切换，不收起抽屉）
-  assets: {
-    icon: <SidebarAnimatedIcon type="assets" size={18} active={false} hovered={false} mode="inline" />,
-    activeIcon: <SidebarAnimatedIcon type="assets" size={18} active hovered={false} mode="inline" />,
-  },
-  subjects: { icon: <UserRound size={18} /> },
-  canvasHistory: { icon: <History size={18} /> },
-  directorHistory: { icon: <Clapperboard size={18} /> },
+  // 2026-11-18 用户口径：两个大分组按产出方命名并换图标——画布资产 = 画面/图像（Images），分镜资产 = 镜头板（Clapperboard）
+  assets: { icon: <Images size={18} /> },
+  // 2026-11-16 用户指令：画布历史 + 分镜历史合并为一个「历史记录」入口（组内 Tab 切来源）
+  history: { icon: <Clapperboard size={18} /> },
   // 画布相关合并入口：层级 / 子画布在组内 Tab 切换
   canvasStructure: { icon: <Layers size={18} /> },
   // 本剧信息（2026-11-07）：整部剧的一句话概述 + 标签，仅剧本/导演台模块挂载
   scriptMeta: { icon: <FileText size={18} /> },
-  // 任务队列：独立按钮，点开看 MCP 任务/取消运行中或排队中任务
+  // 任务队列：全局按钮（MCP 任务 / 取消运行中或排队中任务）
   tasks: { icon: <ListChecks size={18} /> },
 };
 
@@ -72,16 +67,22 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
   // 2026-11-05 用户指令（征集 #174）：「剧本」页签与剧本分组组件从抽屉全删（只留顶部「剧本」页签）
   // 2026-11-06 用户指令：顺序 = 资产 → 层级 → 画布；非画布模块只留资产（+本剧信息）
   // 2026-11-16 用户指令：模块独有分组（层级/子画布、本剧信息）统一垫底，
-  // 首个独有分组上方画分割线，与全局分组（资产/主体/画布历史/导演台/任务队列）隔开
+  // 首个独有分组上方画分割线，与全局分组（公共资产/主体/历史记录/任务队列）隔开
   const visibleItems = DRAWER_TAB_DEFS.map((d) => ({
     key: d.key,
-    label: t(d.labelKey),
+    label: t(d.labelKey, { defaultValue: 'defaultLabel' in d ? d.defaultLabel : d.labelKey }),
     ...TAB_ICONS[d.key],
   })).filter((item) => store.visibleGroups.includes(item.key as DrawerGroup));
-  const firstModuleOnlyIdx = visibleItems.findIndex((item) =>
-    DRAWER_TAB_DEFS.find((d) => d.key === item.key)?.moduleOnly === true);
-  const tabItems: GroupTabItem[] = visibleItems.map((item, i) =>
-    firstModuleOnlyIdx > 0 && i === firstModuleOnlyIdx ? { ...item, dividerBefore: true } : item);
+  // 2026-11-16 用户指令：模块独有分组（画布结构 / 本剧信息）统一垫底，并在首个独有分组上方画分割线，
+  // 与全局分组（公共资产 / 主体 / 历史记录 / 任务队列）分开展示
+  const MODULE_GROUP_KEYS: DrawerGroup[] = ['canvasStructure', 'scriptMeta'];
+  let moduleDividerPlaced = false;
+  const tabItems: GroupTabItem[] = visibleItems.map((item) => {
+    if (!MODULE_GROUP_KEYS.includes(item.key as DrawerGroup)) return item;
+    if (moduleDividerPlaced) return item;
+    moduleDividerPlaced = true;
+    return { ...item, dividerBefore: true };
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0 }}>
@@ -89,13 +90,11 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
 
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
         {store.activeGroup === 'assets' ? (
-          <MaterialGroup store={store} theme={theme} lockedScope="library" />
-        ) : store.activeGroup === 'subjects' ? (
-          <MaterialGroup store={store} theme={theme} lockedScope="subject" />
-        ) : store.activeGroup === 'canvasHistory' ? (
-          <HistoryGroup key="canvas-history" store={store} theme={theme} forcedSource="canvas" />
-        ) : store.activeGroup === 'directorHistory' ? (
-          <HistoryGroup key="director-history" store={store} theme={theme} forcedSource="director" />
+          // 画布资产 = 画布自己产出：组内两段「画布历史 → 公共资产」
+          <MergedAssetsGroup store={store} theme={theme} variant="canvasAssets" />
+        ) : store.activeGroup === 'history' ? (
+          // 分镜资产 = 分镜自己产出：组内两段「主体 → 分镜历史」（看主体不用回左侧切大分组）
+          <MergedAssetsGroup store={store} theme={theme} variant="storyboardAssets" />
         ) : store.activeGroup === 'canvasStructure' ? (
           // 层级 / 子画布合并为一个「画布」入口，组内 Tab 切换
           <CanvasStructureGroup store={store} theme={theme} hierarchy={hierarchy} />
@@ -109,6 +108,29 @@ export function CanvasAssetsPanel({ theme, hierarchy, onSendToCanvas }: CanvasAs
 
       {/* 2026-11-05 约定：删除改就地立即生效 + 3 秒撤销浮层（见 store.handleDeleteAsset），
           原「删除确认」弹窗一并移除 */}
+      {/* 2026-11-18 修复：重命名弹窗必须在抽屉根部一直挂载——历史/主体等分组也会触发重命名，
+          挂在 MaterialGroup 里时只有切到「资产」页签才存在，点重命名就像没反应 */}
+      <Modal
+        title={t('assetLibrary.renameTitle', { defaultValue: '重命名' })}
+        open={store.renameItemOpen}
+        onCancel={() => store.setRenameItemOpen(false)}
+        onOk={() => void store.handleRenameItem()}
+        okText={t('common.confirm', { defaultValue: '确认' })}
+        cancelText={t('common.cancel', { defaultValue: '取消' })}
+        centered
+        width="calc(100vw - 32px)"
+        style={{ maxWidth: 420 }}
+        destroyOnHidden
+      >
+        <Input
+          value={store.renameItemName}
+          onChange={(e) => store.setRenameItemName(e.target.value)}
+          placeholder={t('assetLibrary.renamePlaceholder', { defaultValue: '请输入新名称' })}
+          maxLength={50}
+          autoFocus
+          onPressEnter={() => void store.handleRenameItem()}
+        />
+      </Modal>
     </div>
   );
 }

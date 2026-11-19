@@ -422,7 +422,10 @@
     "viewAllFull": "View All",
     "myFavorites": "My Favorites",
     "favoriteToMyLibrary": "Saved to My Prompt Library",
-    "loginToFavorite": "Please login to favorite"
+    "loginToFavorite": "Please login to favorite",
+    "batchCancel": "Cancel",
+    "retry": "Retry",
+    "noMatch": "No matches"
   },
   "confirm": {
     "deleteCanvasTitle": "Delete Canvas",
@@ -677,7 +680,8 @@
     "missingTitle": "Sub-canvas file missing",
     "missingBody": "projects/{{pid}}/subcanvases/{{id}}.json does not exist (deleted or moved externally). Closing this tab does not remove the entry card on the main canvas.",
     "error": "Failed to load the sub-canvas",
-    "newNode": "New"
+    "newNode": "New",
+    "deleteFailed": "Delete failed, please retry"
   },
   "canvasTab": {
     "canvas": "Canvas",
@@ -687,7 +691,12 @@
     "subjects": "Subjects",
     "director": "Director",
     "storyboardMissing": "This project has no subject library yet — click below to initialize",
-    "createStoryboard": "Initialize Subjects"
+    "createStoryboard": "Initialize Subjects",
+    "subjectsLoadError": "Failed to load the subject library. Please reopen the tab.",
+    "subjectsLoading": "Loading subject library…",
+    "scriptConflict": "The script was changed elsewhere; the latest version has been reloaded",
+    "scriptSaveFailed": "Failed to save the script, please retry",
+    "scriptMissing": "This project has no script yet"
   },
   "toolsDock": {
     "tool": "Tool",
@@ -1123,6 +1132,17 @@
   "assetLibrary": {
     "pageTitle": "Shared assets",
     "pageSubtitle": "Manage assets, subjects, and prompts in one place",
+    "viewPrompt": "View prompt",
+    "chainOpened": "Generation chain opened",
+    "moreActions": "More actions",
+    "sendTo": "Send to",
+    "sendToSubject": "Send to subject",
+    "editImage": "Edit image",
+    "uploadToLibrary": "Upload to shared assets",
+    "referenceImage": "Reference",
+    "untitledImage": "Image",
+    "untitledVideo": "Video",
+    "uploadMaterial": "Upload asset",
     "searchPlaceholder": "Search by name or tag",
     "filterAll": "All",
     "filterImage": "Images",
@@ -1194,8 +1214,8 @@
     "historyTabImage": "Image",
     "historyTabVideo": "Video",
     "historyTabAll": "All",
-    "historySourceCanvas": "From Canvas",
-    "historySourceDirector": "From Director",
+    "historySourceCanvas": "Canvas History",
+    "historySourceDirector": "Storyboard History",
     "historyEmptyDirectorImage": "The director only produces videos; there are no image output records.",
     "historyEmptyDirectorVideo": "No director-run videos yet. Run clips in the director to record them automatically.",
     "historyEmptyImage": "No image generations yet. Images generated via API on the canvas are recorded automatically.",
@@ -1206,7 +1226,7 @@
     "exportTo": "Export to…",
     "exportToProject": "Export to this project's assets",
     "exportToLibrary": "Export to public library",
-    "addToPublicLibrary": "Add to public assets",
+    "addToPublicLibrary": "Send to assets",
     "addToProject": "Add to this project",
     "addToScope": "Add to assets",
     "historyAlreadyInProject": "Already in this project; no need to add again",
@@ -1254,7 +1274,43 @@
     "cardMissingImage": "Image file is not saved or missing, please re-import",
     "cardMissingVideo": "Video file is not saved or missing, please re-import",
     "emptyAssetsTitle": "No assets yet",
-    "emptyAssetsHint": "Click the button above to add your first asset"
+    "emptyAssetsHint": "Click the button above to add your first asset",
+    "canvasAssetsGroup": "Canvas Assets",
+    "storyboardAssetsGroup": "Storyboard Assets",
+    "canvasHistoryTitle": "Canvas History",
+    "directorHistoryTitle": "Storyboard History",
+    "setSegmentCover": "Set as segment cover",
+    "segmentCover": "Current cover",
+    "setSegmentCoverHint": "Set as the segment cover (updates the storyboard display and the next segment guide)",
+    "noEpisode": "No episode",
+    "segmentGenerating": "Generating",
+    "filterAllSegments": "All segments",
+    "allSegments": "All segments",
+    "segmentGeneratingNoReplace": "This segment is generating; replace it after it finishes",
+    "linkedToSegment": "Linked to shot {{num}}",
+    "batchDeleteBody": "You can undo from the toast; asset files are not removed from disk immediately.",
+    "moveVersions": "Move to segment",
+    "moveVersionsTitle": "Move to segment",
+    "moveVersionsOk": "Move",
+    "moveVersionsHint": "Move the selected {{n}} versions to the segment below; only ownership changes, the cover stays.",
+    "episodeCol": "Ep",
+    "segmentCol": "Seg",
+    "segmentVersionCount": "{{n}} versions",
+    "pendingSegment": "Pending · {{episode}} · Shot {{num}} (the original segment was removed; it re-links after you create one)",
+    "unlinkedSegments": "Unlinked segments",
+    "moveToSegment": "Move to…",
+    "versionLabel": "Version {{n}}",
+    "deleteSegmentTitle": "Delete this segment?",
+    "deleteSegmentOnlyVersion": "This is the only version of this segment. Deleting it removes the shot from storyboard history and cannot be undone.",
+    "deleteSegmentKeepOthers": "Only the currently enabled version is deleted; {{n}} other versions stay in this segment.",
+    "emptyProjectTitle": "No assets in this project yet",
+    "emptyLibraryTitle": "No assets yet",
+    "emptyProjectHint": "Reference public assets or upload directly",
+    "emptyLibraryHint": "Click the button above to add your first asset",
+    "scopeCapsuleProjectDisabled": "Available inside a project",
+    "scopeNeedProject": "Project assets require an opened project",
+    "legacyNoChain": "This history entry was generated by an older version; no prompt or chain is available",
+    "open": "Open"
   },
   "openLib": {
     "scopeTab": "Open Library",
@@ -2512,7 +2568,7 @@
     "sendToAsset": "Send to Asset Library",
     "alreadyLinked": "Linked to Asset Library",
     "coverImage": "Cover Image",
-    "canvasGenerate": "Create on Canvas",
+    "canvasGenerate": "Generate on Canvas",
     "inlineRenameHint": "Double-click to rename this state",
     "replaceMediaInline": "Replace image",
     "editState": "Edit state",
@@ -2720,7 +2776,9 @@
     "selectAllEpisodes": "Select all",
     "clearEpisodes": "Clear",
     "appearEpisodesAllCount": "All ({{n}} episodes)",
-    "appearEpisodesRange": "Episodes {{ranges}} ({{n}} total)"
+    "appearEpisodesRange": "Episodes {{ranges}} ({{n}} total)",
+    "episodeAll": "All episodes",
+    "deleteThisState": "Delete this state"
   },
   "episode": {
     "pending": "Pending",
@@ -2852,7 +2910,9 @@
     "scriptMetaTitle": "Script info",
     "scriptLoglinePlaceholder": "One sentence on what the whole show is about",
     "scriptTitleLabel": "Title",
-    "scriptTitlePlaceholder": "Name of the show"
+    "scriptTitlePlaceholder": "Name of the show",
+    "metaSavedWithStyle": "Series info saved; {{n}} subject prompts synced to the series style",
+    "metaVisualStyle": "Series style (inherited by all subjects)"
   },
   "assetPick": {
     "current": "Current media",
@@ -3001,7 +3061,9 @@
     "addedToSegment": "Sent to Director",
     "guideResolving": "Looking up guide…",
     "guideMissing": "This asset has no guide",
-    "guideSent": "Guide sent"
+    "guideSent": "Guide sent",
+    "coverVideoOnly": "Only video can be set as a segment cover",
+    "coverSet": "Set as the current segment cover (latest cached version)"
   },
   "director": {
     "guideSlot": "Guide",
@@ -3111,7 +3173,9 @@
     "deleteVersionTitle": "Delete this version?",
     "deleteVersionBody": "Only this history snapshot is removed; current content stays unchanged.",
     "deleteVersionOk": "Delete",
-    "deleteVersionDone": "Version deleted"
+    "deleteVersionDone": "Version deleted",
+    "segmentTitle": "Shot {{num}}",
+    "importDone": "Imported {{count}} assets"
   },
   "scriptImportModal": {
     "title": "Import script",
@@ -3162,12 +3226,19 @@
   },
   "onboarding": {
     "mcpFirstRun": "No MCP service yet. Copy and run the install command once.",
-    "stepMcpFirstRun": "Copy the install command and run it once in a terminal; this page will detect it automatically.",
+    "stepMcpFirstRun": "Click “Copy” below, then paste it into an Agent chat such as Doubao; the Agent installs and starts it.",
+    "mcpDirLabel": "Install folder",
+    "mcpDirNone": "Not chosen",
+    "mcpDirPick": "Choose folder",
+    "mcpDirWarn": "Not drive C, and not the same folder as step 1.",
+    "mcpDirChange": "Change",
+    "mcpCopy": "Copy",
+    "mcpCopied": "Copied. Paste it to an Agent.",
     "copyBootstrap": "Copy install command",
-    "stepMcpHint": "Copy the config and paste it into your Agent IDE's MCP settings.",
+    "stepMcpHint": "Click “Copy” below, then paste it into an Agent chat such as Doubao; the Agent installs it.",
     "title": "Setup guide",
     "stepRoot": "Choose a storage folder",
-    "stepMcp": "Connect MCP (for your Agent IDE)",
+    "stepMcp": "Connect Agent (e.g. Doubao)",
     "stepComfy": "Connect ComfyUI",
     "copyMcp": "Copy MCP config",
     "downloadPlugin": "Download plugin ZIP",
@@ -3179,7 +3250,7 @@
     "mcpNotReady": "MCP is not ready; no config to copy yet",
     "notice": "First time? Finish storage, MCP and ComfyUI setup.",
     "start": "Start creating",
-    "footerHint": "Reopen anytime from “Setup guide” at the bottom of the home page",
+    "footerHint": "Reopen anytime",
     "chooseRoot": "Choose folder",
     "changeRoot": "Choose again",
     "rootNone": "Not selected",
@@ -3196,6 +3267,33 @@
     "rootPathRequired": "Enter an absolute path for the data folder",
     "rootSwitched": "Data folder switched, reloading…",
     "rootSwitchFailed": "Failed to switch folder",
-    "rootGuess": "The browser does not expose absolute paths; guessed {{path}} from the folder name. Confirm and click Switch."
+    "rootGuess": "The browser does not expose absolute paths; guessed {{path}} from the folder name. Confirm and click Switch.",
+    "modelUnet": "Video model",
+    "modelVideoVae": "Video VAE",
+    "modelAudioVae": "Audio VAE",
+    "modelClip": "Text encoder",
+    "modelRefresh": "Refresh list",
+    "modelPick": "Pick or type a model name",
+    "modelEmpty": "Read from the connection, or type it",
+    "modelGuideHint": "The list is what this machine actually has — pick anything. “Recommended” is only a hint.",
+    "recTagYes": "Recommended",
+    "recTagNo": "(not recommended)",
+    "recommendPrefix": "Recommended: ",
+    "recSelected": "Selected",
+    "recAvailable": "Present in this connection",
+    "recMissing": "Not in this connection",
+    "recUnknown": "Check after connecting",
+    "vaeWarning": "No MiniMax H3 video/audio VAE in this connection (or the selected one is not H3). Pick a file whose name contains h3; quantized builds are fine, but not LTX/Wan VAEs."
+  },
+  "folderListView": {
+    "namePlaceholder": "Folder name",
+    "create": "Create",
+    "title": "Project folders",
+    "newFolder": "New",
+    "empty": "No folders yet"
+  },
+  "styleGallery": {
+    "pickButton": "Choose style",
+    "emptySelected": "Not selected: subject prompts keep the old template; choose a series style first"
   }
 }

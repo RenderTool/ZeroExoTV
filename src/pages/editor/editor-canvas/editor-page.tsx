@@ -34,10 +34,13 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { fullSync, onProjectDeleted } from '@/services/sync/sync-service.js';
 import { useSyncStatus, CLOUD_ENABLED } from '@/services/sync/sync-store.js';
 import type { NodeRecord } from '@zeroexo/core';
-import { AddNodeCommand, filterVisibleNodes } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, filterVisibleNodes } from '@zeroexo/core';
+import { buildChainPrefillPayload, setPendingChainPrefill, takePendingChainPrefill } from '@/features/sub-canvas/pending-chain-prefill.js';
+import { LOCAL_IMAGE_MODEL_KEY, normalizeLocalModelKey } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
 import { VersionBadge } from '@/features/top-bar/components/version-badge.js';
 import { TopBar, ConfigDialog } from '@/features/top-bar/index.js';
 import { CanvasMenu } from '@/features/top-bar/components/canvas-menu.js';
+import { CanvasHistoryButton } from '@/features/top-bar/components/canvas-history-button.js';
 import { CanvasOverlays } from '@/features/canvas-interaction/canvas-overlays.js';
 import { ConnectionDropMenu } from '@/features/canvas-interaction/connection-drop-menu.js';
 import { LeftSideToolBar } from '@/features/left-side-toolbar/index.js';
@@ -45,7 +48,7 @@ import { NodeCapsuleToolbar } from '@/features/tools-dock/node-capsule-toolbar.j
 import { GroupStyleDialog } from '@/features/tools-dock/group-style-dialog.js';
 import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-panel.js';
 import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
-import { Upload } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { ReadOnlyProvider } from '@/shared/readonly-context.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
 import { NodeGenerateDock, TEXT_UPLOAD_ACCEPT } from '@/features/tools-dock/node-generate-dock.js';
@@ -84,21 +87,37 @@ import { useUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useEditorState } from './use-editor-state.js';
 import { useAuth } from '@/features/auth/auth-store.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
+import { createSizedAssetNode } from '@/features/asset-picker/services/asset-node-size.js';
 import { CreationSyncBadge } from '@/shared/components/creation/CreationSyncBadge.js';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
 import { WORKSPACE_SURFACE_STYLE } from '@/shared/components/LAYOUT_CONSTANTS.js';
 import { useAiConfigStore } from '@/features/ai-config/use-ai-config-store.js';
 import { useEditorDialogs } from './use-editor-dialogs.js';
 import { useEditorInteractions } from './use-editor-interactions.js';
-import { useMcpImageJobs } from '@/features/mcp-image-jobs/use-mcp-image-jobs.js';
+import { useClaimImageJobs } from '@/features/mcp-image-jobs/use-claim-image-jobs.js';
 
 import { useStackToast } from './use-stack-toast.js';
 import { ReadOnlyCanvasOverlay } from './read-only-canvas-overlay.js';
+import { useReadOnlyCanvasDocStore } from '@/shared/readonly-canvas-doc.js';
 import { EmptyCanvasGuide, useIsCanvasEmpty } from './empty-canvas-guide.js';
 
 /** 画布点阵世界间距(2026-11-05 用户要求提高密度：24 → 16) */
 const CANVAS_GRID_SIZE = 16;
+
+/**
+ * 素材节点（拖入/发送到画布）本身没有提示词。
+ * 老代码把资产标题当 prompt 写进 data，面板就显示一串资产 id（2026-11-18 报障）；
+ * 这里只在展示层还原成空提示词，不改节点已存数据。
+ */
+function visibleNodePrompt(data: Record<string, unknown> | null | undefined, nodeType: string | undefined): string {
+  const raw = String(data?.prompt ?? '');
+  if (!raw) return '';
+  if (data?.generationId) return raw;
+  if (nodeType && nodeType !== 'image' && nodeType !== 'video' && nodeType !== 'audio') return raw;
+  if (raw === String(data?.storageKey ?? '') || raw === String(data?.title ?? '')) return '';
+  if (raw.replace(/[^0-9a-f]/gi, '').length >= 24) return '';
+  return raw;
+}
 
 export interface EditorPageProps {
   canvasId: string;
@@ -166,7 +185,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // 画布级页签 = 同一编辑器切换文档：主画布（.lf）+ 副本（projects/<pid>/canvases/*.json）。
   // 不再为副本创建第二个引擎实例，视图/工具栏/交互与主画布完全同一套。
   useRestoreCanvasTabs(canvasId);
-  useCanvasDocumentSwitch({ projectId: canvasId, editor: state.editor });
+  useCanvasDocumentSwitch({ projectId: canvasId, editor: state.editor, containerRef });
   // 2026-11-04 单例槽位改造：四个固定页签（剧本/分镜/出片/画布）= 流水线槽位视图。
   // 分镜/出片槽位绑定由 use-editor-interactions 的图订阅解析写入；剧本绑定见下方 effect。
   const slotBindings = useCanvasTabStore((s) => s.slotBindings);
@@ -391,8 +410,42 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     return () => window.removeEventListener('zeroexo:collab-banned', handler);
   }, [canvasId, modal, onBack, t]);
 
-  // 本地版（Plan#83）：无协作成员、无审核制、无只读 viewer 概念，画布永远可写
-  const isReadOnlyViewer = false;
+  // 只读历史链路（查看提示词打开的子画布）：只按文档自己的 readOnly 标记判定，
+  // 普通子画布没有该标记，照常可编辑（2026-11-18 用户：两者必须区分清楚）。
+  const readOnlyCid = useReadOnlyCanvasDocStore((s) => s.readOnlyCid);
+  const isReadOnlyViewer = readOnlyCid !== null;
+
+  // 只读写保护写在命令队列自己身上（CommandQueue.setReadOnly），
+  // 不用替换方法、不用遮罩：拖动/缩放照旧，只有结构性命令会被队列丢弃。
+  useEffect(() => {
+    const ed = state.editor;
+    if (!ed) return;
+    ed.core.commandQueue.setReadOnly(isReadOnlyViewer);
+    return () => {
+      ed.core.commandQueue.setReadOnly(false);
+    };
+  }, [state.editor, isReadOnlyViewer]);
+
+  // 只读：连线预览（引脚拖拽产生的动态虚线）不该出现在历史视图里。
+  // 不走 containerRef（挂载时可能还是 null，effect 只跑一次会失效），
+  // 直接给 body 打标记：全局 CSS 隐藏引脚命中与圆点，不注册任何指针监听。
+  useEffect(() => {
+    if (!isReadOnlyViewer) return;
+    const cssId = 'zx-readonly-canvas-style';
+    if (!document.getElementById(cssId)) {
+      const style = document.createElement('style');
+      style.id = cssId;
+      style.textContent = '.zx-readonly-body [data-pin-id],.zx-readonly-body [data-pin-dot]{pointer-events:none!important;opacity:0!important;}';
+      document.head.appendChild(style);
+    }
+    document.body.classList.add('zx-readonly-body');
+    // 进入只读时把可能残留的「连线拖拽中」状态取消，否则预览虚线会一直挂在画布上
+    refs.connectionController?.cancel();
+    return () => {
+      document.body.classList.remove('zx-readonly-body');
+      refs.connectionController?.cancel();
+    };
+  }, [isReadOnlyViewer, refs]);
 
   // 只读模式拦截编辑类快捷键（2026-08-25 系统性只读防护）：键盘事件走 window 级监听，
   // 画布遮罩拦不住（Delete 删除 / Ctrl+D 原位复制 / Ctrl+Z 撤销 / Ctrl+C/V 复制粘贴均会改画布数据）。
@@ -525,7 +578,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   }
   const commandQueue = refs.commandQueue;
   // MCP 图片作业：网页在线时消费 .lf/.../image-jobs，把 MCP 生成的图落到当前实时画布
-  useMcpImageJobs({ projectId: canvasId, commandQueue, store: refs.store });
+  useClaimImageJobs({ projectId: canvasId, commandQueue, store: refs.store });
   const { processFiles } = useUploadQueue(commandQueue, uploadQueueRef.current);
   // 组件卸载时重置队列
   useEffect(() => {
@@ -594,12 +647,14 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     || !selectedNodeHasContent
     || isPromptRunning
     || selectedHasIncoming
-    || state.selectedNodeType === 'image';
+    || (state.selectedNodeType as string) === 'image'
+    // 只读历史链路：产物节点（图/视频）选中后要能看到当时的提示词与参数
+    || (isReadOnlyViewer && ((state.selectedNodeType as string) === 'image' || state.selectedNodeType === 'video'));
   const handlers = useCanvasHandlers(refs, containerRef);
 
   // ===== 只读浏览手势 — 已提取到 ReadOnlyCanvasOverlay =====
 
-  // 双击节点缩放
+  // 双击节点缩放（只读历史链路的提示词+参数由 NodeGenerateDock 的只读面板承担）
   const handleNodeDoubleClick = useCallback((nodeId: string, width: number, height: number) => {
     const store = state.editor?.store;
     if (!store?.focusOnNode) return;
@@ -649,8 +704,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
   /**
    * 主体 ↔ 画布（2026-11-12 起只保留状态级入口）：
-   * - subject:sendStateToCanvas：状态卡「画布生成」→ 建 320×320 图片节点，
-   *   只挂提示词与参考图 key，status 保持 idle，**不发起 API**；
+   * - subject:sendStateToCanvas：状态卡「去画布生成」→ 建图片生成节点 + **把参考插槽里的图作为上游节点一起建出来并连线**，
+   *   只挂提示词与参考图，status 保持 idle，**不发起 API**；
    * - canvas:subject:open：点主体节点里的某张资产 → 切回主体库并选中该主体/状态。
    * 旧的主体级全局「发送到画布」（subject:sendToCanvas → stacked-media）已下线。
    */
@@ -659,47 +714,83 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       const store = refs.store;
       const cq = refs.commandQueue;
       if (!store || !cq) return;
-      const detail = event as { name?: string; prompt?: string; storageKey?: string; referenceStorageKey?: string };
-      const referenceKey = detail.referenceStorageKey ?? detail.storageKey;
+      const detail = event as { name?: string; prompt?: string; storageKey?: string; referenceStorageKeys?: string[] };
+      const refKeys = (detail.referenceStorageKeys ?? []).filter((key): key is string => Boolean(key));
       const vp = store.getViewport();
       const el = containerRef.current;
       const viewW = el?.clientWidth ?? 800;
       const viewH = el?.clientHeight ?? 600;
       const k = vp.k > 0 ? vp.k : 1;
-      // 2026-11-13 用户指令：主体「画布生成」建 16:9 节点，参数预设 16:9 · 2K，并跳到画布
+      // 2026-11-13 用户指令：主体「去画布生成」建 16:9 节点，参数预设 16:9 · 2K，并跳到画布
       const size = { width: 360, height: 203 };
+      const center = { x: (viewW / 2 - vp.x) / k, y: (viewH / 2 - vp.y) / k };
       const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      cq.execute(new AddNodeCommand({
-        id: nodeId,
-        type: 'image',
-        position: {
-          x: (viewW / 2 - vp.x) / k - size.width / 2,
-          y: (viewH / 2 - vp.y) / k - size.height / 2,
-        },
-        size,
-        title: detail.name || '主体状态',
-        data: {
-          prompt: detail.prompt ?? '',
-          content: '',
-          status: 'idle',
-          params: {
-            aspectRatio: '16:9',
-            resolution: '2k',
-            // 标准 2K（16:9）= 2048×1152；Qwen 最长边也卡 2048，不再用 2816 的电商档
-            size: { width: 2048, height: 1152 },
+      const addGenerationNode = (): void => {
+        cq.execute(new AddNodeCommand({
+          id: nodeId,
+          type: 'image',
+          position: { x: center.x - size.width / 2, y: center.y - size.height / 2 },
+          size,
+          title: detail.name || '主体状态',
+          data: {
+            prompt: detail.prompt ?? '',
+            content: '',
+            status: 'idle',
+            model: LOCAL_IMAGE_MODEL_KEY,
+            width: 2048,
+            height: 1152,
+            paramValues: {
+              aspectRatio: '16:9',
+              resolution: '2k',
+              // 标准 2K（16:9）= 2048×1152；Qwen 最长边也卡 2048，不再用 2816 的电商档
+              width: 2048,
+              height: 1152,
+              size: { width: 2048, height: 1152 },
+            },
           },
-          ...(referenceKey ? { referenceStorageKey: referenceKey } : {}),
-        },
-      } as NodeRecord));
-      store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
-      store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
-      navigateToView('canvas', { nodeId });
-      // 切页签后再居一次：隐藏态拿到的容器尺寸可能为 0，等画布真正可见再校正
-      requestAnimationFrame(() => {
-        const el2 = containerRef.current;
-        store.focusOnNode?.(nodeId, { width: el2?.clientWidth || viewW, height: el2?.clientHeight || viewH });
-      });
-      message.success('已添加到画布');
+        } as NodeRecord));
+      };
+      const focus = (): void => {
+        store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
+        store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
+        navigateToView('canvas', { nodeId });
+        // 切页签后再居一次：隐藏态拿到的容器尺寸可能为 0，等画布真正可见再校正
+        requestAnimationFrame(() => {
+          const el2 = containerRef.current;
+          store.focusOnNode?.(nodeId, { width: el2?.clientWidth || viewW, height: el2?.clientHeight || viewH });
+        });
+      };
+      if (refKeys.length === 0) {
+        addGenerationNode();
+        focus();
+        message.success('已添加到画布');
+        return;
+      }
+      // 参考图 → 生成节点：左侧纵向排开上游图片节点，再连 source.image → target.prompt，
+      // 与「一键同款」同一条引用链原理（连线就是真实参考输入，不再只塞一个没人读的 referenceStorageKey）。
+      void (async () => {
+        const refNodeIds: string[] = [];
+        for (let i = 0; i < refKeys.length; i += 1) {
+          const refNode = await createSizedAssetNode(
+            { kind: 'image', title: `参考图${i + 1}`, storageKey: refKeys[i]!, dataUrl: '' },
+            { x: center.x - 420, y: center.y + (i - (refKeys.length - 1) / 2) * 380 },
+            { width: viewW, height: viewH },
+          );
+          if (!refNode) continue;
+          cq.execute(new AddNodeCommand(refNode));
+          refNodeIds.push(refNode.id);
+        }
+        addGenerationNode();
+        refNodeIds.forEach((sourceId, i) => {
+          cq.execute(new AddEdgeCommand({
+            id: `edge-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+            source: { nodeId: sourceId, pinId: 'image' },
+            target: { nodeId, pinId: 'prompt' },
+          }));
+        });
+        focus();
+        message.success('已添加到画布');
+      })();
     });
     const unsubSendMedia = nodeActionBus.on('subject:sendMediaToCanvas', (event) => {
       const store = refs.store;
@@ -713,27 +804,23 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       const viewW = el?.clientWidth ?? 800;
       const viewH = el?.clientHeight ?? 600;
       const k = vp.k > 0 ? vp.k : 1;
-      const size = { width: 320, height: 320 };
-      const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      cq.execute(new AddNodeCommand({
-        id: nodeId,
-        type: 'image',
-        position: {
-          x: (viewW / 2 - vp.x) / k - size.width / 2,
-          y: (viewH / 2 - vp.y) / k - size.height / 2,
-        },
-        size,
-        title: detail.name || '主体图片',
-        data: {
-          content: getResourceUrl(storageKey, 'preview') ?? storageKey,
-          storageKey,
-          status: 'idle',
-        },
-      } as NodeRecord));
-      store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
-      store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
-      navigateToView('canvas', { nodeId });
-      message.success('已发送到画布');
+      // 2026-11-17 用户实测：主体图片发到画布原来是写死 320×320，1024×768 的图被塞进方框两侧留黑边。
+      // 统一走资产落画布的唯一尺寸入口 createSizedAssetNode（补真实宽高 + 长边上限等比 fit），
+      // 不再在此另写一套尺寸逻辑。position 传视口中心（工厂内部按节点尺寸做中心对齐）。
+      void (async () => {
+        const node = await createSizedAssetNode(
+          { kind: 'image', title: detail.name || '主体图片', storageKey, dataUrl: '' },
+          { x: (viewW / 2 - vp.x) / k, y: (viewH / 2 - vp.y) / k },
+          { width: viewW, height: viewH },
+        );
+        if (!node) return;
+        const nodeId = node.id;
+        cq.execute(new AddNodeCommand(node));
+        store.setSelection({ selectedNodeIds: new Set([nodeId]), selectedEdgeIds: new Set() });
+        store.focusOnNode?.(nodeId, { width: viewW, height: viewH });
+        navigateToView('canvas', { nodeId });
+        message.success('已发送到画布');
+      })();
     });
     const unsubOpen = nodeActionBus.on('canvas:subject:open', (event) => {
       const detail = event as { rootId?: string; stateId?: string };
@@ -774,8 +861,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           isHierarchyOpen={dialogs.isHierarchyOpen}
           onToggleHierarchy={dialogs.toggleHierarchy}
           canvasMenu={
+            <>
             <CanvasMenu
               theme={theme}
+              projectId={canvasId}
               onHome={onBack}
               onNewProject={() => void dialogs.handleNewProject()}
               onExportProject={() => {
@@ -792,6 +881,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               onCopyProject={() => void dialogs.handleCopyProject()}
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
             />
+            <CanvasHistoryButton projectId={canvasId} />
+            </>
           }
           syncBadge={!state.loading && CLOUD_ENABLED ? (
             <>
@@ -944,10 +1035,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             pointerEvents: activeTabKey === CANVAS_TAB_KEY || isOpenCanvasTabKey(activeTabKey) ? 'auto' : 'none',
           }}>
             {/* 只读保护遮罩 — 已提取到 ReadOnlyCanvasOverlay */}
+            {/* 只读标识条：不覆盖画布，不改平移/缩放习惯 */}
             <ReadOnlyCanvasOverlay
-              editor={state.editor}
-              containerSize={state.containerSize}
-              getNodeSize={interactions.getNodeSize}
               isReadOnlyViewer={isReadOnlyViewer}
               loading={state.loading}
             />
@@ -986,7 +1075,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             onNodeTouchMove={handlers.onNodeTouchMove}
             onEdgePointerDown={handlers.onEdgePointerDown}
             onResizeHandlePointerDown={handlers.onResizeHandlePointerDown}
-            onCutEdge={interactions.handleCutEdge}
+            onCutEdge={isReadOnlyViewer ? undefined : interactions.handleCutEdge}
             onCanvasContextMenu={interactions.handleCanvasContextMenu}
             contextMenuItems={contextMenuItems}
             onCanvasDrop={dropHandlers.onDrop}
@@ -1035,7 +1124,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           </NodeDefaultsProvider>
           </PinDefaultsProvider>
           {/* 空画布引导态(2026-11-04):点阵网格(随视口)+中心辉光+居中提示,纯视觉层 */}
-          <EmptyCanvasGuide store={state.editor.store} gridSize={CANVAS_GRID_SIZE} />
+          <EmptyCanvasGuide store={state.editor.store} gridSize={CANVAS_GRID_SIZE} readOnly={isReadOnlyViewer} />
           {/* 画布节点数(内容信标 + 情境面板共用) */}
           {(() => {
             const canvasHasNodes = !!state.editor && filterVisibleNodes(state.editor.store.getGraph().nodes).length > 0;
@@ -1075,7 +1164,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               onClose={() => setNodeCreateMenuPos(null)}
               theme={theme}
               extraItems={[
-                { key: 'upload', label: '上传素材', icon: <Upload size={14} />, onClick: () => fileInputRef.current?.click() },
+                { key: 'upload', label: '上传素材', icon: <Plus size={14} />, onClick: () => fileInputRef.current?.click() },
                 { key: 'reset-view', label: t('toolbar.resetView'), icon: <EDITOR_ICONS.resetView size={14} />, onClick: handleResetView },
                 ...(hasClipboardContent() && state.editor
                   ? [{ key: 'paste', label: t('editor.paste'), icon: <ClipboardPaste size={14} />, onClick: () => {
@@ -1178,14 +1267,76 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             node={state.selectedNodeData}
             isMobile={isMobile}
             isRunning={isPromptRunning}
-            initialPrompt={(selectedNodeData?.prompt as string) ?? ''}
+            initialPrompt={visibleNodePrompt(selectedNodeData as Record<string, unknown> | null | undefined, state.selectedNodeType ?? undefined)}
             onPromptChange={interactions.handlePromptChange}
             onGenerate={interactions.handlePromptGenerate}
             onStop={interactions.handlePromptStop}
             configMode={interactions.selectedConfigMode}
-            model={(selectedNodeData?.model as string) ?? ''}
+            // 图片节点没写模型时按本机 Qwen Image 2.1 展示：否则面板会判定「只吃文字」，
+            // 参考图灰掉、点生成还走文本 provider（2026-11-18 报「请求失败」）。
+            model={normalizeLocalModelKey(String(selectedNodeData?.model ?? ''), state.selectedNodeType)}
             onConfigChange={interactions.handleNodeConfigChange}
             paramValues={(selectedNodeData?.paramValues as Record<string, any>) ?? {}}
+            // 只读历史链路：面板只读展示提示词+参数，「生成同款」回主画布重做这一段
+            onReadOnlyGenerateSame={(clicksNodeId) => {
+              // 生成同款 = 把整条链路投递到主画布：参考图照搬、生成节点变回「空节点」并覆盖原提示词/参数，
+              // 只建节点+连线，绝不在这里发起生成任务（用户自己再点生成）。
+              const chainGraph = state.editor?.store?.getGraph?.() as
+                | { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> }
+                | undefined;
+              const payload = buildChainPrefillPayload(chainGraph ?? {}, clicksNodeId);
+              if (payload.nodes.length === 0) return;
+              setPendingChainPrefill(payload);
+              activateTab(CANVAS_TAB_KEY);
+              let tries = 0;
+              const reveal = (): void => {
+                tries += 1;
+                const mainStore = state.editor?.store;
+                const cq = state.editor?.core.commandQueue;
+                const graph = mainStore?.getGraph?.();
+                // 等主画布文档真正切回来（快照节点都带 __readonly，主画布不该有）
+                const stillChain = (graph?.nodes ?? []).some(
+                  (n) => Boolean((n.data as Record<string, unknown> | undefined)?.__readonly),
+                );
+                if (cq && graph && !stillChain) {
+                  const ready = takePendingChainPrefill();
+                  if (!ready) return;
+                  const live = graph.nodes.filter((n) => !(n as { _deleted?: boolean })._deleted);
+                  const maxX = live.length
+                    ? Math.max(...live.map((n) => (n.position?.x ?? 0) + ((n.size?.width as number) ?? 260)))
+                    : 0;
+                  const minY = live.length ? Math.min(...live.map((n) => n.position?.y ?? 0)) : 0;
+                  const chainMinX = Math.min(...ready.nodes.map((n) => n.position.x));
+                  const chainMinY = Math.min(...ready.nodes.map((n) => n.position.y));
+                  const dx = maxX + 160 - chainMinX;
+                  const dy = minY - chainMinY;
+                  ready.nodes.forEach((n) => {
+                    cq.execute(new AddNodeCommand({
+                      id: n.id,
+                      type: n.type,
+                      position: { x: n.position.x + dx, y: n.position.y + dy },
+                      size: { ...n.size },
+                      ...(n.title ? { title: n.title } : {}),
+                      data: n.data,
+                    } as never));
+                  });
+                  ready.edges.forEach((e) => {
+                    cq.execute(new AddEdgeCommand(e as never));
+                  });
+                  // 只选中「复刻出来的空生成节点」：提示词面板/生成模式绑定的是选中节点，
+                  // 全选整条链路会把面板绑到参考图上，生成时按文生图提交（2026-11-18 实测报错）。
+                  const focusIds = ready.focusNodeId ? [ready.focusNodeId] : ready.nodes.map((n) => n.id);
+                  mainStore!.setSelection({ selectedNodeIds: new Set(focusIds), selectedEdgeIds: new Set() });
+                  if (ready.focusNodeId) {
+                    mainStore!.focusOnNode?.(ready.focusNodeId, state.containerSize, 400, 51);
+                  }
+                  // 同款只复刻链路（空节点 + 参数 + 上游引用），是否生成由用户点「生成」决定。
+                  return;
+                }
+                if (tries < 30) window.setTimeout(reveal, 150);
+              };
+              window.setTimeout(reveal, 150);
+            }}
             // 2026-11-13 用户要求：任何情况下画布提示词面板都不能默认隐藏（选中即可见/可编辑）
             defaultCollapsed={false}
           />
