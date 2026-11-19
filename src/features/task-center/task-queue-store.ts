@@ -186,24 +186,39 @@ export const useTaskQueueStore = create<TaskQueueState>((set) => ({
 
   setCollapsed: (collapsed) => set({ collapsed }),
 
-  applyBrokerTasks: (tasks) => set((s) => {
-    // 已清空的终态任务不再随 broker 全量同步回来（与 applyPluginTasks 同口径）
-    // 2026-11-17 用户实测：画布发起生成后队列里没有任务 —— 本地登记（source='local'）此前被同步整批丢掉，
-    // 这里保留所有本地任务（上传与画布生成），只按 dismissed 过滤。
-    const locals = s.tasks.filter((t) => t.source === 'local' && !s.dismissed.has(t.id));
-    const visible = tasks.filter((t) => !s.dismissed.has(t.id));
-    const merged = [...visible, ...locals].sort((a, b) => b.startedAt - a.startedAt);
-    return { tasks: merged.slice(0, MAX_TASKS) };
-  }),
+  applyBrokerTasks: (tasks) => set((s) => mergeRemote(s, tasks, 'broker')),
 
-  applyPluginTasks: (tasks) => set((s) => {
-    // 插件是生成任务事实源；保留本地任务（上传 + 画布发起且插件里没有记录的生成），已清空的终态不再回来
-    const locals = s.tasks.filter((t) => t.source === 'local' && !s.dismissed.has(t.id));
-    const visible = tasks.filter((t) => !s.dismissed.has(t.id));
-    const merged = [...visible, ...locals].sort((a, b) => b.startedAt - a.startedAt);
-    return { tasks: merged.slice(0, MAX_TASKS) };
-  }),
+  applyPluginTasks: (tasks) => set((s) => mergeRemote(s, tasks, 'plugin')),
 }));
+
+/**
+ * 合并两路远端任务源（2026-11-19）：broker=MCP 任务表（本地，MCP 发起必留痕），
+ * plugin=ComfyUI 插件持久任务（云端）。任一源不可达时另一源的记录不能被整批清掉，
+ * 否则云端 502 时 MCP 发起的任务在队列里全部消失。只替换本次同步的那一路，
+ * 另一路保留活跃任务 + 30 分钟内的终态任务（防止历史无限堆积）。
+ */
+const STALE_ACTIVE_MS = 20 * 60 * 1000;
+const STALE_TERMINAL_MS = 30 * 60 * 1000;
+
+function keepForeign(t: QueuedTask, now: number): boolean {
+  if (t.source === 'local') return true;
+  if (t.status === 'queued' || t.status === 'running') return now - t.startedAt < STALE_ACTIVE_MS;
+  return (t.finishedAt ?? t.startedAt) > now - STALE_TERMINAL_MS;
+}
+
+function mergeRemote(
+  s: TaskQueueState,
+  fresh: QueuedTask[],
+  source: 'broker' | 'plugin',
+): { tasks: QueuedTask[] } {
+  const now = Date.now();
+  const freshVisible = fresh.filter((t) => !s.dismissed.has(t.id));
+  const ids = new Set(freshVisible.map((t) => t.id));
+  const foreign = s.tasks.filter((t) => t.source !== source && !ids.has(t.id)
+    && !s.dismissed.has(t.id) && keepForeign(t, now));
+  const merged = [...freshVisible, ...foreign].sort((a, b) => b.startedAt - a.startedAt);
+  return { tasks: merged.slice(0, MAX_TASKS) };
+}
 
 // 任何变更都落盘（历史跨刷新保留，只有「清空已完成」才会移除）
 useTaskQueueStore.subscribe((s, prev) => {

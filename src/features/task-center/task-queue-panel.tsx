@@ -17,6 +17,7 @@ import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } f
 import { cancelBrokerTask } from './task-broker-client.js';
 import { cancelPluginTask, deletePluginTask } from './plugin-task-client.js';
 import { usePluginTaskQueue } from './use-plugin-task-queue.js';
+import { useTaskBrokerSync } from './use-task-broker.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 
 const KIND_ICON: Record<TaskKind, React.ReactNode> = {
@@ -71,6 +72,8 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
   const { t } = useTranslation();
   const pid = projectId ?? getCurrentCanvasId();
   usePluginTaskQueue(pid);
+  // MCP 发起的任务落在本地 broker 任务表（8790 /tasks）：云端插件不可达时也必须看得见
+  useTaskBrokerSync(pid);
   const [mcpBanner, setMcpBanner] = useMcpBannerVisible();
   const tasks = useTaskQueueStore((s) => s.tasks);
   const clearFinished = useTaskQueueStore((s) => s.clearFinished);

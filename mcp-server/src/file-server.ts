@@ -29,6 +29,10 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, DELETE, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
+  // 2026-11-19：线上页面（https://renderdoc.space）访问本机 127.0.0.1 属于 Private Network Access，
+  // Chrome 会先发带 Access-Control-Request-Private-Network 的预检；缺这条响应头会整体判失败，
+  // 页面直接落到「本地数据服务离线」门（服务其实是好的）。
+  "Access-Control-Allow-Private-Network": "true",
 };
 
 /** 页面写进所选目录的一次性探针文件名：服务端靠它的内容反查绝对路径（浏览器不给路径） */

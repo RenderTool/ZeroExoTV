@@ -1,0 +1,37 @@
+{
+  "subjects": [
+    {
+      "storageKey": "cas:46fb37f46139f28efb4be53d63cc563008afed2b387aa384fcd90df157ff5146.png",
+      "emptySceneConfirmed": true,
+      "stateTag": "概念图",
+      "name": "雨棚小巷",
+      "prompt": "空场景概念图：狭窄石板小巷，旧墙与布雨棚，一盏暖灯，无人物无动物无道具",
+      "id": "item-b24ab10852a3"
+    },
+    {
+      "storageKey": "cas:28a02c4d3ad9299e239fdcbf44e5337da1f8ad78f899437b31b5f3a5741a98f7.png",
+      "emptySceneConfirmed": true,
+      "stateTag": "概念图",
+      "name": "磨坊",
+      "prompt": "空场景概念图：山坡木风车磨坊外景，草坡与云，无人物",
+      "id": "item-5150f6c41a00"
+    },
+    {
+      "storageKey": "cas:6a3cd5a54604a74dd48406f1bfdb80d5697a83d66376c8626b6b5064b4527b66.png",
+      "emptySceneConfirmed": true,
+      "stateTag": "概念图",
+      "name": "山坡灯塔",
+      "prompt": "空场景概念图：草坡红白条纹灯塔，黄昏天光，无人物",
+      "id": "item-9481af89edb6"
+    },
+    {
+      "storageKey": "cas:abae308e34ee4578e169d7e93173c7fdcfc5e075d959f48e3dd73b2550842813.png",
+      "emptySceneConfirmed": true,
+      "stateTag": "概念图",
+      "name": "钟楼内部",
+      "prompt": "空场景概念图：木质钟楼机械室，巨型齿轮与钟摆，暖灯，无人物",
+      "id": "item-8ce662d73288"
+    }
+  ],
+  "baseVersion": 53
+}

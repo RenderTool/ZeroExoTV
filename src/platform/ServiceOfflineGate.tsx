@@ -6,9 +6,9 @@
  * 「重新连接」（探测成功即整页刷新，让 localforage 重新绑磁盘驱动）
  * 「改用浏览器目录」（确实要脱离服务时，才退回首启门的目录授权）。
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button, Typography } from 'antd';
-import { probeHttpFs } from './http-fs.js';
+import { httpFsInfo, probeHttpFs } from './http-fs.js';
 import { reloadWithDisk } from './boot.js';
 
 const { Text } = Typography;
@@ -31,11 +31,23 @@ export function ServiceOfflineGate({ onUseBrowserRoot }: ServiceOfflineGateProps
         reloadWithDisk();
         return;
       }
-      setError('本地数据服务仍未响应：请在项目目录执行 pnpm fs（或 pnpm dev）后点「重新连接」');
+      setError('本地数据服务仍未响应：先确认本项目 MCP 服务在线（8790），再点「重新连接」');
     } finally {
       setBusy(false);
     }
   }, []);
+
+  // 2026-11-19：服务恢复后不该让用户反复手点。每 3 秒静默探一次，连上立刻整页刷新。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void probeHttpFs({ retry: false }).then((next) => {
+        if (next) reloadWithDisk();
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const probeBase = httpFsInfo()?.baseUrl ?? 'http://127.0.0.1:8790';
 
   return (
     <div
@@ -47,6 +59,9 @@ export function ServiceOfflineGate({ onUseBrowserRoot }: ServiceOfflineGateProps
       <div style={{ fontSize: 15 }}>本地数据服务离线</div>
       <Text type="secondary" style={{ maxWidth: 460, lineHeight: 1.8 }}>
         项目数据都在本地数据服务（8790）的数据根里，服务不在线就打不开——这不是目录授权问题，不用重新选目录。
+      </Text>
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        探测地址 {probeBase}（每 3 秒自动重连，连上会自己刷新）
       </Text>
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <Button onClick={onUseBrowserRoot} disabled={busy}>

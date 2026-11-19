@@ -126,7 +126,9 @@ async function probeOnce(): Promise<HttpFsInfo | null> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
-    const res = await fetch(`${base}/health`, { signal: ctrl.signal });
+    // 2026-11-19：线上页面（https）访问 127.0.0.1 属 Private Network Access，浏览器会缓存失败的
+    // 预检结果，短期内重试仍失败。带一个时间戳参数让每次探测都是新请求，服务恢复后能立刻连上。
+    const res = await fetch(`${base}/health?t=${Date.now()}`, { signal: ctrl.signal, cache: 'no-store' });
     clearTimeout(timer);
     if (!res.ok) return null;
     const body = (await res.json()) as { ok?: boolean; dataRoot?: string; rootName?: string };

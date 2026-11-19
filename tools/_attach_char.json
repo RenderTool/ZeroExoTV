@@ -1,0 +1,26 @@
+{
+  "subjects": [
+    {
+      "name": "米拉",
+      "stateTag": "定妆",
+      "id": "item-e7c4876fc832",
+      "prompt": "单人定妆三画面：同一名红棕双麻花辫、蓝背带裤、白衬衫的八岁少女，正面大头、正面全身、背面全身，纯白背景，原创三维卡通造型",
+      "storageKey": "cas:82c032eff96c2ae8c44d7f257e505761378656318e8d8d76399a00ddab90d801.png"
+    },
+    {
+      "name": "布布",
+      "stateTag": "定妆",
+      "id": "item-f4a5ca559a46",
+      "prompt": "单人定妆三画面：同一只青绿色圆滚滚毛绒小生物，大耳朵，正面大头、正面全身、背面全身，纯白背景，原创三维卡通造型",
+      "storageKey": "cas:66ef290d01443737f0b90a7215fca3c7406257980c3ec927bc4c72417b626a5b.png"
+    },
+    {
+      "name": "老钟",
+      "stateTag": "定妆",
+      "id": "item-717b55343a3c",
+      "prompt": "单人定妆三画面：同一名白胡子圆框眼镜钟表匠，白衬衫棕马甲，正面大头、正面全身、背面全身，纯白背景，原创三维卡通造型",
+      "storageKey": "cas:0ee5d8feff1a38ee1a7a687104fd99bc3550dfac197f93895f29bab1ec478430.png"
+    }
+  ],
+  "baseVersion": 42
+}

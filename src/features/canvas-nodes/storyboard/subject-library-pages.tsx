@@ -1332,7 +1332,12 @@ function StateEditPanel({
     });
   };
   const validEpisodes = episodes.slice().sort((a, b) => a.number - b.number);
-  const selectedEpisodes = (node.appearEpisodes ?? []).filter((n) => validEpisodes.some((e) => e.number === n));
+  /** 状态没显式设置集数时，继承主体基础状态的集数（空数组语义=全集，不能因此显示「未选」）。
+      主体级集数由 MCP 的 episodeIds / sync_subject_episodes 维护在 states[0].appearEpisodes。 */
+  const inheritedEpisodes = (tree.states?.[0]?.appearEpisodes ?? []) as number[];
+  const ownEpisodes = (node.appearEpisodes ?? []) as number[];
+  const effectiveEpisodes = ownEpisodes.length > 0 ? ownEpisodes : inheritedEpisodes;
+  const selectedEpisodes = effectiveEpisodes.filter((n) => validEpisodes.some((e) => e.number === n));
   const toggleEpisode = (n: number) => {
     const next = selectedEpisodes.includes(n)
       ? selectedEpisodes.filter((x) => x !== n)

@@ -17,7 +17,8 @@ import {
   type PluginTask,
 } from "../broker/plugin-client.js";
 import { findClaimByJob, listClaims } from "../store/claims.js";
-import { cancelTask, listTasks, readTask, taskSnapshot, type TaskRecord } from "../store/tasks.js";
+import { cancelTask, listTasks, readTask, taskSnapshot, upsertMirrorTask, type TaskRecord } from "../store/tasks.js";
+import { dataRoot } from "../config.js";
 import { defTool, type Ctx } from "./_register.js";
 
 interface SegmentView {
@@ -46,6 +47,42 @@ interface TaskView {
   createdAt?: string;
   updatedAt?: string;
   segments: SegmentView[];
+}
+
+/** 插件状态 → 本地任务表镜像（网页队列在没有云端连接时也能看到 MCP 发起的任务） */
+function mirrorState(state: PluginTask["state"]): "queued" | "running" | "success" | "failed" | "canceled" {
+  if (state === "queued") return "queued";
+  if (state === "running") return "running";
+  if (state === "success") return "success";
+  if (state === "cancelled") return "canceled";
+  return "failed";
+}
+
+export async function mirrorPluginTask(task: PluginTask): Promise<void> {
+  if (!task.projectId) return;
+  try {
+    await upsertMirrorTask(dataRoot(), {
+      taskId: task.taskId,
+      projectId: task.projectId,
+      kind: "director_run",
+      title: task.title ?? "导演台出片",
+      state: mirrorState(task.state),
+      currentSegment: task.currentSegment ?? null,
+      doneCount: task.doneCount,
+      segments: (task.segments ?? []).map((seg) => ({
+        index: seg.index,
+        shotId: seg.shotId,
+        state: mirrorState(seg.state),
+        ...(seg.progress ? { progress: seg.progress } : {}),
+        ...(seg.error ? { error: seg.error } : {}),
+      })),
+      error: task.error ?? null,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+    });
+  } catch {
+    // 镜像失败不影响主流程（本地任务表只是网页展示用）
+  }
 }
 
 function pluginView(task: PluginTask): TaskView {
@@ -114,6 +151,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx): void {
     },
     handler: async (args) => {
       const pluginTasks = await listPluginTasks(args.projectId).catch(() => [] as PluginTask[]);
+      await Promise.all(pluginTasks.map((t) => mirrorPluginTask(t)));
       const claims = await listClaims(args.projectId).catch(() => []);
       const localTasks = await listTasks(undefined, { projectId: args.projectId, limit: 100 }).catch(() => []);
       const merged = [
@@ -149,7 +187,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx): void {
     schema: { taskId: z.string() },
     handler: async (args) => {
       const pluginTask = await getPluginTask(args.taskId).catch(() => null);
-      if (pluginTask) return pluginView(pluginTask);
+      if (pluginTask) {
+        void mirrorPluginTask(pluginTask);
+        return pluginView(pluginTask);
+      }
       const claim = await findClaimByJob(args.taskId);
       if (claim) {
         const job = await getImageJob(args.taskId);
@@ -185,6 +226,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx): void {
       const pluginTask = await getPluginTask(args.taskId).catch(() => null);
       if (pluginTask) {
         const canceled = await cancelPluginTask(args.taskId);
+        void mirrorPluginTask(canceled);
         return { ...pluginView(canceled), hint: "已请求取消；已完成段保留。" };
       }
       const claim = await findClaimByJob(args.taskId);

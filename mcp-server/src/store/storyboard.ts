@@ -912,8 +912,16 @@ export async function syncSubjectEpisodes(
           }
         }
         const tree = ensureTree(s, e);
+        const nums = [...numbers].sort((a, b) => a - b);
         const before = JSON.stringify(tree.states[0]?.appearEpisodes ?? []);
-        tree.states[0].appearEpisodes = [...numbers].sort((a, b) => a - b);
+        // 基础状态永远跟 entity 的集数关联保持一致；
+        // 其余状态若从未显式设置（空数组 = 全集适用），一并继承主体级集数，
+        // 否则网页「出现集数」在非基础状态下永远显示「未选」，看起来像没关联（2026-11-19 用户报障）。
+        tree.states[0].appearEpisodes = nums;
+        for (const st of tree.states.slice(1)) {
+          if ((st.appearEpisodes ?? []).length > 0) continue;
+          st.appearEpisodes = [...nums];
+        }
         if (before !== JSON.stringify(tree.states[0].appearEpisodes)) synced += 1;
         if (numbers.length > 0) appeared += 1;
       }

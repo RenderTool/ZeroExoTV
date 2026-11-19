@@ -25,6 +25,7 @@ import { readScript } from "../store/script.js";
 import { reviewProject, reviewSummaryText } from "../lib/shot-review.js";
 import { checkScriptReadiness, checkSubjectReadiness } from "../lib/readiness.js";
 import { submitPluginTask } from "../broker/plugin-client.js";
+import { mirrorPluginTask } from "./tasks.js";
 import { cacheGuideFile, resolveComfyBase } from "../broker/comfy.js";
 import type { WorkbenchShot } from "../store/workbench.js";
 
@@ -539,6 +540,8 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       }
       // 插件任务表是唯一事实源：网页刷新、MCP get_generation_task / cancel_generation_task 都读它。
       const task = await submitPluginTask(built.payload, args.baseUrl);
+      // 镜像进本地任务表：网页队列先看到 MCP 发起的任务（不依赖云端插件是否可达）
+      void mirrorPluginTask(task);
       return {
         written: true,
         projectId: args.projectId,

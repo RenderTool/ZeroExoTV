@@ -295,8 +295,82 @@ export async function cancelTask(taskId: string, root = dataRoot()): Promise<Tas
   }, root);
 }
 
-const LEASE_TTL_MS = 25_000;
+/**
+ * 插件任务镜像（2026-11-19 用户实测：MCP 发起的生成在网页「任务队列」一条都不显示）。
+ *
+ * 任务执行仍由 ComfyUI 插件完成，但 MCP 从任何入口（提交 / 查询 / 归档）拿到插件任务后，
+ * 都把状态镜像进本地任务表，让网页队列在没有插件连接（云端不可达）时也能看到 MCP 发起的任务。
+ * 镜像只写状态与段，不覆盖本地记录已有的 request / outputs。
+ */
+export interface MirrorTaskInput {
+  taskId: string;
+  projectId: string;
+  kind?: TaskKind;
+  title?: string;
+  state: TaskState;
+  currentSegment?: number | null;
+  doneCount?: number;
+  segments?: Array<{
+    index: number;
+    shotId?: string;
+    state: SegmentState;
+    progress?: { step: number; totalSteps: number };
+    previewKey?: string;
+    error?: string;
+  }>;
+  error?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
+export async function upsertMirrorTask(root: string, input: MirrorTaskInput): Promise<TaskRecord> {
+  const file = taskPath(input.taskId, root);
+  return withFileLock(file, async () => {
+    const existing = await readTask(input.taskId, root).catch(() => null);
+    const now = new Date().toISOString();
+    const segments: TaskSegment[] = (input.segments ?? existing?.segments ?? []).map((seg, i) => ({
+      index: seg.index ?? i + 1,
+      shotId: seg.shotId ?? existing?.segments?.[i]?.shotId,
+      state: seg.state,
+      ...(seg.progress ? { progress: seg.progress } : {}),
+      ...(seg.error ? { error: seg.error } : {}),
+    }));
+    const base: TaskRecord = existing ?? {
+      schemaVersion: 1,
+      taskId: input.taskId,
+      projectId: input.projectId,
+      kind: input.kind ?? "director_run",
+      state: input.state,
+      title: input.title ?? "MCP 生成任务",
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+      request: { kind: "director_run", selectedIds: segments.map((s) => s.shotId ?? "") },
+      segments,
+      totalCount: segments.length,
+      doneCount: 0,
+      currentSegment: null,
+      outputs: [],
+      attempt: 0,
+    };
+    const next: TaskRecord = {
+      ...base,
+      ...(input.title ? { title: input.title } : {}),
+      state: input.state,
+      segments,
+      totalCount: segments.length || base.totalCount,
+      doneCount: input.doneCount
+        ?? segments.filter((s) => s.state === "success").length,
+      currentSegment: input.currentSegment ?? null,
+      ...(input.error ? { error: input.error } : {}),
+      updatedAt: input.updatedAt ?? now,
+    };
+    await writeJsonAtomic(file, next);
+    emit(next);
+    return next;
+  });
+}
+
+const LEASE_TTL_MS = 25_000;
 /**
  * 认领任务：跨进程只有一个执行者。
  * lease 文件用 O_EXCL 创建；已存在且心跳超过 TTL（执行者崩溃/进程被杀）可抢占。
