@@ -231,15 +231,15 @@ describe('空态（两分类各自独立文案，「还没有生成记录」语�
   it('无数据时图片/视频分类分别显示各自空态文案', () => {
     const store = mkStore([]);
     render(<HistoryGroup store={store} theme={theme} />);
-    expect(screen.getByText('还没有图片生成记录，在画布上调用 API 生成图片后自动收录')).toBeTruthy();
+    expect(screen.getByText('还没有图片作品，在画布上生成图片后会自动存到这里')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^视频/ }));
-    expect(screen.getByText('还没有视频生成记录，在画布上调用 API 生成视频后自动收录')).toBeTruthy();
+    expect(screen.getByText('还没有视频作品，在画布上生成视频后会自动存到这里')).toBeTruthy();
   });
 
   it('只有手动上传资产（无生成记录）时同样走空态——D:\\Test 现状即此形态', () => {
     const store = mkStore([mkManualUpload('m1'), mkManualUpload('m2')]);
     render(<HistoryGroup store={store} theme={theme} />);
-    expect(screen.getByText('还没有图片生成记录，在画布上调用 API 生成图片后自动收录')).toBeTruthy();
+    expect(screen.getByText('还没有图片作品，在画布上生成图片后会自动存到这里')).toBeTruthy();
   });
 });
 

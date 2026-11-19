@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen, SlidersHorizontal } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { pickRoot, rootName, currentDataRootPath, switchDataRoot, pickDataRoot, migrateDataRoot, pickDirectoryPath } from '@/platform/fs.js';
+import { pickRoot, rootName, currentDataRootPath, switchDataRoot, pickDataRoot, migrateDataRoot } from '@/platform/fs.js';
 import {
   loadServerInfo,
   mcpServerMissingTools,
@@ -30,17 +30,8 @@ import { applyConnectionResult } from '@/features/canvas-tabs/comfyui-auto-conne
 import { ModelMappingModal } from '@/features/canvas-tabs/model-mapping-modal.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
-/** MCP 自己的安装目录（用户可选，单独一个目录，绝不和资源目录混用） */
-const MCP_DIR_KEY = 'zeroexo.mcp.installDir';
-
-/** 默认建议：资源目录的同级目录，避免默认塞进数据根里 */
-function defaultMcpDir(dataRoot: string | null): string {
-  if (!dataRoot) return '';
-  const trimmed = dataRoot.replace(/[\\/]+$/, '');
-  const idx = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'));
-  const parent = idx > 2 ? trimmed.slice(0, idx) : trimmed;
-  return `${parent}\\ZeroExo-MCP`;
-}
+/** MCP 固定安装目录（2026-11-19 用户定稿：不再让用户选，固定 ~/.zeroexo/mcp，占用极小） */
+const MCP_INSTALL_DIR = '%USERPROFILE%\\.zeroexo\\mcp';
 const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
 const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
 
@@ -118,7 +109,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [testOk, setTestOk] = useState(false);
   const [installingMcp, setInstallingMcp] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
-  const [mcpDir, setMcpDir] = useState<string>('');
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
   const [modelPageOpen, setModelPageOpen] = useState(false);
@@ -131,10 +121,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     setRoot(rootName() ?? null);
     setAddress(endpoint.address || DEFAULT_COMFYUI);
     setMcpCopied(false);
-    const rootPath = currentDataRootPath();
-    let saved: string | null = null;
-    try { saved = localStorage.getItem(MCP_DIR_KEY); } catch { saved = null; }
-    setMcpDir(saved || defaultMcpDir(rootPath));
     void (async () => {
       try {
         const info = await loadServerInfo();
@@ -158,42 +144,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     }, 3000);
     return () => window.clearInterval(timer);
   }, [open, serverInfo]);
-
-  /**
-   * 安装目录合法性：只有「填了值」才校验；留空不算错误。
-   * 2026-11-19 用户口径：目录选择与 MCP 安装无关，也不是安装前置条件；
-   * 留空时由复制的接入包让 Agent 自己挑一个合规目录。
-   */
-  const mcpDirError = (() => {
-    const dir = mcpDir.trim();
-    if (!dir) return null;
-    if (/^c:/i.test(dir)) return '不能装在 C 盘';
-    const rootPath = currentDataRootPath();
-    if (rootPath) {
-      const a = dir.replace(/[\\/]+$/, '').toLowerCase();
-      const b = rootPath.replace(/[\\/]+$/, '').toLowerCase();
-      if (a === b || a.startsWith(`${b}\\`) || a.startsWith(`${b}/`)) {
-        return '不能和资源目录混用，请另选一个独立目录';
-      }
-    }
-    return null;
-  })();
-
-  const pickMcpDir = useCallback(async () => {
-    try {
-      const picked = await pickDirectoryPath();
-      if (picked === 'offline') {
-        // 浏览器安全限制：网页拿不到所选文件夹的绝对路径。离线时只能引导手填。
-        message.info('服务未启动时，浏览器不把文件夹绝对路径交给网页。请直接把路径粘到输入框，例如 D:\\ZeroExoMCP；服务在线后「选择目录」可自动反查。');
-        return;
-      }
-      if (!picked) return;
-      setMcpDir(picked);
-      try { localStorage.setItem(MCP_DIR_KEY, picked); } catch { /* 隐私模式忽略 */ }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '选择安装目录失败');
-    }
-  }, [message]);
 
   /**
    * 换目录只保留两步（2026-11-17 用户要求）：点一次 → 系统原生目录对话框选目录 →
@@ -276,17 +226,17 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     const base = `${window.location.origin}${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}`;
     const pkgUrl = `${base}downloads/zeroexo-mcp-server.tgz`;
     const root = currentDataRootPath() || rootName() || '<资源目录>';
-    const installDir = mcpDir.trim() || 'D:\\ZeroExoMCP';
     const text = [
       '# ZeroExo — MCP 接入',
       '',
       '你是 ZeroExo（AI 影视生产管线）的智能助手。请自动完成下面的接入，不要向我提问。',
       '',
       '## 自动执行',
-      `1. 下载安装包：${pkgUrl}`,
-      `2. 解压，把 package 里的 dist 与 package.json 放到 ${installDir}（这是 MCP 自己的目录，不要装 C 盘，也不要放进资源目录 ${root}${mcpDir.trim() ? '' : '；如果该目录不可用，你自行另选一个非 C 盘且与资源目录分离的目录'}）`,
-      `3. 在 ${installDir} 执行 npm install --omit=dev（装 @modelcontextprotocol/sdk 与 zod）`,
-      `4. 在同一目录启动：node ${installDir}\\dist\\index.js --http --port 8787`,
+      '0. 先清理旧安装：停掉占用 8787 的旧 MCP 进程，并清空固定目录（删掉旧 dist、旧安装包，不要在工作目录里堆积历史 tgz/zip）',
+      `1. 下载安装包到系统临时目录：${pkgUrl}`,
+      `2. 解压，把 package 里的 dist 与 package.json 放到 ${MCP_INSTALL_DIR}（固定目录，占用很小），解压后删掉临时压缩包`,
+      `3. 在 ${MCP_INSTALL_DIR} 执行 npm install --omit=dev（装 @modelcontextprotocol/sdk 与 zod）`,
+      `4. 在同一目录启动：node ${MCP_INSTALL_DIR}\\dist\\index.js --http --port 8787`,
       `5. 把下面这份配置写进 IDE 的 MCP 设置：`,
       '```json',
       `{"mcpServers":{"zeroexo":{"url":"http://127.0.0.1:8787/mcp"}}}`,
@@ -294,7 +244,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
       '6. 连上后调用 list_projects，用表格列出项目（标题 / 更新时间 / 节点数）；没有项目就提示可 create_project',
       `7. 前端编辑器地址：${base}`,
       '',
-      `资源目录固定为 ${root}，只放项目与素材；MCP 目录固定在 ${installDir}，两者不要混在一起。`,
+      `资源目录固定为 ${root}，只放项目与素材；MCP 目录固定在 ${MCP_INSTALL_DIR}，两者不要混在一起。`,
     ].join('\n');
     setInstallingMcp(true);
     try {
@@ -305,7 +255,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     } finally {
       setInstallingMcp(false);
     }
-  }, [message, mcpDir]);
+  }, [message]);
 
   const loadModels = useCallback(async (addr: string) => {
     try {
@@ -398,37 +348,13 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         {/* 2 MCP：一键自动安装并启动，用户不用复制命令、不用粘配置 */}
         <StepCard index={2} title={t('onboarding.stepMcp', '接入 Agent（例如豆包）')} done={Boolean(serverInfo)} theme={theme}>
           <span style={hintStyle(theme)}>
-            {serverInfo
-              ? t('onboarding.stepMcpHint', '点击下方「一键复制」按钮，然后到豆包等 Agent 的对话框粘贴，它会自己装好。')
-              : t('onboarding.stepMcpFirstRun', '点击下方「一键复制」按钮，然后到豆包等 Agent 的对话框粘贴，它会自己装好并启动。')}
+            {t('onboarding.stepMcpHint', '复制后粘给豆包等 Agent，它会自己装好。')}
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Button size="small" icon={<FolderOpen size={13} />} onClick={() => void pickMcpDir()}>
-              {mcpDir
-                ? t('onboarding.mcpDirChange', '重新选择')
-                : t('onboarding.mcpDirPickOptional', '安装目录（可选）')}
-            </Button>
-            {/* 2026-11-19 用户反馈：服务未安装时点「选择目录」会报「本地服务离线」，形成
-                「先装服务才能选目录 / 先选目录才能装服务」的死循环。这里允许直接手填绝对路径，
-                选择目录只在服务在线时用于反查路径，不再作为唯一入口。 */}
-            <Input
-              size="small"
-              value={mcpDir}
-              onChange={(e) => {
-                const v = e.target.value;
-                setMcpDir(v);
-                try { localStorage.setItem(MCP_DIR_KEY, v); } catch { /* 隐私模式忽略 */ }
-              }}
-              placeholder="D:\\ZeroExoMCP"
-              style={{ width: 300 }}
-              status={mcpDirError ? 'error' : undefined}
-              data-testid="onboarding-mcp-dir"
-            />
-          </div>
-          <span style={{ fontSize: 11, color: mcpDirError ? '#dc2626' : theme.toolbar.textMuted, lineHeight: 1.6 }}>
-            {mcpDirError
-              ? mcpDirError
-              : t('onboarding.mcpDirWarn', '别放 C 盘，也别和第一步的资源目录放一起。')}
+          <span
+            data-testid="onboarding-mcp-dir"
+            style={{ ...hintStyle(theme), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {MCP_INSTALL_DIR}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Button
@@ -480,16 +406,13 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             <Button size="small" icon={<Cpu size={13} />} loading={testing} onClick={() => void testComfy()}>
               {t('onboarding.testComfy', '测试连接')}
             </Button>
-          </div>
-          {testResult ? (
-            <span style={{ fontSize: 12, color: testOk ? '#16a34a' : '#dc2626' }}>{testResult}</span>
-          ) : null}
-          {/* 模型、机器信息、显存策略统一收在「高级」页，这里只留一个入口（与连接面板同一文案） */}
-          <div data-onboarding-model-picker style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Button size="small" icon={<SlidersHorizontal size={13} />} onClick={() => setModelPageOpen(true)}>
               {t('director.advancedModels', '高级')}
             </Button>
           </div>
+          {testResult ? (
+            <span style={{ fontSize: 12, color: testOk ? '#16a34a' : '#dc2626' }}>{testResult}</span>
+          ) : null}
         </StepCard>
       </div>
     </Modal>

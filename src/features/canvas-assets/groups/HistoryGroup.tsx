@@ -1244,11 +1244,11 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
   // 空态按「来源 × 类型」给准确指引；导演台只有视频，走「全部」口径
   const emptyText = effectiveKind === 'all'
     ? historySource === 'director'
-      ? t('assetLibrary.historyEmptyDirectorVideo', { defaultValue: '还没有导演台生成的视频，在导演台运行片段后自动收录' })
-      : t('assetLibrary.historyEmptyAll', { defaultValue: '还没有生成记录，在画布上调用 API 生成图片或视频后自动收录' })
+      ? t('assetLibrary.historyEmptyDirectorVideo', { defaultValue: '还没有导演台视频，在导演台运行片段后会自动存到这里' })
+      : t('assetLibrary.historyEmptyAll', { defaultValue: '还没有作品，生成图片或视频后会自动存到这里' })
     : effectiveKind === 'image'
-      ? t('assetLibrary.historyEmptyImage', { defaultValue: '还没有图片生成记录，在画布上调用 API 生成图片后自动收录' })
-      : t('assetLibrary.historyEmptyVideo', { defaultValue: '还没有视频生成记录，在画布上调用 API 生成视频后自动收录' });
+      ? t('assetLibrary.historyEmptyImage', { defaultValue: '还没有图片作品，在画布上生成图片后会自动存到这里' })
+      : t('assetLibrary.historyEmptyVideo', { defaultValue: '还没有视频作品，在画布上生成视频后会自动存到这里' });
 
   /** 单张历史卡（网格与导演台分组共用同一套操作/权限判定，不写两份） */
   const renderCard = (asset: (typeof visibleItems)[number], opts?: { cover?: boolean; versionLabel?: string; shotId?: string }): React.ReactElement => (
