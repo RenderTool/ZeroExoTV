@@ -28,6 +28,8 @@ export interface ProductionItemImage {
   tags: string[];
   /** 状态标记（自由文本，如"受伤态"、"成年"、"幼年"等，不约束语义） */
   stateTag?: string;
+  /** 来源状态节点 id（同一张图被多个状态引用时，列表按 stateId 去重/定位，2026-11-19） */
+  stateId?: string;
 }
 
 /** 统筹条目（一个演员/场景/道具） */

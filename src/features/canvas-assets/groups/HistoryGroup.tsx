@@ -35,7 +35,7 @@ import { LOCAL_IMAGE_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-clien
 import { isShotLocked } from '@/features/canvas-assets/director-run-lock.js';
 import { assetMayHaveGuide } from '@/features/asset-picker/services/guide-resolve.js';
 import { MediaLightbox } from '@/shared/components/media-lightbox.js';
-import { readWorkbenchContainer } from '@/entities/slot-containers.js';
+import { readStoryboardContainer, readWorkbenchContainer } from '@/entities/slot-containers.js';
 import { readScript, displayEpisodeTitle } from '@/entities/script-store.js';
 import { MultiSelectCheckbox } from '@/features/asset-library/components/multi-select-checkbox.js';
 import { CapsuleTabs } from '@/features/asset-library/components/capsule-tabs.js';
@@ -45,13 +45,16 @@ import { openSubjectLinkDialog } from '@/features/canvas-nodes/storyboard/subjec
 import { CategoryChips, EmptyState, PaginationBar, SCROLL_AREA_STYLE, SearchBox, ToolbarRow } from '../components/common.js';
 import { IconButton, ThumbBadge, UI_CARD_HOVER_OVERLAY, UI_CARD_INFO_PADDING_X } from '@/shared/ui/index.js';
 import {
+  HISTORY_CATEGORIES,
   HISTORY_PAGE_SIZE,
+  categoryOfAsset,
+  countHistoryByCategory,
   countHistoryBySourceAndKind,
   filterHistoryAssets,
   fmtDuration,
   fmtRelativeTime,
   paginate,
-  type HistoryKind,
+  type HistoryCategory,
   type HistorySource,
 } from '../history-utils.js';
 
@@ -213,7 +216,7 @@ function chainCanvasIdOf(ids: string[]): string {
   return `scchain${(h >>> 0).toString(36)}${sorted.length}`;
 }
 
-function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onPromote, onDownload, onSetCover, onSendCanvas, onRename, onDelete, onEdit, cover, versionLabel, theme, t }: {
+function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onPromote, onDownload, onSetCover, onSendCanvas, onRename, onDelete, onEdit, onSetCategory, cover, versionLabel, theme, t }: {
   asset: Asset;
   visible: boolean;
   /** 多选模式：是否选中 */
@@ -240,6 +243,8 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
   onDelete?: () => void;
   /** 图片历史产出「编辑」：开画布图片编辑页签（视频不支持） */
   onEdit?: () => void;
+  /** 改类型（角色/场景/道具/备选），写回资产记录 data.subjectKind */
+  onSetCategory?: (category: 'character' | 'scene' | 'prop' | 'other') => void;
   theme: ThemeConfig;
   t: (key: string, opts?: { defaultValue?: string }) => string;
 }): React.ReactElement {
@@ -609,6 +614,19 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
                           { key: 'download', icon: <Download size={13} />, label: t('common.download', { defaultValue: '下载' }), onClick: () => onDownload() },
                         ]),
                     { type: 'divider' as const },
+                    // 2026-11-19 用户口径：历史分类与主体库同一套（角色/场景/道具/备选），
+                    // 卡片上给同款「改类型」，写回资产记录 data.subjectKind。
+                    {
+                      key: 'kind',
+                      icon: <UserRound size={13} />,
+                      label: t('assetLibrary.changeKind', { defaultValue: '改类型' }),
+                      children: [
+                        { key: 'kind:character', label: t('subject.kindCharacter', { defaultValue: '角色' }), onClick: () => void onSetCategory?.('character') },
+                        { key: 'kind:scene', label: t('subject.kindScene', { defaultValue: '场景' }), onClick: () => void onSetCategory?.('scene') },
+                        { key: 'kind:prop', label: t('subject.kindProp', { defaultValue: '道具' }), onClick: () => void onSetCategory?.('prop') },
+                        { key: 'kind:other', label: t('subject.kindCandidate', { defaultValue: '备选' }), onClick: () => void onSetCategory?.('other') },
+                      ],
+                    },
                     ...(onRename ? [{ key: 'rename', icon: <Pencil size={13} />, label: t('assetLibrary.rename', { defaultValue: '重命名' }), onClick: onRename }] : []),
                     ...(onDelete ? [{ key: 'delete', danger: true, icon: <Trash2 size={13} />, label: t('common.delete', { defaultValue: '删除' }), onClick: onDelete }] : []),
                   ],
@@ -908,8 +926,11 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
   useEffect(() => {
     if (forcedSource) setHistorySourceState(forcedSource);
   }, [forcedSource]);
-  /** 第二层：类型 chips（图片 / 视频） */
-  const [historyKind, setHistoryKind] = useState<HistoryKind>('image');
+  /** 第二层：分类 chips（2026-11-19 用户口径 = 与主体库同一套：角色 / 场景 / 道具 / 备选；
+   *  图片/视频降级为卡片左上角类型角标，不再当分类） */
+  const [historyCategory, setHistoryCategory] = useState<HistoryCategory>('character');
+  /** 主体状态图 storageKey → 主体 kind：历史条目归属哪个角色的判定依据 */
+  const [historyKeyToKind, setHistoryKeyToKind] = useState<Map<string, string>>(new Map());
   const [page, setPage] = useState(1);
   /** 搜索（2026-11-16 统一页面标准：标题 → Tab → 搜索栏+批量 → 分类 → 内容） */
   const [search, setSearch] = useState('');
@@ -952,11 +973,38 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
   // 2026-11-08：导演台只产出视频，不需要类型分类 → 直接给「全部」；画布保留「全部/图片/视频」
   /** 分镜视图：合并入口里来源 Tab 切到「分镜」时同样成立（2026-11-16 合并口径） */
   const directorView = forcedSource === 'director' || historySource === 'director';
-  const effectiveKind: HistoryKind = directorView ? 'all' : historyKind;
-  const items = useMemo(
-    () => filterHistoryAssets(store.allAssets, projectId, effectiveKind, historySource),
-    [store.allAssets, projectId, effectiveKind, historySource],
+
+  /** 主体状态图 storageKey → 主体 kind（画布历史按角色/场景/道具归类的事实依据） */
+  useEffect(() => {
+    if (!projectId) { setHistoryKeyToKind(new Map()); return; }
+    let cancelled = false;
+    void readStoryboardContainer(projectId).then((box) => {
+      if (cancelled) return;
+      const map = new Map<string, string>();
+      for (const tree of ((box?.subjectTree ?? []) as Array<{ kind?: string; coverKey?: string | null; states?: Array<{ media?: Array<{ key?: string; type?: string }> }> }>)) {
+        if (!tree.kind) continue;
+        if (tree.coverKey) map.set(tree.coverKey, tree.kind);
+        for (const st of tree.states ?? []) {
+          for (const m of st.media ?? []) {
+            if (m.key && m.type === 'image') map.set(m.key, tree.kind);
+          }
+        }
+      }
+      setHistoryKeyToKind(map);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const categoryCounts = useMemo(
+    () => countHistoryByCategory(store.allAssets, projectId, historySource, historyKeyToKind),
+    [store.allAssets, projectId, historySource, historyKeyToKind],
   );
+
+  const items = useMemo(() => {
+    const list = filterHistoryAssets(store.allAssets, projectId, 'all', historySource);
+    if (directorView) return list;
+    return list.filter((a) => categoryOfAsset(a, historyKeyToKind) === historyCategory);
+  }, [store.allAssets, projectId, historySource, directorView, historyCategory, historyKeyToKind]);
 
   /** 导演台筛选选项：片段来自 workbench 容器；集标题来自剧本 */
   useEffect(() => {
@@ -1231,24 +1279,34 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
     });
   };
 
-  const kindChips = [
-    { key: 'all', label: t('assetLibrary.historyTabAll', { defaultValue: '全部' }), count: sourceCounts[historySource].total },
-    { key: 'image', label: t('assetLibrary.historyTabImage', { defaultValue: '图片' }), count: sourceCounts[historySource].image },
-    { key: 'video', label: t('assetLibrary.historyTabVideo', { defaultValue: '视频' }), count: sourceCounts[historySource].video },
-  ];
+  const kindChips = directorView
+    ? [{ key: 'all', label: t('assetLibrary.historyTabAll', { defaultValue: '全部' }), count: sourceCounts[historySource].total }]
+    : HISTORY_CATEGORIES.map((c) => ({
+      key: c,
+      label: c === 'character'
+        ? t('subject.kindCharacter', { defaultValue: '角色' })
+        : c === 'scene'
+          ? t('subject.kindScene', { defaultValue: '场景' })
+          : c === 'prop'
+            ? t('subject.kindProp', { defaultValue: '道具' })
+            : t('subject.kindCandidate', { defaultValue: '备选' }),
+      count: categoryCounts[c],
+    }));
 
   const handlePromote = (asset: Asset, target: 'project' | 'library'): void => {
     void store.promoteToScope(asset, target);
   };
 
-  // 空态按「来源 × 类型」给准确指引；导演台只有视频，走「全部」口径
-  const emptyText = effectiveKind === 'all'
-    ? historySource === 'director'
-      ? t('assetLibrary.historyEmptyDirectorVideo', { defaultValue: '还没有导演台视频，在导演台运行片段后会自动存到这里' })
-      : t('assetLibrary.historyEmptyAll', { defaultValue: '还没有作品，生成图片或视频后会自动存到这里' })
-    : effectiveKind === 'image'
-      ? t('assetLibrary.historyEmptyImage', { defaultValue: '还没有图片作品，在画布上生成图片后会自动存到这里' })
-      : t('assetLibrary.historyEmptyVideo', { defaultValue: '还没有视频作品，在画布上生成视频后会自动存到这里' });
+  // 空态：导演台只有视频；画布按当前分类（角色/场景/道具/备选）给指引
+  const emptyText = directorView
+    ? t('assetLibrary.historyEmptyDirectorVideo', { defaultValue: '还没有导演台视频，在导演台运行片段后会自动存到这里' })
+    : historyCategory === 'character'
+      ? t('assetLibrary.historyEmptyCharacter', { defaultValue: '还没有角色图：生成角色定妆后会自动存到这里，也可用卡片「改类型」归类' })
+      : historyCategory === 'scene'
+        ? t('assetLibrary.historyEmptyScene', { defaultValue: '还没有场景图：生成场景概念图后会自动存到这里' })
+        : historyCategory === 'prop'
+          ? t('assetLibrary.historyEmptyProp', { defaultValue: '还没有道具图：生成道具定妆后会自动存到这里' })
+          : t('assetLibrary.historyEmptyOther', { defaultValue: '还没有备选素材：未归类的生成产物都在这里' });
 
   /** 单张历史卡（网格与导演台分组共用同一套操作/权限判定，不写两份） */
   const renderCard = (asset: (typeof visibleItems)[number], opts?: { cover?: boolean; versionLabel?: string; shotId?: string }): React.ReactElement => (
@@ -1299,6 +1357,13 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
             store.setRenameItemOpen(true);
           }}
           onDelete={() => void store.handleDeleteAsset(asset)}
+          onSetCategory={(category) => {
+            const nextData = {
+              ...(asset.data as unknown as Record<string, unknown>),
+              subjectKind: category,
+            } as unknown as Asset['data'];
+            void updateAsset(asset.id, { data: nextData }).then(() => store.refreshAssets());
+          }}
           onEdit={(asset.data as { kind?: string }).kind === 'image'
             ? () => {
               const d = asset.data as { storageKey?: string; dataUrl?: string; url?: string; width?: number; height?: number };
@@ -1427,14 +1492,14 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
         )}
       </ToolbarRow>
 
-      {/* 分类行：画布历史=图片/视频 chips；分镜历史的片段筛选已并入搜索行，不再单独占一行 */}
+      {/* 分类行（2026-11-19）：画布历史按 角色/场景/道具/备选 归类；图片/视频只作卡片角标 */}
       {!directorView && (
         <ToolbarRow style={{ paddingTop: 0 }}>
           <CategoryChips
             items={kindChips}
-            active={historyKind}
+            active={historyCategory}
             onChange={(k) => {
-              setHistoryKind((k ?? 'all') as HistoryKind);
+              setHistoryCategory((k ?? 'character') as HistoryCategory);
               setPage(1);
               setSelectedIds(new Set());
             }}

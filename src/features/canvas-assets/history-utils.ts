@@ -15,6 +15,32 @@ export type { HistorySource } from '@/features/asset-picker/index.js';
 export type HistoryKind = 'image' | 'video' | 'all';
 
 /**
+ * 历史分类（2026-11-19 用户口径）：与主体库同一套——角色 / 场景 / 道具 / 备选。
+ * 类型（图片/视频）只在卡片左上角做角标，不再作为分类标签。
+ * 判定顺序：资产记录显式 `data.subjectKind`（用户改类型 / MCP 归类）→ 该图属于哪个主体状态
+ * （storageKey → 主体 kind）→ 备选。
+ */
+export type HistoryCategory = 'character' | 'scene' | 'prop' | 'other';
+
+export const HISTORY_CATEGORIES: HistoryCategory[] = ['character', 'scene', 'prop', 'other'];
+
+export function subjectKindToCategory(kind: string | undefined | null): HistoryCategory {
+  if (kind === 'character') return 'character';
+  if (kind === 'scene') return 'scene';
+  if (kind === 'prop') return 'prop';
+  return 'other';
+}
+
+/** 历史条目分类：显式标注 > 主体状态归属 > 备选 */
+export function categoryOfAsset(asset: Asset, keyToKind?: Map<string, string>): HistoryCategory {
+  const d = asset.data as { subjectKind?: string; storageKey?: string };
+  if (d.subjectKind) return subjectKindToCategory(d.subjectKind);
+  const key = d.storageKey;
+  if (key && keyToKind?.has(key)) return subjectKindToCategory(keyToKind.get(key));
+  return 'other';
+}
+
+/**
  * 历史产出来源判定（2026-11-07）：优先读落库字段 data.originSource；
  * 存量记录（该字段上线前产生）按「导演台特征」兜底：本机 provider（zeroexo /
  * comfyui-direct）或导演台标题「片段 N · Ns」。其余一律视为画布生成。
@@ -111,6 +137,22 @@ export function countHistoryBySourceAndKind(
     else if (a.kind === 'video') bucket.video++;
   }
   return result;
+}
+
+/** 当前来源下四个分类的条数（一次遍历；分类口径见 categoryOfAsset） */
+export function countHistoryByCategory(
+  assets: Asset[],
+  projectId: string | null,
+  source: HistorySource,
+  keyToKind?: Map<string, string>,
+): Record<HistoryCategory, number> {
+  const out: Record<HistoryCategory, number> = { character: 0, scene: 0, prop: 0, other: 0 };
+  if (!projectId) return out;
+  for (const a of dedupeGenerationAssets(assets.filter((x) => isGenerationAsset(x) && x.projectId === projectId))) {
+    if (getHistorySource(a) !== source) continue;
+    out[categoryOfAsset(a, keyToKind)]++;
+  }
+  return out;
 }
 
 /** 公共库已有的内容 hash 集合（历史卡片「加入资产库」按钮据此隐藏） */

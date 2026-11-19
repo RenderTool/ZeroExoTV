@@ -276,6 +276,10 @@ export function AssetPickPanel({
   const [searchQ, setSearchQ] = useState('');
   /** 详情面板目标（hover / 键盘高亮驱动；仅展示，不写入） */
   const [detail, setDetail] = useState<PickDetailTarget | null>(null);
+  /** 详情大图预览：点状态图缩略图切换上方预览（2026-11-19 用户要求），主体切换时重置 */
+  const [detailPreviewKey, setDetailPreviewKey] = useState<string | null>(null);
+  const detailSubjectId = detail?.type === 'subject' ? detail.subject.id : null;
+  useEffect(() => { setDetailPreviewKey(null); }, [detailSubjectId]);
   /** 拖拽中：不更新/不显示详情浮层（否则拖拽经过行时详情弹出、面板尺寸变化会顶掉落点） */
   const draggingRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -358,11 +362,15 @@ export function AssetPickPanel({
   const subjectsScoped = useMemo<ProductionItem[]>(() => subjects.map((item) => {
     const tree = treeByItemId.get(item.id);
     if (!tree) return item;
+    // 2026-11-19 用户报障「点状态下拉会重复生成重复状态」：同一张图被多个状态引用（基础状态与状态2
+    // 指向同一 CAS）时，按 storageKey 去重，只保留第一个状态；行 key 用 stateId，避免 duplicate key 错乱。
+    const seenKeys = new Set<string>();
     const images: ProductionItemImage[] = (tree.states ?? []).flatMap((st) => (st.media ?? [])
-      .filter((m) => m.type === 'image')
+      .filter((m) => m.type === 'image' && !seenKeys.has(m.key) && (seenKeys.add(m.key), true))
       .map((m) => ({
         storageKey: m.key,
         tags: [],
+        stateId: st.id,
         stateTag: st.id === SUBJECT_BASE_STATE_ID
           ? (st.state || t('subject.baseState', '基础状态'))
           : (st.state || t('director.subjectStateFallback', '剧照')),
@@ -598,11 +606,15 @@ export function AssetPickPanel({
         const item = detail.subject;
         // 封面 = 手动 coverKey（用户显式切换）→ 基础状态首图 → 无
         const coverKey = resolveSubjectCover(item, undefined, subjectBaseCoverKeys(treeByItemId.get(item.id))).key;
+        // 点击状态图缩略图 → 上方大预览切到该图（点回封面图本身仍是 coverKey）
+        const previewKey = (detailPreviewKey && item.images.some((i) => i.storageKey === detailPreviewKey))
+          ? detailPreviewKey
+          : coverKey;
         const inSlot = slotLabels[`subject:${item.id}`];
         return (
           <>
-            {coverKey ? (
-              <ThumbImage storageKey={coverKey} prefer="preview" width="100%" height={120} radius={8} title={item.name} icon={<User size={20} style={{ opacity: 0.6 }} />} />
+            {previewKey ? (
+              <ThumbImage storageKey={previewKey} prefer="preview" width="100%" height={120} radius={8} title={item.name} icon={<User size={20} style={{ opacity: 0.6 }} />} />
             ) : (
               <span style={{ width: '100%', height: 80, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                 <User size={20} style={{ opacity: 0.6 }} />
@@ -623,7 +635,16 @@ export function AssetPickPanel({
                   <span
                     key={img.storageKey}
                     data-subject-detail-image={img.storageKey}
-                    style={{ display: 'inline-block', border: `1px solid ${palette.popBorder}`, borderRadius: 6 }}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t('director.detailPreviewThumb', '查看这张图')}
+                    title={t('director.detailPreviewThumb', '查看这张图')}
+                    onClick={() => setDetailPreviewKey(img.storageKey)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setDetailPreviewKey(img.storageKey); }}
+                    style={{
+                      display: 'inline-block', borderRadius: 6, cursor: 'pointer',
+                      border: `1px solid ${(detailPreviewKey ?? coverKey) === img.storageKey ? 'var(--zeroexo-accent, #d97757)' : palette.popBorder}`,
+                    }}
                   >
                     <ThumbImage storageKey={img.storageKey} width={36} height={36} radius={6} title={img.stateTag ?? img.tags[0]} icon={<ImageIcon size={14} style={{ opacity: 0.6 }} />} />
                   </span>
