@@ -1,6 +1,0 @@
-[
-  {
-    "type": "text",
-    "text": "MCP error -32602: Tool tools_list not found"
-  }
-]

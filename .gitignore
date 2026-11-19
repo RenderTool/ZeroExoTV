@@ -60,3 +60,5 @@ tools/*.png
 .tmpbuild/
 comfyui-plugin/ComfyUI_ZeroExoNodes/.update_state.json
 comfyui-plugin/ComfyUI_ZeroExoNodes/*.update-tmp
+
+.tmp/
