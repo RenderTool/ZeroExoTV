@@ -446,7 +446,7 @@ class ZeroExoGuideLoad:
 # ===== HTTP 协议 =====
 routes = PromptServer.instance.routes
 
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.1.1"
 
 
 def _queue_counts() -> dict[str, Any]:
@@ -533,6 +533,91 @@ def _save_last_prompt(job_id: str, prompt_id: str, template: dict[str, Any], par
     except Exception as exc:  # noqa: BLE001 - 落盘失败不影响运行
         import logging
         logging.getLogger(__name__).warning("ZeroExoNodes: persist last prompt failed: %s", exc)
+
+
+@routes.get("/zeroexo/v1/guides/{guide_id}")
+async def guide_stat(request):
+    """引导文件是否已在 ComfyUI 输出缓存里（账户制存储：机器换了只要没删就还在）。"""
+    gid = str(request.match_info.get("guide_id") or "")
+    if not GUIDE_ID_PATTERN.match(gid):
+        return web.json_response({"ok": False, "error": f"guide_id 非法: {gid}"}, status=400)
+    path = os.path.join(guides_dir(), f"{gid}.safetensors")
+    if not os.path.isfile(path):
+        return web.json_response({"ok": True, "exists": False, "id": gid}, status=404)
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    out: dict[str, Any] = {"ok": True, "exists": True, "id": gid, "bytes": size, "path": path}
+    # 调用方给了期望 sha256 → 顺带校验内容（id 相同但文件被截断/替换的情况）
+    want = str(request.query.get("sha256") or "").strip().lower()
+    if want:
+        try:
+            with open(path, "rb") as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+            out["sha256"] = digest
+            out["match"] = digest == want
+            if digest != want:
+                out["exists"] = False
+        except OSError as exc:  # noqa: PERF203
+            out["sha256Error"] = str(exc)
+    return web.json_response(out)
+
+
+def _safetensors_ok(data: bytes) -> bool:
+    """只做最小合法性校验：8 字节头长 + 可解析 JSON，且带 guide 张量。"""
+    if len(data) < 24:
+        return False
+    import struct
+    (header_len,) = struct.unpack("<Q", data[:8])
+    if header_len <= 0 or 8 + header_len > len(data):
+        return False
+    try:
+        header = json.loads(data[8 : 8 + header_len].decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(header, dict) and "guide" in header
+
+
+@routes.post("/zeroexo/v1/guides/{guide_id}")
+async def guide_upload(request):
+    """双重兜底的上传端：调用方（网页/MCP）在输出缓存里没有该引导时，把本地缓存推上来。
+
+    支持 raw `application/octet-stream` 与 multipart（字段 file / guide 均可）。
+    """
+    gid = str(request.match_info.get("guide_id") or "")
+    if not GUIDE_ID_PATTERN.match(gid):
+        return web.json_response({"ok": False, "error": f"guide_id 非法: {gid}"}, status=400)
+    try:
+        ctype = str(request.headers.get("Content-Type") or "").lower()
+        if "multipart/" in ctype:
+            post = await request.post()
+            field = post.get("file") or post.get("guide")
+            if field is None or not hasattr(field, "file"):
+                return web.json_response({"ok": False, "error": "multipart 里没有 file/guide 字段"}, status=400)
+            data = field.file.read()
+        else:
+            data = await request.read()
+        if not data:
+            return web.json_response({"ok": False, "error": "空文件"}, status=400)
+        if len(data) > 2 * 1024 * 1024 * 1024:
+            return web.json_response({"ok": False, "error": "引导文件超过 2GB"}, status=413)
+        if not _safetensors_ok(data):
+            return web.json_response({"ok": False, "error": "不是合法的 safetensors（缺少 guide 张量）"}, status=400)
+        dest = os.path.join(guides_dir(), f"{gid}.safetensors")
+        tmp = dest + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)
+        return web.json_response({
+            "ok": True,
+            "exists": True,
+            "id": gid,
+            "bytes": os.path.getsize(dest),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        })
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": f"写入引导失败: {exc}"}, status=500)
 
 
 @routes.get("/zeroexo/v1/health")

@@ -6,6 +6,7 @@
  */
 import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import type { PluginBatchPayload } from '@/features/canvas-tabs/director-plugin-payload.js';
+import { readCachedGuideBlob } from '@/entities/guide-store.js';
 
 export type PluginTaskState = 'queued' | 'running' | 'success' | 'error' | 'cancelled' | 'interrupted';
 
@@ -58,7 +59,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+/**
+ * 双重兜底（2026-11-19 用户拍板）：云端输出是账户制存储，机器换了只要没删引导就还在。
+ * 提交前先查 ComfyUI 自己的 output/zeroexo/guides/<id>.safetensors；
+ * 缺了再把本地 media/guides 缓存的同一份推上去；两边都没有才报错，不静默降级。
+ */
+async function ensureGuidesOnComfy(base: string, payload: PluginBatchPayload): Promise<void> {
+  const ids = [
+    ...new Set(
+      (payload.segments ?? [])
+        .filter((s) => s.guide?.mode === 'initial' && s.guide?.id)
+        .map((s) => s.guide!.id as string),
+    ),
+  ];
+  for (const id of ids) {
+    try {
+      const head = await fetch(`${base}/zeroexo/v1/guides/${encodeURIComponent(id)}`, { method: 'GET' });
+      if (head.ok) continue;
+    } catch { /* 探活失败按缺失处理，走本地补传 */ }
+    const blob = await readCachedGuideBlob({ id }).catch(() => null);
+    if (!blob || !blob.size) {
+      throw new Error(`起始引导 ${id} 在 ComfyUI 输出缓存与本地 media/guides 里都不存在，无法续接`);
+    }
+    const form = new FormData();
+    form.append('file', blob, `${id}.safetensors`);
+    const res = await fetch(`${base}/zeroexo/v1/guides/${encodeURIComponent(id)}`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`引导 ${id} 上传失败：HTTP ${res.status}`);
+  }
+}
+
 export async function submitPluginTask(payload: PluginBatchPayload): Promise<PluginTask> {
+  const base = pluginTaskBase();
+  if (!base) throw new Error('未配置 ComfyUI 地址');
+  await ensureGuidesOnComfy(base, payload);
   const created = await request<{ jobId: string }>('/zeroexo/v1/tasks', {
     method: 'POST',
     body: JSON.stringify(payload),

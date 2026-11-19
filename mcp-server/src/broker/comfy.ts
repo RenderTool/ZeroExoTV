@@ -233,6 +233,54 @@ export async function downloadComfyOutput(base: string, outputPath: string): Pro
   }
 }
 
+/** 引导是否已在 ComfyUI 输出缓存里（账户制存储：换机器只要没删就还在）。
+ *  给了 expectedSha256 时要求内容一致，避免「同名但被截断/替换」的坏缓存。 */
+export async function comfyGuideExists(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean> {
+  try {
+    const qs = expectedSha256 ? `?sha256=${encodeURIComponent(expectedSha256)}` : "";
+    const res = await fetch(`${base}/zeroexo/v1/guides/${encodeURIComponent(guideId)}${qs}`, {
+      signal: AbortSignal.timeout(expectedSha256 ? 60_000 : 10_000),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json().catch(() => null)) as { exists?: boolean } | null;
+    return body?.exists === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 把本地 media/guides 的引导推到 ComfyUI（双重兜底：缓存里没有才传） */
+export async function pushGuideToComfy(base: string, guideId: string): Promise<boolean> {
+  if (!/^gd_[A-Za-z0-9_-]{4,64}$/.test(guideId)) return false;
+  const file = path.join(dataRoot(), "media", "guides", `${guideId}.safetensors`);
+  let buf: Buffer;
+  try {
+    const s = await fs.stat(file);
+    if (!s.size) return false;
+    buf = await fs.readFile(file);
+  } catch {
+    return false;
+  }
+  try {
+    const res = await fetch(`${base}/zeroexo/v1/guides/${encodeURIComponent(guideId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: new Uint8Array(buf),
+      signal: AbortSignal.timeout(120_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 提交前保证起始段引导在远端可用：先查云端 output 缓存（可用 sha256 校验内容），
+ *  缺了/内容不符再从本地 media/guides 传上去；两边都没有返回 false（由调用方报人话）。 */
+export async function ensureComfyGuide(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean> {
+  if (await comfyGuideExists(base, guideId, expectedSha256)) return true;
+  return pushGuideToComfy(base, guideId);
+}
+
 /** guide safetensors 落到本地 media/guides，返回 `guide:<id>.safetensors`（跨重启仍可追溯） */
 export async function cacheGuideFile(
   base: string,

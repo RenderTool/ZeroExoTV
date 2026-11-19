@@ -38,6 +38,7 @@ import {
   ComfyPreviewSocket,
   detectLowVram,
   downloadComfyOutput,
+  ensureComfyGuide,
   getComfyJob,
   newClientId,
   probeComfy,
@@ -343,6 +344,8 @@ interface PlannedSegment {
   /** 批次里的 guide 指令：initial=起始段显式引导；chain=上一段产出；none=不用 */
   mode: "initial" | "chain" | "none";
   guideId?: string;
+  /** 云端缓存校验用的 sha256（拿得到才比对内容） */
+  guideSha256?: string;
   guideSource: "cache" | "slot" | "chain" | "none";
   guideSourceShotId?: string;
   guideFrames?: number;
@@ -415,7 +418,7 @@ async function runDirector(taskId: string, base: string): Promise<void> {
     const head = all[headIdx]!;
     const slot = head.guide;
     const starting = slot?.id
-      ? { id: slot.id, source: "slot" as const, frames: slot.frames, sourceShotId: undefined }
+      ? { id: slot.id, source: "slot" as const, frames: slot.frames, sha256: slot.sha256, sourceShotId: undefined }
       : boundaryEnabled(headIdx)
         ? resolveGuide(all, headIdx)
         : { id: "", source: "none" as const, frames: undefined, sourceShotId: undefined };
@@ -426,6 +429,9 @@ async function runDirector(taskId: string, base: string): Promise<void> {
           shot,
           mode: starting.id ? "initial" : "none",
           ...(starting.id ? { guideId: starting.id } : {}),
+          ...(starting.id && (starting as { sha256?: string }).sha256
+            ? { guideSha256: (starting as { sha256?: string }).sha256 }
+            : {}),
           guideSource: starting.id ? starting.source : "none",
           ...(starting.sourceShotId ? { guideSourceShotId: starting.sourceShotId } : {}),
           ...(starting.frames ? { guideFrames: starting.frames } : {}),
@@ -470,6 +476,23 @@ async function runDirector(taskId: string, base: string): Promise<void> {
     const succeeded = task0.segments.filter((s) => s.state === "success").length;
     if (succeeded > 0) {
       throw new McpError("VALIDATION", "任务里已有完成段但缺少批次 id，无法安全续接；请重新提交任务");
+    }
+    // 双重兜底（2026-11-19 用户拍板）：云端输出是账户制存储，机器换了只要没删引导就还在。
+    // 提交前先查 ComfyUI 自己的 output/zeroexo/guides/<id>.safetensors；缺了再从本机
+    // media/guides 传上去；两边都没有才报错，不静默降级成 none。
+    const initialGuides = new Map<string, string | undefined>();
+    for (const p of planned) {
+      if (p.mode === "initial" && p.guideId && !initialGuides.has(p.guideId)) {
+        initialGuides.set(p.guideId, p.guideSha256);
+      }
+    }
+    for (const [gid, sha] of initialGuides) {
+      if (!(await ensureComfyGuide(base, gid, sha)) ) {
+        throw new McpError(
+          "VALIDATION",
+          `起始引导 ${gid} 在 ComfyUI 输出缓存与本机 media/guides 里都不存在/内容不一致；先在项目侧生成/缓存该引导，或把该段改成 none`,
+        );
+      }
     }
     const segments: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; params: Record<string, unknown> }> = [];
     for (const p of planned) {
