@@ -32,7 +32,6 @@ import { useTranslation } from 'react-i18next';
 import { App, Checkbox, Dropdown, InputNumber, Popover, Select } from 'antd';
 import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Film, Image as ImageIcon, Music, Plus, Waypoints, X, ArrowLeftRight } from 'lucide-react';
 import { buildShotAiBrief } from './shot-ai-brief.js';
-import { checkShotPrompt } from '@/features/canvas-nodes/storyboard/shot-quality-check.js';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
@@ -1164,13 +1163,6 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
     [segmentAssets, shot.guide?.fromAssetId],
   );
 
-  /** 分镜质量闸门（2026-11-19）：提示词 @引用 与槽位必须对得上，error 会阻止生成 */
-  const qualityIssues = useMemo(
-    () => checkShotPrompt({ imagePrompt: shot.imagePrompt, references: visibleSegmentAssets }),
-    [shot.imagePrompt, visibleSegmentAssets],
-  );
-  const qualityErrors = qualityIssues.filter((i) => i.level === 'error');
-
   return (
     <div
       data-director-prompt-panel
@@ -1289,35 +1281,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         >
           {segTitle}
         </span>
-        {qualityIssues.length ? (
-          <Popover
-            trigger="hover"
-            placement="bottomLeft"
-            classNames={{ root: 'director-popover' }}
-            content={(
-              <div data-shot-quality-panel style={{ width: 300, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
-                <strong>分镜质量检查</strong>
-                {qualityIssues.map((q, i) => (
-                  <span key={`${q.code}-${i}`} style={{ color: q.level === 'error' ? palette.danger : palette.sub, lineHeight: 1.6 }}>
-                    {q.level === 'error' ? '错误：' : '提示：'}{q.message}
-                  </span>
-                ))}
-              </div>
-            )}
-          >
-            <span
-              data-shot-quality-badge
-              style={{
-                flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 3, height: 18, padding: '0 6px',
-                borderRadius: 4, fontSize: 10, cursor: 'default',
-                background: qualityErrors.length ? palette.danger : 'rgba(245,158,11,0.18)',
-                color: qualityErrors.length ? '#fff' : '#f59e0b',
-              }}
-            >
-              {qualityErrors.length ? `质量 ${qualityErrors.length}` : `提示 ${qualityIssues.length}`}
-            </span>
-          </Popover>
-        ) : null}
+        {/* 分镜质量检查不在网页上做：检查口径与闸门都在 MCP（review_shots / request_director_run + Skill 指引），
+            网页只是容器，不再弹「质量 N」徽标或问题清单。 */}
         {/* Row2 右侧：元信息胶囊
             2026-11-04 第八条C（用户更正）：编号胶囊「分镜 N」删除——两种编号标签均不再显示，
             当前片段靠激活态与上方表格高亮表达；「分镜」字样全区域清零 */}

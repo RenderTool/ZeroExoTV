@@ -83,12 +83,25 @@ const PHASE: Record<string, PluginDirectorPhase> = {
 
 /** 任务表里可能同时存在「排队」和「运行」两批（网页点一次、MCP 又提交一次）。
  *  接管必须优先 running：此前按数组顺序取第一个 active，刷新后接到的往往是排队批次，
- *  页面就显示「排队中」骨架 + 片段「未生成」，真正的运行批次和实时预览反而不见。 */
+ *  页面就显示「排队中」骨架 + 片段「未生成」，真正的运行批次和实时预览反而不见。
+ *
+ *  另外必须过滤「死任务」：云端 ComfyUI 重启/掉线后，旧批次会一直挂在 queued/running，
+ *  没有任何心跳。接管它会把这批的片段点亮成「生成中」，用户点第 2 段却看到第 1 段在转，
+ *  其实云端什么都没跑。因此按 updatedAt 判断新鲜度：排队 3 分钟、运行 15 分钟没更新即视为失联。 */
+const STALE_QUEUED_MS = 3 * 60 * 1000;
+const STALE_RUNNING_MS = 15 * 60 * 1000;
+
 function pickActiveTask(tasks: PluginTask[]): PluginTask | null {
   const score = (t: PluginTask) => Date.parse(t.updatedAt ?? t.createdAt ?? '') || 0;
-  const running = tasks.filter((t) => t.state === 'running').sort((a, b) => score(b) - score(a));
+  const now = Date.now();
+  const fresh = (t: PluginTask) => {
+    const at = score(t);
+    if (!at) return true;
+    return now - at <= (t.state === 'running' ? STALE_RUNNING_MS : STALE_QUEUED_MS);
+  };
+  const running = tasks.filter((t) => t.state === 'running' && fresh(t)).sort((a, b) => score(b) - score(a));
   if (running.length > 0) return running[0]!;
-  const queued = tasks.filter((t) => t.state === 'queued').sort((a, b) => score(b) - score(a));
+  const queued = tasks.filter((t) => t.state === 'queued' && fresh(t)).sort((a, b) => score(b) - score(a));
   return queued[0] ?? null;
 }
 

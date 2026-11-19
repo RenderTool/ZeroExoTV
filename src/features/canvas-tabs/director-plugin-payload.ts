@@ -10,7 +10,6 @@ import type { WorkbenchShot } from '@/features/canvas-nodes/storyboard/workbench
 import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { resolveRefVisual } from './director-prompt-panel.js'
-import { checkShotPrompt } from '@/features/canvas-nodes/storyboard/shot-quality-check.js';
 import { selectedShotVersion } from './shot-cache.js';
 import { pluginTaskBase } from '@/features/task-center/plugin-task-client.js';
 import { uploadZeroexoReference } from './zeroexo-jobs-client.js';
@@ -163,20 +162,11 @@ export async function attachDirectorReferenceImages(
   for (const segment of payload.segments) {
     const shot = byId.get(segment.shotId);
     /**
-     * 2026-11-19 用户要求：生成前先过分镜质量闸门。
-     * 提示词里的 @PictureN 必须与真实槽位一一对应（悬空引用、Subject 块与槽位名不符、重复块），
-     * 有 error 直接拒绝提交，不允许把错位提示词当「模型不听话」丢给生成。
+     * 分镜质量由 Agent 侧（MCP `review_shots` / `request_director_run`）把关。
+     * 网页运行是用户的手动决定，不允许在提交链路上抛错拦截——
+     * 提示词问题在面板上用「质量 N」徽标提示（同一份 checkShotPrompt 结果），
+     * 用户想直接跑就让他跑。这里不再 throw，也不再静默改写提示词。
      */
-    if (shot) {
-      const errors = checkShotPrompt({ imagePrompt: shot.imagePrompt, references: shot.references })
-        .filter((i) => i.level === 'error');
-      if (errors.length) {
-        throw new Error(
-          `第 ${shot.number ?? segment.shotId} 段分镜质量未通过：${errors.map((e) => e.message).join('；')}`
-          + ' —— 请先修插槽/提示词，再提交生成',
-        );
-      }
-    }
     /**
      * 2026-11-19 报障：这里原来按 `r.storageKey` 过滤，主体引用（`subject:<id>`、主体状态引用换图后 key 为空）
      * 会被静默丢掉，上传顺序被压缩 → 提示词里的 @PictureN 与真实上传的第 N 张错位，
