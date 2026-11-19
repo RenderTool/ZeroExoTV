@@ -581,10 +581,16 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
       // 固有规则：链路竖向成列排布（上游左、下游右，同列自上而下），杜绝节点互相压住
       layoutChainVertically(chainGraph.nodes as unknown as Array<Record<string, unknown>>, chainGraph.edges);
 
-      // 稳定的链路标识：同一条链路（同一组节点 id）永远落回同一份只读快照，
-      // 不会「每张产物卡片都复制一整条链」。
-      const cid = chainCanvasIdOf(chainGraph.nodes.map((n) => String((n as { id?: string }).id ?? '')));
-      const title = promptText.slice(0, 24) || t('assetLibrary.viewPrompt', { defaultValue: '查看提示词' });
+      // 稳定的链路标识：由「整条链路节点 id 集合」算出哈希。
+      // 同一条链路从不同产物卡片打开 = 同一份只读快照，不会每个产物都复制一遍节点。
+      // 2026-11-20 用户报障：同一片段的不同版本链路节点 id 完全一样（chain_prompt/chain_input/seg-x），
+      // 只按节点 id 算 cid 会把「第 1 版」和「第 5 版」认成同一条链路，打开提示词就是别人的。
+      // 因此每个产物（资产记录）各自一份快照：cid 后缀带 assetId。
+      const assetSig = String(asset.id).replace(/[^a-z0-9]/gi, '').slice(0, 24).toLowerCase();
+      const cid = `${chainCanvasIdOf(chainGraph.nodes.map((n) => String((n as { id?: string }).id ?? '')))}${assetSig}`;
+      const baseTitle = promptText.slice(0, 24) || t('assetLibrary.viewPrompt', { defaultValue: '查看提示词' });
+      // 同片段多版本时标题带版本号，页签不再都叫「片段 1」
+      const title = versionLabel ? `${baseTitle} · ${versionLabel}` : baseTitle;
       const existing = await getCanvas(projectId, cid).catch(() => null);
       if (existing) {
         const liveNodes = ((existing.graph.nodes ?? []) as Array<{ id?: string; _deleted?: boolean; data?: Record<string, unknown>; position?: unknown }>).filter((n) => !n._deleted);
