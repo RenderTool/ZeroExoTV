@@ -12,7 +12,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Tooltip } from 'antd';
+import { App, Button, Spin, Tooltip } from 'antd';
 import { ArrowLeft, Grid2x2, Paintbrush, Scissors } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { CommandQueue, NodeRecord } from '@zeroexo/core';
@@ -243,8 +243,11 @@ export function ImageEditWorkspace({
   };
 
   const editor = !dataUrl ? (
-    <div style={{ padding: 48, textAlign: 'center', fontSize: 13, color: theme.toolbar.textMuted }}>
-      {t('imageEditor.noContent', '图片内容尚未就绪')}
+    // 2026-11-19 用户报障「点编辑有明显延迟」：图片要先把磁盘内容读成可渲染地址才开对话框，
+    // 期间页面毫无反馈。这里先给即时 loading 占位，避免被当成卡死。
+    <div style={{ padding: 48, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, fontSize: 13, color: theme.toolbar.textMuted }}>
+      <Spin size="small" />
+      <span>{t('imageEditor.loadingImage', '正在载入原图…')}</span>
     </div>
   ) : mode === 'crop' ? (
     <CropDialog dataUrl={dataUrl} open inline theme={theme} onClose={abandonEdit} onConfirm={(crop) => void handleCrop(crop)} />
