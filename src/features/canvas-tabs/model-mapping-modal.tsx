@@ -57,6 +57,31 @@ const IMAGE_NEEDS: Array<{ key: string; label: string; test: RegExp }> = [
   { key: 'clip', label: '图片文本编码器', test: /qwen3\.5|qwen_image/i },
 ];
 
+/**
+ * 2026-11-19 用户口径：云端显存足够时应优先用推荐高精度模型，
+ * 不可用时按挡位逐级回退（24G以上 → 24G → 8G），都没有才让用户自己选。
+ */
+const TIER_ORDER = ['24G 以上推荐', '24G 推荐', '8G 及以上推荐', '8G 推荐'] as const;
+
+function tierAllowed(tier: string, totalGb: number | null): boolean {
+  if (totalGb == null) return false;
+  if (tier === '24G 以上推荐') return totalGb >= 24;
+  if (tier === '24G 推荐') return totalGb >= 20;
+  if (tier === '8G 及以上推荐' || tier === '8G 推荐') return totalGb >= 8;
+  return false;
+}
+
+/** 按显存挡位从高到低，挑本机真实存在的第一个推荐模型 */
+function pickPreferredModel(slot: VideoSlot, options: string[], totalGb: number | null): string | undefined {
+  const table = RECOMMENDED[slot] as Record<string, string>;
+  for (const tier of TIER_ORDER) {
+    if (!tierAllowed(tier, totalGb)) continue;
+    const hit = options.find((name) => table[name] === tier);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 function gb(bytes?: number): string {
   if (typeof bytes !== 'number' || bytes <= 0) return '—';
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -96,6 +121,21 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
     const filtered = source.filter((n) => SLOT_FILTER[slot].test(n));
     return filtered.length > 0 ? filtered : source;
   };
+
+  const totalGb = typeof ep.machine?.vramTotalBytes === 'number' && ep.machine.vramTotalBytes > 0
+    ? ep.machine.vramTotalBytes / 1024 ** 3
+    : null;
+
+  // 未手动选过：按显存挡位自动落到最合适的推荐模型；没有推荐可回退时保持空，让用户自己选。
+  useEffect(() => {
+    if (!open) return;
+    for (const slot of Object.keys(SLOT_LABEL) as VideoSlot[]) {
+      if (conn.models[slot]) continue;
+      const prefer = pickPreferredModel(slot, listFor(slot), totalGb);
+      if (prefer) conn.setModel(slot, prefer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, available.unet.length, available.vae.length, available.clip.length, totalGb]);
 
   const machine = ep.machine;
 
@@ -153,7 +193,9 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
           </div>
         );
       })}
-      <Text type="secondary" style={{ fontSize: 11 }}>下拉就是本机已有的模型，随便选；标「推荐」只是建议。</Text>
+      <Text type="secondary" style={{ fontSize: 11 }}>
+        默认按显存自动选推荐高精度模型，不可用时依次回退（24G 以上 → 24G → 8G）；没有可回退的模型时请手动选择。
+      </Text>
     </div>
   );
 
