@@ -317,7 +317,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
       // 没链 → 只渲染产物本身，绝不按 live graph 反推上游。
       const hasStoredChain = storedNodes.length > 0;
       let chainNodes: Array<Record<string, unknown>>;
-      let chainEdges: Array<{ id?: string; source: { nodeId: string }; target: { nodeId: string } }> = [];
+      let chainEdges: Array<{ id?: string; source: { nodeId: string; pinId?: string }; target: { nodeId: string; pinId?: string } }> = [];
       if (hasStoredChain) {
         // 历史链节点数据做一次归一：旧记录把模型写成「qwen」这种展示名、也不带 paramValues，
         // 面板就会只显示一个错标签、没有尺寸/步数/seed。统一映射到真实模型 key 并补上链级参数。
@@ -335,7 +335,6 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
         chainEdges = (storedChain?.edges ?? []) as typeof chainEdges;
         // @ 引用的输入不一定挂在画布连线上（@图片N 来自素材/主体），
         // 但它们在「本次提交」里确实参与了生成：按 inputs 的 storageKey 补成只读参考节点。
-        // 不合成连线——合成线的 pin 与真实 pin 对不上，会画出漂浮错位线。
         const knownKeys = new Set(
           chainNodes.map((n) => String((n.data as { storageKey?: string } | undefined)?.storageKey ?? '')),
         );
@@ -359,6 +358,53 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
             },
           });
         }
+        // 旧链路记录只存了节点、没存连线（edges 为空）→ 画面上看不出「参考图 → 产物」，
+        // 用户 2026-11-20 明确要求这种图链路形态。这里按节点角色补线：
+        // 参考图（image 输出 pin=image）→ 产物节点（输入 pin=prompt），产物取 originNodeId / 最后一个节点。
+        if (chainEdges.length === 0 && chainNodes.length > 1) {
+          const originNid = String((asset.data as { originNodeId?: string }).originNodeId ?? '');
+          const productNode = (originNid
+            ? chainNodes.find((n) => String((n as { id?: string }).id ?? '') === originNid)
+            : undefined) ?? chainNodes[chainNodes.length - 1];
+          const productId = String((productNode as { id?: string }).id ?? '');
+          if (productId) {
+            chainEdges = chainNodes
+              .filter((n) => String((n as { id?: string }).id ?? '') !== productId)
+              .map((n, i) => ({
+                id: `edge-chain-${i + 1}`,
+                source: {
+                  nodeId: String((n as { id?: string }).id ?? ''),
+                  pinId: String((n as { type?: string }).type ?? 'image') === 'video' ? 'video' : 'image',
+                },
+                target: { nodeId: productId, pinId: 'prompt' },
+              }));
+          }
+        }
+        // 提示词节点统一口径（2026-11-20 用户要求）：提示词 + 素材 + 结果 = 一条链；
+        // 老记录没存提示词节点时按资产记录补一个只读文本节点并连到产物。
+        if (promptText) {
+          const originNid = String((asset.data as { originNodeId?: string }).originNodeId ?? '');
+          const productNode = (originNid
+            ? chainNodes.find((n) => String((n as { id?: string }).id ?? '') === originNid)
+            : undefined) ?? chainNodes[chainNodes.length - 1];
+          const productId = String((productNode as { id?: string }).id ?? '');
+          const hasPromptNode = chainNodes.some((n) => String((n as { id?: string }).id ?? '') === 'chain_prompt');
+          if (productId && !hasPromptNode) {
+            chainNodes.unshift({
+              id: 'chain_prompt',
+              type: 'text',
+              title: t('historyGroup.promptNode', { defaultValue: '提示词' }),
+              position: { x: 60, y: 60 },
+              size: { width: 420, height: 260 },
+              data: { content: promptText, promptStyle: 'storyboard', __readonly: true },
+            });
+            chainEdges.unshift({
+              id: 'edge-chain-prompt',
+              source: { nodeId: 'chain_prompt', pinId: 'output' },
+              target: { nodeId: productId, pinId: 'prompt' },
+            });
+          }
+        }
       } else {
         const productLiveId = nodeId && present.includes(nodeId) ? nodeId : '';
         const liveProduct = productLiveId
@@ -370,8 +416,9 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
           // 产物节点已被删除：用资产记录造一个只读产物节点，历史至少还看得到这张图与这次参数
           const dw = typeof data.width === 'number' ? data.width : 768;
           const dh = typeof data.height === 'number' ? data.height : 1024;
-          chainNodes = [{
-            id: (asset.data as { originNodeId?: string }).originNodeId || `asset_${asset.id}`,
+          const productNodeId = (asset.data as { originNodeId?: string }).originNodeId || `asset_${asset.id}`;
+          const productNode = {
+            id: productNodeId,
             type: isVideo ? 'video' : 'image',
             position: { x: 60, y: 60 },
             size: fitMediaSize(dw, dh, IMAGE_FIT_BOX),
@@ -389,8 +436,103 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
               height: dh,
               paramValues: (data as { generation?: { params?: Record<string, unknown> } }).generation?.params,
             },
-          }];
+          };
+          // 2026-11-20 用户要求：分镜/导演台片段的历史即使没存 chain，
+          // 也要用「片段提示词 + 片段引用资产」还原成链路节点，不能只丢一个产物节点。
+          const shotSrc = (asset.data as { originSource?: HistorySource }).originSource;
+          const synthNodes: Array<Record<string, unknown>> = [];
+          const synthEdges: Array<{ id?: string; source: { nodeId: string; pinId?: string }; target: { nodeId: string; pinId?: string } }> = [];
+          let resolvedPrompt = promptText;
+          if (shotSrc === 'director' && productNodeId.startsWith('seg-')) {
+            const container = await readWorkbenchContainer(projectId).catch(() => null);
+            const shot = (container?.shots ?? []).find((s) => String((s as { id?: string }).id) === productNodeId) as
+              | {
+                  imagePrompt?: string;
+                  videoPrompt?: string;
+                  references?: Array<{ storageKey?: string; title?: string; kind?: string }>;
+                }
+              | undefined;
+            if (shot) {
+              resolvedPrompt = resolvedPrompt || String(shot.imagePrompt ?? shot.videoPrompt ?? '').trim();
+              const refs = shot.references ?? [];
+              let slot = 0;
+              for (const ref of refs) {
+                const key = typeof ref.storageKey === 'string' ? ref.storageKey : '';
+                if (!key) continue;
+                slot += 1;
+                const id = `chain_input_${slot}`;
+                synthNodes.push({
+                  id,
+                  type: ref.kind === 'video' ? 'video' : 'image',
+                  title: ref.title || t('historyGroup.refImage', { defaultValue: `参考图 ${slot}` }),
+                  position: { x: 60, y: 60 + (slot - 1) * 380 },
+                  size: { ...IMAGE_FIT_BOX },
+                  data: { kind: ref.kind === 'video' ? 'video' : 'image', storageKey: key, status: 'success', __readonly: true },
+                });
+                synthEdges.push({
+                  id: `edge-chain-ref-${slot}`,
+                  source: { nodeId: id, pinId: ref.kind === 'video' ? 'video' : 'image' },
+                  target: { nodeId: productNodeId, pinId: 'prompt' },
+                });
+              }
+            }
+          }
+          // 画布生成的视频/图片：参考图取自记录里的 sourceStorageKey（图生图/图生视频的原图）
+          if (referenceKey) {
+            const exists = synthNodes.some((n) => String((n.data as { storageKey?: string }).storageKey ?? '') === referenceKey);
+            if (!exists) {
+              synthNodes.push({
+                id: 'chain_input_1',
+                type: 'image',
+                title: t('historyGroup.refImage', { defaultValue: '参考图 1' }),
+                position: { x: 60, y: 60 },
+                size: { ...IMAGE_FIT_BOX },
+                data: { kind: 'image', storageKey: referenceKey, status: 'success', __readonly: true },
+              });
+              synthEdges.push({
+                id: 'edge-chain-ref-1',
+                source: { nodeId: 'chain_input_1', pinId: 'image' },
+                target: { nodeId: productNodeId, pinId: 'prompt' },
+              });
+            }
+          }
+          // 提示词 → 产物：与分镜一致的呈现口径（提示词独立成节点，正文按原样换行）
+          if (resolvedPrompt) {
+            synthNodes.unshift({
+              id: 'chain_prompt',
+              type: 'text',
+              title: t('historyGroup.promptNode', { defaultValue: '提示词' }),
+              position: { x: 60, y: 60 },
+              size: { width: 420, height: 260 },
+              data: {
+                content: resolvedPrompt,
+                promptStyle: 'storyboard',
+                __readonly: true,
+              },
+            });
+            synthEdges.unshift({
+              id: 'edge-chain-prompt',
+              source: { nodeId: 'chain_prompt', pinId: 'output' },
+              target: { nodeId: productNodeId, pinId: 'prompt' },
+            });
+            (productNode.data as Record<string, unknown>).prompt = resolvedPrompt;
+          }
+          if (synthNodes.length > 0) {
+            chainNodes = [...synthNodes, productNode];
+            chainEdges = synthEdges;
+          } else {
+            chainNodes = [productNode];
+          }
         }
+      }
+      // 产物节点缺提示词时用资产记录补齐：老快照只存了标题，只读 dock 会误报「没有提示词」
+      const originNid = String((asset.data as { originNodeId?: string }).originNodeId ?? '');
+      const productEntry = (originNid
+        ? chainNodes.find((n) => String((n as { id?: string }).id ?? '') === originNid)
+        : undefined) ?? chainNodes[chainNodes.length - 1];
+      if (productEntry && promptText) {
+        const d = ((productEntry as { data?: Record<string, unknown> }).data ??= {});
+        if (typeof d.prompt !== 'string' || !String(d.prompt).trim()) d.prompt = promptText;
       }
       const allNodes = chainNodes;
       const chainGraph = {
@@ -448,7 +590,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
         // 数据也要一致：旧快照里模型写成「qwen」、缺 paramValues 时按当前归一结果重建，
         // 否则永远打开的是那份坏数据（用户 2026-11-18 截图里的错标签就是这个）。
         const dataSig = (list: Array<{ id?: string; data?: Record<string, unknown> }>): string => list
-          .map((n) => `${String(n.id ?? '')}:${String(n.data?.model ?? '')}:${JSON.stringify(n.data?.paramValues ?? null)}`)
+          .map((n) => `${String(n.id ?? '')}:${String(n.data?.model ?? '')}:${String(n.data?.prompt ?? '')}:${JSON.stringify(n.data?.paramValues ?? null)}`)
           .sort()
           .join('|');
         const dataSigEqual = dataSig(liveNodes) === dataSig(chainGraph.nodes as Array<{ id?: string; data?: Record<string, unknown> }>);

@@ -14,6 +14,7 @@
 | C-05 | 项目 ZIP 完整迁移（剧本 MD / 主体格式 / 实体还原） | done | [plans/2026-11-11-project-zip-full-migration.md](plans/2026-11-11-project-zip-full-migration.md) |
 | C-06 | 生成引用链 / 同款 / 继续编辑（含尺寸与 CAS） | in-progress | [plans/2026-11-18-generation-replay-chain.md](plans/2026-11-18-generation-replay-chain.md) |
 | C-07 | 分镜与主体资产链路修复（连播/提示词/主体@/授权/服务守护） | in-progress | [plans/2026-11-18-分镜与主体资产链路修复.md](plans/2026-11-18-分镜与主体资产链路修复.md) |
+| C-08 | 本轮线上可用性批量（历史链路/顶栏按钮/插件版本提醒/引导双重兜底/备份） | in-progress | [plans/2026-11-20-历史链路与插件版本提醒.md](plans/2026-11-20-历史链路与插件版本提醒.md) |
 
 状态：in-progress 5 / done 2 / 待拍板 0 / deprecated 0。
 

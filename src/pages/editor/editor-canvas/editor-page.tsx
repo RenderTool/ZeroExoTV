@@ -883,9 +883,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               onCopyProject={() => void dialogs.handleCopyProject()}
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
             />
-            <CanvasHistoryButton projectId={canvasId} />
             </>
           }
+          rightTools={<CanvasHistoryButton projectId={canvasId} />}
           syncBadge={!state.loading && CLOUD_ENABLED ? (
             <>
               <CreationSyncBadge

@@ -67,6 +67,8 @@ export interface TopBarProps {
   syncBadge?: React.ReactNode;
   /** LOGO下拉菜单(画布编辑器左上角,桌面端显示) */
   canvasMenu?: React.ReactNode;
+  /** 右侧工具组（历史版本等图标按钮；2026-11-20 用户要求：放右上角工具堆里，别挨着 LOGO） */
+  rightTools?: React.ReactNode;
   /** 移动端导航按钮打开 */
   onMobileNavOpen?: () => void;
   /** 层级/资产抽屉(资产任何时刻可打开,2026-08-29 迁至标题旁) */
@@ -88,6 +90,7 @@ export function TopBar({
   isMobile,
   syncBadge,
   canvasMenu,
+  rightTools,
   gridStyle,
   onGridStyleChange,
   onOpenSettings,
@@ -222,6 +225,8 @@ export function TopBar({
         </div>
       )}
       <div style={rightStyle}>
+        {/* 右侧工具组：历史版本等低频但需一键可达的入口（2026-11-20 用户要求） */}
+        {rightTools}
         {/* 协作 + Agent(桌面端;账号/退出已移入左上角 CanvasMenu) */}
         {!mobile && (
           <>

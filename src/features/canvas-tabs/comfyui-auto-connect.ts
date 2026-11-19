@@ -12,6 +12,7 @@
  */
 import { useEffect } from 'react';
 import { create } from 'zustand';
+import { message } from 'antd';
 import { fetchBridgeModels } from './comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from './comfyui-connection.js';
 import {
@@ -19,7 +20,19 @@ import {
   useComfyuiEndpointStore,
   type EndpointTestResult,
 } from './comfyui-endpoint.js';
+import { pluginUpdateHint } from './plugin-version.js';
 import { AutoProbeScheduler, type AutoProbeSnapshot } from './auto-probe-scheduler.js';
+
+/** 版本提醒每个「地址+版本」只弹一次，避免自动探测反复刷屏 */
+const outdatedNotified = new Set<string>();
+
+function notifyPluginOutdated(result: EndpointTestResult): void {
+  if (result.kind !== 'ok' || !result.pluginOutdated || !result.pluginVersion) return;
+  const key = `${result.address}@${result.pluginVersion}`;
+  if (outdatedNotified.has(key)) return;
+  outdatedNotified.add(key);
+  message.warning(pluginUpdateHint(result.pluginVersion), 8);
+}
 
 const IDLE_SNAPSHOT: AutoProbeSnapshot = {
   status: 'idle',
@@ -48,6 +61,8 @@ export async function applyConnectionResult(
     return { bridgeMissing: false };
   }
   ep.markTested(result.address, result.backend, result.models, result.machine);
+  // 云端插件无法自动更新：连通后比一次官方版本，低了提醒用户手动换插件
+  notifyPluginOutdated(result);
   if (result.backend === 'zeroexo') {
     // 重写版插件（/zeroexo/v1/jobs）：仍需展示/选择模型；插件同样提供 /zeroexo/h3/models
     try {

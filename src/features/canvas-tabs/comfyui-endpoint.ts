@@ -26,6 +26,7 @@
 
 import { create } from 'zustand';
 import { DEFAULT_COMFYUI_BASE_URL, normalizeBaseUrl, probeTcp } from './comfyui-bridge-client.js';
+import { isPluginOutdated } from './plugin-version.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from './comfyui-connection.js';
 import { publishComfyuiEndpoint } from '@/platform/comfyui-endpoint-broadcast.js';
 import type { OpenaiChannelCredentials } from './openai-protocol-client.js';
@@ -179,7 +180,18 @@ export function isLocalComfyuiAddress(address: string): boolean {
 }
 
 export type EndpointTestResult =
-  | { kind: 'ok'; backend: EndpointBackend; address: string; version?: string; models: string[]; machine?: ComfyuiMachineInfo }
+  | {
+      kind: 'ok';
+      backend: EndpointBackend;
+      address: string;
+      version?: string;
+      /** ZeroExo 插件版本（仅 backend=zeroexo 时有值） */
+      pluginVersion?: string;
+      /** 插件版本低于官方 → 提醒手动更新（云端实例不会自动更新） */
+      pluginOutdated?: boolean;
+      models: string[];
+      machine?: ComfyuiMachineInfo;
+    }
   | { kind: 'fail'; failure: 'unreachable' | 'cors' | 'rejected'; message: string };
 
 function bytes(value: unknown): number | undefined {
@@ -247,8 +259,18 @@ export async function testEndpointConnection(rawAddress: string): Promise<Endpoi
     if (res.ok) {
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (body && body.ok === true && typeof body.plugin === 'string') {
-        const version = typeof body.version === 'string' ? body.version : machine?.comfyuiVersion;
-        return { kind: 'ok', backend: 'zeroexo', address: base, version, models: [], machine: machine ?? undefined };
+        const pluginVersion = typeof body.version === 'string' ? body.version : undefined;
+        const version = pluginVersion ?? machine?.comfyuiVersion;
+        return {
+          kind: 'ok',
+          backend: 'zeroexo',
+          address: base,
+          version,
+          pluginVersion,
+          pluginOutdated: isPluginOutdated(pluginVersion),
+          models: [],
+          machine: machine ?? undefined,
+        };
       }
     }
   } catch { /* 未装插件 / 未开 CORS → 继续探测 */ }
