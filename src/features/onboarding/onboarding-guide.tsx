@@ -159,10 +159,14 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     return () => window.clearInterval(timer);
   }, [open, serverInfo]);
 
-  /** 安装目录合法性：不能是 C 盘，不能和数据根混用（也不许是数据根的子目录） */
+  /**
+   * 安装目录合法性：只有「填了值」才校验；留空不算错误。
+   * 2026-11-19 用户口径：目录选择与 MCP 安装无关，也不是安装前置条件；
+   * 留空时由复制的接入包让 Agent 自己挑一个合规目录。
+   */
   const mcpDirError = (() => {
     const dir = mcpDir.trim();
-    if (!dir) return '尚未选择 MCP 安装目录';
+    if (!dir) return null;
     if (/^c:/i.test(dir)) return '不能装在 C 盘';
     const rootPath = currentDataRootPath();
     if (rootPath) {
@@ -267,7 +271,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     const base = `${window.location.origin}${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}`;
     const pkgUrl = `${base}downloads/zeroexo-mcp-server.tgz`;
     const root = currentDataRootPath() || rootName() || '<资源目录>';
-    const installDir = mcpDir.trim();
+    const installDir = mcpDir.trim() || 'D:\\ZeroExoMCP';
     const text = [
       '# ZeroExo — MCP 接入',
       '',
@@ -275,7 +279,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
       '',
       '## 自动执行',
       `1. 下载安装包：${pkgUrl}`,
-      `2. 解压，把 package 里的 dist 与 package.json 放到 ${installDir}（这是 MCP 自己的目录，不要装 C 盘，也不要放进资源目录 ${root}）`,
+      `2. 解压，把 package 里的 dist 与 package.json 放到 ${installDir}（这是 MCP 自己的目录，不要装 C 盘，也不要放进资源目录 ${root}${mcpDir.trim() ? '' : '；如果该目录不可用，你自行另选一个非 C 盘且与资源目录分离的目录'}）`,
       `3. 在 ${installDir} 执行 npm install --omit=dev（装 @modelcontextprotocol/sdk 与 zod）`,
       `4. 在同一目录启动：node ${installDir}\\dist\\index.js --http --port 8787`,
       `5. 把下面这份配置写进 IDE 的 MCP 设置：`,
@@ -397,7 +401,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             <Button size="small" icon={<FolderOpen size={13} />} onClick={() => void pickMcpDir()}>
               {mcpDir
                 ? t('onboarding.mcpDirChange', '重新选择')
-                : t('onboarding.mcpDirPick', '选择目录')}
+                : t('onboarding.mcpDirPickOptional', '安装目录（可选）')}
             </Button>
             {/* 2026-11-19 用户反馈：服务未安装时点「选择目录」会报「本地服务离线」，形成
                 「先装服务才能选目录 / 先选目录才能装服务」的死循环。这里允许直接手填绝对路径，
@@ -427,7 +431,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               type="primary"
               icon={<Copy size={13} />}
               loading={installingMcp}
-              disabled={Boolean(mcpDirError)}
               onClick={() => void copyMcpPrompt()}
               data-testid="onboarding-copy-mcp"
             >
