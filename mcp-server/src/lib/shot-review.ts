@@ -107,16 +107,23 @@ function reviewShot(
       issues.push({ code: "ORPHAN_PICTURE", level: "error", message: `片段 ${shot.number} 引用了 @Picture${m[1]} 但没有对应槽位`, fix: "补齐槽位或改成实际存在的 @PictureN" });
     }
   }
+  // 2026-11-19 用户实测「同框三人被画成两个布布 + 一个米拉缺失」：
+  // 之前这里校验的是整段 imagePrompt，主体清单那行「本段画面内主体只有 <Subject 1> …」
+  // 就把检查喂饱了 —— 真正会丢锚的是 [Shot N] 动作句。改成只校验镜头句，并禁泛称。
+  const shotLine = imagePrompt
+    .split(/\n/)
+    .filter((l) => /\[Shot\s+\d+\]/.test(l))
+    .join(" ");
   for (const r of refs) {
     const slot = r.slotNo ?? 0;
     if (slot <= 0) continue;
-    if (!new RegExp(`<Subject\\s+${slot}>`).test(imagePrompt)) {
+    if (!new RegExp(`<Subject\\s+${slot}>`).test(shotLine || imagePrompt)) {
       refs2 = 0;
       issues.push({
         code: "SLOT_NOT_ANCHORED",
         level: "error",
-        message: `片段 ${shot.number} 的 @Picture${slot}（${r.title ?? "未命名"}）正文没有 <Subject ${slot}> 指代，图会挂空`,
-        fix: `在正文首次提到该素材时写 <Subject ${slot}> 名字`,
+        message: `片段 ${shot.number} 的 @Picture${slot}（${r.title ?? "未命名"}）在镜头动作句里没有 <Subject ${slot}> 指代，图会挂空`,
+        fix: `动作句逐一点名：<Subject ${slot}> 名字 做什么、站在哪，别用「三人/大家」这种泛称`,
       });
     }
     if (!r.storageKey) {
@@ -125,6 +132,16 @@ function reviewShot(
     } else if (!subjectHasImage(slot, r.title)) {
       issues.push({ code: "SUBJECT_NO_IMAGE", level: "error", message: `片段 ${shot.number} 引用的主体「${r.title ?? slot}」在主体库里没有图`, fix: "先补主体定妆图，再出片" });
     }
+  }
+  const anchoredSlots = refs.filter((r) => (r.slotNo ?? 0) > 0).length;
+  if (anchoredSlots >= 3 && /三人|两人|众人|大家|所有人/.test(shotLine)) {
+    refs2 = Math.min(refs2, 1);
+    issues.push({
+      code: "GENERIC_ENSEMBLE",
+      level: "error",
+      message: `片段 ${shot.number} 多主体同框却用「三人/众人」泛指，模型会复制同一角色、丢掉其他角色`,
+      fix: "改成逐个点名 + 各自站位动作，并加一句「每个主体只出现一个实例，禁止复制个体」",
+    });
   }
   dims.refs = refs2;
 

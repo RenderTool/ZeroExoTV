@@ -587,6 +587,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const sequenceTimer = useRef<number | null>(null);
   /** 连播游标：真实 ended 事件与兜底定时器共用同一份 list/index */
   const sequenceCursor = useRef<{ list: typeof visibleShots; index: number }>({ list: [], index: 0 });
+  /** 上次推进时间（防 ended 假触发的秒跳） */
+  const lastAdvanceAt = useRef(0);
   const stopSequence = useCallback(() => {
     if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
     sequenceTimer.current = null;
@@ -626,6 +628,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   }, [visibleShots, playSequenceFrom]);
   /** 单段视频真实播完 → 立即切下一段（不靠定时器猜测） */
   const advanceSequence = useCallback(() => {
+    // 连播防秒跳：ended 可能在重挂载/seek 时假触发，250ms 内的重复推进直接忽略，
+    // 否则一条 4 段 5s 的链路会在几百毫秒内跳完，看起来就是「连播没生效」。
+    const now = Date.now();
+    if (now - lastAdvanceAt.current < 250) return;
+    lastAdvanceAt.current = now;
     if (sequenceTimer.current !== null) {
       window.clearTimeout(sequenceTimer.current);
       sequenceTimer.current = null;

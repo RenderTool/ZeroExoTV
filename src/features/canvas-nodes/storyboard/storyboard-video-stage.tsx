@@ -188,6 +188,8 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   // ===== 播放器状态（自研控制条） =====
   const rootRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** 本轮真实起播时刻（连播判定 ended 真伪用；0 = 未在播） */
+  const playStartedAtRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [curTime, setCurTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -220,11 +222,13 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
     try { v.currentTime = Math.min(offsetRef.current, v.duration || offsetRef.current); } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    if (isPlaying) return;
+    // 连播模式不做「按时间轴播放头 seek」：连播自己从 0 起播，
+    // 这里再按 playhead 拉一次会把刚起播的段落直接推向片尾（ended 秒触发 → 整条链路瞬间跳完）。
+    if (isPlaying || sequenceChain) return;
     const v = videoRef.current;
     if (v && v.readyState >= 1) applyPausedSeek();
     // 元数据未就绪时由 <video onLoadedMetadata> 兜底 apply（offsetRef 取最新值）
-  }, [playbackOffsetSec, isPlaying, videoStorageKey, resolvedSrc, applyPausedSeek]);
+  }, [playbackOffsetSec, isPlaying, videoStorageKey, resolvedSrc, sequenceChain, applyPausedSeek]);
 
   // 点击候选视频 / 点击片段 → 中央区立即从 0 播放对应视频。
   // 关键：切片段时 <video> 会按 videoStorageKey 重挂载，且 storageKey → URL 是异步解析的；
@@ -240,6 +244,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
     if (!v) return;
     autoPlayPending.current = false;
     try { v.currentTime = 0; } catch { /* ignore */ }
+    playStartedAtRef.current = Date.now();
     void v.play().catch(() => { /* ignore */ });
   }, [autoPlayKey, resolvedSrc, videoStorageKey]);
 
@@ -373,11 +378,20 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
           loop={!sequenceChain}
           // Plan#83 A 修正：hideControls 模式下禁用点击播放 / 双击全屏
           onClick={hideControls ? undefined : togglePlay}
-          onPlay={() => setPlaying(true)}
+          onPlay={() => { setPlaying(true); playStartedAtRef.current = Date.now(); }}
           onPause={() => setPlaying(false)}
           onEnded={() => {
             setPlaying(false);
-            if (sequenceChain) onPlaybackEnded?.();
+            // 连播防「秒跳空」：seek 到片尾 / 重挂载后的假 ended 会让整条链路瞬间跳完，
+            // 用户看到的就是「连播没生效」。只有真正播够时长才交给宿主推进，
+            // 否则交给宿主的段长兜底定时器（playSequenceFrom 里的 timer）。
+            if (!sequenceChain) return;
+            const v = videoRef.current;
+            const total = v?.duration && Number.isFinite(v.duration) ? v.duration : 0;
+            const played = playStartedAtRef.current > 0 ? (Date.now() - playStartedAtRef.current) / 1000 : 0;
+            const enough = total > 0 ? played >= Math.min(1.2, total * 0.25) : played >= 0.8;
+            playStartedAtRef.current = 0;
+            if (enough) onPlaybackEnded?.();
           }}
           onTimeUpdate={(e) => setCurTime(e.currentTarget.currentTime)}
           onDurationChange={(e) => setDuration(e.currentTarget.duration)}
