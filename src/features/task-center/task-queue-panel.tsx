@@ -14,6 +14,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { useMcpBannerVisible } from '@/features/project-log/mcp-banner-visibility.js';
 import { ProjectMemorySection } from '@/features/project-log/project-memory-section.js';
 import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } from './task-queue-store.js';
+import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import { cancelBrokerTask } from './task-broker-client.js';
 import { cancelPluginTask, deletePluginTask } from './plugin-task-client.js';
 import { usePluginTaskQueue } from './use-plugin-task-queue.js';
@@ -75,6 +76,7 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
   // MCP 发起的任务落在本地 broker 任务表（8790 /tasks）：云端插件不可达时也必须看得见
   useTaskBrokerSync(pid);
   const [mcpBanner, setMcpBanner] = useMcpBannerVisible();
+  const connected = useComfyuiEndpointStore((s) => s.connected);
   const tasks = useTaskQueueStore((s) => s.tasks);
   const clearFinished = useTaskQueueStore((s) => s.clearFinished);
   const active = useMemo(() => countActiveTasks(tasks), [tasks]);
@@ -204,6 +206,12 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
         {tasks.length === 0 ? (
           <div style={{ padding: '36px 14px', textAlign: 'center', color: muted, fontSize: 12 }}>
             <div>{t('taskQueue.empty', '暂无任务')}</div>
+            {/* 2026-11-20 用户报障：发起多条生成队列页仍空——先说明为什么空，别只给「暂无任务」 */}
+            {!connected ? (
+              <div style={{ marginTop: 6 }}>
+                {t('taskQueue.emptyOffline', 'ComfyUI 未连接，任务列表暂时读不到；连上后自动同步（不影响发起生成）')}
+              </div>
+            ) : null}
           </div>
         ) : (
           <>

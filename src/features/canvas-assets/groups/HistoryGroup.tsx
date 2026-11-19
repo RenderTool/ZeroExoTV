@@ -205,6 +205,19 @@ function layoutChainVertically(
   }
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * 历史链路里的提示词节点：文本节点 data.content 是富文本 HTML（见 text-node-view），
+ * 纯字符串直接塞会被折叠成一行。这里按行包 <p>，与分镜提示词面板的逐行呈现一致。
+ */
+function promptToHtml(text: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  return lines.map((line) => `<p>${line ? escapeHtml(line) : '<br>'}</p>`).join('');
+}
+
 /**
  * 链路的稳定标识：由「整条链路节点 id 集合」算出哈希。
  * 同一条链路从不同产物卡片打开 = 同一份只读快照，不会每个产物都复制一遍节点。
@@ -396,7 +409,7 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
               title: t('historyGroup.promptNode', { defaultValue: '提示词' }),
               position: { x: 60, y: 60 },
               size: { width: 420, height: 260 },
-              data: { content: promptText, promptStyle: 'storyboard', __readonly: true },
+              data: { content: promptToHtml(promptText), promptText, __readonly: true },
             });
             chainEdges.unshift({
               id: 'edge-chain-prompt',
@@ -505,8 +518,8 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
               position: { x: 60, y: 60 },
               size: { width: 420, height: 260 },
               data: {
-                content: resolvedPrompt,
-                promptStyle: 'storyboard',
+                content: promptToHtml(resolvedPrompt),
+                promptText: resolvedPrompt,
                 __readonly: true,
               },
             });
