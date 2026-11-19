@@ -81,6 +81,17 @@ const PHASE: Record<string, PluginDirectorPhase> = {
   failed: 'error', cancelled: 'canceled', canceled: 'canceled', interrupted: 'error',
 };
 
+/** 任务表里可能同时存在「排队」和「运行」两批（网页点一次、MCP 又提交一次）。
+ *  接管必须优先 running：此前按数组顺序取第一个 active，刷新后接到的往往是排队批次，
+ *  页面就显示「排队中」骨架 + 片段「未生成」，真正的运行批次和实时预览反而不见。 */
+function pickActiveTask(tasks: PluginTask[]): PluginTask | null {
+  const score = (t: PluginTask) => Date.parse(t.updatedAt ?? t.createdAt ?? '') || 0;
+  const running = tasks.filter((t) => t.state === 'running').sort((a, b) => score(b) - score(a));
+  if (running.length > 0) return running[0]!;
+  const queued = tasks.filter((t) => t.state === 'queued').sort((a, b) => score(b) - score(a));
+  return queued[0] ?? null;
+}
+
 export function usePluginDirectorTask(args: {
   projectId: string | null | undefined;
   callbacks: PluginDirectorCallbacks;
@@ -373,7 +384,7 @@ export function usePluginDirectorTask(args: {
     const timer = window.setInterval(() => {
       if (pollRef.current !== null) return; // 自己正在轮询，不抢
       void listPluginTasks(projectId).then((tasks) => {
-        const active = tasks.find((t) => t.state === 'running' || t.state === 'queued');
+        const active = pickActiveTask(tasks);
         if (!active || active.taskId === taskRef.current?.taskId) return;
         void applyTask(active).then(() => {
           connectPreview(active.clientId || active.taskId);
@@ -390,7 +401,7 @@ export function usePluginDirectorTask(args: {
     let cancelled = false;
     void listPluginTasks(projectId).then((tasks) => {
       if (cancelled || tasks.length === 0) return;
-      const active = tasks.find((t) => t.state === 'running' || t.state === 'queued');
+      const active = pickActiveTask(tasks);
       const target = active ?? tasks[0]!;
       void applyTask(target).then(() => {
         if (active) {
