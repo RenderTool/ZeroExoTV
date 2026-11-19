@@ -165,16 +165,19 @@ export function composeImagePrompt(input: ComposeShotInput): string {
 
   const size = shotSize[input.number % shotSize.length]!;
   const cam = input.index === 0 ? "固定机位，缓慢推近" : "固定机位";
-  const dialogue = input.dialogue
-    ? ` ${input.speaker ?? "在场角色"}说：<d>[Chinese] ${clean(input.dialogue)}</d>`
+  // 2026-11-19 用户口径：台词不能塞进空间调度句里（塞进去模型会把台词当画面描述，
+  // 还会出现「某某说：」这种叙述，H3 只认 <d> 里那一段声音）。台词单独成块：
+  // 说话人：<d>[Chinese] 台词</d>，一句一行，描述里不再重复。
+  const speaker = input.speaker ?? chars[0]?.name ?? "在场角色";
+  const dialogueBlock = input.dialogue
+    ? `台词（仅声音，画外念出，绝不渲染成画面文字）：\n${speaker}：<d>[Chinese] ${clean(input.dialogue)}</d>`
     : "";
   const shotLine =
     `[Shot 1] ${size}，${cam}，机位在${scene?.name ?? input.scene.name}一侧、轴线固定。` +
     `空间调度：${action}，动作到终点态即停，不转身离画。` +
     (sceneRef ? `以 <${sceneRef}> 为空间基准。` : "") +
     (colorText ? `颜色锁定 ${colorText}。` : "") +
-    `声音：${input.sound ? clean(input.sound) : "环境声与动作音效"}。` +
-    dialogue;
+    `声音：${input.sound ? clean(input.sound) : "环境声与动作音效"}。`;
 
   const names = chars.map((c) => c.name).join("、");
   const closedMouth = chars.length
@@ -190,6 +193,7 @@ export function composeImagePrompt(input: ComposeShotInput): string {
       `目标视频为${input.style.look}；非动画、非游戏渲染。无字幕。无字卡。无屏显文字。`,
     shotLine,
     "",
+    ...(dialogueBlock ? [dialogueBlock, ""] : []),
     "overall_soundscape:",
     `本段仅环境声与动作音效：${input.sound ? clean(input.sound) : "风声、脚步与器物轻响"}。全段无人旁白；${closedMouth}`,
     "",
