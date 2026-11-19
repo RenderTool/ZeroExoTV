@@ -87,9 +87,13 @@ const PHASE: Record<string, PluginDirectorPhase> = {
  *
  *  另外必须过滤「死任务」：云端 ComfyUI 重启/掉线后，旧批次会一直挂在 queued/running，
  *  没有任何心跳。接管它会把这批的片段点亮成「生成中」，用户点第 2 段却看到第 1 段在转，
- *  其实云端什么都没跑。因此按 updatedAt 判断新鲜度：排队 3 分钟、运行 15 分钟没更新即视为失联。 */
-const STALE_QUEUED_MS = 3 * 60 * 1000;
-const STALE_RUNNING_MS = 15 * 60 * 1000;
+ *  其实云端什么都没跑。
+ *
+ *  2026-11-19 用户纠正：不能用「15 分钟没更新」判死 —— 高分辨率长片单批跑到 1–2 小时是常态，
+ *  中途采样不写 updatedAt 很常见，短阈值会把正在跑的真任务误判成失联、直接把批次打成 error。
+ *  阈值放宽到「排队 1 小时 / 运行 4 小时」只用于兜真正的僵尸任务；连不上服务仍由轮询失败 3 次判定。 */
+const STALE_QUEUED_MS = 60 * 60 * 1000;
+const STALE_RUNNING_MS = 4 * 60 * 60 * 1000;
 
 function pickActiveTask(tasks: PluginTask[]): PluginTask | null {
   const score = (t: PluginTask) => Date.parse(t.updatedAt ?? t.createdAt ?? '') || 0;
