@@ -196,8 +196,16 @@ export function usePluginDirectorTask(args: {
     taskRef.current = task;
     const base = pluginTaskBase();
     const segs = task.segments ?? [];
-    const phase = PHASE[task.state] ?? 'queued';
-    const current = task.currentSegment ?? null;
+    // 2026-11-19 用户实测「早就出片了，网页一直显示生成中」：
+    // 插件/MCP 的任务记录会卡在 running（回调丢了），或整批段都 success 但任务没翻状态。
+    // 这里以「段事实」为准兜底：段全 success → 直接按 success 收口；任务记录长时间没心跳
+    // 也按失联处理，不能让片段永久转圈。
+    const allSegsSuccess = segs.length > 0 && segs.every((x) => x.state === 'success');
+    const updatedAt = Date.parse(task.updatedAt ?? task.createdAt ?? '') || 0;
+    const staleActive = updatedAt > 0 && (Date.now() - updatedAt) > (task.state === 'running' ? STALE_RUNNING_MS : STALE_QUEUED_MS);
+    const stateKey = allSegsSuccess ? 'success' : staleActive ? 'error' : task.state;
+    const phase = PHASE[stateKey] ?? 'queued';
+    const current = allSegsSuccess ? null : task.currentSegment ?? null;
     const queue = useTaskQueueStore.getState();
     // 用户已「清空已完成」的任务不再入队（刷新恢复也不能复活）；落库流程不受影响。
     const queueDismissed = queue.dismissed.has(task.taskId);
@@ -217,12 +225,12 @@ export function usePluginDirectorTask(args: {
         ...(currentSeg?.progress ? { progress: currentSeg.progress } : {}),
       });
     }
-    if (!queueDismissed && ['success', 'error', 'interrupted', 'cancelled'].includes(task.state) && !queueFinishedRef.current.has(task.taskId)) {
+    if (!queueDismissed && ['success', 'error', 'interrupted', 'cancelled'].includes(stateKey) && !queueFinishedRef.current.has(task.taskId)) {
       queueFinishedRef.current.add(task.taskId);
       queue.finish(
         task.taskId,
-        task.state === 'success' ? 'success' : task.state === 'cancelled' ? 'cancelled' : 'error',
-        task.error ?? undefined,
+        stateKey === 'success' ? 'success' : stateKey === 'cancelled' ? 'cancelled' : 'error',
+        task.error ?? (staleActive ? OFFLINE_MESSAGE : undefined),
       );
     }
 
@@ -230,7 +238,7 @@ export function usePluginDirectorTask(args: {
     // 插件任务仍在 running/queued 时，段级 interrupted 可能只是网页刷新导致
     // WebSocket 短暂断开后的瞬态值：此时不能写回「中断/未生成」，
     // 否则刷新一次就把正在生成的片段抹成 pending（2026-11-18 实测）。
-    const taskActive = task.state === 'running' || task.state === 'queued';
+    const taskActive = stateKey === 'running' || stateKey === 'queued';
     for (const seg of segs) {
       const shotId = seg.shotId;
       if (!shotId) continue;
@@ -259,8 +267,14 @@ export function usePluginDirectorTask(args: {
     for (const seg of segs) {
       if (seg.state !== 'success' || !seg.shotId) continue;
       const key = `${task.taskId}:${seg.shotId}`;
-      if (landedRef.current.has(key)) continue;
-      if (!seg.outputs?.some((o) => o.path)) continue;
+      // 2026-11-19：success 段因「已落过库 / outputs 缺 path / 落库失败」跳过落库时，
+      // 也必须把片段从「生成中」收口（有片段的保留成片，没片段的回到未生成），
+      // 否则任务早已结束，网页却一直转圈。
+      if (landedRef.current.has(key) || !seg.outputs?.some((o) => o.path)) {
+        cbRef.current.onSegmentState(seg.shotId, 'done');
+        landedRef.current.add(key);
+        continue;
+      }
       landedRef.current.add(key);
       try {
         const landed = await landPluginSegment({
@@ -323,9 +337,9 @@ export function usePluginDirectorTask(args: {
       currentSegment: current,
       doneCount: task.doneCount ?? segs.filter((x) => x.state === 'success').length,
       totalCount: task.totalCount ?? segs.length,
-      error: task.state === 'error' || task.state === 'interrupted'
-        ? (task.error ?? '任务失败') : null,
-      canceledKept: task.state === 'cancelled' ? (task.doneCount ?? segs.filter((x) => x.state === 'success').length) : null,
+      error: stateKey === 'error' || stateKey === 'interrupted'
+        ? (task.error ?? (staleActive ? OFFLINE_MESSAGE : '任务失败')) : null,
+      canceledKept: stateKey === 'cancelled' ? (task.doneCount ?? segs.filter((x) => x.state === 'success').length) : null,
       segmentShotIds: segs.map((x) => x.shotId).filter((x): x is string => Boolean(x)),
       startedAt: Date.parse(task.createdAt ?? '') || Date.now(),
       preview: (() => {
@@ -345,11 +359,11 @@ export function usePluginDirectorTask(args: {
       })(),
     }));
 
-    if ((task.state === 'error' || task.state === 'interrupted') && task.error && errorNotifiedRef.current !== task.taskId) {
+    if ((stateKey === 'error' || stateKey === 'interrupted') && (task.error || staleActive) && errorNotifiedRef.current !== task.taskId) {
       errorNotifiedRef.current = task.taskId;
-      cbRef.current.onNotice('error', `生成失败：${task.error}`);
+      cbRef.current.onNotice('error', `生成失败：${task.error ?? OFFLINE_MESSAGE}`);
     }
-    if (['success', 'error', 'interrupted', 'cancelled'].includes(task.state)) {
+    if (['success', 'error', 'interrupted', 'cancelled'].includes(stateKey)) {
       stopPolling();
       closePreview();
     }
