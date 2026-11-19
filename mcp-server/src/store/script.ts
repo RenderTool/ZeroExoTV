@@ -364,6 +364,23 @@ export async function setEpisodeMeta(
   return { ...res, episode: updated };
 }
 
+/**
+ * 2026-11-19 首测缺陷：整部剧本 overwrite 导入时，原文里的「第N集」标记没有拆集，
+ * 三集被塞进 1 集。这里按集标记切块，每块成为独立 episode（编号按出现顺序）。
+ */
+function splitEpisodeBlocks(text: string): Array<{ number: number; title: string; body: string }> {
+  const re = /^[ \t]*第\s*(?:[0-9]+|[一二三四五六七八九十]+)\s*集[^\n]*$/gm;
+  const matches = [...text.matchAll(re)];
+  if (matches.length < 2) return [];
+  return matches.map((m, i) => {
+    const start = m.index ?? 0;
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+    const header = m[0].trim();
+    const body = text.slice(start + m[0].length, end).replace(/^\n+/, "").trimEnd();
+    return { number: i + 1, title: header, body };
+  });
+}
+
 export async function importScript(
   root: string,
   projectId: string,
@@ -414,14 +431,29 @@ export async function importScript(
           s.activeEpisodeId = ep.id;
         } else {
           // 未指定单集 = 整部剧本重写（保持原有“全部替换”语义）
+          // 2026-11-19 首测缺陷：带「第N集」标记的整部原文要按标记拆成多集，
+          // 否则三集内容会全部塞进第 1 集。
+          const blocks = splitEpisodeBlocks(opts.content);
           s.episodes = [];
-          s.episodes.push({
-            id: `ep-${crypto.randomBytes(6).toString("hex")}`,
-            number: 1,
-            title: opts.title ?? meta.episodeTitle ?? autoEpisodeTitle(1),
-            content: html,
-            status: "draft",
-          });
+          if (blocks.length > 0) {
+            for (const b of blocks) {
+              s.episodes.push({
+                id: `ep-${crypto.randomBytes(6).toString("hex")}`,
+                number: b.number,
+                title: b.title,
+                content: toScriptHtml(b.body),
+                status: "draft",
+              });
+            }
+          } else {
+            s.episodes.push({
+              id: `ep-${crypto.randomBytes(6).toString("hex")}`,
+              number: 1,
+              title: opts.title ?? meta.episodeTitle ?? autoEpisodeTitle(1),
+              content: html,
+              status: "draft",
+            });
+          }
           s.activeEpisodeId = s.episodes[0].id;
         }
       } else if (opts.strategy === "new_episode") {

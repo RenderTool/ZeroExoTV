@@ -537,8 +537,9 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
           />
         </Modal>
 
-        {/* 版本号：统一放在画布左下角（2026-11-12 用户要求） */}
-        <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 20 }}>
+        {/* 版本号：统一放在画布左下角（2026-11-12 用户要求）。
+            底部「使用指引」条会盖住这里，2026-11-19 用户反馈点不开：抬高层级并让出底部条高度。 */}
+        <div style={{ position: 'fixed', left: 12, bottom: 46, zIndex: 1000 }}>
           <VersionBadge theme={theme} />
         </div>
 

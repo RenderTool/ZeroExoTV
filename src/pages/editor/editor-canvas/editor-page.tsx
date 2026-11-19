@@ -833,8 +833,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   return (
     <ReadOnlyProvider value={isReadOnlyViewer}>
     <Layout style={layoutStyle(theme)}>
-      {/* 版本号：统一放画布左下角（2026-11-12 用户要求） */}
-      <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 20 }}>
+      {/* 版本号：统一放画布左下角（2026-11-12 用户要求）；层级要压过底部浮层，否则点不开 */}
+      <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 1000 }}>
         <VersionBadge theme={theme} />
       </div>
       <div style={mainRowStyle}>
