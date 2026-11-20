@@ -24,7 +24,7 @@
  * 不存在渠道选择环节。
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Input, Modal, Space, Tooltip, Typography } from 'antd';
 import { ModelMappingPanel } from './model-mapping-modal.js';
@@ -59,6 +59,22 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
 
   // 自动连接：进入导演台即静默探一次（失败只在面板留一行原因，不弹窗）
   useComfyuiAutoConnect({ disabled: autoProbeDisabled });
+
+  /**
+   * 2026-11-21 用户要求：每次连上 ComfyUI 后，把「连接配置」页自动弹一次，
+   * 让用户当场看到机器/显存与模型清单（尤其缺模型时能立刻发现）。
+   * 只在「未连接 → 已连接」这一跳弹，用户关掉后不会反复弹；内嵌形态不弹。
+   */
+  const prevConnected = useRef(ep.connected);
+  useEffect(() => {
+    const was = prevConnected.current;
+    prevConnected.current = ep.connected;
+    if (inline || ep.connected === was || !ep.connected) return;
+    setOpen(true);
+    setDraft(useComfyuiEndpointStore.getState().address);
+    setTestResult(null);
+    setBridgeWarn(false);
+  }, [ep.connected, inline]);
 
   const patchDraft = useCallback((value: string) => {
     setDraft(value);

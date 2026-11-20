@@ -13,6 +13,7 @@ import { readJson, listDir, readFile } from '@/platform/fs.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { useMcpBannerVisible } from './mcp-banner-visibility.js';
+import { projectLogExists } from './project-log-exists.js';
 
 type Kind = 'requirement' | 'decision' | 'progress' | 'todo' | 'artifact';
 type Status = 'open' | 'review' | 'done' | 'dropped';
@@ -102,6 +103,11 @@ export function ProjectLogTabContent(): React.ReactElement {
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    // 文件不存在就不发请求（否则每 5 秒一条 404 刷满控制台）
+    if (!(await projectLogExists(projectId))) {
+      setLog(EMPTY);
+      return;
+    }
     setLoading(true);
     try {
       setLog((await readJson<ProjectLog>(logPath(projectId))) ?? EMPTY);

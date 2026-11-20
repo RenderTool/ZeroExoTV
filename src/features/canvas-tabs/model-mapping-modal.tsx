@@ -8,8 +8,8 @@
  * 图片是固定工作流，只显示「已就绪 / 未下载」；文本、语音后续支持。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Checkbox, InputNumber, Modal, Select, Tabs, Tag, Typography, message } from 'antd';
-import { RefreshCw } from 'lucide-react';
+import { Button, Checkbox, InputNumber, Modal, Select, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Copy, RefreshCw } from 'lucide-react';
 import { MAX_LORAS, type LoraRow } from '@/entities/director-lora.js';
 import { fetchBridgeModels } from './comfyui-bridge-client.js';
 import { hasDirectorLoraSink, getDirectorLoras, setDirectorLoras } from './director-lora-bridge.js';
@@ -55,11 +55,58 @@ const SLOT_FILTER: Record<VideoSlot, RegExp> = {
   clip: /qwen3vl/i,
 };
 
-/** 图片工作流用的模型：模板里写死，这里只判断本机有没有 */
-const IMAGE_NEEDS: Array<{ key: string; label: string; test: RegExp }> = [
-  { key: 'unet', label: '图片主模型', test: /qwen_image|moss|krea2/i },
-  { key: 'vae', label: '图片 VAE', test: /qwen_image/i },
-  { key: 'clip', label: '图片文本编码器', test: /qwen3\.5|qwen_image/i },
+/**
+ * 图片模型族（2026-11-21 用户口径）：图片不是「一套模型」，Qwen-Image / Krea2 / Moss
+ * 各自的主模型、文本编码器、VAE 完全不同，必须按族逐项列出——包括本机没下载的，
+ * 并且每行都能复制官方文件名，用户才知道该下哪一个。
+ * 期望文件名来源：插件 templates/{qwen_image_t2i,qwen_image_edit,krea2_t2i,moss_image_t2i}.json
+ */
+interface ImageModelLine {
+  label: string;
+  expected: string;
+  source: 'unet' | 'vae' | 'clip';
+  test: RegExp;
+}
+
+interface ImageFamily {
+  key: string;
+  label: string;
+  note: string;
+  models: ImageModelLine[];
+}
+
+const IMAGE_FAMILIES: ImageFamily[] = [
+  {
+    key: 'qwen',
+    label: 'Qwen-Image（文生图 / 改图）',
+    note: '改图与纯文生图共用这一套；两个文本编码器都要有',
+    models: [
+      { label: '主模型', expected: 'qwen_image_2.1_int8_convrot.safetensors', source: 'unet', test: /qwen_image_.*\.safetensors$/i },
+      { label: 'VAE', expected: 'qwen_image_2.1_vae_bf16.safetensors', source: 'vae', test: /qwen_image_2\.1_vae/i },
+      { label: '文本编码器（Qwen3-VL 8B）', expected: 'qwen3vl_8b_int8_convrot.safetensors', source: 'clip', test: /qwen3vl_8b/i },
+      { label: '文本编码器（Qwen3.5 PE）', expected: 'qwen3.5_qwen_image_2.1_pe_i2i.int8_convrot.safetensors', source: 'clip', test: /qwen3\.5_qwen_image/i },
+    ],
+  },
+  {
+    key: 'krea2',
+    label: 'Krea2（文生图）',
+    note: '纯文生图，不支持参考图；VAE 复用 qwen_image_vae',
+    models: [
+      { label: '主模型', expected: 'krea2_turbo_bf16.safetensors', source: 'unet', test: /krea2/i },
+      { label: '文本编码器', expected: 'qwen3vl_4b_fp8_scaled.safetensors', source: 'clip', test: /qwen3vl_4b_fp8/i },
+      { label: 'VAE', expected: 'qwen_image_vae.safetensors', source: 'vae', test: /^qwen_image_vae\.safetensors$/i },
+    ],
+  },
+  {
+    key: 'moss',
+    label: 'Moss Image（文生图）',
+    note: 'Flux2 latent，宽高按 16 对齐',
+    models: [
+      { label: '主模型', expected: 'moss_image_sft_int8_convrot.safetensors', source: 'unet', test: /moss_image/i },
+      { label: '文本编码器', expected: 'qwen3.5_9b_w4a8_gptq.safetensors', source: 'clip', test: /qwen3\.5_9b_w4a8/i },
+      { label: 'VAE', expected: 'flux2-vae_small.safetensors', source: 'vae', test: /flux2-vae_small/i },
+    ],
+  },
 ];
 
 /**
@@ -90,6 +137,31 @@ function pickPreferredModel(slot: VideoSlot, options: string[], totalGb: number 
 function gb(bytes?: number): string {
   if (typeof bytes !== 'number' || bytes <= 0) return '—';
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * 模型名复制按钮（2026-11-21 用户要求「这些模型要支持复制」）：
+ * 客户经常要把文件名贴给 ComfyUI 或下载脚本，逐字符手抄太容易错。
+ */
+function CopyNameButton({ name, size = 12 }: { name: string; size?: number }): JSX.Element {
+  return (
+    <Tooltip title={`复制：${name}`}>
+      <Button
+        type="text"
+        size="small"
+        data-testid="copy-model-name"
+        aria-label={`复制模型名 ${name}`}
+        style={{ padding: '0 4px', height: 20, flexShrink: 0, color: 'inherit', opacity: 0.65 }}
+        icon={<Copy size={size} />}
+        onClick={() => {
+          void navigator.clipboard
+            .writeText(name)
+            .then(() => message.success(`已复制：${name}`))
+            .catch(() => message.error('复制失败，请手动选中文件名'));
+        }}
+      />
+    </Tooltip>
+  );
 }
 
 export interface ModelMappingPanelProps {
@@ -217,6 +289,7 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
               options={options.map((name) => ({ value: name, label: name }))}
             />
             {tier ? <Tag color="green" style={{ marginInlineEnd: 0 }}>{tier}</Tag> : null}
+            {conn.models[slot] ? <CopyNameButton name={conn.models[slot]!} /> : null}
           </div>
         );
       })}
@@ -227,21 +300,34 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
   );
 
   const imagePane = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {IMAGE_NEEDS.map((need) => {
-        const source = need.key === 'unet' ? available.unet : need.key === 'clip' ? available.clip : available.vae;
-        const found = source.find((n) => need.test.test(n));
-        return (
-          <div key={need.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Text style={{ width: 108, fontSize: 12 }}>{need.label}</Text>
-            <Text style={{ flex: 1, fontSize: 12, color: 'var(--ant-color-text-secondary)' }} ellipsis>
-              {found ?? '未下载'}
-            </Text>
-            <Tag color={found ? 'green' : 'default'} style={{ marginInlineEnd: 0 }}>{found ? '已就绪' : '未下载'}</Tag>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {IMAGE_FAMILIES.map((family) => (
+        <div key={family.key} data-image-family={family.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <Text strong style={{ fontSize: 12 }}>{family.label}</Text>
+            <Text type="secondary" style={{ fontSize: 10 }}>{family.note}</Text>
           </div>
-        );
-      })}
-      <Text type="secondary" style={{ fontSize: 11 }}>图片按工作流固定使用上面的模型；缺哪个就先下载，没下载时对应功能静默不可用。</Text>
+          {family.models.map((need) => {
+            const source = need.source === 'unet' ? available.unet : need.source === 'clip' ? available.clip : available.vae;
+            const found = source.find((n) => need.test.test(n));
+            return (
+              <div key={`${family.key}-${need.label}`} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Text style={{ width: 132, fontSize: 12 }}>{need.label}</Text>
+                <Text style={{ flex: 1, fontSize: 12, color: found ? 'var(--ant-color-text-secondary)' : '#d97706' }} ellipsis>
+                  {found ?? `${need.expected}（本机未下载）`}
+                </Text>
+                <Tag color={found ? 'green' : 'default'} style={{ marginInlineEnd: 0 }}>{found ? '已就绪' : '未下载'}</Tag>
+                {/* 没下载也要能复制官方文件名，用户才知道该去下什么 */}
+                <CopyNameButton name={found ?? need.expected} />
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <Text type="secondary" style={{ fontSize: 11 }}>
+        图片模型按族各自成套，维度和文本编码器不能混用（拿 SD 系的 CLIP/VAE 去跑 Qwen-Image 会在采样前的条件拼接处直接报
+        tensor size 不匹配）。缺哪个就先下载，没下载时对应族不可用。
+      </Text>
     </div>
   );
 
@@ -308,6 +394,7 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
                 onChange={() => toggleLora(name)}
               />
               <Text style={{ flex: 1, fontSize: 12 }} ellipsis>{name}</Text>
+              <CopyNameButton name={name} />
               {checked ? <Tag color="green" style={{ marginInlineEnd: 0 }}>第 {order + 1} 条</Tag> : null}
               <InputNumber
                 size="small"
@@ -326,7 +413,9 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
         </div>
       )}
       <Text type="secondary" style={{ fontSize: 11 }}>
-        勾选哪几条、各自强度、串联顺序就是实际下发顺序（ComfyUI 里就是多个 LoraLoaderModelOnly 逐节改 MODEL，显存和耗时都会涨）。{hasDirectorLoraSink() ? '' : '当前没有打开导演台，改动无法写入项目。'}
+        勾选哪几条、各自强度、串联顺序就是实际下发顺序（ComfyUI 里就是多个 LoraLoaderModelOnly 逐节改 MODEL，显存和耗时都会涨）。
+        这里是设置，不是一次性参数：勾完就保存（本地设置 + 项目参数双写），下次打开还是这几条。
+        {hasDirectorLoraSink() ? '' : '（当前没打开导演台，已存为全局设置，打开项目时会自动写进项目参数。）'}
       </Text>
     </div>
   );

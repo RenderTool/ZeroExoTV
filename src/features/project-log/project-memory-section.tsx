@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tag } from 'antd';
 import { readJson } from '@/platform/fs.js';
+import { projectLogExists } from './project-log-exists.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 
 type Kind = 'requirement' | 'decision' | 'progress' | 'todo' | 'artifact';
@@ -50,6 +51,11 @@ export function ProjectMemorySection({ projectId }: { projectId?: string | null 
   const load = useCallback(async () => {
     if (!projectId) return;
     try {
+      // 没有这个文件就不发请求，避免每 4 秒一条 404
+      if (!(await projectLogExists(projectId))) {
+        setLog(null);
+        return;
+      }
       const j = await readJson<ProjectLog>(`projects/${projectId}/entities/project-log.json`);
       setLog(j ?? null);
     } catch {

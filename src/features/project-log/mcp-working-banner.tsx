@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Spin, Tag } from 'antd';
 import { X } from 'lucide-react';
 import { readJson } from '@/platform/fs.js';
+import { projectLogExists } from './project-log-exists.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useMcpBannerVisible } from './mcp-banner-visibility.js';
 
@@ -37,6 +38,11 @@ export function McpWorkingBanner(): React.ReactElement | null {
     let alive = true;
     const tick = async () => {
       try {
+        // 没有这个文件就不发请求（否则每 4 秒一条 404 把控制台刷满）
+        if (!(await projectLogExists(projectId))) {
+          if (alive) setPipeline(null);
+          return;
+        }
         const j = await readJson<{ pipeline?: Pipeline }>(`projects/${projectId}/entities/project-log.json`);
         if (alive) setPipeline(j?.pipeline ?? null);
       } catch {
