@@ -511,8 +511,15 @@ async function runDirector(taskId: string, base: string): Promise<void> {
     const segments: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; params: Record<string, unknown> }> = [];
     for (const p of planned) {
       const refImages = (p.shot.references ?? [])
-        .filter((r) => r.kind === "image")
-        .slice(0, 9);
+        .filter((r) => r.kind === "image");
+      // H3 上限 9 张：插件只取前 9，静默丢图会让 @PictureN 错位 → 超了直接报错。
+      if (refImages.length > 9) {
+        throw new McpError(
+          "VALIDATION",
+          `片段 ${p.shot.number ?? p.shot.id} 参考图 ${refImages.length} 张，超过 H3 上限 9 张；`
+            + "先合并同主体素材或删掉多余槽位（不允许静默丢图）",
+        );
+      }
       const refNames: string[] = [];
       for (const ref of refImages) {
         const resolved = resolveRefStorageKey(

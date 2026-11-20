@@ -212,8 +212,19 @@ async function uploadShotReferences(base: string, shot: WorkbenchShot, subjectTr
       const pa = typeof a.slotNo === "number" && a.slotNo >= 1 ? a.slotNo : Number.POSITIVE_INFINITY;
       const pb = typeof b.slotNo === "number" && b.slotNo >= 1 ? b.slotNo : Number.POSITIVE_INFINITY;
       return pa - pb;
-    })
-    .slice(0, 9);
+    });
+  /**
+   * H3 参考图硬上限 9 张（插件 `ref_video.py::_build_timeline` 只取 `names[:9]`）。
+   * 以前这里 `slice(0,9)` 静默截断，提示词里的 @Picture10+ 就成了空引用；现在超了直接报错。
+   */
+  if (refs.length > 9) {
+    throw new McpError(
+      "VALIDATION",
+      `片段 ${shot.number ?? shot.id} 参考图 ${refs.length} 张，超过 H3 上限 9 张：`
+        + refs.map((r, i) => `${i + 1}.${String(r.title ?? r.storageKey ?? r.id ?? "")}`).join("、")
+        + "。先合并同主体素材或删掉多余槽位，不允许静默丢图（会让 @PictureN 错位）",
+    );
+  }
   const names: string[] = [];
   for (const [i, ref] of refs.entries()) {
     /**

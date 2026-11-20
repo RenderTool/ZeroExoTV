@@ -248,8 +248,19 @@ export async function attachDirectorReferenceImages(
         const pa = typeof a.slotNo === 'number' && a.slotNo >= 1 ? a.slotNo : Number.POSITIVE_INFINITY;
         const pb = typeof b.slotNo === 'number' && b.slotNo >= 1 ? b.slotNo : Number.POSITIVE_INFINITY;
         return pa - pb;
-      })
-      .slice(0, 9);
+      });
+    /**
+     * H3 参考图硬上限 9 张（插件 `ref_video.py::_build_timeline` 用 `names[:9]`，第 10 张起直接丢）。
+     * 以前这里 `slice(0,9)` 静默截断 → 提示词里的 @Picture10+ 变成空引用，成片对不上。
+     * 现在超了直接报错，让用户自己合并/删槽位（不替用户决定丢哪张）。
+     */
+    if (refs.length > 9) {
+      throw new Error(
+        `本段参考图 ${refs.length} 张，超过 H3 上限 9 张：`
+        + refs.map((r, i) => `${i + 1}.${r.title || r.id}`).join('、')
+        + '。请先合并同主体素材或删掉多余槽位（不允许静默丢图，否则 @PictureN 会错位）',
+      );
+    }
     if (refs.length === 0) continue;
     const names: string[] = [];
     for (const [i, ref] of refs.entries()) {
