@@ -332,8 +332,7 @@ def guide_meta(path: str) -> dict[str, Any] | None:
 
         with safe_open(path, framework="pt") as f:
             frames = int(f.get_slice("guide").get_shape()[0])
-        with open(path, "rb") as f:
-            digest = hashlib.sha256(f.read()).hexdigest()
+        digest = _sha256_file(path)
     except Exception:  # noqa: BLE001 - 元数据缺失不影响产物回传
         return None
     return {
@@ -342,6 +341,38 @@ def guide_meta(path: str) -> dict[str, Any] | None:
         "frames": frames,
         "sha256": digest,
     }
+
+
+# 2026-11-20 用户硬要求：id 相同 ≠ 内容相同（实测同一 gd 在云端/本地字节数不同）。
+# 引导内容哈希按 (path,size,mtime) 缓存，避免每段重复读几百 MB。
+_GUIDE_SHA_CACHE: dict[str, tuple[int, float, str]] = {}
+
+
+def _sha256_file(path: str) -> str:
+    st = os.stat(path)
+    hit = _GUIDE_SHA_CACHE.get(path)
+    if hit and hit[0] == st.st_size and hit[1] == st.st_mtime:
+        return hit[2]
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    out = digest.hexdigest()
+    _GUIDE_SHA_CACHE[path] = (st.st_size, st.st_mtime, out)
+    return out
+
+
+def _verify_guide_sha(path: str, want: str, label: str) -> None:
+    """内容指纹校验：不一致就拒绝执行，绝不把错引导当对的用。"""
+    want = str(want or "").strip().lower()
+    if not want:
+        return
+    got = _sha256_file(path)
+    if got != want:
+        raise ValueError(
+            f"{label}内容与记录不一致（记录 {want[:12]}… / 实际 {got[:12]}…，{os.path.getsize(path)} 字节）："
+            "拒绝执行本段，请重新生成该引导或换成正确的那一份"
+        )
 
 
 def _history_entry(prompt_id: str) -> dict[str, Any] | None:
@@ -446,7 +477,7 @@ class ZeroExoGuideLoad:
 # ===== HTTP 协议 =====
 routes = PromptServer.instance.routes
 
-PLUGIN_VERSION = "0.1.1"
+PLUGIN_VERSION = "0.1.2"
 
 
 def _queue_counts() -> dict[str, Any]:
@@ -494,6 +525,7 @@ def resolve_guide_input(params: dict[str, Any]) -> tuple[str, str]:
         path = os.path.join(guides_dir(), f"{explicit}.safetensors")
         if not os.path.isfile(path):
             raise FileNotFoundError(f"引导槽文件不存在: {explicit}")
+        _verify_guide_sha(path, str(params.get("guide_sha256") or ""), f"引导槽 {explicit} ")
         return path, "explicit"
     return "", "none"
 
@@ -549,18 +581,18 @@ async def guide_stat(request):
     except OSError:
         size = 0
     out: dict[str, Any] = {"ok": True, "exists": True, "id": gid, "bytes": size, "path": path}
+    # 始终回 sha256（按 size+mtime 缓存），让调用方在「记录里没存哈希」时也能核对内容
+    try:
+        out["sha256"] = _sha256_file(path)
+    except OSError as exc:  # noqa: PERF203
+        out["sha256Error"] = str(exc)
     # 调用方给了期望 sha256 → 顺带校验内容（id 相同但文件被截断/替换的情况）
     want = str(request.query.get("sha256") or "").strip().lower()
     if want:
-        try:
-            with open(path, "rb") as f:
-                digest = hashlib.sha256(f.read()).hexdigest()
-            out["sha256"] = digest
-            out["match"] = digest == want
-            if digest != want:
+        if out.get("sha256"):
+            out["match"] = out["sha256"] == want
+            if not out["match"]:
                 out["exists"] = False
-        except OSError as exc:  # noqa: PERF203
-            out["sha256Error"] = str(exc)
     return web.json_response(out)
 
 
@@ -1160,6 +1192,15 @@ async def _batch_worker() -> None:
                         if not os.path.isfile(path):
                             seg["state"] = "error"
                             seg["error"] = f"起始引导不存在: {gid}（请先在项目侧生成/缓存该引导）"
+                            job["state"] = "error"
+                            job["error"] = seg["error"]
+                            failed = True
+                            break
+                        try:
+                            _verify_guide_sha(path, str(guide.get("sha256") or ""), f"起始引导 {gid} ")
+                        except ValueError as exc:
+                            seg["state"] = "error"
+                            seg["error"] = str(exc)
                             job["state"] = "error"
                             job["error"] = seg["error"]
                             failed = True

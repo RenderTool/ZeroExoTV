@@ -12,6 +12,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
 
@@ -256,8 +257,9 @@ export async function comfyGuideExists(base: string, guideId: string, expectedSh
   }
 }
 
-/** 把本地 media/guides 的引导推到 ComfyUI（双重兜底：缓存里没有才传） */
-export async function pushGuideToComfy(base: string, guideId: string): Promise<boolean> {
+/** 把本地 media/guides 的引导推到 ComfyUI（双重兜底：缓存里没有才传）
+ *  给了 expectedSha256 时：本地不一致直接拒绝上传（避免把错内容污染云端），上传后用云端返回的 sha 复核。 */
+export async function pushGuideToComfy(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean> {
   if (!/^gd_[A-Za-z0-9_-]{4,64}$/.test(guideId)) return false;
   const file = path.join(dataRoot(), "media", "guides", `${guideId}.safetensors`);
   let buf: Buffer;
@@ -268,6 +270,13 @@ export async function pushGuideToComfy(base: string, guideId: string): Promise<b
   } catch {
     return false;
   }
+  if (expectedSha256) {
+    const localSha = createHash("sha256").update(buf).digest("hex");
+    if (localSha !== expectedSha256.toLowerCase()) {
+      console.warn(`[guide] ${guideId} 本地内容与记录不一致（记录 ${expectedSha256.slice(0, 12)}… / 本地 ${localSha.slice(0, 12)}…），拒绝上传`);
+      return false;
+    }
+  }
   try {
     const res = await fetch(`${base}/zeroexo/v1/guides/${encodeURIComponent(guideId)}`, {
       method: "POST",
@@ -275,7 +284,15 @@ export async function pushGuideToComfy(base: string, guideId: string): Promise<b
       body: new Uint8Array(buf),
       signal: AbortSignal.timeout(120_000),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    if (expectedSha256) {
+      const body = (await res.json().catch(() => null)) as { sha256?: string } | null;
+      if (body?.sha256 && body.sha256 !== expectedSha256.toLowerCase()) {
+        console.warn(`[guide] ${guideId} 上传后云端 sha 与记录不一致（云端 ${body.sha256.slice(0, 12)}…），视为失败`);
+        return false;
+      }
+    }
+    return true;
   } catch {
     return false;
   }
@@ -287,7 +304,7 @@ export async function ensureComfyGuide(base: string, guideId: string, expectedSh
   const exists = await comfyGuideExists(base, guideId, expectedSha256);
   // 探针不可用（旧插件/代理）时不能断言缺失：云端 output 可能是用户手动上传的，交给插件运行时判断
   if (exists !== false) return true;
-  return pushGuideToComfy(base, guideId);
+  return pushGuideToComfy(base, guideId, expectedSha256);
 }
 
 /** guide safetensors 落到本地 media/guides，返回 `guide:<id>.safetensors`（跨重启仍可追溯） */

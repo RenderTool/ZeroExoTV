@@ -18,7 +18,8 @@ import { resolveMediaBlob } from '@/shared/media/resolve-media-blob.js';
 
 export interface PluginSegmentPayload {
   shotId: string;
-  guide: { mode: 'initial' | 'chain' | 'none'; id?: string };
+  /** sha256 = 该引导内容指纹；提交前/执行时都必须校验，禁止「同 id 不同内容」被当成同一份 */
+  guide: { mode: 'initial' | 'chain' | 'none'; id?: string; sha256?: string };
   params: Record<string, unknown>;
 }
 
@@ -112,9 +113,13 @@ export function buildDirectorBatchPayload(args: {
       ? selectedShotVersion(shots[headIdx - 1]!)
       : null;
     const startGuide = head.guide?.id
-      ? { mode: 'initial' as const, id: head.guide.id }
+      ? { mode: 'initial' as const, id: head.guide.id, ...(head.guide.sha256 ? { sha256: head.guide.sha256 } : {}) }
       : prevVersion?.guide?.id
-        ? { mode: 'initial' as const, id: prevVersion.guide.id }
+        ? {
+            mode: 'initial' as const,
+            id: prevVersion.guide.id,
+            ...(prevVersion.guide.sha256 ? { sha256: prevVersion.guide.sha256 } : {}),
+          }
         : { mode: 'none' as const };
 
     run.forEach((idx, k) => {

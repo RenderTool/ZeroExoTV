@@ -7,6 +7,7 @@
 import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import type { PluginBatchPayload } from '@/features/canvas-tabs/director-plugin-payload.js';
 import { readCachedGuideBlob } from '@/entities/guide-store.js';
+import { sha256Hex } from '@/entities/cas-store.js';
 
 export type PluginTaskState = 'queued' | 'running' | 'success' | 'error' | 'cancelled' | 'interrupted';
 
@@ -16,7 +17,7 @@ export interface PluginTaskSegment {
   state: PluginTaskState;
   prompt?: string;
   params?: Record<string, unknown>;
-  guide?: { mode: 'initial' | 'chain' | 'none'; id?: string; path?: string; frames?: number };
+  guide?: { mode: 'initial' | 'chain' | 'none'; id?: string; path?: string; frames?: number; sha256?: string };
   progress?: { step: number; totalSteps: number };
   previewPath?: string;
   outputs?: Array<{ kind?: string; path?: string }>;
@@ -82,47 +83,108 @@ function withTimeout(ms: number): AbortSignal {
     : new AbortController().signal;
 }
 
-async function ensureGuideOnComfy(base: string, id: string): Promise<string | null> {
+/** 结果分两类：conflict 必须中止提交（绝不允许拿错内容送进去），其余只提示 */
+type GuideCheck = { level: 'ok' } | { level: 'warn'; reason: string } | { level: 'conflict'; message: string };
+
+const localShaCache = new Map<string, { size: number; sha: string }>();
+
+async function localGuideSha(id: string, blob: Blob): Promise<string> {
+  const cached = localShaCache.get(id);
+  if (cached && cached.size === blob.size) return cached.sha;
+  const sha = await sha256Hex(blob);
+  localShaCache.set(id, { size: blob.size, sha });
+  return sha;
+}
+
+async function ensureGuideOnComfy(base: string, id: string, wantSha?: string): Promise<GuideCheck> {
   const url = `${base}/zeroexo/v1/guides/${encodeURIComponent(id)}`;
-  let needUpload = false;
+  const blob = await readCachedGuideBlob({ id }).catch(() => null);
+  // 老记录没存 sha 时不能「按 id 就认」：拿本地这份的哈希当基准去核云端，
+  // 两边不一致同样按冲突中止（宁可停，也不让错引导进链）。
+  let expected = wantSha ?? null;
+  let legacyDerived = false;
+  if (!expected && blob?.size) {
+    expected = await localGuideSha(id, blob);
+    legacyDerived = true;
+  }
+
+  let cloudSha: string | null = null;
   try {
-    const head = await fetch(url, { method: 'GET', signal: withTimeout(8_000) });
+    const qs = expected ? `?sha256=${encodeURIComponent(expected)}` : '';
+    const head = await fetch(`${url}${qs}`, { method: 'GET', signal: withTimeout(expected ? 60_000 : 8_000) });
     if (head.ok) {
-      const body = await head.json().catch(() => null) as { exists?: boolean } | null;
-      if (body?.exists !== false) return null; // 云端已有 → 直接用
-      needUpload = true;
+      const body = await head.json().catch(() => null) as
+        | { exists?: boolean; match?: boolean; sha256?: string; bytes?: number }
+        | null;
+      cloudSha = body?.sha256 ?? null;
+      if (body?.exists !== false && (expected ? body?.match === true : true)) return { level: 'ok' };
+      if (legacyDerived && expected) {
+        return {
+          level: 'conflict',
+          message: `引导 ${id} 云端与本地同名但内容不同（云端 ${cloudSha ? `${cloudSha.slice(0, 12)}…` : '无哈希'}/${body?.bytes ?? '?'}B，本地 ${expected.slice(0, 12)}…/${blob!.size}B）；`
+            + '记录里没有该引导的 sha256，无法判定哪份正确，已阻止提交。请重新生成该段，或人工确认后用正确的那份覆盖',
+        };
+      }
+      // 记录有 sha：云端同 id 内容不符（或明确没有）→ 落到下面用记录那份覆盖
     } else if (head.status === 404) {
       const body = await head.json().catch(() => null) as { ok?: boolean; exists?: boolean } | null;
-      // 只有 0.1.1 的 {ok:true, exists:false} 才算「确证缺失」；其它 404 视为探针不可用 → 放行
-      if (body?.ok === true && body?.exists === false) needUpload = true;
-      else return null;
+      // 只有 0.1.1+ 的 {ok:true, exists:false} 才算「确证缺失」；其它 404 视为探针不可用 → 交给执行校验
+      if (!(body?.ok === true && body?.exists === false)) return { level: 'ok' };
     } else {
-      return null; // 探针异常（代理/旧插件/500）→ 交给插件运行时自己判断
+      return { level: 'ok' }; // 探针异常（代理/旧插件/500）→ 交给插件执行时校验
     }
   } catch {
-    return null; // 超时/网络问题不阻塞生成
+    return { level: 'ok' }; // 超时/网络问题不阻塞生成
   }
-  if (!needUpload) return null;
 
-  const blob = await readCachedGuideBlob({ id }).catch(() => null);
-  if (!blob || !blob.size) return 'local-missing';
+  if (!blob || !blob.size) {
+    if (!expected) return { level: 'warn', reason: 'local-missing' };
+    // 记录里有 sha 但本地没有副本：云端又对不上，无法自证 → 中止
+    return {
+      level: 'conflict',
+      message: `引导 ${id} 云端内容与记录不一致（期望 ${expected.slice(0, 12)}…，云端 ${cloudSha ? `${cloudSha.slice(0, 12)}…` : '无哈希'}），本地也没有副本可校验；已阻止提交，请重新生成该段或换回正确引导`,
+    };
+  }
+
+  if (expected) {
+    const localSha = await localGuideSha(id, blob);
+    if (localSha !== expected) {
+      // 本地缓存本身就不是记录里那份 → 上传只会污染云端，直接中止
+      return {
+        level: 'conflict',
+        message: `引导 ${id} 内容与记录不符（记录 ${expected.slice(0, 12)}… / 本地 ${localSha.slice(0, 12)}… / 云端 ${cloudSha ? (cloudSha === expected ? '一致' : `${cloudSha.slice(0, 12)}…`) : '无'}），已阻止提交；请确认哪一份正确后再生成`,
+      };
+    }
+  }
+
   try {
     const form = new FormData();
     form.append('file', blob, `${id}.safetensors`);
     const res = await fetch(url, { method: 'POST', body: form, signal: withTimeout(90_000) });
-    if (res.ok) return null;
-    if (GUIDE_ROUTE_MISSING.has(res.status)) return `route:${res.status}`;
-    if (res.status === 413) return `large:${Math.round(blob.size / 1024 / 1024)}`;
-    return `http:${res.status}`;
+    if (!res.ok) {
+      if (GUIDE_ROUTE_MISSING.has(res.status)) return { level: 'warn', reason: `route:${res.status}` };
+      if (res.status === 413) return { level: 'warn', reason: `large:${Math.round(blob.size / 1024 / 1024)}` };
+      return { level: 'warn', reason: `http:${res.status}` };
+    }
+    if (expected) {
+      const body = await res.json().catch(() => null) as { sha256?: string } | null;
+      if (body?.sha256 && body.sha256 !== expected) {
+        return {
+          level: 'conflict',
+          message: `引导 ${id} 上传后云端内容仍与记录不一致（云端 ${body.sha256.slice(0, 12)}… / 记录 ${expected.slice(0, 12)}…），已阻止提交`,
+        };
+      }
+    }
+    return { level: 'ok' };
   } catch {
-    return 'unreachable';
+    return { level: 'warn', reason: 'unreachable' };
   }
 }
 
 function guideWarning(id: string, reason: string): string {
   const manual = `本地 <数据根>/media/guides/${id}.safetensors 需放到云端 ComfyUI/output/zeroexo/guides`;
   if (reason.startsWith('route:')) {
-    return `云端插件没有引导写入接口（HTTP ${reason.slice(6)}），且查询确认云端没有 ${id}；${manual}（或升级 ComfyUI_ZeroExoNodes 0.1.1）`;
+    return `云端插件没有引导写入接口（HTTP ${reason.slice(6)}），且查询确认云端没有 ${id}；${manual}（或升级 ComfyUI_ZeroExoNodes 0.1.2）`;
   }
   if (reason.startsWith('large:')) {
     return `网关拒收引导体积 ${reason.slice(6)}MB，且云端没有 ${id}；${manual}`;
@@ -137,20 +199,34 @@ function guideWarning(id: string, reason: string): string {
 }
 
 async function ensureGuidesOnComfy(base: string, payload: PluginBatchPayload): Promise<string[]> {
-  const ids = [
-    ...new Set(
-      (payload.segments ?? [])
-        .filter((s) => s.guide?.mode === 'initial' && s.guide?.id)
-        .map((s) => s.guide!.id as string),
-    ),
-  ];
-  if (ids.length === 0) return [];
-  const results = await Promise.all(ids.map(async (id) => ({ id, reason: await ensureGuideOnComfy(base, id) })));
-  const warnings: string[] = [];
-  for (const { id, reason } of results) {
-    if (reason) warnings.push(guideWarning(id, reason));
+  // 同一 id 若出现多个 sha（历史脏数据）→ 直接判冲突，绝不挑一个用
+  const wanted = new Map<string, string | undefined>();
+  const conflictIds = new Set<string>();
+  for (const seg of payload.segments ?? []) {
+    if (seg.guide?.mode !== 'initial' || !seg.guide.id) continue;
+    const id = seg.guide.id;
+    const sha = seg.guide.sha256;
+    if (!wanted.has(id)) wanted.set(id, sha);
+    else if (wanted.get(id) !== sha) conflictIds.add(id);
   }
-  return warnings;
+  if (conflictIds.size) {
+    throw new Error(
+      `同一引导 id 在批次里对应了不同内容（${[...conflictIds].join('、')}），已阻止提交；请刷新分镜后重试`,
+    );
+  }
+  if (wanted.size === 0) return [];
+
+  const results = await Promise.all(
+    [...wanted.entries()].map(async ([id, sha]) => ({ id, check: await ensureGuideOnComfy(base, id, sha) })),
+  );
+  const conflicts = results.filter((r) => r.check.level === 'conflict');
+  if (conflicts.length) {
+    throw new Error(
+      (conflicts[0]!.check as { message: string }).message
+      + (conflicts.length > 1 ? `（另有 ${conflicts.length - 1} 条同类冲突）` : ''),
+    );
+  }
+  return results.filter((r) => r.check.level === 'warn').map((r) => guideWarning(r.id, (r.check as { reason: string }).reason));
 }
 
 export async function submitPluginTask(payload: PluginBatchPayload): Promise<PluginSubmitResult> {

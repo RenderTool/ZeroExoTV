@@ -121,11 +121,13 @@ export async function landPluginSegment(args: {
   const blob = await res.blob();
   if (!blob.size) return null;
 
+  // guide 的 sha256 必须落库：单凭同 id 无法证明内容一致（用户 2026-11-20 明确要求「同名不同内容绝不允许」）
   const guide: GuideMeta | undefined = args.segment.guide?.id
     ? {
         id: args.segment.guide.id,
         ...(args.segment.guide.path ? { path: args.segment.guide.path } : {}),
         ...(args.segment.guide.frames ? { frames: args.segment.guide.frames } : {}),
+        ...(args.segment.guide.sha256 ? { sha256: args.segment.guide.sha256 } : {}),
       }
     : undefined;
 

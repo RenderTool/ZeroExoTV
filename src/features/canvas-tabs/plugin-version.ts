@@ -9,7 +9,7 @@
  * 的 PLUGIN_VERSION 必须一起改（发版时同一条提交里同步）。
  */
 
-export const OFFICIAL_PLUGIN_VERSION = '0.1.1';
+export const OFFICIAL_PLUGIN_VERSION = '0.1.2';
 
 const PARTS = 3;
 
