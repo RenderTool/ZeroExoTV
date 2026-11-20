@@ -56,6 +56,10 @@ import {
   snapGuide,
 } from "./params.js";
 import { appendVersion, resolveGuide } from "./shot-cache.js";
+import { readBroadcastComfyModels } from "../lib/comfy-models.js";
+import { resolveRefStorageKey, type RefLike } from "../lib/subject-refs.js";
+import { templatePassthrough } from "../lib/template-params.js";
+import { readStoryboard } from "../store/storyboard.js";
 
 const POLL_MS = 2500;
 const MAX_WAIT_MS = 60 * 60 * 1000;
@@ -388,6 +392,15 @@ async function runDirector(taskId: string, base: string): Promise<void> {
   const all = wb.shots as WorkbenchShot[];
   const byId = new Map(all.map((s) => [s.id, s]));
   const shared = (wb.sharedParams?.params ?? {}) as Record<string, unknown>;
+  /** 主体树：参考图必须按它解析当前图（2026-11-20，否则换图后仍传旧图）。 */
+  const subjectTree = await readStoryboard(root, task0.projectId)
+    .then((sb) => sb?.subjectTree)
+    .catch(() => undefined);
+  /**
+   * 模型四件套：任务里带了就用；没带读网页模型映射面板广播的当前选择。
+   * 两条来源都空 → 明确报错，绝不静默让插件挑模板默认（48G bf16 → 47.4G 卡 OOM）。
+   */
+  const models = request.models ?? (await readBroadcastComfyModels()) ?? undefined;
   const num = (key: string, fallback: number): number => {
     const n = Number(shared[key]);
     return Number.isFinite(n) ? n : fallback;
@@ -498,18 +511,32 @@ async function runDirector(taskId: string, base: string): Promise<void> {
     const segments: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; params: Record<string, unknown> }> = [];
     for (const p of planned) {
       const refImages = (p.shot.references ?? [])
-        .filter((r) => r.kind === "image" && r.storageKey)
+        .filter((r) => r.kind === "image")
         .slice(0, 9);
       const refNames: string[] = [];
       for (const ref of refImages) {
-        if (!ref.storageKey) continue;
-        const name = await uploadRef(base, ref.storageKey, `zxb_${p.shot.id}_${refNames.length}`);
+        const resolved = resolveRefStorageKey(
+          {
+            id: String((ref as { id?: string }).id ?? ""),
+            title: (ref as { title?: string }).title,
+            storageKey: ref.storageKey,
+            kind: ref.kind,
+            origin: (ref as { origin?: RefLike["origin"] }).origin,
+          },
+          subjectTree,
+        );
+        const key = resolved.stale ? "" : resolved.key ?? ref.storageKey;
+        if (!key) continue;
+        const name = await uploadRef(base, key, `zxb_${p.shot.id}_${refNames.length}`);
         if (name) refNames.push(name);
       }
       segments.push({
         shotId: p.shot.id,
         guide: { mode: p.mode, ...(p.guideId ? { id: p.guideId } : {}) },
         params: {
+          // 模板级参数（sampler/scheduler/位移/LoRA/缓存开关）真下发：共享打底、本段覆盖优先。
+          ...templatePassthrough(shared),
+          ...templatePassthrough((p.shot as { paramValues?: Record<string, unknown> }).paramValues ?? {}),
           prompt: promptOf(p.shot),
           negative_prompt: String((p.shot as { negativePrompt?: string }).negativePrompt ?? ""),
           width,
@@ -527,12 +554,19 @@ async function runDirector(taskId: string, base: string): Promise<void> {
         },
       });
     }
+    if (!models) {
+      throw new McpError(
+        "MODELS_NOT_CONFIGURED",
+        "任务没有携带模型四件套，网页模型映射面板也没有广播当前选择："
+          + "先在网页「模型映射」里选定 unet / 视频VAE / 音频VAE / 文本编码器（保存即广播），再重新提交。",
+      );
+    }
     try {
       batchId = await submitComfyBatch(base, {
         clientJobId: `zxb_${taskId}`,
         clientId: task0.engine?.clientId,
         runId: taskId,
-        ...(request.models ? { models: request.models } : {}),
+        models: models as Record<string, string>,
         segments,
       });
     } catch (err) {

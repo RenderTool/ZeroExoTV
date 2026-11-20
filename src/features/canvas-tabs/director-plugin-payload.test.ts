@@ -56,4 +56,40 @@ describe('buildDirectorBatchPayload', () => {
     const shots = [shot(1), shot(2), shot(3, { continuation: false })];
     expect(contiguousRuns(shots, ['s1', 's2', 's3'])).toEqual([[0, 1], [2]]);
   });
+
+  /**
+   * 2026-11-20 报障回归：sampler/scheduler/位移/LoRA 等模板级参数以前一个都没下发，
+   * 插件退回模板默认（LoRA 恒 8 步 turbo、文本编码器挑到 48G bf16）。这里锁住三件事：
+   * 1) 共享参数里的模板键必须出现在每段 params；2) 段级 paramValues 覆盖共享；
+   * 3) 计算值（width/height/frames/steps）不能被 UI 旧值冲掉。
+   */
+  it('模板级参数真下发，且段级 paramValues 优先、计算值不被冲掉', () => {
+    const sharedWithTpl = {
+      params: {
+        aspect: '21:9', scaleFactor: 1.5, steps: 12, cfg: 1, seed: -1,
+        sampler: 'res_multistep', scheduler: 'simple', shift_video: 12, shift_audio: 3,
+        clear_vram_between_segments: true, lora_name: 'shared_lora.safetensors', lora_strength: 0.8,
+        width: 1728, height: 736, frames: 999,
+        continuityOverlapFrames: 22,
+      },
+    } as unknown as WorkbenchSharedParams;
+    const perShot = shot(1) as unknown as Record<string, unknown>;
+    perShot.paramValues = { sampler: 'euler', lora_strength: 0.6 };
+    const payload = buildDirectorBatchPayload({
+      projectId: 'p', taskId: 't', shots: [perShot as unknown as WorkbenchShot], selectedIds: ['s1'],
+      shared: sharedWithTpl,
+    });
+    const params = payload.segments[0]!.params;
+    expect(params.sampler).toBe('euler');
+    expect(params.scheduler).toBe('simple');
+    expect(params.shift_video).toBe(12);
+    expect(params.shift_audio).toBe(3);
+    expect(params.clear_vram_between_segments).toBe(true);
+    expect(params.lora_name).toBe('shared_lora.safetensors');
+    expect(params.lora_strength).toBe(0.6);
+    expect(params.steps).toBe(12);
+    expect(params.width).toBe(1920);
+    expect(params.height).toBe(832);
+    expect(params.frames).toBe(124);
+  });
 });

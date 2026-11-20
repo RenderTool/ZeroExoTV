@@ -10,6 +10,7 @@
  */
 
 import { create } from 'zustand';
+import { publishComfyuiModels } from '@/platform/comfyui-models-broadcast.js';
 
 export const COMFYUI_CONNECTION_STORAGE_KEY = 'zeroexo.comfyuiBridge';
 export const COMFYUI_CONNECTION_SCHEMA_VERSION = 1;
@@ -89,9 +90,15 @@ export const useComfyuiConnectionStore = create<ComfyuiConnectionState>()((set, 
     set(patch);
     const s = get();
     saveComfyuiConnection({ token: s.token, models: s.models });
+    // 模型四件套同时广播到数据根：MCP 是另一个进程，读不到 localStorage，
+    // 不广播的话走 MCP 发起的任务永远不带 models（插件退回模板自选 48G bf16）。
+    void publishComfyuiModels(s.models);
   };
+  /** 启动时也广播一次：用户装完新版没去动「模型映射」面板，MCP 也要能读到已保存的四件套。 */
+  const initial = loadComfyuiConnection();
+  void publishComfyuiModels(initial.models);
   return {
-    ...loadComfyuiConnection(),
+    ...initial,
     connected: false,
     availableModels: { unet: [], vae: [], clip: [] },
     setToken: (token) => commit({ token }),

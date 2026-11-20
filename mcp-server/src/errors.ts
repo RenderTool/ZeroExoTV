@@ -43,6 +43,8 @@ export type McpErrorCode =
   | "SCRIPT_NOT_READY"
   /** 前置门：剧本未定稿 / 主体未完善（2026-11-19 升级为硬门禁） */
   | "PREFLIGHT_GATE_FAILED"
+  /** 模型四件套没给也没广播（2026-11-20：禁止插件退回模板默认模型） */
+  | "MODELS_NOT_CONFIGURED"
   | "GITHUB_FAILED";
 
 export class McpError extends Error {

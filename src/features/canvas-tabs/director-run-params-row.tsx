@@ -16,7 +16,7 @@
  */
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { InputNumber, Popover, Select } from 'antd';
+import { Input, InputNumber, Popover, Select } from 'antd';
 import { Play, SlidersHorizontal } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AspectRatioPicker } from '@/features/generator-settings/aspect-ratio-picker.js';
@@ -223,6 +223,41 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
           className="director-select"
           popupClassName="director-select-popup"
           style={{ width: 160, height: 25 }}
+        />
+      </div>
+      {/*
+        LoRA（2026-11-20）：插件模板里 lora_name 有默认值（8 步 turbo 蒸馏版），
+        以前网页/MCP 都不传这个键，面板也没有入口 → 步数调到 12/15 仍然套 8 步 LoRA。
+        这里给显式入口：留空 = 跟模板默认走；填文件名 = 原样下发（不按步数自动挑，选择权在用户）。
+      */}
+      <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+        <span style={labelStyle}>{t('director.loraName', 'LoRA')}</span>
+        <Input
+          data-param-key="lora_name"
+          aria-label={t('director.loraName', 'LoRA')}
+          size="small"
+          value={String(params['lora_name'] ?? '')}
+          placeholder={t('director.loraDefault', '留空 = 模板默认（8 步 turbo）')}
+          onChange={(e) => setParam('lora_name', e.target.value)}
+          className="director-input"
+          style={{ height: 25, fontSize: 11 }}
+        />
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>{t('director.loraStrength', 'LoRA 强度')}</span>
+        <InputNumber
+          data-param-key="lora_strength"
+          aria-label={t('director.loraStrength', 'LoRA 强度')}
+          size="small"
+          min={0}
+          max={2}
+          step={0.05}
+          precision={2}
+          value={params['lora_strength'] == null ? null : Number(params['lora_strength'])}
+          placeholder={t('director.loraStrengthDefault', '留空 = 模板默认')}
+          onChange={(v) => setParam('lora_strength', typeof v === 'number' && Number.isFinite(v) ? v : undefined)}
+          className="director-input-number"
+          style={{ width: 120, height: 25 }}
         />
       </div>
     </>

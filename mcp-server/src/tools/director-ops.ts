@@ -28,6 +28,9 @@ import { submitPluginTask } from "../broker/plugin-client.js";
 import { mirrorPluginTask } from "./tasks.js";
 import { cacheGuideFile, resolveComfyBase } from "../broker/comfy.js";
 import type { WorkbenchShot } from "../store/workbench.js";
+import { readBroadcastComfyModels, type ComfyModels } from "../lib/comfy-models.js";
+import { resolveRefStorageKey, type RefLike } from "../lib/subject-refs.js";
+import { templatePassthrough } from "../lib/template-params.js";
 
 const GUIDE_ID_RE = /^gd_[A-Za-z0-9_-]{4,64}$/;
 
@@ -201,7 +204,7 @@ async function uploadRefImage(base: string, filePath: string, filename: string):
  * 与网页 attachDirectorReferenceImages 同口径：缺文件 / 上传失败都直接抛错，
  * 不允许「静默退化成纯文本生成」。
  */
-async function uploadShotReferences(base: string, shot: WorkbenchShot): Promise<string[]> {
+async function uploadShotReferences(base: string, shot: WorkbenchShot, subjectTree?: unknown): Promise<string[]> {
   const refs = ((shot.references ?? []) as unknown as Array<Record<string, unknown>>)
     .filter((r) => r.kind === "image")
     .slice()
@@ -213,12 +216,27 @@ async function uploadShotReferences(base: string, shot: WorkbenchShot): Promise<
     .slice(0, 9);
   const names: string[] = [];
   for (const [i, ref] of refs.entries()) {
-    const key = String(ref.storageKey ?? "");
+    /**
+     * 2026-11-20 报障：这里原来直接用 records 里的 storageKey，主体换图后仍传旧图
+     * （实测 Picture5 还是 `cas:23d2e809` 旧版）。改成与网页 resolveRefVisual 同语义，
+     * 按主体树解析当前图；解析不到才报错，不静默退化成旧图。
+     */
+    const resolved = resolveRefStorageKey(
+      {
+        id: String(ref.id ?? ""),
+        title: typeof ref.title === "string" ? ref.title : undefined,
+        storageKey: typeof ref.storageKey === "string" ? ref.storageKey : undefined,
+        kind: typeof ref.kind === "string" ? ref.kind : undefined,
+        origin: (ref.origin && typeof ref.origin === "object" ? ref.origin : undefined) as RefLike["origin"],
+      },
+      subjectTree,
+    );
+    const key = resolved.stale ? "" : String(resolved.key ?? ref.storageKey ?? "");
     const filePath = casFilePath(key);
     if (!filePath) {
       throw new McpError(
         "VALIDATION",
-        `片段 ${shot.number ?? shot.id} 第 ${i + 1} 张参考图没有可用文件（${key || "空 key"}）：先重新放入插槽再生成`,
+        `片段 ${shot.number ?? shot.id} 第 ${i + 1} 张参考图没有可用文件（${key || "空 key"}）：主体/素材已失效或未挂图，先重新放入插槽再生成`,
       );
     }
     const ext = path.extname(filePath) || ".png";
@@ -242,9 +260,11 @@ function buildDirectorPluginPayload(args: {
   selectedIds: readonly string[];
   shared: Record<string, unknown>;
   base: string;
+  models?: ComfyModels;
+  dryRun?: boolean;
 }): Promise<{
   payload: Record<string, unknown>;
-  plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }>;
+  plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number; refs?: string[]; params?: Record<string, unknown> }>;
 }> {
   return buildPayloadAsync(args);
 }
@@ -256,11 +276,14 @@ async function buildPayloadAsync(args: {
   selectedIds: readonly string[];
   shared: Record<string, unknown>;
   base: string;
+  models?: ComfyModels;
+  dryRun?: boolean;
 }): Promise<{
   payload: Record<string, unknown>;
-  plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }>;
+  plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number; refs?: string[]; params?: Record<string, unknown> }>;
 }> {
   const { projectId, taskId, shots, selectedIds, shared } = args;
+  const subjectTree = await readStoryboard(dataRoot(), projectId).then((sb) => sb?.subjectTree).catch(() => undefined);
   const aspect = String(shared.aspect ?? "16:9");
   const size = resolveVideoSize(aspect, Number(shared.scaleFactor ?? 1));
   const num = (key: string, fallback: number): number => {
@@ -272,7 +295,7 @@ async function buildPayloadAsync(args: {
   const seed = num("seed", 0);
   const guideFrames = snapGuide(shared.continuityOverlapFrames);
   const segments: Array<Record<string, unknown>> = [];
-  const plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number }> = [];
+  const plan: Array<{ shotId: string; guide: { mode: "initial" | "chain" | "none"; id?: string }; frames: number; durationSec: number; refs?: string[]; params?: Record<string, unknown> }> = [];
 
   for (const run of contiguousRuns(shots, selectedIds)) {
     const headIdx = run[0]!;
@@ -292,11 +315,23 @@ async function buildPayloadAsync(args: {
       // 参考图必须真上传（2026-11-19 事故）：只发提示词 = 插件按文本自由发挥，
       // 画面会脱离主体定妆/场景概念图，也会出现果冻式漂移。这里与网页
       // attachDirectorReferenceImages 同源：按槽号顺序上传，缺图直接报错。
-      const refs = await uploadShotReferences(args.base, shot);
+      /**
+       * dryRun 是纯预检：不碰网络、不传图，只把「会传哪几张」列出来给用户核对。
+       * （2026-11-20：以前 dryRun 也要连云端上传，实例一停就没法核对参数。）
+       */
+      const refTitles = ((shot.references ?? []) as unknown as Array<Record<string, unknown>>)
+        .filter((r) => r.kind === "image")
+        .map((r) => String(r.title ?? r.storageKey ?? ""));
+      const refs = args.dryRun ? [] : await uploadShotReferences(args.base, shot, subjectTree);
+      const shotParams = (shot as { paramValues?: Record<string, unknown> }).paramValues ?? {};
       segments.push({
         shotId: shot.id,
         guide,
         params: {
+          // 模板级参数（sampler/scheduler/位移/LoRA/缓存开关）：共享值打底，本段覆盖优先。
+          // 2026-11-20 报障：原来这些键一个都没下发，插件退回模板默认 → LoRA 恒为 8 步 turbo。
+          ...templatePassthrough(shared),
+          ...templatePassthrough(shotParams),
           prompt: shotPrompt(shot),
           negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ""),
           width: size.width,
@@ -312,7 +347,29 @@ async function buildPayloadAsync(args: {
           ...(refs.length ? { reference_image: refs[0] ?? "", reference_images: refs } : {}),
         },
       });
-      plan.push({ shotId: shot.id, guide, frames, durationSec: Number((frames / 24).toFixed(3)) });
+      plan.push({
+        shotId: shot.id,
+        guide,
+        frames,
+        durationSec: Number((frames / 24).toFixed(3)),
+        ...(args.dryRun ? { refs: refTitles } : {}),
+        ...(args.dryRun
+          ? {
+              params: {
+                ...templatePassthrough(shared),
+                ...templatePassthrough(shotParams),
+                width: size.width,
+                height: size.height,
+                frames,
+                steps,
+                cfg,
+                seed,
+                frame_rate: 24,
+                guide_frames: guideFrames,
+              },
+            }
+          : {}),
+      });
     }
   }
 
@@ -322,6 +379,7 @@ async function buildPayloadAsync(args: {
       clientJobId: taskId,
       clientId: taskId,
       kind: "director_run",
+      ...(args.models ? { models: args.models } : {}),
       segments,
     },
     plan,
@@ -464,6 +522,16 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       dryRun: z.boolean().optional(),
       confirm: z.boolean().optional(),
       userOverride: z.boolean().optional().describe("用户已看过质检结论并明确认可继续（用户权限高于质检门）"),
+      models: z
+        .object({
+          unet: z.string().optional(),
+          videoVae: z.string().optional(),
+          audioVae: z.string().optional(),
+          clip: z.string().optional(),
+          clipType: z.string().optional(),
+        })
+        .optional()
+        .describe("模型四件套；不传则读网页模型映射面板广播的当前选择（.lf/zeroexo/app_meta/comfyui-models.json）"),
     },
     handler: async (args) => {
       guardDryRunConfirm(args, { requireOne: true });
@@ -473,6 +541,12 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       const requested = args.selectedIds?.length ? args.selectedIds : allShots.map((s) => s.id);
       const selectedIds = requested.filter((id) => allShots.some((s) => s.id === id));
       if (selectedIds.length === 0) throw new McpError("VALIDATION", "导演台没有可运行的片段");
+      /**
+       * 模型四件套（2026-11-20 报障：网页/MCP 两条链路都没真正下发给插件，
+       * 插件退回模板自选 → 48G bf16 文本编码器把 47.4G 卡打 OOM）。
+       * 口径：显式传参优先 → 网页广播的当前选择 → 都没有就明确报错，不静默降档。
+       */
+      const models = args.models ?? (await readBroadcastComfyModels()) ?? undefined;
       // 质检门（2026-11-19 用户要求）：剧本未入库 / 主体缺图 / 提示词不合格 → 不许提交。
       // 用户权力更高：明确认可后传 userOverride:true 放行，并把结论原样留痕。
       if (!args.dryRun) {
@@ -511,8 +585,9 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       // 延续法准入（2026-11-11 用户事故；2026-11-15 改为批次模型）：
       // 只要求「做过延续法计划」。起始段没有缓存 guide 不算错误（首次生成第一段本来就没有），
       // 执行器会按 none 生成；run 内续接由插件批次内循环完成，不逐段发送 guide。
+      // dryRun 不拦：预检本来就是用来看「这段会按什么参数跑」，被门禁挡住就没法核对参数。
       const continuityOn = wb.sharedParams?.params?.continuityEnabled === true;
-      if (continuityOn) {
+      if (!args.dryRun && continuityOn) {
         const selected = allShots.filter((s) => selectedIds.includes(s.id));
         const unplanned = selected.filter((s) => !hasContinuityPlan(s as never));
         if (unplanned.length > 0) {
@@ -525,6 +600,13 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
       }
       const taskId = newDirectorTaskId();
       const comfyBase = await resolveComfyBase(args.baseUrl);
+      if (!args.dryRun && !models) {
+        throw new McpError(
+          "MODELS_NOT_CONFIGURED",
+          "没有可用的模型四件套：网页「模型映射」里先选好 unet / 视频VAE / 音频VAE / 文本编码器（保存后会自动广播），"
+            + "或本次调用显式传 models。不自动挑模型，避免插件退回模板默认（bf16 文本编码器会打爆 48G 卡）。",
+        );
+      }
       const built = await buildDirectorPluginPayload({
         projectId: args.projectId,
         taskId,
@@ -532,6 +614,8 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
         selectedIds,
         shared: (wb.sharedParams?.params ?? {}) as Record<string, unknown>,
         base: comfyBase,
+        models,
+        dryRun: args.dryRun,
       });
       if (args.dryRun) {
         return {
@@ -540,6 +624,7 @@ export function registerDirectorOpsTools(server: McpServer, ctx: Ctx): void {
           projectId: args.projectId,
           taskId,
           selectedIds,
+          models: models ?? null,
           totalFrames: built.plan.reduce((sum, s) => sum + s.frames, 0),
           segments: built.plan,
         };

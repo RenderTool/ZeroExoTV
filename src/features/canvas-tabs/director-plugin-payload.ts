@@ -97,6 +97,40 @@ function sharedNum(shared: WorkbenchSharedParams, key: string, fallback: number)
 }
 
 /**
+ * 模板占位符白名单（2026-11-20 报障：面板里改 sampler/LoRA/位移，成片却一直按模板默认跑）。
+ *
+ * 只放 `templates/reference_video.json` 里真实存在的 `__zx:*` 键 ——
+ * `aspect/scaleFactor/total_frames` 之类的 UI 内部键不进模板，避免越权覆盖。
+ * 插件 `_prepare_batch_segment` 对未知键是无害的，但这里仍然收紧，防止将来模板改名后静默乱写。
+ */
+export const TEMPLATE_PASSTHROUGH_KEYS = [
+  'sampler',
+  'scheduler',
+  'shift_video',
+  'shift_audio',
+  'clear_vram_between_segments',
+  'cache_frames_codec',
+  'cache_name',
+  'lora_name',
+  'lora_strength',
+  'use_low_vram',
+] as const;
+
+export function templatePassthrough(shared: WorkbenchSharedParams): Record<string, unknown> {
+  return templatePassthroughRaw((shared?.params ?? {}) as Record<string, unknown>);
+}
+
+/** 同一套白名单，吃裸 params 对象（段级 paramValues 覆盖用）。 */
+export function templatePassthroughRaw(p: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of TEMPLATE_PASSTHROUGH_KEYS) {
+    const v = p[k];
+    if (v !== undefined && v !== null && v !== '') out[k] = v;
+  }
+  return out;
+}
+
+/**
  * 生成插件批次 payload。
  * 起始段 guide：显式 shot.guide 优先；否则上一段当前缓存版本的 guide（开关开着时）。
  * 起始段没有 guide 时用 none，不拒绝；run 内其余段一律 chain。
@@ -139,6 +173,10 @@ export function buildDirectorBatchPayload(args: {
         shotId: shot.id,
         guide: k === 0 ? startGuide : { mode: 'chain' },
         params: {
+          // 面板里的模板级参数先铺（sampler/scheduler/位移/LoRA/缓存开关），
+          // 下面的计算值后写 → 永远以本段的实际尺寸/帧数/引导为准，不会被 UI 旧值冲掉。
+          ...templatePassthrough(shared),
+          ...templatePassthroughRaw(((shot as { paramValues?: Record<string, unknown> }).paramValues ?? {})),
           prompt: promptOf(shot),
           negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ''),
           width: size.width,
