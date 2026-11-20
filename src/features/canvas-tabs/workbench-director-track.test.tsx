@@ -131,7 +131,7 @@ import { WorkbenchMultiTrack } from '@/features/canvas-nodes/storyboard/workbenc
 import { TimelineClip } from '@/features/canvas-nodes/storyboard/timeline-clip';
 import { pickDirectorCardWidth, directorCardHeight, DIRECTOR_RAIL_HEIGHT, DIRECTOR_ARROW_SIZE, directorRailTone, directorBadgeTone } from '@/features/canvas-nodes/storyboard/timeline-constants';
 import { WORKSPACE_SURFACE_RADIUS } from '@/shared/components/LAYOUT_CONSTANTS';
-import { DirectorParamsButton, DirectorParamsPanel, DirectorRunButton } from './director-run-params-row';
+import { DirectorParamsButton, DirectorParamsControls, DirectorParamsPanel, DirectorRunButton } from './director-run-params-row';
 import type { WorkbenchSharedParams } from '@/entities/slot-containers';
 import type { StoryboardTimelineProps } from '@/features/canvas-nodes/storyboard/storyboard-timeline';
 import type { WorkbenchNodeData, WorkbenchTrack } from '@/features/canvas-nodes/storyboard/workbench-types';
@@ -836,6 +836,32 @@ describe('DirectorParamsButton/RunButton/Panel 单测（比例/系数/运行链�
     expect(container.querySelector('[data-param-key="steps"]')).toBeTruthy();
     expect(container.querySelector('[data-param-key="seed"]')).toBeTruthy();
     expect((container.querySelector('[data-resolved-size]') as HTMLElement).textContent).toBe('1376×768');
+  });
+
+  it('出片预设：预览/中等/成片 只填 steps + scaleFactor + refImageSize，不动比例与种子', () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <DirectorParamsControls params={{ aspect: '16:9', steps: 8, scaleFactor: 1, seed: 42, refImageSize: 'match' }} onChange={onChange} subColor="#888888" />,
+    );
+    fireEvent.click(container.querySelector('[data-quality-preset="preview"]') as Element);
+    expect(onChange).toHaveBeenLastCalledWith({ steps: 8, scaleFactor: 0.4, refImageSize: 'match' });
+
+    fireEvent.click(container.querySelector('[data-quality-preset="standard"]') as Element);
+    expect(onChange).toHaveBeenLastCalledWith({ steps: 12, scaleFactor: 0.8, refImageSize: 'max' });
+
+    fireEvent.click(container.querySelector('[data-quality-preset="final"]') as Element);
+    expect(onChange).toHaveBeenLastCalledWith({ steps: 15, scaleFactor: 1, refImageSize: 'max' });
+  });
+
+  it('预设只是填充：填完仍可手动改步数（控件不锁）', () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <DirectorParamsControls params={{ aspect: '16:9', steps: 8, scaleFactor: 0.4, refImageSize: 'match' }} onChange={onChange} subColor="#888888" />,
+    );
+    const steps = container.querySelector('input[data-param-key="steps"]') as HTMLInputElement;
+    expect(steps.disabled).toBe(false);
+    fireEvent.change(steps, { target: { value: '20' } });
+    expect(onChange).toHaveBeenLastCalledWith({ steps: 20 });
   });
 });
 

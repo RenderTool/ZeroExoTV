@@ -12,11 +12,29 @@ import { RefreshCw } from 'lucide-react';
 import { fetchBridgeModels } from './comfyui-bridge-client.js';
 import { useComfyuiConnectionStore } from './comfyui-connection.js';
 import { useComfyuiEndpointStore, type ComfyuiVramMode } from './comfyui-endpoint.js';
-import { isModelOverBudget, modelTier, pickPreferredModel, type ModelSlot } from './model-recommendations.js';
 
 const { Text } = Typography;
 
-type VideoSlot = ModelSlot;
+/**
+ * 推荐字典：文件名 → 挡位（8G / 24G / 24G 以上）。
+ * 只用来给「当前选中的」文件名贴一个推荐标记，下拉内容永远是本机真实清单。
+ */
+const RECOMMENDED: Record<'unet' | 'videoVae' | 'audioVae' | 'clip', Record<string, string>> = {
+  unet: {
+    'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors': '8G 推荐',
+    'minimax_h3_hybrid_fl2va_ref2va_b25-49-bf16.safetensors': '24G 推荐',
+    'minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors': '24G 以上推荐',
+  },
+  videoVae: { 'minimax_h3_video_vae_int8_convrot.safetensors': '8G 推荐' },
+  audioVae: { 'minimax_h3_audio_vae_fp32.safetensors': '通用' },
+  clip: {
+    // 8G 机器同样跑 32B int8；8B 是生图模型的编码器，H3 不认
+    'qwen3vl_32b_minimax_h3_int8_convrot.safetensors': '48G 及以下推荐',
+    'qwen3vl_32b_minimax_h3_bf16.safetensors': '需 ≥80G 显存',
+  },
+};
+
+type VideoSlot = keyof typeof RECOMMENDED;
 
 const SLOT_LABEL: Record<VideoSlot, string> = {
   unet: '视频主模型',
@@ -38,6 +56,31 @@ const IMAGE_NEEDS: Array<{ key: string; label: string; test: RegExp }> = [
   { key: 'vae', label: '图片 VAE', test: /qwen_image/i },
   { key: 'clip', label: '图片文本编码器', test: /qwen3\.5|qwen_image/i },
 ];
+
+/**
+ * 2026-11-19 用户口径：云端显存足够时应优先用推荐高精度模型，
+ * 不可用时按挡位逐级回退（24G以上 → 24G → 8G），都没有才让用户自己选。
+ */
+const TIER_ORDER = ['24G 以上推荐', '24G 推荐', '8G 及以上推荐', '8G 推荐'] as const;
+
+function tierAllowed(tier: string, totalGb: number | null): boolean {
+  if (totalGb == null) return false;
+  if (tier === '24G 以上推荐') return totalGb >= 24;
+  if (tier === '24G 推荐') return totalGb >= 20;
+  if (tier === '8G 及以上推荐' || tier === '8G 推荐') return totalGb >= 8;
+  return false;
+}
+
+/** 按显存挡位从高到低，挑本机真实存在的第一个推荐模型 */
+function pickPreferredModel(slot: VideoSlot, options: string[], totalGb: number | null): string | undefined {
+  const table = RECOMMENDED[slot] as Record<string, string>;
+  for (const tier of TIER_ORDER) {
+    if (!tierAllowed(tier, totalGb)) continue;
+    const hit = options.find((name) => table[name] === tier);
+    if (hit) return hit;
+  }
+  return undefined;
+}
 
 function gb(bytes?: number): string {
   if (typeof bytes !== 'number' || bytes <= 0) return '—';
@@ -83,14 +126,13 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
     ? ep.machine.vramTotalBytes / 1024 ** 3
     : null;
 
-  // 未手动选过：按显存档位自动落到最合适的推荐模型；已经选过但超出显存允许范围的（比如之前在 48G 卡上选了 48G 的 bf16 文本编码器），自动降档，不留在必炸的配置上。
+  // 未手动选过：按显存挡位自动落到最合适的推荐模型；没有推荐可回退时保持空，让用户自己选。
   useEffect(() => {
     if (!open) return;
     for (const slot of Object.keys(SLOT_LABEL) as VideoSlot[]) {
-      const current = conn.models[slot];
-      if (current && !isModelOverBudget(slot, current, totalGb)) continue;
+      if (conn.models[slot]) continue;
       const prefer = pickPreferredModel(slot, listFor(slot), totalGb);
-      if (prefer && prefer !== current) conn.setModel(slot, prefer);
+      if (prefer) conn.setModel(slot, prefer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, available.unet.length, available.vae.length, available.clip.length, totalGb]);
@@ -134,39 +176,25 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {(Object.keys(SLOT_LABEL) as VideoSlot[]).map((slot) => {
         const options = listFor(slot);
-        const selected = conn.models[slot];
-        const tier = modelTier(slot, selected);
-        const over = isModelOverBudget(slot, selected, totalGb);
+        const tier = RECOMMENDED[slot][conn.models[slot] || ''];
         return (
           <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Text style={{ width: 88, fontSize: 12 }}>{SLOT_LABEL[slot]}</Text>
             <Select
               size="small"
               style={{ flex: 1 }}
-              value={selected || undefined}
+              value={conn.models[slot] || undefined}
               placeholder={options.length ? '选择本机已有的模型' : '本机没有可用模型'}
               disabled={options.length === 0}
               onChange={(value) => conn.setModel(slot, value)}
-              options={options.map((name) => {
-                const need = modelTier(slot, name);
-                const tooBig = totalGb != null && need != null && need.minGb > totalGb;
-                return {
-                  value: name,
-                  label: tooBig ? `${name}（需 ≥${need.minGb}G 显存）` : name,
-                };
-              })}
+              options={options.map((name) => ({ value: name, label: name }))}
             />
-            {tier ? (
-              <Tag color={over ? 'red' : 'green'} style={{ marginInlineEnd: 0 }}>
-                {over ? `需 ≥${tier.minGb}G 显存` : tier.label}
-              </Tag>
-            ) : null}
+            {tier ? <Tag color="green" style={{ marginInlineEnd: 0 }}>{tier}</Tag> : null}
           </div>
         );
       })}
       <Text type="secondary" style={{ fontSize: 11 }}>
-        默认按显存档位自动选（每个模型有自己的显存下限，超限会自动降档）；32B 文本编码器 bf16 单文件 48G，
-        只有 ≥80G 显存才允许选择，48G 及以下请用 int8_convrot。
+        默认按显存自动选推荐高精度模型，不可用时依次回退（24G 以上 → 24G → 8G）；没有可回退的模型时请手动选择。
       </Text>
     </div>
   );

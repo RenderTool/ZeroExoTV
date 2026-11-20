@@ -55,20 +55,4 @@ describe('pickDefaultModels：只挑 MiniMax H3 兼容版本', () => {
     expect(picked.audioVae).toBe('companyX_h3_audio_vae_int8.safetensors');
     expect(picked.clip).toBe('companyX_qwen3vl_h3_int8.safetensors');
   });
-
-  it('自动挑选按量化档位从轻到重：bf16 排在列表第一个也不许被选（48G 卡会炸）', () => {
-    const picked = pickDefaultModels({
-      unet: [
-        'minimax_h3_hybrid_fl2va_ref2va_b25-49-bf16.safetensors',
-        'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors',
-      ],
-      vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-      clip: [
-        'qwen3vl_32b_minimax_h3_bf16.safetensors',
-        'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
-      ],
-    }, empty);
-    expect(picked.clip).toBe('qwen3vl_32b_minimax_h3_int8_convrot.safetensors');
-    expect(picked.unet).toBe('minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors');
-  });
 });

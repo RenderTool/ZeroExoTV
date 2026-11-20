@@ -44,6 +44,19 @@ export interface DirectorParamsControlsProps {
 }
 
 /**
+ * 出片预设（2026-11-20 用户定稿）：只负责「填充参数」，点完用户照样能手动改。
+ * 预览 8 步 / ×0.4 / 参考图 match；中等 12 步 / ×0.8 / max；成片 15 步 / ×1.0 / max。
+ * 不碰比例、种子这两个跟画质无关的项。
+ */
+export const QUALITY_PRESETS = [
+  { id: 'preview', label: '预览', steps: 8, scaleFactor: 0.4, refImageSize: 'match' },
+  { id: 'standard', label: '中等', steps: 12, scaleFactor: 0.8, refImageSize: 'max' },
+  { id: 'final', label: '成片', steps: 15, scaleFactor: 1.0, refImageSize: 'max' },
+] as const;
+
+export type QualityPresetId = (typeof QUALITY_PRESETS)[number]['id'];
+
+/**
  * 参数控件本体：比例九宫格 + 尺寸系数 + 换算尺寸 + 采样步数 + 种子 + 参考图尺寸。
  * 导演台「参数」面板与画布视频节点参数面板共用这一份（用户要求两处一致）。
  */
@@ -63,6 +76,39 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
 
   return (
     <>
+      <div style={{ ...rowStyle, gap: 6 }}>
+        <span style={labelStyle}>{t('director.qualityPreset', '预设')}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'flex-end' }}>
+          {QUALITY_PRESETS.map((preset) => {
+            const active =
+              Number(params['steps'] ?? 8) === preset.steps
+              && Number(params['scaleFactor'] ?? 1) === preset.scaleFactor
+              && String(params['refImageSize'] ?? 'match') === preset.refImageSize;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                data-quality-preset={preset.id}
+                data-selected={active ? 'true' : undefined}
+                title={`${preset.steps} 步 · ×${preset.scaleFactor} · ${preset.refImageSize}`}
+                onClick={() => onChange({
+                  steps: preset.steps,
+                  scaleFactor: preset.scaleFactor,
+                  refImageSize: preset.refImageSize,
+                })}
+                style={{
+                  height: 25, padding: '0 10px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                  border: `1px solid ${active ? theme.toolbar.accent : theme.toolbar.border}`,
+                  background: active ? 'rgba(128,128,128,0.16)' : 'transparent',
+                  color: 'inherit',
+                }}
+              >
+                {t(`director.qualityPreset_${preset.id}`, preset.label)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
         <span style={labelStyle}>{t('director.aspect', '视频比例')}</span>
         <AspectRatioPicker

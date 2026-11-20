@@ -29,6 +29,17 @@ export interface PluginBatchPayload {
   /** 预览 WS 的 clientId（与插件子任务共用，网页直连 /ws 收采样帧） */
   clientId: string;
   kind: 'director_run';
+  /**
+   * 模型映射面板选中的四件套（插件写进模板加载器节点的就是它）。
+   * 不传时插件按模板 + 自己的规则挑，会挑到 48G 的 bf16 编码器（2026-11-20 显存事故）。
+   */
+  models?: {
+    unet?: string;
+    videoVae?: string;
+    audioVae?: string;
+    clip?: string;
+    clipType?: string;
+  };
   segments: PluginSegmentPayload[];
 }
 

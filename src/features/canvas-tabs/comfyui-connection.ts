@@ -101,16 +101,6 @@ export const useComfyuiConnectionStore = create<ComfyuiConnectionState>()((set, 
   };
 });
 
-/** 量化档位：数字越小越省显存（int8 → fp8/nvfp4 → bf16/fp16）；未识别的排中间 */
-const PRECISION_PATTERNS: Array<RegExp> = [/int8_convrot/i, /int8/i, /nvfp4/i, /awq/i, /fp8/i, /bf16/i, /fp16/i];
-
-export function precisionRank(name: string): number {
-  for (let i = 0; i < PRECISION_PATTERNS.length; i += 1) {
-    if (PRECISION_PATTERNS[i]!.test(name)) return i;
-  }
-  return PRECISION_PATTERNS.length - 1;
-}
-
 /**
  * 模型清单 → 四件套默认值：各槽自动选文件名含 `minimax_h3` 的项；
  * 用户已选值仍在清单内则保留。clipType 固定 'minimax'（契约 §2.2 样例）。
@@ -128,11 +118,7 @@ export function pickDefaultModels(
     // 用户手动输入/选过的兼容版本优先保留（云端列表可能拉取失败，或用户用了第三方量化命名）；
     // 不兼容的旧值（例如 LTX/Wan VAE）才会被替换。
     if (currentVal && compatible(currentVal)) return currentVal;
-    // 自动挑选时按量化档位从轻到重，bf16/fp16 排在最后：
-    // 32B 文本编码器 bf16 单文件 48G，按文件名排序第一个选它必然把 48G 卡撑爆（2026-11-20 事故）。
-    const candidates = list.filter(compatible).map((name, index) => ({ name, index }));
-    candidates.sort((a, b) => precisionRank(a.name) - precisionRank(b.name) || a.index - b.index);
-    return candidates[0]?.name ?? '';
+    return list.find(compatible) ?? '';
   };
   return {
     unet: pick(models.unet, [/minimax_h3/i, /fasth3/i], current.unet),

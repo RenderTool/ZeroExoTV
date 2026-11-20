@@ -248,56 +248,6 @@ def _pick_model(folder: str, current: str, preferred: tuple[str, ...]) -> str:
     return names[0]
 
 
-# ---------------------------------------------------------------- 编码器量化档位
-# 2026-11-20 事故：32B 文本编码器 bf16 单文件 48G，一张 48G 卡光加载它就占满，
-# 主模型 + VAE 进来必然 OOM。所以自动挑选必须看「文件多重 + 本机多大显存」，
-# 不能按文件名排序第一个就上（bf16 恰好排在 int8 前面）。
-_ENCODER_PRECISION_PREF = ("int8_convrot", "int8", "nvfp4", "awq", "fp8", "bf16", "fp16")
-
-# 32B 编码器 bf16/fp16 至少需要 80G 显存才能和主模型共存
-_HEAVY_ENCODER_MIN_GB = 80.0
-
-
-def _gpu_total_gb() -> float:
-    """本机总显存（GB）；读不到按 0 处理（即视为低显存，绝不自动选重编码器）。"""
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            return float(torch.cuda.get_device_properties(0).total_memory) / (1024 ** 3)
-    except Exception:  # noqa: BLE001 - 取不到显存只影响推荐，不影响执行
-        pass
-    return 0.0
-
-
-def _encoder_rank(name: str) -> int:
-    low = name.lower()
-    for index, kw in enumerate(_ENCODER_PRECISION_PREF):
-        if kw in low:
-            return index
-    return len(_ENCODER_PRECISION_PREF)
-
-
-def _is_heavy_encoder(name: str) -> bool:
-    """32B 的非量化编码器（bf16/fp16），单个就接近一张 48G 卡。"""
-    low = name.lower()
-    if "32b" not in low:
-        return False
-    return not any(kw in low for kw in ("int8", "fp8", "fp4", "awq"))
-
-
-def _pick_32b_encoder(current: str) -> str:
-    """H3 参考视频用的 32B 编码器：按量化档位挑最省显存且能装下的那个。"""
-    names = [n for n in _available_models("text_encoders") if "32b" in n.lower()]
-    if not names:
-        return current
-    total_gb = _gpu_total_gb()
-    allow_heavy = total_gb >= _HEAVY_ENCODER_MIN_GB
-    usable = [n for n in names if allow_heavy or not _is_heavy_encoder(n)] or names
-    usable.sort(key=_encoder_rank)
-    return usable[0]
-
-
 def apply_model_overrides(template: dict[str, Any], models: Any, family: str = "auto") -> dict[str, Any]:
     """把前端选择的模型文件名写进模板；加载器节点不变，只换权重文件。
 
@@ -339,31 +289,12 @@ def apply_model_overrides(template: dict[str, Any], models: Any, family: str = "
                 else:
                     inputs["clip_name"] = _pick_model("text_encoders", current_clip, ("qwen3.5", "qwen_image"))
             else:
-                # H3 参考视频：用户选的就是它；没配时只在含 32b 的项里回落，绝不回落到 8b/4b。
-                # 用户选了 bf16 而本机装不下（<80G）时也降档，并打日志说明，不静默 OOM。
+                # H3 参考视频：用户选的就是它；没配时只在含 32b 的项里回落，绝不回落到 8b/4b
                 if clip and not ("qwen3.5" in clip.lower() or "qwen_image" in clip.lower()):
-                    if _is_heavy_encoder(clip) and _gpu_total_gb() < _HEAVY_ENCODER_MIN_GB:
-                        picked = _pick_32b_encoder(clip)
-                        if _is_heavy_encoder(picked):
-                            inputs["clip_name"] = clip
-                        else:
-                            try:
-                                import logging
-
-                                logging.getLogger(__name__).warning(
-                                    "ZeroExoNodes: 显存 %.1fG < %.0fG，文本编码器 %s 装不下，已改用 %s",
-                                    _gpu_total_gb(),
-                                    _HEAVY_ENCODER_MIN_GB,
-                                    clip,
-                                    picked,
-                                )
-                            except Exception:  # noqa: BLE001
-                                pass
-                            inputs["clip_name"] = picked
-                    else:
-                        inputs["clip_name"] = clip
+                    inputs["clip_name"] = clip
                 else:
-                    inputs["clip_name"] = _pick_32b_encoder(current_clip)
+                    names = [n for n in _available_models("text_encoders") if "32b" in n.lower()]
+                    inputs["clip_name"] = names[0] if names else current_clip
             if clip_type:
                 inputs["type"] = clip_type
         elif cls == "VAELoader":
@@ -546,7 +477,7 @@ class ZeroExoGuideLoad:
 # ===== HTTP 协议 =====
 routes = PromptServer.instance.routes
 
-PLUGIN_VERSION = "0.1.3"
+PLUGIN_VERSION = "0.1.2"
 
 
 def _queue_counts() -> dict[str, Any]:

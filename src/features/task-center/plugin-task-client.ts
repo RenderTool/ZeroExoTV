@@ -5,6 +5,7 @@
  * 网页重开按 projectId 拉任务列表，把已完成段补落库。
  */
 import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
+import { useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connection.js';
 import type { PluginBatchPayload } from '@/features/canvas-tabs/director-plugin-payload.js';
 import { readCachedGuideBlob } from '@/entities/guide-store.js';
 import { sha256Hex } from '@/entities/cas-store.js';
@@ -233,11 +234,31 @@ export async function submitPluginTask(payload: PluginBatchPayload): Promise<Plu
   const base = pluginTaskBase();
   if (!base) throw new Error('未配置 ComfyUI 地址');
   const warnings = await ensureGuidesOnComfy(base, payload);
+  // 模型映射面板选中的四件套必须随任务提交：插件 apply_model_overrides 读的就是 body.models，
+  // 不传就等于面板白设（2026-11-20 实测：云端任务记录 models 全空，插件自己挑成了 48G bf16 编码器）。
+  const models = payload.models ?? modelsFromConnection();
+  const body = {
+    ...payload,
+    ...(models ? { models: { ...models, clipType: models.clipType ?? 'minimax' } } : {}),
+  };
   const created = await request<{ jobId: string }>('/zeroexo/v1/tasks', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   return { task: await getPluginTask(created.jobId), warnings };
+}
+
+/** 连接面板（模型映射）里选中的四件套；一个都没选时返回 null，让插件按模板走 */
+function modelsFromConnection(): PluginBatchPayload['models'] | null {
+  const { models } = useComfyuiConnectionStore.getState();
+  const picked = {
+    unet: models.unet?.trim(),
+    videoVae: models.videoVae?.trim(),
+    audioVae: models.audioVae?.trim(),
+    clip: models.clip?.trim(),
+  };
+  if (!picked.unet && !picked.videoVae && !picked.audioVae && !picked.clip) return null;
+  return picked;
 }
 
 export async function getPluginTask(taskId: string): Promise<PluginTask> {

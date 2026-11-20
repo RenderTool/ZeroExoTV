@@ -9,7 +9,7 @@
  * 的 PLUGIN_VERSION 必须一起改（发版时同一条提交里同步）。
  */
 
-export const OFFICIAL_PLUGIN_VERSION = '0.1.3';
+export const OFFICIAL_PLUGIN_VERSION = '0.1.2';
 
 const PARTS = 3;
 
@@ -43,4 +43,3 @@ export function isPluginOutdated(localVersion: string | null | undefined): boole
 export function pluginUpdateHint(localVersion: string): string {
   return `插件版本 ${localVersion} 低于官方 ${OFFICIAL_PLUGIN_VERSION}：云端 ComfyUI 不会自动更新插件，请手动替换 ComfyUI_ZeroExoNodes 后重启 ComfyUI`;
 }
-
