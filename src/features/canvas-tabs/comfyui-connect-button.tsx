@@ -179,15 +179,16 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
           {t('director.comfyBridgeMissing')}
         </Text>
       )}
-      {(ep.connected || testResult?.kind === 'ok') && (
-        <div
-          data-testid="comfyui-model-section"
-          style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(128,128,128,0.18)' }}
-        >
-          <Text style={{ fontSize: 12 }}>{t('director.modelMapping', '模型映射')}</Text>
-          <ModelMappingPanel visible={inline || open} />
-        </div>
-      )}
+      {/* 2026-11-21 用户口径（第三次强调）：模型清单必须一直显示在「连接配置」页里，
+          不跟着「已连接」状态隐藏 —— 没连上也要能看到清单/机器信息/显存策略。
+          清单拉不到就显示空清单与原因，不吞。 */}
+      <div
+        data-testid="comfyui-model-section"
+        style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(128,128,128,0.18)' }}
+      >
+        <Text style={{ fontSize: 12 }}>{t('director.modelMapping', '模型映射')}</Text>
+        <ModelMappingPanel visible={inline || open} />
+      </div>
 
       {/* 自动连接失败：不弹窗，只在面板留一行可读原因 + 「重试」（手动永远放行） */}
       {!testResult && autoState.failureMessage && (
