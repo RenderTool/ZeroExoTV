@@ -1769,6 +1769,11 @@ export const SubjectLibraryPages = memo(function SubjectLibraryPages({
     treesRef.current = next;
     setTrees(next);
     onChangeTree?.(next);
+    // 2026-11-20 报障：主体「换图」后，导演台插槽仍是旧图。
+    // 原因是插槽的图由 resolveRefVisual 按主体树实时解析，而分镜面板只在收到
+    // subjectMediaLinkEvent 时才会重读 storyboard.json；换图只 commitTrees 不广播，
+    // 面板就一直拿着打开页面时的旧树。这里统一广播，任何树写入都让插槽跟着刷新。
+    useSubjectMediaLinkEventStore.getState().emit({ rootId: '', stateId: '' });
   }, [onChangeTree]);
 
   // 容器被另一条入口（整页页签 / 抽屉主体分段）写回时同步到本实例，两条路径共用同一份数据

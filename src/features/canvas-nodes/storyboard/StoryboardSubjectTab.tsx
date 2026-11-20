@@ -456,6 +456,8 @@ function SubjectDetailView({
     const current = treesRef.current;
     const rest = current.filter((x) => x.rootId !== newTree.rootId);
     onChangeTree?.([...rest, newTree]);
+    // 同上：树一变就广播，避免导演台插槽停在旧的主体图
+    useSubjectMediaLinkEventStore.getState().emit({ rootId: newTree.rootId, stateId: '' });
     // Plan#71 T2: 树内改名/改分类才回写卡片；基础提示词(模板)不再回写卡片 consistency
     if (newTree.name !== card.name || newTree.kind !== card.kind) {
       onUpdateItem?.(card.id, {
