@@ -912,7 +912,27 @@ export function useAiGeneration({
         type: 'ai-placeholder',
         position: { x: px, y: py },
         title: i18n.t('editor.aiGenerating'),
-        data: { status: 'generating', generationType: generationMode, targetNodeType: targetType, taskLabel: model || '' },
+        data: {
+          status: 'generating',
+          generationType: generationMode,
+          targetNodeType: targetType,
+          taskLabel: model || '',
+          /**
+           * 2026-11-20 用户报障「生成过程中点开提示词没了」：
+           * 提交瞬间选中态会切到这个占位节点，而占位节点此前只有状态字段（没有 prompt / paramValues），
+           * 底栏提示词框按选中节点的 data 取值 → 一生成就变空、参数也回默认。
+           * 这里把本次提交的真实提示词、模型与参数一起写进占位节点，生成中的底栏与提交内容一致。
+           */
+          prompt,
+          model,
+          paramValues: {
+            ...genPv,
+            ...(size ? { size } : {}),
+            ...(quality ? { quality } : {}),
+            ...(count > 1 ? { count } : {}),
+            ...(seconds !== 5 ? { seconds } : {}),
+          },
+        },
       }));
 
       // 连线：复制源节点的「上游 → 自己」这批输入边到新节点，新节点用同一批资产生成；

@@ -13,6 +13,7 @@ import { resolveRefVisual } from './director-prompt-panel.js'
 import { selectedShotVersion } from './shot-cache.js';
 import { pluginTaskBase } from '@/features/task-center/plugin-task-client.js';
 import { uploadZeroexoReference } from './zeroexo-jobs-client.js';
+import { fetchComfyuiMachineInfo } from './comfyui-endpoint.js';
 import { resolveMediaBlob } from '@/shared/media/resolve-media-blob.js';
 
 export interface PluginSegmentPayload {
@@ -158,6 +159,16 @@ export async function attachDirectorReferenceImages(
 ): Promise<PluginBatchPayload> {
   const base = pluginTaskBase();
   if (!base) throw new Error('ComfyUI 地址未配置，无法上传参考图');
+  /**
+   * 2026-11-20 报障：云实例停了（连 /system_stats 都 404）时，这里只会抛「参考图上传失败：<标题>」，
+   * 用户根本看不出根因。上传前先探活一次：连不上就直接说清楚地址和动作，不让人怀疑图片本身。
+   */
+  if (!(await fetchComfyuiMachineInfo(base))) {
+    throw new Error(
+      `ComfyUI 连不上（${base}）：实例可能已停止、地址已失效或本机网络不通。`
+      + '先在「连接 ComfyUI」面板测试通过，再发起生成',
+    );
+  }
   const byId = new Map(shots.map((s) => [s.id, s]));
   for (const segment of payload.segments) {
     const shot = byId.get(segment.shotId);
@@ -212,7 +223,7 @@ export async function attachDirectorReferenceImages(
       if (!blob) throw new Error(`参考图读取失败：${ref.title || key}`);
       const ext = blob.type.includes('webp') ? '.webp' : blob.type.includes('jpeg') ? '.jpg' : '.png';
       const name = await uploadZeroexoReference(base, blob, `director_${segment.shotId}_${i}${ext}`);
-      if (!name) throw new Error(`参考图上传失败：${ref.title || key}`);
+      if (!name) throw new Error(`第 ${i + 1} 张参考图上传失败（${ref.title || key}）：ComfyUI /upload/image 没返回文件名，确认实例正常、图片没超过输入上限`);
       names.push(name);
     }
     segment.params.reference_image = names[0] ?? '';

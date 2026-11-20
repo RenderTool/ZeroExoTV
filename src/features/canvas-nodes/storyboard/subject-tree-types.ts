@@ -149,6 +149,11 @@ export interface SubjectGenParams {
   useBaseRef?: boolean;
   /** 参考素材（图1 选择页写入；生成时按顺序作为参考图；空 = 不加参考） */
   referenceKeys?: string[];
+  /**
+   * 出图尺寸模式（2026-11-20 用户报障：主体页选了原图档位却永远是 custom）：
+   * 'source' = 跟随唯一一张输入图的真实尺寸，'custom' = 按 width/height。缺省 custom。
+   */
+  sizeMode?: 'custom' | 'source';
 }
 
 /** 状态出图任务（随树持久化；刷新/切页签后据此续接进度） */
@@ -551,6 +556,19 @@ export function buildDefaultStateName(
   const label = stateLabel(step);
   const name = typeof treeName === 'string' ? treeName.trim() : '';
   return name ? `${name} · ${label}` : label;
+}
+
+/**
+ * 状态图的展示名（2026-11-20 报障：插槽里出现「中州驿站庭院·中州驿站庭院 · 状态4」）。
+ * 默认状态名本身就带主体名前缀（`buildDefaultStateName`），再拼一次主体名会重复一遍。
+ * 统一口径：状态名已以主体名开头就直接用它，否则才拼「主体名·状态」。
+ */
+export function subjectStateDisplayName(subjectName: string | undefined, stateTag: string | undefined): string {
+  const name = (subjectName ?? '').trim();
+  const tag = (stateTag ?? '').trim();
+  if (!tag) return name;
+  if (!name) return tag;
+  return tag.startsWith(name) ? tag : `${name}·${tag}`;
 }
 
 // ===== 方案 C（2026-11-05 约定）：出现集数「不过滤、只排序 + 标签」=====

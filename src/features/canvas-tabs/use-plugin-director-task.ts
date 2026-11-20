@@ -75,6 +75,26 @@ const INITIAL: PluginDirectorState = {
 /** 连续轮询失败几次后判定 ComfyUI 已断开；2 秒一次，避免一次网络抖动就误报。 */
 const POLL_FAILURE_LIMIT = 3;
 const OFFLINE_MESSAGE = 'ComfyUI 连接已断开或任务已丢失，无法确认任务状态';
+/**
+ * 运行时心跳（2026-11-20 用户报障：任务挂了 2 小时，打开 ComfyUI 才发现显存炸了）。
+ * 轮询失败时不能只说「连接断开」——要明确提示可能是进程崩溃/显存不足，并给出可执行动作。
+ */
+const OOM_HINT_MESSAGE =
+  'ComfyUI 无响应，任务已挂起。常见原因是进程崩溃或显存不足（OOM）。请查看 ComfyUI 控制台报错，重启 ComfyUI 后重试该段（不是网页失联阈值误判）';
+
+/** 心跳探活：/zeroexo/v1/health 短超时；返回 false 说明 ComfyUI 进程本身不响应 */
+async function probeComfyHeartbeat(base: string | null): Promise<boolean> {
+  if (!base) return false;
+  try {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`${base.replace(/\/+$/, '')}/zeroexo/v1/health`, { signal: controller.signal });
+    window.clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 const PHASE: Record<string, PluginDirectorPhase> = {
   queued: 'queued', running: 'running', success: 'success', error: 'error',
@@ -131,6 +151,9 @@ export function usePluginDirectorTask(args: {
   const queueFinishedRef = useRef<Set<string>>(new Set());
   const pollFailuresRef = useRef(0);
   const offlineNotifiedRef = useRef<string | null>(null);
+  /** 心跳连续失败计数 / 已提示过的任务（同一批只提示一次，不刷屏） */
+  const heartbeatFailRef = useRef(0);
+  const heartbeatNotifiedRef = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) window.clearInterval(pollRef.current);
@@ -382,6 +405,20 @@ export function usePluginDirectorTask(args: {
     }
     if (!task) {
       pollFailuresRef.current += 1;
+      // 2026-11-20：任务轮询不到时先做一次心跳探活，区分「只是任务记录取不到」与「ComfyUI 进程挂了」。
+      // 连续两次心跳失败就明确提示显存不足/进程崩溃，并把队列行标成「ComfyUI 无响应」。
+      if (pollFailuresRef.current >= 2) {
+        const alive = await probeComfyHeartbeat(pluginTaskBase());
+        heartbeatFailRef.current = alive ? 0 : heartbeatFailRef.current + 1;
+        if (!alive && heartbeatFailRef.current >= 2) {
+          const queue = useTaskQueueStore.getState();
+          queue.update(taskId, { phase: 'ComfyUI 无响应' });
+          if (heartbeatNotifiedRef.current !== taskId) {
+            heartbeatNotifiedRef.current = taskId;
+            cbRef.current.onNotice('error', OOM_HINT_MESSAGE);
+          }
+        }
+      }
       if (pollFailuresRef.current < POLL_FAILURE_LIMIT) return;
       // 连续失败后不能继续显示“生成中”：ComfyUI 可能已经退出，任务状态未知。
       stopPolling();
@@ -393,6 +430,7 @@ export function usePluginDirectorTask(args: {
       }
       return;
     }
+    heartbeatFailRef.current = 0;
     pollFailuresRef.current = 0;
     await applyTask(task);
   }, [applyTask, stopPolling, closePreview]);
@@ -401,6 +439,8 @@ export function usePluginDirectorTask(args: {
     stopPolling();
     pollFailuresRef.current = 0;
     offlineNotifiedRef.current = null;
+    heartbeatFailRef.current = 0;
+    heartbeatNotifiedRef.current = null;
     pollRef.current = window.setInterval(() => { void poll(taskId); }, 2000);
   }, [poll, stopPolling]);
 

@@ -277,6 +277,17 @@ export const TimelineClip = memo(function TimelineClip({
               ? t('storyboard.clipBadgeInterrupted', { defaultValue: '已中断' })
               : t('storyboard.clipBadgeIdle', { defaultValue: '未生成' });
   const PlayIcon = CANVAS_NODE_ICONS.clipPlay;
+  const WarningIcon = CANVAS_NODE_ICONS.warning;
+  /**
+   * 参考失效角标（2026-11-20 用户口径）：clip.data.stale 由工作台/分镜侧汇总；
+   * 分镜页直接把 WorkbenchShot 当 clip data 用时，退化读 references[].stale。
+   */
+  const staleFromRefs = ((clip.data as unknown as {
+    references?: Array<{ stale?: { level: 'warn' | 'broken'; reason: string } | null }>;
+  }).references ?? [])
+    .map((r) => r.stale)
+    .filter((x): x is { level: 'warn' | 'broken'; reason: string } => Boolean(x));
+  const clipStale = clip.data.stale ?? staleFromRefs.find((x) => x.level === 'broken') ?? staleFromRefs[0];
 
   return (
     <div
@@ -555,6 +566,27 @@ export const TimelineClip = memo(function TimelineClip({
           )}
           <b style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{displaySeconds}s</b>
         </>
+      )}
+      {/* 参考失效感叹号（2026-11-20 用户口径）：主体/状态引用失效时标出，修好后自动消失 */}
+      {clipStale && (
+        <span
+          data-clip-stale={clipStale.level}
+          title={`参考失效：${clipStale.reason}`}
+          style={{
+            position: 'absolute',
+            top: director ? 4 : 2,
+            left: director ? 8 : 4,
+            zIndex: 4,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 16, height: 16, borderRadius: 4,
+            color: clipStale.level === 'broken' ? '#ef4444' : '#f59e0b',
+            background: clipStale.level === 'broken' ? 'rgba(239,68,68,0.16)' : 'rgba(245,158,11,0.16)',
+            border: `1px solid ${clipStale.level === 'broken' ? 'rgba(239,68,68,0.45)' : 'rgba(245,158,11,0.45)'}`,
+            pointerEvents: 'none',
+          }}
+        >
+          <WarningIcon size={11} strokeWidth={2} />
+        </span>
       )}
       {/* §8.5 rework 角标（橙=待修改 / 蓝=修改中；done 不显角标，靠绿状态色） */}
       {clip.data.rework?.status && clip.data.rework.status !== 'done' && (

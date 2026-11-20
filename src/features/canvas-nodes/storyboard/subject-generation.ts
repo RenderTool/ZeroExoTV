@@ -58,6 +58,8 @@ export interface ResolvedSubjectGenParams {
   seed: number;
   useBaseRef: boolean;
   referenceKeys: string[];
+  /** 尺寸模式：source = 跟随唯一一张输入图真实尺寸（仅 Qwen 且恰好一张参考图时生效） */
+  sizeMode: 'custom' | 'source';
 }
 
 /** 1K/2K = 最长边 1024/2048，另一边按比例换算，再按 Qwen 的 32 对齐夹取 */
@@ -108,6 +110,7 @@ export function resolveSubjectGenParams(
     seed: p.seed ?? -1,
     useBaseRef: isBase ? false : (p.useBaseRef ?? true),
     referenceKeys: Array.isArray(p.referenceKeys) ? p.referenceKeys.filter(Boolean) : [],
+    sizeMode: p.sizeMode === 'source' ? 'source' : 'custom',
   };
 }
 
@@ -355,9 +358,9 @@ async function runJob(key: string, input: RunInput): Promise<void> {
           use_llm_enhance: params.useLlmEnhance,
           transparent_background: params.transparent,
           seed: params.seed,
-          // 用户选的比例/尺寸必须生效；不能因为有参考图就退回 source 跟随输入尺寸，
-          // 否则面板显示 16:9、出图却是参考图的 4:3。
-          sizeMode: 'custom',
+          // 面板显示什么就提交什么：选「原图」时跟随唯一一张参考图真实尺寸（Qwen 侧按 referenceCount===1 判断），
+          // 其余一律用请求尺寸，绝不因为「有参考图」就偷偷退回 source。
+          sizeMode: params.sizeMode,
         },
         onPreview, onProgress, onJobSubmitted,
         resume: input.resume,

@@ -215,6 +215,15 @@ function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string>
   const activeInRun = !!run
     && ['submitting', 'queued', 'running'].includes(run.phase)
     && run.segmentShotIds.includes(s.id);
+  /**
+   * 参考失效角标（2026-11-20 用户口径）：
+   * detectStaleRefs 把失效写进 references[].stale，这里汇总成片段级标记 ——
+   * 只要有 broken 取 broken，否则 warn；全部修好后 stale 为空 → 角标自动消失。
+   */
+  const staleRefs = (s.references ?? [])
+    .map((r) => r.stale)
+    .filter((x): x is { level: 'warn' | 'broken'; reason: string } => Boolean(x));
+  const stale = staleRefs.find((x) => x.level === 'broken') ?? staleRefs[0];
   return {
     id: s.id,
     number: s.number,
@@ -234,6 +243,7 @@ function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string>
     sourceDuration: s.media?.sourceDuration,
     label: `#${s.number} ${s.description || s.shotType}`,
     hasAudio: !!s.audioPreview,
+    ...(stale ? { stale } : {}),
   };
 }
 

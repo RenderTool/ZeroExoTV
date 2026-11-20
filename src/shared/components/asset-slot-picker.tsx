@@ -28,6 +28,7 @@ import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { readStoryboardContainer } from '@/entities/slot-containers.js';
 import {
   migrateSubjectTrees,
+  subjectStateDisplayName,
   type SubjectTree,
 } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import type { ProductionItem } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
@@ -425,7 +426,7 @@ export const AssetSlotPicker = memo(function AssetSlotPicker({
           onPick({
             kind: 'image',
             storageKey: img.storageKey,
-            title: `${item.name}·${img.stateTag ?? ''}`.replace(/·$/, ''),
+            title: subjectStateDisplayName(item.name, img.stateTag) || (img.stateTag ?? ''),
             origin: 'subject',
           });
           onClose();

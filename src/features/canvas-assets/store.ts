@@ -106,20 +106,22 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   // 其余模块（剧本/主体库/导演台）即使上次停在层级，也回落到资产，绝不把画布层级挂出来。
   const drawerModule = module ?? 'canvas';
   const visibleGroups = DRAWER_MODULE_GROUPS[drawerModule];
-  // 2026-11-18 用户口径：默认落点按语境——画布模块落「画布资产」，剧本 / 分镜 / 导演台落「分镜资产」
-  const [groupByModule, setGroupByModule] = useState<Record<DrawerModule, DrawerGroup>>({
-    canvas: 'assets', script: 'history', storyboard: 'history', workbench: 'history',
-  });
-  const activeGroup: DrawerGroup = visibleGroups.includes(groupByModule[drawerModule])
-    ? groupByModule[drawerModule]
+  /**
+   * 2026-11-20 用户口径（覆盖 2026-11-06「分组按模块独立记忆」）：切换顶部「画布 / 分镜 / 剧本 / 导演台」时
+   * 不许再偷偷改掉抽屉里选中的分组——抽屉只记**一个**当前分组，只有该分组在这个模块不可挂载
+   * （层级 / 本剧信息是模块专属）时才回落到第一个可见分组，这属于必要的跳转。
+   */
+  const [activeGroupState, setActiveGroupState] = useState<DrawerGroup>('assets');
+  const activeGroup: DrawerGroup = visibleGroups.includes(activeGroupState)
+    ? activeGroupState
     : visibleGroups[0]!;
   const setGroupForModule = useCallback((group: DrawerGroup) => {
-    setGroupByModule((prev) => (prev[drawerModule] === group ? prev : { ...prev, [drawerModule]: group }));
-  }, [drawerModule]);
+    setActiveGroupState(group);
+  }, []);
   const [search, setSearch] = useState('');
 
-  // 切模块即清搜索词：搜索是模块内的临时筛选，不跨模块串味
-  useEffect(() => { setSearch(''); }, [drawerModule]);
+  // 切模块不再清搜索：搜索词属于用户的当前上下文，清掉会让用户刚挑中的东西消失。
+  // （切换项目 / 关闭抽屉等情况仍由各自流程处理。）
 
   // ── 定位焦点（Plan#64: 资产创建后自动定位到对应卡片，仅瞬时滚动） ──
   const [focusAssetId, setFocusAssetId] = useState<string | null>(null);

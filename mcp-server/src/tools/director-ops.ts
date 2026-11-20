@@ -223,7 +223,13 @@ async function uploadShotReferences(base: string, shot: WorkbenchShot): Promise<
     }
     const ext = path.extname(filePath) || ".png";
     const name = await uploadRefImage(base, filePath, `director_${shot.id}_${i}${ext}`);
-    if (!name) throw new McpError("IO_ERROR", `参考图上传失败：${key}`);
+    if (!name) {
+      throw new McpError(
+        "IO_ERROR",
+        `片段 ${shot.number ?? shot.id} 第 ${i + 1} 张参考图上传失败（${key}）：ComfyUI /upload/image 没返回文件名。`
+          + `确认实例在线（${base}）、图片没超过输入上限`,
+      );
+    }
     names.push(name);
   }
   return names;

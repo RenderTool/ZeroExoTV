@@ -81,6 +81,11 @@ export interface TimelineClipData {
   quality?: { score: number; deductions?: Array<{ item: number; reason: string }>; checkedAt: string };
   /** §8.5 待修改标记（随 WorkbenchShot.rework 透传，时间轴 clip 橙描边+角标） */
   rework?: { status: 'flagged' | 'reworking' | 'done'; reason?: string };
+  /**
+   * 参考失效标记（2026-11-20 用户口径）：片段里有主体/状态引用失效时，
+   * 卡片上用感叹号角标标出，修复后 detectStaleRefs 不再产出 → 下一轮自动消失。
+   */
+  stale?: { level: 'warn' | 'broken'; reason: string };
 }
 
 export interface StoryboardTimelineProps {

@@ -61,7 +61,7 @@ import type { WorkbenchShot, WorkbenchShotReference } from '@/features/canvas-no
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import type { SubjectTree } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
-import { SUBJECT_BASE_STATE_ID, subjectBaseCoverKeys } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { SUBJECT_BASE_STATE_ID, subjectBaseCoverKeys, subjectStateDisplayName } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { MentionEditor, type MentionEditorHandle, type MentionSlotView } from './mention-editor.js';
 import { useContext } from 'react';
 import { ReactGraphStoreContext } from '@zeroexo/plugin-render-react';
@@ -285,7 +285,7 @@ function subjectImageToRef(item: ProductionItem, img: ProductionItemImage, baseK
   return {
     id: `subject:${item.id}:${img.storageKey}`,
     kind: 'image',
-    title: `${item.name}·${stateName}${isCover ? '（封面）' : ''}`,
+    title: `${subjectStateDisplayName(item.name, stateName)}${isCover ? '（封面）' : ''}`,
     storageKey: img.storageKey,
     originScope: 'project',
     // 具体状态图必须带来源指纹，删状态/删主体时能精确清掉，且换封面后按 state 回查最新图

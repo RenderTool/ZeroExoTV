@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Typography } from 'antd';
+import { useTheme } from '@zeroexo/plugin-theme';
 import { httpFsInfo, probeHttpFs } from './http-fs.js';
 import { reloadWithDisk } from './boot.js';
 
@@ -19,6 +20,7 @@ export interface ServiceOfflineGateProps {
 }
 
 export function ServiceOfflineGate({ onUseBrowserRoot }: ServiceOfflineGateProps): React.ReactElement {
+  const { theme } = useTheme();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,14 +55,17 @@ export function ServiceOfflineGate({ onUseBrowserRoot }: ServiceOfflineGateProps
     <div
       style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        gap: 12, minHeight: '60vh', padding: 24, textAlign: 'center',
+        gap: 12, minHeight: '100vh', padding: 24, textAlign: 'center',
+        // 2026-11-20 用户报障：这一页之前没跟主题走 —— 背景与文字色都取主题 token，明暗两套都可读
+        background: theme.canvas.background,
+        color: theme.toolbar.text,
       }}
     >
-      <div style={{ fontSize: 15 }}>本地数据服务离线</div>
-      <Text type="secondary" style={{ maxWidth: 460, lineHeight: 1.8 }}>
+      <div style={{ fontSize: 15, fontWeight: 600, color: theme.toolbar.text }}>本地数据服务离线</div>
+      <Text style={{ maxWidth: 460, lineHeight: 1.8, color: theme.toolbar.textMuted }}>
         项目数据都在本地数据服务（8790）的数据根里，服务不在线就打不开——这不是目录授权问题，不用重新选目录。
       </Text>
-      <Text type="secondary" style={{ fontSize: 12 }}>
+      <Text style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
         探测地址 {probeBase}（每 3 秒自动重连，连上会自己刷新）
       </Text>
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -71,7 +76,7 @@ export function ServiceOfflineGate({ onUseBrowserRoot }: ServiceOfflineGateProps
           重新连接
         </Button>
       </div>
-      {error ? <div style={{ color: '#c5221f', fontSize: 13, maxWidth: 460 }}>{error}</div> : null}
+      {error ? <div style={{ color: theme.toolbar.accent, fontSize: 13, maxWidth: 460 }}>{error}</div> : null}
     </div>
   );
 }

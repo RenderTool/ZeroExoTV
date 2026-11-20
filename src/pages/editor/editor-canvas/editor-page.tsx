@@ -111,7 +111,16 @@ const CANVAS_GRID_SIZE = 16;
  * 这里只在展示层还原成空提示词，不改节点已存数据。
  */
 function visibleNodePrompt(data: Record<string, unknown> | null | undefined, nodeType: string | undefined): string {
-  const raw = String(data?.prompt ?? '');
+  // 2026-11-20 用户报障「生成中点开提示词没了」：生成中节点可能只留下产物/任务信息，
+  // data.prompt 被清或还没回写，而本次提交的提示词一定记录在 data.generation.prompt 里。
+  // 面板的初值按 顺序回退：data.prompt → data.generation.prompt → paramValues.prompt。
+  const fallback = (): string => {
+    const generation = (data?.generation ?? {}) as { prompt?: unknown };
+    if (typeof generation.prompt === 'string' && generation.prompt.trim()) return generation.prompt;
+    const pv = (data?.paramValues ?? {}) as { prompt?: unknown };
+    return typeof pv.prompt === 'string' ? pv.prompt : '';
+  };
+  const raw = String(data?.prompt ?? '') || fallback();
   if (!raw) return '';
   if (data?.generationId) return raw;
   if (nodeType && nodeType !== 'image' && nodeType !== 'video' && nodeType !== 'audio') return raw;

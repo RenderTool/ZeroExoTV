@@ -279,8 +279,17 @@ export type DataRootState = 'ok' | 'service-offline' | 'unauthorized';
 export async function dataRootState(): Promise<DataRootState> {
   await httpFsReady;
   if (httpFs.online) return 'ok';
-  // 服务模式的数据根只认 8790：离线就走「服务离线」提示，绝不退化成「请选择目录」
-  if (dataRootExpectsService()) return 'service-offline';
+  // MCP 服务离线不拦整站（2026-11-20 用户报障：没启动 MCP 就变成离线门页面）。
+  // 浏览器里已有授权目录句柄（showDirectoryPicker 的句柄，持久权限还在）就先按浏览器目录打开，
+  // 页面照常用；服务端相关能力（MCP 任务/队列）由各自面板提示。只有没有可用句柄才落离线门。
+  if (dataRootExpectsService()) {
+    const savedForFallback = await idbGet<DirHandle>(ROOT_KEY).catch(() => null);
+    if (savedForFallback && (await probe(savedForFallback, 'readwrite')) === 'granted') {
+      root = savedForFallback;
+      return 'ok';
+    }
+    return 'service-offline';
+  }
   if (root) return (await probe(root, 'readwrite')) === 'granted' ? 'ok' : 'unauthorized';
   const saved = await idbGet<DirHandle>(ROOT_KEY);
   if (!saved) return 'unauthorized';

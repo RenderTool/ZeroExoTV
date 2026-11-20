@@ -1151,7 +1151,7 @@ function StateGridCard({
  * 底栏不再重复「发送到画布」；生成按钮必须永远是这一行最后一个动作。
  */
 function SubjectGenFooter({
-  jobKey, theme, model, prompt, paramValues, referenceKey, leading,
+  jobKey, theme, model, prompt, paramValues, imageReferenceCount, leading,
   onModelChange, onParamsChange, onStart, onCancel,
 }: {
   jobKey: string;
@@ -1159,7 +1159,8 @@ function SubjectGenFooter({
   model: string;
   prompt: string;
   paramValues: Record<string, unknown>;
-  referenceKey: string;
+  /** 有效输入图数量（显式引用 + 继承基础状态，去重后）：1 张时参数面板才允许「原图」 */
+  imageReferenceCount: number;
   /** 主体专属的紧凑控件（出现集数 / 提示词模板），与底栏同一行 */
   leading?: React.ReactNode;
   onModelChange: (model: string) => void;
@@ -1181,8 +1182,8 @@ function SubjectGenFooter({
             model={model}
             modelOptions={SUBJECT_MODEL_OPTIONS}
             paramValues={paramValues}
-            hasImageReference={Boolean(referenceKey)}
-            imageReferenceCount={referenceKey ? 1 : 0}
+            hasImageReference={imageReferenceCount > 0}
+            imageReferenceCount={imageReferenceCount}
             isRunning={running}
             hasText={Boolean(prompt.trim())}
             textLength={prompt.length}
@@ -1292,6 +1293,12 @@ function StateEditPanel({
     ? firstCoverMediaKeyOfState((tree.states ?? []).find((n) => n.id === SUBJECT_BASE_STATE_ID)?.media)
     : '';
   const baseRefId = 'base-state-ref';
+  /**
+   * 有效输入图数量（2026-11-20 报障：引用状态后「原图」档位还是灰的）。
+   * 原来只数显式 referenceKeys，漏掉「继承基础状态」那张图 —— 派生状态默认 useBaseRef=true，
+   * 实际已经有一张输入图，却判定成「无参考图」。这里把两张合并去重后再判断。
+   */
+  const effectiveImageRefCount = (referenceKey ? 1 : 0) + (baseRefKey && baseRefKey !== referenceKey ? 1 : 0);
   /** 画布参数弹层的数据形状（Qwen=宽高/1K·2K，Moss/Krea=比例+百万像素） */
   const footerParamValues: Record<string, unknown> = model === MOSS_MODEL_KEY
     ? { aspect: genParams.aspect, megapixels: genParams.megapixels, steps: genParams.steps, cfg: genParams.cfg, seed: genParams.seed, sizeMode: 'custom' }
@@ -1306,9 +1313,8 @@ function StateEditPanel({
         use_llm_enhance: genParams.useLlmEnhance,
         transparent_background: genParams.transparent,
         seed: genParams.seed,
-        // 用户选的比例/尺寸必须生效；不能因为有参考图就退回 “source” 跟随参考图，
-        // 否则面板显示 16:9、出图却是参考图的 4:3。
-        sizeMode: 'custom',
+        // 面板显示什么就提交什么：原图档位必须能真的生效（此前写死 custom → 选了没用）
+        sizeMode: genParams.sizeMode,
       };
   /** 参数一次写全，刷新后保留（不做「只存改过的键」的隐式合并） */
   const commitGenParams = (patch: Partial<typeof genParams>): void => {
@@ -1328,6 +1334,7 @@ function StateEditPanel({
         seed: next.seed,
         useBaseRef: next.useBaseRef,
         referenceKeys: next.referenceKeys,
+        sizeMode: next.sizeMode,
       },
     });
   };
@@ -1608,7 +1615,7 @@ function StateEditPanel({
           model={model}
           prompt={promptValue}
           paramValues={footerParamValues}
-          referenceKey={referenceKey}
+          imageReferenceCount={effectiveImageRefCount}
           leading={(
             <>
               {validEpisodes.length === 0 ? null : (
@@ -1649,6 +1656,9 @@ function StateEditPanel({
             if (typeof patch.use_llm_enhance === 'boolean') next.useLlmEnhance = patch.use_llm_enhance;
             if (typeof patch.transparent_background === 'boolean') next.transparent = patch.transparent_background;
             if (typeof patch.seed === 'number') next.seed = Math.round(patch.seed);
+            // 尺寸档位：原图 = 跟随唯一一张输入图真实尺寸；其它档位（1K/2K/自定义）一律回到 custom。
+            if (patch.sizeMode === 'source' && effectiveImageRefCount === 1) next.sizeMode = 'source';
+            else if (patch.sizeMode === 'custom') next.sizeMode = 'custom';
             if (typeof patch.width === 'number' && typeof patch.height === 'number') {
               const width = Math.max(64, Math.min(2048, Math.round(patch.width / 32) * 32));
               const height = Math.max(64, Math.min(2048, Math.round(patch.height / 32) * 32));
