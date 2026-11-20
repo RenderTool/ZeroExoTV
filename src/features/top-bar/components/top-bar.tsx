@@ -225,13 +225,14 @@ export function TopBar({
         </div>
       )}
       <div style={rightStyle}>
-        {/* 右侧工具组：历史版本等低频但需一键可达的入口（2026-11-20 用户要求） */}
-        {rightTools}
-        {/* 协作 + Agent(桌面端;账号/退出已移入左上角 CanvasMenu) */}
+        {/*
+          2026-11-20 用户口径：历史版本等低频入口也要收进右侧「»」展开/收纳箭头里，
+          收起时只留箭头，点开才出现（不再常驻占位）。
+        */}
         {!mobile && (
           <>
             {/* 设置组：水平展开/收纳（2026-09-01 约定，替代原 LOGO 下拉的视图/帮助组）。
-                收起态仅一个开关按钮；点击水平展开 外观/语言/配置/快捷键/协作，再点收纳。
+                收起态仅一个开关按钮；点击水平展开 历史版本/外观/语言/配置/快捷键/服务/ComfyUI，再点收纳。
                 展开状态持久化（UTILS_EXPANDED_KEY）；Agent 排除在外保持常驻。 */}
             <div
               style={{
@@ -239,11 +240,14 @@ export function TopBar({
                 alignItems: 'center',
                 gap: TOPBAR_ICON_GAP,
                 overflow: 'hidden',
-                maxWidth: utilsOpen ? 260 : 0,
+                maxWidth: utilsOpen ? 320 : 0,
                 opacity: utilsOpen ? 1 : 0,
                 transition: 'max-width 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s',
               }}
             >
+              {/* 历史版本（画布历史抽屉入口，2026-11-20 收进箭头组） */}
+              {rightTools}
+
               {/* 外观(主题切换,2026-08-29 移回顶栏;与主页顶栏共用同一图标) */}
               <TopBarIconButton
                 action="appearance"
