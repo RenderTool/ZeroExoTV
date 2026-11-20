@@ -103,6 +103,12 @@ export interface StoryboardVideoStageProps {
    */
   hideControls?: boolean;
   /**
+   * 2026-11-20 用户要求：分镜预览里视频要能像正常播放器一样用 ——
+   * 有可拖的进度条（看具体帧）、点画面能播放/暂停，且不再自动无限循环。
+   * true 时关掉自动循环（播到最后一帧停住），其余控制沿用控制条。
+   */
+  disableLoop?: boolean;
+  /**
    * 2026-11-07 导演台修复：当前片段没有成片（生成中 / 未生成 / 失败）时隐藏播放控制条，
    * 只保留状态占位与实时帧角标 —— 播放键、时间码、进度条只在生成完成后才有意义。
    * 出片工作台等由时间轴主时钟驱动的路径不传此开关，控制条行为保持原样（整轨播放需要）。
@@ -167,6 +173,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   placeholderPrompt, placeholderTitle, placeholderStatus, placeholderDetail, placeholderReason, onFullscreenPlay,
   livePreview, progressOnly = false,
   hideControls = false,
+  disableLoop = false,
   hideControlBarWhenNoVideo = false,
   paramsLabel,
   theme, isDark,
@@ -252,8 +259,15 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) void v.play().catch(() => { /* ignore */ });
-    else v.pause();
+    if (v.paused) {
+      // 播完停在最后一帧后再点播放 → 从头重播，而不是原地不动
+      if (v.ended || (Number.isFinite(v.duration) && v.duration > 0 && v.currentTime >= v.duration - 0.05)) {
+        try { v.currentTime = 0; setCurTime(0); } catch { /* ignore */ }
+      }
+      void v.play().catch(() => { /* ignore */ });
+    } else {
+      v.pause();
+    }
   }, []);
   const toggleMute = useCallback(() => {
     const v = videoRef.current;
@@ -375,7 +389,7 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
           controls={false}
           preload="metadata"
           muted={muted}
-          loop={!sequenceChain}
+          loop={!sequenceChain && !disableLoop}
           // Plan#83 A 修正：hideControls 模式下禁用点击播放 / 双击全屏
           onClick={hideControls ? undefined : togglePlay}
           onPlay={() => { setPlaying(true); playStartedAtRef.current = Date.now(); }}

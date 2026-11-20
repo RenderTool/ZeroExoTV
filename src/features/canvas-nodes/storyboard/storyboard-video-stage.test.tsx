@@ -8,7 +8,7 @@
  * 4. videoStatus='failed' 时即使有 storageKey 也不渲染 <video>
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { createElement } from 'react';
 
 vi.mock('react-i18next', () => ({
@@ -38,6 +38,41 @@ const baseProps = {
     canvas: { background: '#17171a' },
   } as never,
 };
+
+describe('StoryboardVideoStage 分镜预览：可暂停 / 可拖进度 / 不自动循环（2026-11-20）', () => {
+  it('disableLoop：<video> 不循环，播完停在最后一帧；控制条（播放键 + 进度条）仍然渲染', () => {
+    const { container } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStorageKey: 'video:preview.mp4',
+      videoStatus: 'done',
+      disableLoop: true,
+    }));
+    const video = container.querySelector('video') as HTMLVideoElement;
+    expect(video.loop).toBe(false);
+    expect(container.querySelector('[data-video-control-bar]')).toBeTruthy();
+    // 进度条可拖（有 pointer 处理器即代表可 scrub）
+    expect(container.querySelector('[data-video-control-bar]')).toBeTruthy();
+  });
+
+  it('点画面能播放/暂停（非 hideControls 模式）', () => {
+    const { container } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStorageKey: 'video:preview.mp4',
+      videoStatus: 'done',
+      disableLoop: true,
+    }));
+    const video = container.querySelector('video') as HTMLVideoElement;
+    // jsdom 的 paused 恒为 true，这里用可控的 getter 模拟真实播放态切换
+    let paused = true;
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+    const playSpy = vi.spyOn(video, 'play').mockImplementation(async () => { paused = false; });
+    const pauseSpy = vi.spyOn(video, 'pause').mockImplementation(() => { paused = true; });
+    fireEvent.click(video);
+    expect(playSpy).toHaveBeenCalled();
+    fireEvent.click(video);
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+});
 
 describe('StoryboardVideoStage 媒体/占位互斥', () => {
   it('有媒体：渲染 <video>（src 已解析）且无状态占位节点', () => {

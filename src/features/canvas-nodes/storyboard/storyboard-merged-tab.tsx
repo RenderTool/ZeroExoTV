@@ -485,7 +485,7 @@ title={t('storyboard.dragResize', '拖拽调整宽度')}
 
 {/* 右列：视频预览（与提示词区等高，不向下延伸到轨道区；videoPreviewOnly 透传隐藏控制条） */}
 <div data-wb="video-preview" style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-<StoryboardVideoStage theme={theme} isDark={isDark} hideControls={!!videoPreviewOnly} {...videoStageProps} />
+<StoryboardVideoStage theme={theme} isDark={isDark} disableLoop={!!videoPreviewOnly} {...videoStageProps} />
 </div>
 </div>
 
