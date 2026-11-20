@@ -85,18 +85,15 @@
  },
  "25": {
   "inputs": {
-   "lora_name": "__zx:lora_name__",
-   "strength_model": "__zx:lora_strength__",
+   "loras": "",
    "model": [
     "45:66",
     0
    ]
   },
-  "class_type": "LoraLoaderModelOnly",
+  "class_type": "ZeroExoLoraChain",
   "_meta": {
-   "title": "LoRA加载器（仅模型）",
-   "cnr_id": "comfy-core",
-   "ver": "0.42.0"
+   "title": "LoRA 数组串联（多项按顺序叠加）"
   }
  },
  "45:1": {

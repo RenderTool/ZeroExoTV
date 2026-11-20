@@ -10,9 +10,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Checkbox, InputNumber, Modal, Select, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
-import { MAX_LORAS, type LoraRow } from '@/entities/director-lora.js';
+import { DEFAULT_LORA_NAME, MAX_LORAS, type LoraRow } from '@/entities/director-lora.js';
 import { fetchBridgeModels } from './comfyui-bridge-client.js';
-import { hasDirectorLoraSink, getDirectorLoras, setDirectorLoras } from './director-lora-bridge.js';
+import { getDirectorLoras, setDirectorLoras } from './director-lora-bridge.js';
 import { useComfyuiConnectionStore } from './comfyui-connection.js';
 import { useComfyuiEndpointStore, type ComfyuiVramMode } from './comfyui-endpoint.js';
 
@@ -383,17 +383,28 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
         </Text>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
-        {available.lora.map((name) => {
+        {(available.lora.includes(DEFAULT_LORA_NAME)
+          ? available.lora
+          : [DEFAULT_LORA_NAME, ...available.lora]
+        ).map((name) => {
           const order = loraRows.findIndex((r) => r.name === name);
           const checked = order >= 0;
+          const isDefault = name === DEFAULT_LORA_NAME;
+          const missing = isDefault && !available.lora.includes(name);
           return (
             <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <Checkbox
                 checked={checked}
-                disabled={!checked && loraRows.length >= MAX_LORAS}
+                disabled={missing || (!checked && loraRows.length >= MAX_LORAS)}
                 onChange={() => toggleLora(name)}
               />
-              <Text style={{ flex: 1, fontSize: 12 }} ellipsis>{name}</Text>
+              <Text style={{ flex: 1, fontSize: 12, color: missing ? '#d97706' : undefined }} ellipsis>{name}</Text>
+              {isDefault ? (
+                <Tag color="blue" style={{ marginInlineEnd: 0 }}>默认推荐</Tag>
+              ) : null}
+              {missing ? (
+                <Tag style={{ marginInlineEnd: 0 }}>本机未下载</Tag>
+              ) : null}
               <CopyNameButton name={name} />
               {checked ? <Tag color="green" style={{ marginInlineEnd: 0 }}>第 {order + 1} 条</Tag> : null}
               <InputNumber
@@ -413,10 +424,12 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
         </div>
       )}
       <Text type="secondary" style={{ fontSize: 11 }}>
-        勾选哪几条、各自强度、串联顺序就是实际下发顺序（ComfyUI 里就是多个 LoraLoaderModelOnly 逐节改 MODEL，显存和耗时都会涨）。
-        这里是设置，不是一次性参数：勾完就保存（本地设置 + 项目参数双写），下次打开还是这几条。
-        {hasDirectorLoraSink() ? '' : '（当前没打开导演台，已存为全局设置，打开项目时会自动写进项目参数。）'}
+        LoRA 是可选项：不勾就完全不加 LoRA。勾选即串联，顺序就是下发顺序；勾完即保存（本项目 + 本机设置）。清单里的「默认推荐」只是建议，不勾不会自动启用。
       </Text>
+      <div data-testid="lora-recommend" style={{ marginTop: 6, fontSize: 11, color: 'rgba(128,128,128,0.95)' }}>
+        推荐：{DEFAULT_LORA_NAME}
+        <span style={{ marginLeft: 6 }}>（8 步 turbo，出片快、8G 显存友好；不需要就别勾）</span>
+      </div>
     </div>
   );
 

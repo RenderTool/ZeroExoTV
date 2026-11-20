@@ -42,7 +42,7 @@ import {
   useComfyuiEndpointStore,
   type EndpointTestResult,
 } from './comfyui-endpoint.js';
-import { pluginUpdateHint } from './plugin-version.js';
+import { OFFICIAL_PLUGIN_VERSION, pluginUpdateHint } from './plugin-version.js';
 
 const { Text } = Typography;
 
@@ -183,6 +183,11 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
       {testResult?.kind === 'fail' && (
         <Text type="danger" style={{ fontSize: 12 }} data-testid="comfyui-test-fail">
           {testResult.message}
+        </Text>
+      )}
+      {testResult?.kind === 'ok' && testResult.pluginVersion && (
+        <Text style={{ fontSize: 12 }} data-testid="comfyui-plugin-version">
+          插件版本 v{testResult.pluginVersion} · 官方 v{OFFICIAL_PLUGIN_VERSION}
         </Text>
       )}
       {testResult?.kind === 'ok' && testResult.pluginOutdated && testResult.pluginVersion && (

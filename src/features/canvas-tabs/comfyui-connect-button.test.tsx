@@ -103,7 +103,9 @@ describe('极简面板形态', () => {
     expect(screen.queryByText('director.channelSelect')).toBeNull();
     expect(screen.queryByText('director.channelCorsNote')).toBeNull();
     expect(screen.queryByText('director.comfyToken')).toBeNull();
-    expect(screen.queryAllByRole('combobox')).toHaveLength(0); // 渠道/模型下拉不存在
+    // 0.4.42 起「模型映射」块常显在连接配置里（视频槽位/显存策略都是下拉），
+    // 所以这里只校验「旧的渠道/模型下拉」不存在，不再断言整页没有 combobox。
+    expect(screen.getByTestId('comfyui-model-section')).toBeTruthy();
     expect(document.querySelectorAll('input[type="password"]')).toHaveLength(0); // API Key 密码框不存在
   });
 });

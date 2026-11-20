@@ -508,22 +508,14 @@ export function ScriptFullscreenEditor({
               </Button>
             </Tooltip>
           ) : null}
-        </div>
-
-        {/* 右侧：视图 / 问AI / 统计（固定顺序） */}
-        <div
-          data-toolbar-zone="right"
-          data-script-stats
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
-            flex: 1, minWidth: 0, gap: 12, fontSize: 11, color: mutedColor,
-            whiteSpace: 'nowrap', overflow: 'hidden',
-          }}
-        >
+          {/* 2026-11-21 用户口径：右侧是状态栏，只放统计；显示标签 / 问AI 是操作，
+              必须和导入/撤销/重做/版本同一组放在左侧。 */}
+          <span style={{ width: 1, height: 16, background: cardBorder, margin: '0 2px', flexShrink: 0 }} />
           <Tooltip title={effectiveShowLabels ? t('scriptEditor.hideLabels') || '隐藏标签' : t('scriptEditor.showLabels') || '显示标签'}>
             <Button
               type="text"
               size="small"
+              data-script-toggle-labels
               icon={effectiveShowLabels ? <Eye size={15} /> : <EyeOff size={15} />}
               onClick={handleShowLabelsChange}
               style={{
@@ -547,7 +539,18 @@ export function ScriptFullscreenEditor({
               {t('scriptEditor.askAiBtn', '问AI')}
             </Button>
           </Tooltip>
-          <span style={{ width: 1, height: 12, background: cardBorder, flexShrink: 0 }} />
+        </div>
+
+        {/* 右侧：仅统计（状态栏） */}
+        <div
+          data-toolbar-zone="right"
+          data-script-stats
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
+            flex: 1, minWidth: 0, gap: 12, fontSize: 11, color: mutedColor,
+            whiteSpace: 'nowrap', overflow: 'hidden',
+          }}
+        >
           <Tooltip title={t('storyboard.wordCountNoPunct', { count: scriptStats.charsNoPunct })}>
             <span>{t('canvasNodes.wordCount', { count: wordCount })}</span>
           </Tooltip>

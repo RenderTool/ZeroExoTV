@@ -32,3 +32,12 @@ for (const file of files) {
   writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
 }
 console.log(`version -> ${next} (${files.join(', ')})`);
+
+// 2026-11-21 用户要求：下载的插件 zip 必须带版本号。
+// 每次 bump 后按插件 PLUGIN_VERSION 重打 zip，避免「代码 0.1.4、zip 还是 0.1.2」。
+try {
+  const { buildPluginZip } = await import('./build-plugin-zip.mjs');
+  buildPluginZip();
+} catch (err) {
+  console.error(`[bump] 插件 zip 重打失败（版本号已改，需手动跑 node tools/build-plugin-zip.mjs）: ${err.message}`);
+}

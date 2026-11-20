@@ -38,7 +38,7 @@ function savePersisted(rows: LoraRow[]): void {
 }
 
 let sink: LoraSink | null = null;
-let current: LoraRow[] = loadPersisted();
+let current: LoraRow[] = normalizeLoras(loadPersisted());
 
 /** 导演台挂载时注册（返回注销函数）；snapshot 传当前项目的 params.loras */
 export function registerDirectorLoraSink(next: LoraSink, snapshot: unknown): () => void {
@@ -46,7 +46,7 @@ export function registerDirectorLoraSink(next: LoraSink, snapshot: unknown): () 
   current = normalizeLoras(snapshot);
   if (current.length === 0) {
     // 项目里还没设置过 → 用上次的 LoRA 设置补进去并落盘，用户不必每次重勾
-    const persisted = loadPersisted();
+    const persisted = normalizeLoras(loadPersisted());
     if (persisted.length > 0) {
       current = persisted;
       next(current);

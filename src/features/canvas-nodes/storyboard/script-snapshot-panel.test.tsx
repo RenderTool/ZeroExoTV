@@ -309,3 +309,41 @@ describe('script-snapshot-panel 手动删除（2026-11-05）', () => {
     expect(onRestore).not.toHaveBeenCalled(); // 删除流程中的条目禁止恢复
   });
 });
+
+/**
+ * 2026-11-21 报障回归：点「剧本 → 版本」打开历史面板直接白屏，
+ * 控制台 "Cannot read properties of undefined (reading 'map')"。
+ * 根因是老快照 / 老 backups 迁移条目的 entity 没有 episodes 数组（甚至没有 entity），
+ * 原先 entity.episodes.map 必炸。要求：这类条目照常显示（按 0 字处理），不阻塞面板。
+ */
+describe('script-snapshot-panel 老快照兼容（2026-11-21 报障）', () => {
+  beforeEach(() => {
+    deleteSnapshotFile.mockClear();
+    undeleteSnapshot.mockClear();
+  });
+
+  it('entity 缺 episodes / 是裸 content / 缺 entity 时面板照常渲染，不抛 .map 错误', async () => {
+    listSnapshots.mockImplementation((async () => ([
+      { schemaVersion: 1, type: 'script', reason: 'auto', createdAt: '2026-11-04T09:00:00', hash: 'x', entity: { title: '裸正文', content: '只有一段老正文' }, fileName: 'snap-legacy-1.json' },
+      { schemaVersion: 1, type: 'script', reason: 'auto', createdAt: '2026-11-04T10:00:00', hash: 'y', entity: undefined, fileName: 'snap-legacy-2.json' },
+      { schemaVersion: 1, type: 'script', reason: 'auto', createdAt: '2026-11-04T11:00:00', hash: 'z', entity: { title: '字段缺失' }, fileName: 'snap-legacy-3.json' },
+    ])) as unknown as typeof listSnapshots);
+    const container = renderPanel(() => Promise.resolve());
+    await waitFor(() => {
+      const el = container.querySelector('[data-snapshot-list]') as HTMLElement;
+      expect(el).not.toBeNull();
+      expect(el.textContent).not.toContain('加载中…');
+    });
+    expect(container.querySelector('[data-snapshot-meta]')?.textContent).toContain('3 个版本');
+    // 三条都在，不因某条结构异常整块崩掉
+    expect(container.querySelectorAll('button[data-snapshot-restore]')).toHaveLength(3);
+    // 裸 content 也能预览出正文
+    fireEvent.click(Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === '预览')[2]!);
+    const preview = await waitFor(() => {
+      const el = container.querySelector('[data-snapshot-preview]') as HTMLElement;
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(preview.textContent).toContain('只有一段老正文');
+  });
+});

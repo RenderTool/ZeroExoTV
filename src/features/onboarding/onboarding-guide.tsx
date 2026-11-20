@@ -26,6 +26,7 @@ import {
 import { fetchBridgeModels } from '@/features/canvas-tabs/comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connection.js';
 import { ComfyuiConnectButton } from '@/features/canvas-tabs/comfyui-connect-button.js';
+import { OFFICIAL_PLUGIN_VERSION, PLUGIN_ZIP_FILENAME } from '@/features/canvas-tabs/plugin-version.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
 /** MCP 固定安装目录（2026-11-19 用户定稿：不再让用户选，固定 ~/.zeroexo/mcp，占用极小） */
@@ -113,7 +114,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
 
-  const pluginZipUrl = `${import.meta.env.BASE_URL}downloads/ComfyUI_ZeroExoNodes.zip`;
+  const pluginZipUrl = `${import.meta.env.BASE_URL}downloads/${PLUGIN_ZIP_FILENAME}`;
 
   useEffect(() => {
     if (!open) return;
@@ -373,11 +374,14 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
               type="primary"
               icon={<Download size={13} />}
               href={pluginZipUrl}
-              download
+              download={PLUGIN_ZIP_FILENAME}
               data-testid="onboarding-download-plugin"
             >
-              {t('onboarding.downloadPlugin', '下载插件 ZIP')}
+              {t('onboarding.downloadPlugin', '下载插件 ZIP')}（v{OFFICIAL_PLUGIN_VERSION}）
             </Button>
+            <Tag color="blue" data-testid="onboarding-plugin-version" style={{ marginInlineEnd: 0 }}>
+              插件版本 v{OFFICIAL_PLUGIN_VERSION}
+            </Tag>
             <span style={hintStyle(theme)}>
               {t('onboarding.pluginPathHint', '解压到 {{path}}，重启 ComfyUI', { path: PLUGIN_DIR })}
             </span>

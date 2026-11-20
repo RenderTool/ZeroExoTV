@@ -55,12 +55,33 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+/**
+ * 快照正文的安全读取（2026-11-21 报障：点「版本」进历史面板报
+ * "Cannot read properties of undefined (reading 'map')"）。
+ * 根因：老快照 / 老 backups 迁移进来的实体不一定有 episodes 数组
+ * （可能是裸 { content }，也可能字段缺失），原先直接 entity.episodes.map 就炸。
+ * 这里统一兜底成「章节列表」，缺字段按空正文处理，不阻塞面板打开、也不吞掉其他条目。
+ */
+type SnapshotEpisode = { content?: unknown };
+
+function episodesOf(entity: ScriptEntity | null | undefined): SnapshotEpisode[] {
+  if (!entity || typeof entity !== 'object') return [];
+  const list = (entity as { episodes?: unknown }).episodes;
+  if (Array.isArray(list)) return list as SnapshotEpisode[];
+  // 老格式：实体本身就是 { content: '...' }
+  const legacy = (entity as { content?: unknown }).content;
+  return typeof legacy === 'string' ? [{ content: legacy }] : [];
+}
+
 function entityText(entity: ScriptEntity): string {
-  return entity.episodes.map((ep) => normalizeScriptText(ep.content ?? '')).join('\n');
+  return episodesOf(entity)
+    .map((ep) => normalizeScriptText(typeof ep?.content === 'string' ? ep.content : ''))
+    .join('\n');
 }
 
 function entityChars(entity: ScriptEntity): number {
-  return entity.episodes.reduce((sum, ep) => sum + countScriptChars(ep.content ?? ''), 0);
+  return episodesOf(entity)
+    .reduce((sum, ep) => sum + countScriptChars(typeof ep?.content === 'string' ? ep.content : ''), 0);
 }
 
 /** 与上一版差异摘要（公共前后缀剥离，增删字符数；不做逐行 diff 渲染） */

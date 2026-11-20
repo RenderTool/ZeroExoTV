@@ -9,6 +9,13 @@
 /** 工程护栏：不是模型硬限制，是「再多显存/耗时都会明显变差」的上限 */
 export const MAX_LORAS = 4;
 
+/**
+ * 推荐 LoRA（H3 8 步 turbo）。2026-11-21 用户口径：
+ * LoRA 是可选增强项，**一切以勾选为准** —— 它只在清单里标注「默认推荐」，
+ * 默认不勾；不勾 = 插件一条都不加载，不存在任何隐式默认。
+ */
+export const DEFAULT_LORA_NAME = 'minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors';
+
 export interface LoraRow {
   name: string;
   strength: number;

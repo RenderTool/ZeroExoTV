@@ -115,4 +115,21 @@ describe('buildDirectorBatchPayload', () => {
     expect(params.lora_name).toBe('a.safetensors');
     expect(params.lora_strength).toBe(0.8);
   });
+
+  /** 2026-11-21 用户口径：LoRA 是可选增强项，一条都没勾 = 一条都不下发（不许隐式塞 turbo）。 */
+  it('不勾任何 LoRA 时，payload 里没有任何 LoRA 字段', () => {
+    const sharedEmpty = {
+      params: {
+        aspect: '21:9', scaleFactor: 1.5, steps: 12, cfg: 1, seed: -1,
+        loras: [], lora_name: '', lora_strength: 1,
+      },
+    } as unknown as WorkbenchSharedParams;
+    const payload = buildDirectorBatchPayload({
+      projectId: 'p', taskId: 't', shots: [shot(1)], selectedIds: ['s1'], shared: sharedEmpty,
+    });
+    const params = payload.segments[0]!.params;
+    expect(params.loras).toBeUndefined();
+    expect(params.lora_name).toBeUndefined();
+    expect(params.lora_strength).toBeUndefined();
+  });
 });

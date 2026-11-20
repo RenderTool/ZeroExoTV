@@ -19,19 +19,47 @@ _LOW_CHAIN = ("45:58", "45:59", "45:60", "45:61")
 # 模板里的单 LoRA 节点 id（2026-11-20：要支持多 LoRA 串联）
 _LORA_NODE_ID = "25"
 _LORA_CLASS = "LoraLoaderModelOnly"
+# 2026-11-21（C-12）：模板底稿改成一个「数组节点」——插件自定义 Node，内部按数组顺序串联。
+# 有它时只写它的 widget，图结构零改动；没有它（老模板）才走下面 0.1.3 的造链兼容路径。
+_LORA_CHAIN_CLASS = "ZeroExoLoraChain"
+
+
+def format_lora_text(loras: list[dict[str, Any]]) -> str:
+    """把数组写成 ZeroExoLoraChain 的 widget 文本（顺序即串联顺序）。"""
+    lines = ["# 每行一条：文件名 | 强度（0–2），顺序 = 串联顺序"]
+    for lora in loras:
+        lines.append(f"{lora['name']} | {lora['strength']}")
+    return "\n".join(lines)
 
 
 def apply_lora_chain(template: dict[str, Any], loras: list[dict[str, Any]]) -> dict[str, Any]:
-    """把模板里「单个 LoRA 节点」改造成按顺序串联的 LoRA 链。
+    """把模板里的 LoRA 节点按数组填好。
 
+    优先：模板里若有 `ZeroExoLoraChain`（数组节点），只给它 `inputs["loras"]` 赋值，
+    不改动任何节点结构——这样 ComfyUI 工作流界面看到的图与实际下发完全一致。
+
+    兼容：老模板/老插件产物没有这个节点时，退回 0.1.3 的「造链」做法——
     ComfyUI 的 LoRA 是 MODEL 的串联 patch：每个 LoraLoaderModelOnly 吃上一个的 MODEL、
     按 strength_model 加权，所以多个 LoRA = 一串节点，顺序即用户排列顺序。
 
-    - loras 为空 → 原样返回（不该发生，调用方会兜底成默认 LoRA）
-    - 1 条 → 直接改原节点的两个输入，图结构不变（与今天完全一致）
-    - N 条 → 原节点被 N 个新节点替换：链首吃原节点原来的 model 输入源，
+    - loras 为空 → 数组节点写入空文本（原样透传 MODEL）；老模板原样返回
+    - 数组节点存在 → 只写 widget，节点/连线不变
+    - 老模板 1 条 → 直接改原节点的两个输入，图结构不变
+    - 老模板 N 条 → 原节点被 N 个新节点替换：链首吃原节点原来的 model 输入源，
       链尾接回所有原本消费该节点的下游（通常是 ZeroExoRefVideo）
     """
+    chain_id = next(
+        (nid for nid, node in template.items()
+         if isinstance(node, dict) and node.get("class_type") == _LORA_CHAIN_CLASS),
+        None,
+    )
+    if chain_id is not None:
+        inputs = template[chain_id].setdefault("inputs", {})
+        inputs["loras"] = format_lora_text(loras) if loras else ""
+        return template
+    if not loras:
+        return template
+
     anchor_id = _LORA_NODE_ID if isinstance(template.get(_LORA_NODE_ID), dict) else None
     if anchor_id is None:
         anchor_id = next(
@@ -39,7 +67,7 @@ def apply_lora_chain(template: dict[str, Any], loras: list[dict[str, Any]]) -> d
              if isinstance(node, dict) and node.get("class_type") == _LORA_CLASS),
             None,
         )
-    if anchor_id is None or not loras:
+    if anchor_id is None:
         return template
     anchor = template[anchor_id]
     inputs = anchor.setdefault("inputs", {})

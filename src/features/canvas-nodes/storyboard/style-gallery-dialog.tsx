@@ -8,13 +8,14 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Input, Modal } from 'antd';
-import { Check, Search, Star } from 'lucide-react';
+import { Camera, Check, Clapperboard, ExternalLink, Lightbulb, Search, Star, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import {
   STYLE_CATEGORY_LABELS, STYLE_PRESETS, stylePresetImageUrl,
   type StylePreset, type StylePresetCategory,
 } from '@/shared/style-presets.js';
+import { styleCraftFor } from '@/shared/style-craft.js';
 
 const FAVORITES_KEY = 'zeroexo:style-favorites';
 
@@ -35,6 +36,119 @@ export interface StyleGalleryDialogProps {
   theme: ThemeConfig;
 }
 
+/** 风格详情：技法 / 运镜（带秒数）/ 叙事剪辑 / 依据来源（用户要求「点开看，不能瞎给」） */
+function StyleCraftDetail({
+  open, preset, theme, onBack, onApply,
+}: {
+  open: boolean;
+  preset: StylePreset | null;
+  theme: ThemeConfig;
+  onBack: () => void;
+  onApply: (preset: StylePreset) => void;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  const text = theme.toolbar.text;
+  const muted = theme.toolbar.textMuted;
+  const accent = theme.toolbar.accent;
+  const isDark = theme.mode === 'dark';
+  const craft = preset ? styleCraftFor(preset.id) : null;
+
+  const section = (
+    icon: React.ReactNode, title: string, items: string[],
+  ): React.ReactNode => (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: text }}>
+        {icon}{title}
+      </div>
+      <ol style={{ margin: '8px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map((line, i) => (
+          <li key={i} style={{ fontSize: 12, lineHeight: 1.7, color: muted }}>{line}</li>
+        ))}
+      </ol>
+    </div>
+  );
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onBack}
+      footer={null}
+      centered
+      width={760}
+      zIndex={1200}
+      title={null}
+      closeIcon={null}
+      styles={{ body: { padding: 0 } }}
+      destroyOnHidden
+    >
+      <div data-style-detail={preset?.id} style={{ background: isDark ? '#17171a' : '#fff', borderRadius: 12, maxHeight: '80vh', overflowY: 'auto' }}>
+        {preset && (
+          <div style={{ padding: '16px 20px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: text }}>{preset.nameZh}</div>
+                <div style={{ fontSize: 11, color: muted, marginTop: 2 }}>
+                  {[preset.nameEn, STYLE_CATEGORY_LABELS[preset.category]].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+              <Button size="small" onClick={onBack}>{t('styleGallery.back', '返回列表')}</Button>
+            </div>
+            <div style={{ fontSize: 12, color: muted, marginTop: 10, lineHeight: 1.7 }}>{preset.intro}</div>
+
+            {craft ? (
+              <>
+                <div style={{
+                  marginTop: 14, padding: '10px 12px', borderRadius: 8,
+                  border: `1px solid ${accent}55`, background: `${accent}12`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: accent }}>
+                    <Timer size={13} />{t('styleGallery.craft.beat', '镜头时长与节奏（分镜直接照此设时长）')}
+                  </div>
+                  <div style={{ fontSize: 12, color: text, marginTop: 6, lineHeight: 1.7 }}>{craft.asl}</div>
+                </div>
+
+                {section(<Lightbulb size={13} />, t('styleGallery.craft.techniques', '风格技法'), craft.techniques)}
+                {section(<Camera size={13} />, t('styleGallery.craft.camera', '运镜要领'), craft.camera)}
+                {section(<Clapperboard size={13} />, t('styleGallery.craft.narrative', '叙事与剪辑'), craft.narrative)}
+
+                {craft.sources.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: muted }}>{t('styleGallery.craft.sources', '依据来源')}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+                      {craft.sources.map((src) => (
+                        <a
+                          key={src.url}
+                          href={src.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: accent, textDecoration: 'none' }}
+                        >
+                          <ExternalLink size={10} />{src.label}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ marginTop: 16, fontSize: 12, color: muted }}>
+                {t('styleGallery.craft.missing', '这套风格暂无技法条目（不会拿假数据填），可先按提示词描述使用。')}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+              <Button size="small" onClick={onBack}>{t('styleGallery.back', '返回列表')}</Button>
+              <Button size="small" type="primary" data-style-detail-apply onClick={() => onApply(preset)}>
+                {t('styleGallery.apply', '使用此风格')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme }: StyleGalleryDialogProps): React.ReactElement {
   const { t } = useTranslation();
   const [category, setCategory] = useState<'all' | StylePresetCategory>('all');
@@ -42,12 +156,14 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set(readFavorites()));
   const [pendingId, setPendingId] = useState<string | null>(selectedId ?? null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const text = theme.toolbar.text;
   const muted = theme.toolbar.textMuted;
   const accent = theme.toolbar.accent;
   const isDark = theme.mode === 'dark';
 
   useEffect(() => { if (open) setPendingId(selectedId ?? null); }, [open, selectedId]);
+  useEffect(() => { if (!open) setDetailId(null); }, [open]);
   useEffect(() => {
     try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites])); } catch { /* 忽略 */ }
   }, [favorites]);
@@ -66,7 +182,10 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
     return next;
   });
 
+  const detailPreset = STYLE_PRESETS.find((s) => s.id === detailId) ?? null;
+
   return (
+    <>
     <Modal
       open={open}
       onCancel={onClose}
@@ -147,7 +266,7 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
                   data-style-card={preset.id}
                   data-style-selected={selected ? '1' : undefined}
                   onDoubleClick={() => { onSelect(preset); onClose(); }}
-                  onClick={() => setPendingId(preset.id)}
+                  onClick={() => { setPendingId(preset.id); setDetailId(preset.id); }}
                   style={{
                     position: 'relative', padding: 0, border: `1px solid ${selected ? accent : 'rgba(128,128,128,0.25)'}`,
                     borderRadius: 10, overflow: 'hidden', cursor: 'pointer', background: isDark ? '#1b1b1f' : '#f5f5f4',
@@ -178,6 +297,14 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
                         <Check size={12} color="#fff" />
                       </span>
                     )}
+                    <span style={{
+                      position: 'absolute', bottom: 6, left: 6, display: 'inline-flex', alignItems: 'center', gap: 3,
+                      height: 18, padding: '0 6px', borderRadius: 9, background: 'rgba(0,0,0,0.5)',
+                      fontSize: 10, color: 'rgba(255,255,255,0.9)', pointerEvents: 'none',
+                    }}>
+                      <Clapperboard size={10} />
+                      {t('styleGallery.detailHint', '技法 · 运镜')}
+                    </span>
                     <span
                       role="button"
                       tabIndex={0}
@@ -225,5 +352,13 @@ export function StyleGalleryDialog({ open, onClose, selectedId, onSelect, theme 
         </div>
       </div>
     </Modal>
+    <StyleCraftDetail
+      open={!!detailPreset}
+      preset={detailPreset}
+      theme={theme}
+      onBack={() => setDetailId(null)}
+      onApply={(preset) => { setDetailId(null); onSelect(preset); onClose(); }}
+    />
+    </>
   );
 }

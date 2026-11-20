@@ -101,6 +101,19 @@ describe('script-fullscreen-editor 剧本卡片布局', () => {
     expect(stats.style.justifyContent).toBe('flex-end');
   });
 
+  /** 2026-11-21 用户口径：右侧是状态栏（只放统计），操作按钮必须在左侧操作组 */
+  it('显示标签/问AI 属于左侧操作组，不在右侧统计条里', () => {
+    const { baseElement } = renderEditor();
+    const left = baseElement.querySelector('[data-toolbar-zone="left"]') as HTMLElement;
+    const stats = baseElement.querySelector('[data-script-stats]') as HTMLElement;
+    expect(left).not.toBeNull();
+    expect(stats).not.toBeNull();
+    expect(stats.querySelector('[data-script-ask-ai]')).toBeNull();
+    expect(stats.querySelector('[data-script-toggle-labels]')).toBeNull();
+    expect(left.querySelector('[data-script-ask-ai]')).not.toBeNull();
+    expect(left.querySelector('[data-script-toggle-labels]')).not.toBeNull();
+  });
+
   it('集名文字色为中性色（非 accent 红）', () => {
     const { baseElement } = renderEditor();
     const header = baseElement.querySelector('[data-script-episodes-header]')!;

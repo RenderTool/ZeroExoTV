@@ -129,8 +129,9 @@ export function templatePassthroughRaw(p: Record<string, unknown>): Record<strin
     if (v !== undefined && v !== null && v !== '') out[k] = v;
   }
   /**
-   * 多 LoRA 串联（2026-11-20）：有序列表原样下发，插件按顺序生成 LoraLoaderModelOnly 链。
-   * 同时把第一条回填成旧字段，让「还没升级插件」时至少跑用户选的第一条，而不是模板默认。
+   * 多 LoRA 串联（2026-11-20）：有序列表原样下发，插件按顺序串联。
+   * 2026-11-21 用户口径：LoRA 是可选项，一条没勾 = 一个 LoRA 字段都不下发
+   * （旧的 lora_name/lora_strength 也不透传，避免残留值把默认 turbo 带上去）。
    */
   const loras = normalizeLoras(p['loras']);
   if (loras.length > 0) {
@@ -180,28 +181,40 @@ export function buildDirectorBatchPayload(args: {
 
     run.forEach((idx, k) => {
       const shot = shots[idx]!;
+      const params: Record<string, unknown> = {
+        // 面板里的模板级参数先铺（sampler/scheduler/位移/LoRA/缓存开关），
+        // 下面的计算值后写 → 永远以本段的实际尺寸/帧数/引导为准，不会被 UI 旧值冲掉。
+        ...templatePassthrough(shared),
+        ...templatePassthroughRaw(((shot as { paramValues?: Record<string, unknown> }).paramValues ?? {})),
+        prompt: promptOf(shot),
+        negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ''),
+        width: size.width,
+        height: size.height,
+        frames: durationToFrames(Number(shot.duration) || 5),
+        steps,
+        cfg,
+        seed,
+        frame_rate: 24,
+        guide_frames: guideFrames,
+        // 采样中的 TAE 动态预览；插件默认关，网页直连任务显式打开
+        live_tae_preview: true,
+        liveTaePreview: true,
+      };
+      /**
+       * 2026-11-21 用户口径：LoRA 是可选项，一条没勾 = 一个 LoRA 字段都不下发。
+       * 合并完再清，避免段级 paramValues 的 lora_strength 残留把「默认 turbo」带上去；
+       * 老项目只有 lora_name（没有 loras 数组）时仍按他那一条跑。
+       */
+      const loraRows = normalizeLoras(shared.params['loras']);
+      if (loraRows.length === 0 && !String(shared.params['lora_name'] ?? '').trim()) {
+        delete params['loras'];
+        delete params['lora_name'];
+        delete params['lora_strength'];
+      }
       segments.push({
         shotId: shot.id,
         guide: k === 0 ? startGuide : { mode: 'chain' },
-        params: {
-          // 面板里的模板级参数先铺（sampler/scheduler/位移/LoRA/缓存开关），
-          // 下面的计算值后写 → 永远以本段的实际尺寸/帧数/引导为准，不会被 UI 旧值冲掉。
-          ...templatePassthrough(shared),
-          ...templatePassthroughRaw(((shot as { paramValues?: Record<string, unknown> }).paramValues ?? {})),
-          prompt: promptOf(shot),
-          negative_prompt: String((shot as { negativePrompt?: string }).negativePrompt ?? ''),
-          width: size.width,
-          height: size.height,
-          frames: durationToFrames(Number(shot.duration) || 5),
-          steps,
-          cfg,
-          seed,
-          frame_rate: 24,
-          guide_frames: guideFrames,
-          // 采样中的 TAE 动态预览；插件默认关，网页直连任务显式打开
-          live_tae_preview: true,
-          liveTaePreview: true,
-        },
+        params,
       });
     });
   }

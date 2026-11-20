@@ -65,10 +65,8 @@ VISIBLE_PARAMS = {
         "default": False,
         "help": "true = 走 MiniMax 低显存链（8–12GB 显存开）；高显存机器关闭，避免稀疏注意力成为瓶颈",
     },
-    "lora_name": {
-        "type": "string",
-        "default": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
-    },
+    # 空 = 不加 LoRA（LoRA 是可选增强项，默认不加，一律以勾选为准）
+    "lora_name": {"type": "string", "default": ""},
     "lora_strength": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0},
     # 采样 / 性能（与 MiniMax H3 Director 同口径；默认值 = 引擎默认）
     "sampler": {"type": "string", "default": "euler"},
@@ -135,7 +133,7 @@ TEMPLATE_DEFAULTS = {
     "project": "zeroexo",
     "episode": "ep01",
     "use_low_vram": False,
-    "lora_name": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+    "lora_name": "",
     "lora_strength": 1.0,
     "sampler": "euler",
     "scheduler": "simple",
@@ -239,7 +237,11 @@ def _resolve_loras(params: dict[str, Any]) -> list[dict[str, Any]]:
     接受三种形态：
     - `params["loras"]` 为列表：[{name, strength}] 或 ["a.safetensors", ...]
     - `params["loras"]` 为 JSON 字符串（模板/表单便于透传）
-    - 都没有 → 退回旧字段 `lora_name/lora_strength`（再退回模板默认）
+    - 都没有 → 退回旧字段 `lora_name/lora_strength`（单条）
+
+    2026-11-21 用户口径：LoRA 是纯可选项，一切以勾选为准。
+    - 一条都没勾（空列表 / 空字段）→ 返回 []，完全不加载任何 LoRA（MODEL 原样透传）；
+    - 不再有「模板默认 turbo LoRA」这种隐式兜底。
 
     文件不存在直接报错：宁可停下，也不让 ComfyUI 报难懂的 LoraLoaderModelOnly 找不到文件。
     """
@@ -274,12 +276,14 @@ def _resolve_loras(params: dict[str, Any]) -> list[dict[str, Any]]:
             strength = 1.0
         out.append({"name": name, "strength": max(0.0, min(2.0, strength))})
     if not out:
-        fallback = str(params.get("lora_name") or "").strip() or str(TEMPLATE_DEFAULTS.get("lora_name") or "")
-        try:
-            strength = float(params.get("lora_strength"))
-        except (TypeError, ValueError):
-            strength = 1.0
-        out = [{"name": fallback, "strength": max(0.0, min(2.0, strength))}]
+        # 空 = 用户一条都没勾：不加 LoRA，不做任何隐式兜底（2026-11-21 用户口径）
+        legacy = str(params.get("lora_name") or "").strip()
+        if legacy:
+            try:
+                strength = float(params.get("lora_strength"))
+            except (TypeError, ValueError):
+                strength = 1.0
+            out = [{"name": legacy, "strength": max(0.0, min(2.0, strength))}]
     available = _available_models("loras")
     missing = [l["name"] for l in out if available and l["name"] not in available]
     if missing:
@@ -535,7 +539,7 @@ class ZeroExoGuideLoad:
 # ===== HTTP 协议 =====
 routes = PromptServer.instance.routes
 
-PLUGIN_VERSION = "0.1.3"
+PLUGIN_VERSION = "0.1.4"
 
 
 def _queue_counts() -> dict[str, Any]:
@@ -926,9 +930,7 @@ async def submit_job(request):
         params["reference_images"] = ",".join(str(x).strip() for x in params["reference_images"] if str(x).strip())
     # guide_frames 是下拉档位（5/22/39/56）：HTTP 传 30 之类的值夹到最近档位，避免组合校验失败
     params["guide_frames"] = snap_guide_frames(params.get("guide_frames"))
-    # LoRA 名不能为空（空串会让 LoraLoaderModelOnly 找不到文件）；空 = 用默认 LoRA
-    if not str(params.get("lora_name") or "").strip():
-        params["lora_name"] = TEMPLATE_DEFAULTS["lora_name"]
+    # LoRA 名允许为空：空 = 不加 LoRA（2026-11-21 用户口径，一切以勾选为准）
     for key in ("project", "episode"):
         if body.get(key):
             params[key] = body[key]
@@ -1200,8 +1202,7 @@ def _prepare_batch_segment(
             str(x).strip() for x in params["reference_images"] if str(x).strip()
         )
     params["guide_frames"] = snap_guide_frames(params.get("guide_frames"))
-    if not str(params.get("lora_name") or "").strip():
-        params["lora_name"] = TEMPLATE_DEFAULTS["lora_name"]
+    # LoRA 名允许为空：空 = 不加 LoRA（一切以勾选为准）
     # guide 指令由批次给：initial 的路径已传入；chain 由上一段产物路径传入；none 为空
     params["guide_in_path"] = guide_in_path
     guide_dir = ensure_dir(os.path.join(output_root(), "guides"))
@@ -1549,6 +1550,11 @@ from .ref_video import (
     NODE_CLASS_MAPPINGS as _REF_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _REF_NAME,
 )
+# 2026-11-21（C-12）：LoRA 数组节点——模板底稿里就是一个节点，内部按数组顺序串联
+from .lora_chain import (
+    NODE_CLASS_MAPPINGS as _LORA_CLASS_MAP,
+    NODE_DISPLAY_NAME_MAPPINGS as _LORA_NAME_MAP,
+)
 
 # ===== 导演桥接（原 ComfyUI_ZeroExoDirectorBridge，2026-11-07 合并进本插件）=====
 # 完整导演包流程（多参考图 / 段间延续 / 引导预览 / last-prompt）作为本插件的一部分注册，
@@ -1562,12 +1568,14 @@ NODE_CLASS_MAPPINGS = {
     "ZeroExoGuideSave": ZeroExoGuideSave,
     "ZeroExoGuideLoad": ZeroExoGuideLoad,
     **_REF_CLASS,
+    **_LORA_CLASS_MAP,
     **_BRIDGE_CLASS,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ZeroExoGuideSave": "ZeroExo 引导保存",
     "ZeroExoGuideLoad": "ZeroExo 引导读取",
     **_REF_NAME,
+    **_LORA_NAME_MAP,
     **_BRIDGE_NAME,
 }
 
@@ -1580,3 +1588,4 @@ try:
 except Exception as _bridge_exc:  # noqa: BLE001 - 桥接异常不得阻断插件加载
     import logging
     logging.getLogger(__name__).warning("ZeroExoNodes: 导演桥接路由加载失败: %s", _bridge_exc)
+
