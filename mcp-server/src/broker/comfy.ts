@@ -15,6 +15,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { dataRoot } from "../config.js";
 import { McpError } from "../errors.js";
+import { localGuideDigest, readGuideSha, recordGuideSha } from "../lib/guide-sha.js";
 
 export interface ComfyBatchSegmentStatus {
   index?: number;
@@ -298,13 +299,29 @@ export async function pushGuideToComfy(base: string, guideId: string, expectedSh
   }
 }
 
-/** 提交前保证起始段引导在远端可用：先查云端 output 缓存（可用 sha256 校验内容），
- *  缺了/内容不符再从本地 media/guides 传上去；两边都没有返回 false（由调用方报人话）。 */
+/**
+ * 提交前保证起始段引导在远端可用：
+ * - 有可信 sha（版本记录或台账）：先按 sha 核云端，存在即复用；缺失/不一致才从本地传，传完复核。
+ * - **没有可信 sha（历史存档）**：默认把本地 media/guides 那份重传覆盖云端一遍，
+ *   上传成功后把本地 sha 写进台账；之后走到上一行，不再重复上传（引导约 400MB）。
+ *   这条就是用户 2026-11-20 的要求：宁可重传一次，也不让云端旧文件冒充。
+ * - 本地也没有副本 → false，由调用方报人话。
+ */
 export async function ensureComfyGuide(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean> {
-  const exists = await comfyGuideExists(base, guideId, expectedSha256);
+  const trusted = (expectedSha256 ?? "").toLowerCase() || (await readGuideSha(guideId));
+  if (!trusted) {
+    const local = await localGuideDigest(guideId);
+    if (!local) return false;
+    const pushed = await pushGuideToComfy(base, guideId, null);
+    if (!pushed) return false;
+    await recordGuideSha(guideId, local.sha256, local.bytes).catch(() => undefined);
+    console.warn(`[guide] ${guideId} 历史存档无 sha，已按本地内容重传云端（${local.sha256.slice(0, 12)}… / ${local.bytes}B），并记入台账`);
+    return true;
+  }
+  const exists = await comfyGuideExists(base, guideId, trusted);
   // 探针不可用（旧插件/代理）时不能断言缺失：云端 output 可能是用户手动上传的，交给插件运行时判断
   if (exists !== false) return true;
-  return pushGuideToComfy(base, guideId, expectedSha256);
+  return pushGuideToComfy(base, guideId, trusted);
 }
 
 /** guide safetensors 落到本地 media/guides，返回 `guide:<id>.safetensors`（跨重启仍可追溯） */

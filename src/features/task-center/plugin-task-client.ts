@@ -9,6 +9,7 @@ import { useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connec
 import type { PluginBatchPayload } from '@/features/canvas-tabs/director-plugin-payload.js';
 import { readCachedGuideBlob } from '@/entities/guide-store.js';
 import { sha256Hex } from '@/entities/cas-store.js';
+import { readGuideSha, recordGuideSha } from '@/platform/guide-sha.js';
 
 export type PluginTaskState = 'queued' | 'running' | 'success' | 'error' | 'cancelled' | 'interrupted';
 
@@ -104,6 +105,12 @@ async function ensureGuideOnComfy(base: string, id: string, wantSha?: string): P
   // 两边不一致同样按冲突中止（宁可停，也不让错引导进链）。
   let expected = wantSha ?? null;
   let legacyDerived = false;
+  /**
+   * 历史存档没有 sha —— 先查本地台账（MCP 重传时写下的那份）。
+   * 台账也没有 → 拿本地这份的哈希当基准，并且**默认重传一遍覆盖云端**
+   * （2026-11-20 用户要求：宁可重传一次，也不让云端旧文件冒充正确引导）。
+   */
+  if (!expected) expected = await readGuideSha(id).catch(() => null);
   if (!expected && blob?.size) {
     expected = await localGuideSha(id, blob);
     legacyDerived = true;
@@ -118,14 +125,8 @@ async function ensureGuideOnComfy(base: string, id: string, wantSha?: string): P
         | { exists?: boolean; match?: boolean; sha256?: string; bytes?: number }
         | null;
       cloudSha = body?.sha256 ?? null;
-      if (body?.exists !== false && (expected ? body?.match === true : true)) return { level: 'ok' };
-      if (legacyDerived && expected) {
-        return {
-          level: 'conflict',
-          message: `引导 ${id} 云端与本地同名但内容不同（云端 ${cloudSha ? `${cloudSha.slice(0, 12)}…` : '无哈希'}/${body?.bytes ?? '?'}B，本地 ${expected.slice(0, 12)}…/${blob!.size}B）；`
-            + '记录里没有该引导的 sha256，无法判定哪份正确，已阻止提交。请重新生成该段，或人工确认后用正确的那份覆盖',
-        };
-      }
+      // legacyDerived（无 sha 记录）一律不认云端，落到下面重传覆盖
+      if (!legacyDerived && body?.exists !== false && (expected ? body?.match === true : true)) return { level: 'ok' };
       // 记录有 sha：云端同 id 内容不符（或明确没有）→ 落到下面用记录那份覆盖
     } else if (head.status === 404) {
       const body = await head.json().catch(() => null) as { ok?: boolean; exists?: boolean } | null;
@@ -176,6 +177,11 @@ async function ensureGuideOnComfy(base: string, id: string, wantSha?: string): P
         };
       }
     }
+    /**
+     * 历史 guide 重传成功 → 把本地这份的 sha 记进共享台账，
+     * 下次网页与 MCP 都按 sha 校验，不再重复上传 400MB。
+     */
+    if (expected && !wantSha) await recordGuideSha(id, expected, blob.size).catch(() => undefined);
     return { level: 'ok' };
   } catch {
     return { level: 'warn', reason: 'unreachable' };
