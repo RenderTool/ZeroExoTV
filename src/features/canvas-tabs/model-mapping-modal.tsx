@@ -103,7 +103,7 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
     setRefreshing(true);
     try {
       const res = await fetchBridgeModels(ep.address.replace(/\/+$/, ''), conn.token || undefined);
-      if (res.ok) conn.setConnected(true, { unet: res.unet, vae: res.vae, clip: res.clip });
+      if (res.ok) conn.setConnected(true, { unet: res.unet, vae: res.vae, clip: res.clip, lora: res.lora ?? [] });
     } catch {
       /* 拉取失败保持原清单 */
     } finally {

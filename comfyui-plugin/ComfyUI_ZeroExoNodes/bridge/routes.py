@@ -115,7 +115,7 @@ async def models(request) -> web.Response:
     auth = check_auth(request)
     if auth is not None:
         return auth
-    out = {"unet": [], "vae": [], "clip": [], "clipTypes": []}
+    out = {"unet": [], "vae": [], "clip": [], "clipTypes": [], "lora": []}
     try:
         out["unet"] = folder_paths.get_filename_list("diffusion_models")
     except Exception:
@@ -126,6 +126,11 @@ async def models(request) -> web.Response:
         pass
     try:
         out["clip"] = folder_paths.get_filename_list("text_encoders")
+    except Exception:
+        pass
+    try:
+        # 2026-11-20：多 LoRA 串联要从清单里选，不能手填
+        out["lora"] = folder_paths.get_filename_list("loras")
     except Exception:
         pass
     try:

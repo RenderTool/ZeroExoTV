@@ -1,0 +1,48 @@
+/**
+ * LoRA 串联参数（2026-11-20）
+ *
+ * ComfyUI 的 LoRA 是 MODEL 的串联 patch：多个 LoraLoaderModelOnly 逐节加权，
+ * 所以项目侧只存「有序列表 + 各自强度」，由插件按顺序生成节点链。
+ * 网页参数面板与 MCP 共用这份解析，保证两边提交的 payload 一致。
+ */
+
+/** 工程护栏：不是模型硬限制，是「再多显存/耗时都会明显变差」的上限 */
+export const MAX_LORAS = 4;
+
+export interface LoraRow {
+  name: string;
+  strength: number;
+}
+
+/** 容错解析：支持 [{name,strength}] / ["a.safetensors"] / JSON 字符串 / 垃圾值 → [] */
+export function normalizeLoras(raw: unknown): LoraRow[] {
+  let items: unknown[] = [];
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) items = parsed;
+    } catch {
+      return [];
+    }
+  } else if (Array.isArray(raw)) {
+    items = raw;
+  }
+  const out: LoraRow[] = [];
+  for (const item of items) {
+    if (typeof item === 'string') {
+      const name = item.trim();
+      if (name) out.push({ name, strength: 1 });
+      continue;
+    }
+    if (item && typeof item === 'object') {
+      const rec = item as Record<string, unknown>;
+      const name = String(rec['name'] ?? rec['lora_name'] ?? '').trim();
+      if (!name) continue;
+      const rawStrength = rec['strength'] ?? rec['strength_model'];
+      const strength = Number(rawStrength);
+      out.push({ name, strength: Number.isFinite(strength) ? Math.min(2, Math.max(0, strength)) : 1 });
+    }
+  }
+  return out.slice(0, MAX_LORAS);
+}

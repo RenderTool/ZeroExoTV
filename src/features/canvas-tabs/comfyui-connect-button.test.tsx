@@ -61,7 +61,7 @@ beforeEach(() => {
     token: '',
     models: { unet: '', videoVae: '', audioVae: '', clip: '' },
     connected: false,
-    availableModels: { unet: [], vae: [], clip: [] },
+    availableModels: { unet: [], vae: [], clip: [], lora: [] },
   });
 });
 

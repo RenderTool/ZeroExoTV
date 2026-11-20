@@ -92,6 +92,8 @@ export interface BridgeModelsResponse {
   vae: string[];
   clip: string[];
   clipTypes: string[];
+  /** 2026-11-20：LoRA 清单（多 LoRA 串联要下拉选；旧插件没有这个字段 → 空） */
+  lora?: string[];
 }
 
 /** POST /run 的 models 块（契约 §2.2） */

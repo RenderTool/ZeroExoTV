@@ -15,6 +15,7 @@ import { pluginTaskBase } from '@/features/task-center/plugin-task-client.js';
 import { uploadZeroexoReference } from './zeroexo-jobs-client.js';
 import { fetchComfyuiMachineInfo } from './comfyui-endpoint.js';
 import { resolveMediaBlob } from '@/shared/media/resolve-media-blob.js';
+import { normalizeLoras } from '@/entities/director-lora.js';
 
 export interface PluginSegmentPayload {
   shotId: string;
@@ -126,6 +127,16 @@ export function templatePassthroughRaw(p: Record<string, unknown>): Record<strin
   for (const k of TEMPLATE_PASSTHROUGH_KEYS) {
     const v = p[k];
     if (v !== undefined && v !== null && v !== '') out[k] = v;
+  }
+  /**
+   * 多 LoRA 串联（2026-11-20）：有序列表原样下发，插件按顺序生成 LoraLoaderModelOnly 链。
+   * 同时把第一条回填成旧字段，让「还没升级插件」时至少跑用户选的第一条，而不是模板默认。
+   */
+  const loras = normalizeLoras(p['loras']);
+  if (loras.length > 0) {
+    out['loras'] = loras;
+    out['lora_name'] = loras[0]!.name;
+    out['lora_strength'] = loras[0]!.strength;
   }
   return out;
 }

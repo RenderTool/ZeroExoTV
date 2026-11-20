@@ -92,4 +92,27 @@ describe('buildDirectorBatchPayload', () => {
     expect(params.height).toBe(832);
     expect(params.frames).toBe(124);
   });
+
+  /** 2026-11-20：多 LoRA 串联 — 有序列表原样下发，首条回填旧字段（旧插件兼容）。 */
+  it('多 LoRA 按顺序下发，并回填 lora_name/lora_strength', () => {
+    const sharedLora = {
+      params: {
+        aspect: '21:9', scaleFactor: 1.5, steps: 12, cfg: 1, seed: -1, continuityOverlapFrames: 22,
+        loras: [
+          { name: 'a.safetensors', strength: 0.8 },
+          { name: 'b.safetensors', strength: 0.5 },
+        ],
+      },
+    } as unknown as WorkbenchSharedParams;
+    const payload = buildDirectorBatchPayload({
+      projectId: 'p', taskId: 't', shots: [shot(1)], selectedIds: ['s1'], shared: sharedLora,
+    });
+    const params = payload.segments[0]!.params;
+    expect(params.loras).toEqual([
+      { name: 'a.safetensors', strength: 0.8 },
+      { name: 'b.safetensors', strength: 0.5 },
+    ]);
+    expect(params.lora_name).toBe('a.safetensors');
+    expect(params.lora_strength).toBe(0.8);
+  });
 });

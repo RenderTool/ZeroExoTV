@@ -68,7 +68,7 @@ export async function applyConnectionResult(
     try {
       const models = await fetchBridgeModels(result.address, prefs.token || undefined);
       const defaults = pickDefaultModels(models, prefs.models);
-      prefs.setConnected(true, { unet: models.unet, vae: models.vae, clip: models.clip });
+      prefs.setConnected(true, { unet: models.unet, vae: models.vae, clip: models.clip, lora: models.lora ?? [] });
       for (const slot of ['unet', 'videoVae', 'audioVae', 'clip'] as const) {
         prefs.setModel(slot, defaults[slot]);
       }
@@ -84,7 +84,7 @@ export async function applyConnectionResult(
   try {
     const models = await fetchBridgeModels(result.address, prefs.token || undefined);
     const defaults = pickDefaultModels(models, prefs.models);
-    prefs.setConnected(true, { unet: models.unet, vae: models.vae, clip: models.clip });
+    prefs.setConnected(true, { unet: models.unet, vae: models.vae, clip: models.clip, lora: models.lora ?? [] });
     for (const slot of ['unet', 'videoVae', 'audioVae', 'clip'] as const) {
       prefs.setModel(slot, defaults[slot]);
     }

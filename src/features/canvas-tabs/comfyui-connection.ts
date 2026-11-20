@@ -79,10 +79,10 @@ export interface ComfyuiConnectionState extends ComfyuiConnectionPrefs {
   /** 运行态（不持久化）：测试连接通过 = true；刷新后需重新测试 */
   connected: boolean;
   /** 运行态（不持久化）：/zeroexo/h3/models 拉到的文件名清单 */
-  availableModels: { unet: string[]; vae: string[]; clip: string[] };
+  availableModels: { unet: string[]; vae: string[]; clip: string[]; lora: string[] };
   setToken: (token: string) => void;
   setModel: (slot: 'unet' | 'videoVae' | 'audioVae' | 'clip', filename: string) => void;
-  setConnected: (connected: boolean, modelsList?: { unet: string[]; vae: string[]; clip: string[] }) => void;
+  setConnected: (connected: boolean, modelsList?: { unet: string[]; vae: string[]; clip: string[]; lora?: string[] }) => void;
 }
 
 export const useComfyuiConnectionStore = create<ComfyuiConnectionState>()((set, get) => {
@@ -100,11 +100,11 @@ export const useComfyuiConnectionStore = create<ComfyuiConnectionState>()((set, 
   return {
     ...initial,
     connected: false,
-    availableModels: { unet: [], vae: [], clip: [] },
+    availableModels: { unet: [], vae: [], clip: [], lora: [] },
     setToken: (token) => commit({ token }),
     setModel: (slot, filename) => commit({ models: { ...get().models, [slot]: filename } }),
     setConnected: (connected, modelsList) =>
-      set(connected && modelsList ? { connected, availableModels: modelsList } : { connected, availableModels: { unet: [], vae: [], clip: [] } }),
+      set(connected && modelsList ? { connected, availableModels: { lora: [], ...modelsList } } : { connected, availableModels: { unet: [], vae: [], clip: [], lora: [] } }),
   };
 });
 

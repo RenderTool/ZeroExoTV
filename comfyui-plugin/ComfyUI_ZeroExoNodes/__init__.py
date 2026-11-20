@@ -25,7 +25,7 @@ import uuid
 from typing import Any
 
 from .lib.guide_options import GUIDE_FRAME_OPTIONS, snap_guide_frames
-from .engine.graph_ops import prune_model_chain
+from .engine.graph_ops import apply_lora_chain, prune_model_chain
 from . import task_store
 
 import aiohttp
@@ -231,6 +231,64 @@ def _available_models(folder: str) -> list[str]:
         except Exception:
             pass
     return names
+
+
+def _resolve_loras(params: dict[str, Any]) -> list[dict[str, Any]]:
+    """解析 LoRA 列表（2026-11-20 多 LoRA 串联）。
+
+    接受三种形态：
+    - `params["loras"]` 为列表：[{name, strength}] 或 ["a.safetensors", ...]
+    - `params["loras"]` 为 JSON 字符串（模板/表单便于透传）
+    - 都没有 → 退回旧字段 `lora_name/lora_strength`（再退回模板默认）
+
+    文件不存在直接报错：宁可停下，也不让 ComfyUI 报难懂的 LoraLoaderModelOnly 找不到文件。
+    """
+    raw = params.get("loras")
+    items: Any = []
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            items = parsed
+    elif isinstance(raw, list):
+        items = raw
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("lora_name") or "").strip()
+            strength_raw = item.get("strength")
+            if strength_raw is None:
+                strength_raw = item.get("strength_model")
+        elif isinstance(item, str):
+            name = item.strip()
+            strength_raw = None
+        else:
+            continue
+        if not name:
+            continue
+        try:
+            strength = float(strength_raw) if strength_raw is not None else 1.0
+        except (TypeError, ValueError):
+            strength = 1.0
+        out.append({"name": name, "strength": max(0.0, min(2.0, strength))})
+    if not out:
+        fallback = str(params.get("lora_name") or "").strip() or str(TEMPLATE_DEFAULTS.get("lora_name") or "")
+        try:
+            strength = float(params.get("lora_strength"))
+        except (TypeError, ValueError):
+            strength = 1.0
+        out = [{"name": fallback, "strength": max(0.0, min(2.0, strength))}]
+    available = _available_models("loras")
+    missing = [l["name"] for l in out if available and l["name"] not in available]
+    if missing:
+        raise RuntimeError(
+            "LoRA 文件不存在：" + "、".join(missing)
+            + "。请把 .safetensors 放进 models/loras，或改用清单里的名字。可用："
+            + (", ".join(available[:8]) if available else "（目录读取失败）")
+        )
+    return out
 
 
 def _pick_model(folder: str, current: str, preferred: tuple[str, ...]) -> str:
@@ -477,7 +535,7 @@ class ZeroExoGuideLoad:
 # ===== HTTP 协议 =====
 routes = PromptServer.instance.routes
 
-PLUGIN_VERSION = "0.1.2"
+PLUGIN_VERSION = "0.1.3"
 
 
 def _queue_counts() -> dict[str, Any]:
@@ -667,12 +725,17 @@ async def health(_request):
 @routes.get("/zeroexo/v1/models")
 async def models(_request):
     """可用的模型文件清单（与桥接 /zeroexo/h3/models 同口径；连接面板校验用）。"""
-    out: dict[str, Any] = {"ok": True, "unet": [], "vae": [], "clip": [], "clipTypes": []}
+    out: dict[str, Any] = {"ok": True, "unet": [], "vae": [], "clip": [], "clipTypes": [], "lora": []}
     try:
         import folder_paths as _fp
         out["unet"] = _fp.get_filename_list("diffusion_models")
         out["vae"] = _fp.get_filename_list("vae")
         out["clip"] = _fp.get_filename_list("text_encoders")
+        # 2026-11-20：LoRA 也要能下拉选（多 LoRA 串联需要清单，不能靠手填文件名）
+        try:
+            out["lora"] = _fp.get_filename_list("loras")
+        except Exception:  # noqa: BLE001
+            out["lora"] = []
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -924,6 +987,11 @@ async def submit_job(request):
         # 低显存 / 原模型是 switch 二选一，但两条链都是输出节点的祖先 → 都会执行。
         # 按本次参数把没选中的一支删掉，避免「选了高性能还在跑低显存链」。
         template = prune_model_chain(template, _truthy(params.get("use_low_vram")))
+        # 多 LoRA 串联（2026-11-20）：单条 = 改原节点输入，多条 = 生成串联链并接回下游
+        try:
+            template = apply_lora_chain(template, _resolve_loras(params))
+        except RuntimeError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
     job_id = body.get("clientJobId") or f"zx_{uuid.uuid4().hex[:12]}"
     # 前端 /ws clientId 透传：引擎的 minimax_director_preview/progress 按 server.client_id 定向发送
@@ -1152,6 +1220,7 @@ def _prepare_batch_segment(
                 " 8b/4b 的 hidden 是 4096，H3 需要 5120，强行跑会报 matmul 形状不匹配。"
             )
     template = prune_model_chain(template, _truthy(params.get("use_low_vram")))
+    template = apply_lora_chain(template, _resolve_loras(params))
     return params, template, out_guide
 
 
