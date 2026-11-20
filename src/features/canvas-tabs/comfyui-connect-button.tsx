@@ -4,9 +4,12 @@
  * 约定：无论线上还是线下的 ComfyUI 都只填一个地址，且只在顶栏这一处配置；
  * 导演台等其他功能一律从 comfyui-endpoint 读同一个地址，不再重复输入。
  * 入口形态：右上角图标组内的 32×32 文本按钮（PlugZap 16px + 右下角状态点），
- * Tooltip 显示状态词与地址；状态点：未连接灰 / 连接中蓝 / 已连接绿 / 失败红。面板只剩：
+ * Tooltip 显示状态词与地址；状态点：未连接灰 / 连接中蓝 / 已连接绿 / 失败红。
+ * 2026-11-20 用户定稿：点击打开的是 Modal「连接配置」（不是下拉浮层），尺寸 760；
+ * 2026-11-20 五调：原「模型映射」弹窗整页内容（机器信息 / 显存策略 / 视频·LoRA·图片·文本·语音 清单）
+ * 直接并进这个 Modal 里（`ModelMappingPanel`），不再另开窗口。面板内容：
  * - 一个输入框：ComfyUI 地址（本机 http://127.0.0.1:8188，线上地址也填这里）；
- * - 两个按钮：测试连接 / 保存；一个「工作流配置」入口；
+ * - 两个按钮：测试连接 / 保存；下面接模型映射整块；
  * - 一个状态点 + 短词（已连接 · 直连 / 已连接 · 兼容口），不展示长篇判定细节。
  *
  * 旧概念全部移除：多渠道管理、渠道名称、Base URL（OpenAI 兼容）字样、API Key、
@@ -23,8 +26,8 @@
 
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Popover, Space, Tooltip, Typography } from 'antd';
-import { ModelMappingModal } from './model-mapping-modal.js';
+import { Button, Input, Modal, Space, Tooltip, Typography } from 'antd';
+import { ModelMappingPanel } from './model-mapping-modal.js';
 import { TopBarIcon, topBarButtonStyle } from '@/shared/components/topbar-icon-button.js';
 import {
   applyConnectionResult,
@@ -50,8 +53,7 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(ep.address);
   const [testing, setTesting] = useState(false);
-  const [modelPageOpen, setModelPageOpen] = useState(false);
-  const [testResult, setTestResult] = useState<EndpointTestResult | null>(null);
+    const [testResult, setTestResult] = useState<EndpointTestResult | null>(null);
   /** 直连测试通过但桥接插件 /zeroexo/h3/* 未响应（一行短提示，测试后出现） */
   const [bridgeWarn, setBridgeWarn] = useState(false);
 
@@ -120,7 +122,7 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
   const triggerTooltip = `${stateLabel} · ${ep.address || '未填写地址'}`;
 
   const content = (
-    <div data-testid="comfyui-endpoint-panel" style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div data-testid="comfyui-endpoint-panel" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <Input
         data-testid="comfyui-address-input"
         value={draft}
@@ -178,14 +180,12 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
         </Text>
       )}
       {(ep.connected || testResult?.kind === 'ok') && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 6, borderTop: '1px solid rgba(128,128,128,0.18)' }}>
-          <Button
-            size="small"
-            data-testid="comfyui-advanced-models"
-            onClick={() => setModelPageOpen(true)}
-          >
-            {t('director.advancedModels', '高级')}
-          </Button>
+        <div
+          data-testid="comfyui-model-section"
+          style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(128,128,128,0.18)' }}
+        >
+          <Text style={{ fontSize: 12 }}>{t('director.modelMapping', '模型映射')}</Text>
+          <ModelMappingPanel visible={open} />
         </div>
       )}
 
@@ -218,60 +218,70 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
     return (
       <>
         {content}
-        <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
       </>
     );
   }
 
   return (
     <>
-    <Popover
-      content={content}
-      title={t('director.comfyTitle')}
-      trigger="click"
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (v) {
-          setDraft(useComfyuiEndpointStore.getState().address);
-          setTestResult(null);
-          setBridgeWarn(false);
-          requestComfyuiAutoProbe('panel'); // 打开面板自动探一次（受 60s/退避/停用约束）
-        }
-      }}
-      placement="bottomRight"
-    >
-      <Tooltip title={triggerTooltip} placement="bottom">
-        <Button
-          type="text"
-          aria-label={`ComfyUI ${stateLabel}`}
-          data-testid="comfyui-connect-trigger"
-          data-connection-state={connectionState}
+    <Tooltip title={triggerTooltip} placement="bottom">
+      <Button
+        type="text"
+        aria-label={`ComfyUI ${stateLabel}`}
+        data-testid="comfyui-connect-trigger"
+        data-connection-state={connectionState}
+        style={{
+          ...topBarButtonStyle,
+          color: 'inherit',
+          position: 'relative',
+        }}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) {
+            setDraft(useComfyuiEndpointStore.getState().address);
+            setTestResult(null);
+            setBridgeWarn(false);
+            requestComfyuiAutoProbe('panel'); // 打开面板自动探一次（受 60s/退避/停用约束）
+          }
+        }}
+      >
+        <TopBarIcon action="comfyui" />
+        <span
+          aria-hidden
+          data-testid="comfyui-connect-dot"
           style={{
-            ...topBarButtonStyle,
-            color: 'inherit',
-            position: 'relative',
+            position: 'absolute',
+            top: 6,
+            right: 6,
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: stateDotColor,
+            boxShadow: connectionState === 'disconnected' ? 'none' : `0 0 4px ${stateDotColor}`,
           }}
-        >
-          <TopBarIcon action="comfyui" />
-          <span
-            aria-hidden
-            data-testid="comfyui-connect-dot"
-            style={{
-              position: 'absolute',
-              top: 6,
-              right: 6,
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: stateDotColor,
-              boxShadow: connectionState === 'disconnected' ? 'none' : `0 0 4px ${stateDotColor}`,
-            }}
-          />
-        </Button>
-      </Tooltip>
-    </Popover>
-    <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
+        />
+      </Button>
+    </Tooltip>
+    {/*
+      2026-11-20 用户定稿：改成 Modal（不是下拉浮层），把「模型映射」整页内容并进来，
+      标题叫「连接配置」，尺寸给大一点（760）。
+    */}
+    <Modal
+      open={open}
+      onCancel={() => setOpen(false)}
+      footer={null}
+      centered
+      width={760}
+      title={t('director.connectionConfig', '连接配置')}
+      destroyOnHidden
+      data-testid="comfyui-connection-modal"
+    >
+      {content}
+    </Modal>
     </>
   );
 }
+
+
+

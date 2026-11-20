@@ -92,42 +92,47 @@ function gb(bytes?: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
-export interface ModelMappingModalProps {
-  open: boolean;
-  onClose: () => void;
+export interface ModelMappingPanelProps {
+  /** 面板可见（顶栏「连接配置」浮层打开时才刷新清单） */
+  visible?: boolean;
 }
 
-export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JSX.Element {
+/**
+ * 2026-11-20 五调（用户定稿）：「模型映射」整页内容合并进顶栏「连接配置」浮层，
+ * 不再是独立弹窗；这里只导出内嵌面板本体。
+ */
+export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): JSX.Element {
   const ep = useComfyuiEndpointStore();
   const conn = useComfyuiConnectionStore();
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState('video');
-  /** LoRA 已选（顺序即串联顺序）：弹窗打开时从导演台桥同步，改动即时写回项目 params.loras */
+  /** LoRA 已选（顺序即串联顺序）：面板可见时从导演台桥同步，改动即时写回项目 params.loras */
   const [loraRows, setLoraRows] = useState<LoraRow[]>([]);
 
   const reload = useCallback(async (): Promise<void> => {
     if (!ep.address) return;
     setRefreshing(true);
     try {
-      const res = await fetchBridgeModels(ep.address.replace(/\/+$/, ''), conn.token || undefined);
-      if (res.ok) conn.setConnected(true, { unet: res.unet, vae: res.vae, clip: res.clip, lora: res.lora ?? [] });
+      const state = useComfyuiConnectionStore.getState();
+      const res = await fetchBridgeModels(ep.address.replace(/\/+$/, ''), state.token || undefined);
+      if (res.ok) state.setConnected(true, { unet: res.unet, vae: res.vae, clip: res.clip, lora: res.lora ?? [] });
     } catch {
       /* 拉取失败保持原清单 */
     } finally {
       setRefreshing(false);
     }
-  }, [conn, ep.address]);
+  }, [ep.address]);
 
   useEffect(() => {
-    if (open && conn.availableModels.unet.length === 0) void reload();
-  }, [open, conn.availableModels.unet.length, reload]);
+    if (visible && conn.availableModels.unet.length === 0) void reload();
+  }, [visible, conn.availableModels.unet.length, reload]);
 
-  // LoRA 清单也要在打开时是新的（旧插件不返回就保持空，由页面提示升级）
+  // LoRA 清单也要在面板打开时是新的（旧插件不返回就保持空，由页面提示升级）
   useEffect(() => {
-    if (!open) return;
+    if (!visible) return;
     setLoraRows(getDirectorLoras());
     void reload();
-  }, [open, reload]);
+  }, [visible, reload]);
 
   const available = conn.availableModels;
   const listFor = (slot: VideoSlot): string[] => {
@@ -142,20 +147,20 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
 
   // 未手动选过：按显存挡位自动落到最合适的推荐模型；没有推荐可回退时保持空，让用户自己选。
   useEffect(() => {
-    if (!open) return;
+    if (!visible) return;
     for (const slot of Object.keys(SLOT_LABEL) as VideoSlot[]) {
       if (conn.models[slot]) continue;
       const prefer = pickPreferredModel(slot, listFor(slot), totalGb);
       if (prefer) conn.setModel(slot, prefer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, available.unet.length, available.vae.length, available.clip.length, totalGb]);
+  }, [visible, available.unet.length, available.vae.length, available.clip.length, totalGb]);
 
   const machine = ep.machine;
 
   const machineBlock = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+    <div data-testid="comfyui-machine-info" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         {machine ? (
           <Text style={{ fontSize: 12 }}>
             {machine.gpuName ?? 'GPU'}
@@ -169,6 +174,7 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
         )}
         <Text style={{ fontSize: 12 }}>显存策略</Text>
         <Select<ComfyuiVramMode>
+          data-testid="comfyui-vram-mode"
           size="small"
           style={{ width: 110 }}
           value={ep.vramMode}
@@ -183,6 +189,13 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
           刷新列表
         </Button>
       </div>
+      <Text type="secondary" data-testid="comfyui-vram-summary" style={{ fontSize: 11 }}>
+        {ep.vramMode === 'low'
+          ? '低显存：按低挡位跑，速度慢但不容易 OOM'
+          : ep.vramMode === 'high'
+            ? '高显存：显存紧张时不回退，OOM 直接报错'
+            : '自动：按显存挡位自动选择，显存不足时逐级回退'}
+      </Text>
     </div>
   );
 
@@ -283,7 +296,8 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
           云端插件没有返回 LoRA 清单：旧版插件（0.1.2）的 /models 不含 lora。升级到 0.1.3 后，这里会列出云端 models/loras 下的全部文件。
         </Text>
       ) : (
-        available.lora.map((name) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
+        {available.lora.map((name) => {
           const order = loraRows.findIndex((r) => r.name === name);
           const checked = order >= 0;
           return (
@@ -308,7 +322,8 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
               />
             </div>
           );
-        })
+        })}
+        </div>
       )}
       <Text type="secondary" style={{ fontSize: 11 }}>
         勾选哪几条、各自强度、串联顺序就是实际下发顺序（ComfyUI 里就是多个 LoraLoaderModelOnly 逐节改 MODEL，显存和耗时都会涨）。{hasDirectorLoraSink() ? '' : '当前没有打开导演台，改动无法写入项目。'}
@@ -317,12 +332,13 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
   );
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} centered width={640} title="模型映射" destroyOnHidden>
+    <div data-testid="model-mapping-panel" style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
       {machineBlock}
       <Tabs
         activeKey={tab}
         onChange={setTab}
-        style={{ marginTop: 8 }}
+        size="small"
+        style={{ marginTop: 6 }}
         items={[
           { key: 'video', label: '视频', children: videoPane },
           { key: 'lora', label: 'LoRA', children: loraPane },
@@ -331,6 +347,24 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
           { key: 'voice', label: '语音', children: <Text type="secondary" style={{ fontSize: 12 }}>后续支持</Text> },
         ]}
       />
+    </div>
+  );
+}
+
+/**
+ * 弹窗形态只留给「使用指引」（onboarding-guide）里的内嵌打开；
+ * 顶栏「连接配置」浮层用的是内嵌的 `ModelMappingPanel`，内容同一份。
+ */
+export interface ModelMappingModalProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JSX.Element {
+  return (
+    <Modal open={open} onCancel={onClose} footer={null} centered width={640} title="模型映射" destroyOnHidden>
+      <ModelMappingPanel visible={open} />
     </Modal>
   );
 }
+
