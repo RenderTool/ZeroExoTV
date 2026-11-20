@@ -9,9 +9,9 @@
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button, Input, Modal, Tag } from 'antd';
+import { App, Button, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Circle, Copy, Cpu, Download, FolderOpen, SlidersHorizontal, BookOpen } from 'lucide-react';
+import { BookOpen, Cable, CheckCircle2, Circle, Copy, Download, FolderOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { pickRoot, rootName, currentDataRootPath, switchDataRoot, pickDataRoot, migrateDataRoot } from '@/platform/fs.js';
@@ -21,18 +21,15 @@ import {
   type ServerInfo,
 } from '@/features/mcp-settings/mcp-client.js';
 import {
-  testEndpointConnection,
   useComfyuiEndpointStore,
 } from '@/features/canvas-tabs/comfyui-endpoint.js';
 import { fetchBridgeModels } from '@/features/canvas-tabs/comfyui-bridge-client.js';
 import { pickDefaultModels, useComfyuiConnectionStore } from '@/features/canvas-tabs/comfyui-connection.js';
-import { applyConnectionResult } from '@/features/canvas-tabs/comfyui-auto-connect.js';
-import { ModelMappingModal } from '@/features/canvas-tabs/model-mapping-modal.js';
+import { ComfyuiConnectButton } from '@/features/canvas-tabs/comfyui-connect-button.js';
 
 const SEEN_KEY = 'zeroexo:onboarding.seen';
 /** MCP 固定安装目录（2026-11-19 用户定稿：不再让用户选，固定 ~/.zeroexo/mcp，占用极小） */
 const MCP_INSTALL_DIR = '%USERPROFILE%\\.zeroexo\\mcp';
-const DEFAULT_COMFYUI = 'http://127.0.0.1:8188';
 const PLUGIN_DIR = 'ComfyUI/custom_nodes/ComfyUI_ZeroExoNodes';
 
 export function isOnboardingDone(): boolean {
@@ -107,15 +104,12 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   const endpoint = useComfyuiEndpointStore();
 
   const [root, setRoot] = useState<string | null>(null);
-  const [address, setAddress] = useState(endpoint.address || DEFAULT_COMFYUI);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
-  const [testOk, setTestOk] = useState(false);
   const [installingMcp, setInstallingMcp] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [mcpStaleTools, setMcpStaleTools] = useState<string[]>([]);
-  const [modelPageOpen, setModelPageOpen] = useState(false);
+  /** 2026-11-21 用户口径：「高级」改名为「连接配置」，模型映射整页并进这个窗口，不再单独弹「模型映射」 */
+  const [configOpen, setConfigOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const setConnectedModels = useComfyuiConnectionStore((s) => s.setConnected);
 
@@ -124,7 +118,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!open) return;
     setRoot(rootName() ?? null);
-    setAddress(endpoint.address || DEFAULT_COMFYUI);
     setMcpCopied(false);
     void (async () => {
       try {
@@ -135,7 +128,7 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         setServerInfo(null);
       }
     })();
-  }, [open, endpoint.address]);
+  }, [open]);
 
   // 首装机器：用户跑完安装命令后 MCP 才写 server-info，这里自动识别，不用刷新
   useEffect(() => {
@@ -281,34 +274,6 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
     if (open && endpoint.connected && endpoint.address) void loadModels(endpoint.address);
   }, [open, endpoint.connected, endpoint.address, loadModels]);
 
-  const testComfy = useCallback(async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await testEndpointConnection(address);
-      if (res.kind === 'ok') {
-        // 关键：同时写 endpoint 与 comfyui-connection 两个 store，
-        // 否则导演台/画布只认 connection.connected，会继续提示“尚未连接”。
-        const applied = await applyConnectionResult(res);
-        const backendLabel = res.backend === 'zeroexo'
-          ? t('onboarding.backendZeroexo', 'ZeroExo 插件')
-          : res.backend === 'direct'
-            ? t('onboarding.backendDirect', '直连桥接')
-            : t('onboarding.backendOpenAI', 'OpenAI 兼容口');
-        setTestResult(`${t('onboarding.comfyOk', '已连接')}：${backendLabel}${applied.bridgeMissing ? '（模型列表读取失败，可点刷新）' : ''}`);
-        setTestOk(true);
-      } else {
-        setTestResult(res.message);
-        setTestOk(false);
-      }
-    } catch (err) {
-      setTestResult(err instanceof Error ? err.message : t('onboarding.comfyFailed', '连接失败'));
-      setTestOk(false);
-    } finally {
-      setTesting(false);
-    }
-  }, [address, t, loadModels]);
-
   const comfyDone = endpoint.connected;
 
 
@@ -418,27 +383,29 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Input
-              size="small"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder={DEFAULT_COMFYUI}
-              style={{ width: 320 }}
-            />
-            <Button size="small" icon={<Cpu size={13} />} loading={testing} onClick={() => void testComfy()}>
-              {t('onboarding.testComfy', '测试连接')}
+            <Button size="small" type="default" icon={<Cable size={13} />} onClick={() => setConfigOpen(true)} data-testid="onboarding-connection-config">
+              {t('director.connectionConfig', '连接配置')}
             </Button>
-            <Button size="small" icon={<SlidersHorizontal size={13} />} onClick={() => setModelPageOpen(true)}>
-              {t('director.advancedModels', '高级')}
-            </Button>
+            <span style={hintStyle(theme)}>
+              {t('onboarding.connectionHint', '地址、测试连接、模型映射（视频/LoRA/图片/文本/语音）都在这里面')}
+            </span>
           </div>
-          {testResult ? (
-            <span style={{ fontSize: 12, color: testOk ? '#16a34a' : '#dc2626' }}>{testResult}</span>
-          ) : null}
         </StepCard>
       </div>
     </Modal>
-    <ModelMappingModal open={modelPageOpen} onClose={() => setModelPageOpen(false)} />
+    {/* 2026-11-21 用户口径：「连接配置」窗口 = 地址 + 测试连接 + 模型映射整页（不再单独弹「模型映射」） */}
+    <Modal
+      open={configOpen}
+      onCancel={() => setConfigOpen(false)}
+      footer={null}
+      width={760}
+      centered
+      zIndex={5200}
+      destroyOnHidden
+      title={t('director.connectionConfig', '连接配置')}
+    >
+      <ComfyuiConnectButton inline />
+    </Modal>
     {/* 第三步「连接 ComfyUI」的教程图（云电脑安装插件流程） */}
     <Modal
       open={tutorialOpen}
@@ -527,3 +494,4 @@ export function OnboardingNotice({ onOpen }: { onOpen: () => void }): React.Reac
     </div>
   );
 }
+

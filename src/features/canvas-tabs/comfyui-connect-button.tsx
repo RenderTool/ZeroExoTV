@@ -185,7 +185,7 @@ export function ComfyuiConnectButton({ autoProbeDisabled = false, inline = false
           style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(128,128,128,0.18)' }}
         >
           <Text style={{ fontSize: 12 }}>{t('director.modelMapping', '模型映射')}</Text>
-          <ModelMappingPanel visible={open} />
+          <ModelMappingPanel visible={inline || open} />
         </div>
       )}
 
