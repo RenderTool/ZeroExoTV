@@ -234,18 +234,25 @@ export async function downloadComfyOutput(base: string, outputPath: string): Pro
 }
 
 /** 引导是否已在 ComfyUI 输出缓存里（账户制存储：换机器只要没删就还在）。
- *  给了 expectedSha256 时要求内容一致，避免「同名但被截断/替换」的坏缓存。 */
-export async function comfyGuideExists(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean> {
+ *  给了 expectedSha256 时要求内容一致，避免「同名但被截断/替换」的坏缓存。
+ *  返回 null = 探针不可用（旧插件 404/405、代理异常），此时不能断言缺失。 */
+export async function comfyGuideExists(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean | null> {
   try {
     const qs = expectedSha256 ? `?sha256=${encodeURIComponent(expectedSha256)}` : "";
     const res = await fetch(`${base}/zeroexo/v1/guides/${encodeURIComponent(guideId)}${qs}`, {
       signal: AbortSignal.timeout(expectedSha256 ? 60_000 : 10_000),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      if (res.status === 404) {
+        const body = (await res.json().catch(() => null)) as { ok?: boolean; exists?: boolean } | null;
+        if (body?.ok === true && body?.exists === false) return false; // 确证缺失
+      }
+      return null;
+    }
     const body = (await res.json().catch(() => null)) as { exists?: boolean } | null;
     return body?.exists === true;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -277,7 +284,9 @@ export async function pushGuideToComfy(base: string, guideId: string): Promise<b
 /** 提交前保证起始段引导在远端可用：先查云端 output 缓存（可用 sha256 校验内容），
  *  缺了/内容不符再从本地 media/guides 传上去；两边都没有返回 false（由调用方报人话）。 */
 export async function ensureComfyGuide(base: string, guideId: string, expectedSha256?: string | null): Promise<boolean> {
-  if (await comfyGuideExists(base, guideId, expectedSha256)) return true;
+  const exists = await comfyGuideExists(base, guideId, expectedSha256);
+  // 探针不可用（旧插件/代理）时不能断言缺失：云端 output 可能是用户手动上传的，交给插件运行时判断
+  if (exists !== false) return true;
   return pushGuideToComfy(base, guideId);
 }
 

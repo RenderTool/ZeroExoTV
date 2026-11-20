@@ -504,7 +504,10 @@ export function usePluginDirectorTask(args: {
         segmentShotIds: runArgs.selectedIds,
         startedAt: Date.now(),
       });
-      const task = await submitPluginTask({ ...runArgs.payload, projectId: runArgs.projectId });
+      const { task, warnings } = await submitPluginTask({ ...runArgs.payload, projectId: runArgs.projectId });
+      if (warnings.length) {
+        cbRef.current.onNotice('warning', `引导提示：${warnings.join('；')}`);
+      }
       connectPreview(runArgs.payload.clientId);
       await applyTask(task);
       startPolling(task.taskId);

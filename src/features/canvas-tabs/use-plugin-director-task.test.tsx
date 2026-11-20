@@ -57,7 +57,7 @@ beforeEach(() => {
 
 describe('usePluginDirectorTask', () => {
   it('提交后轮询成功段：落库并回调 onSegmentDone（带 storageKey/version）', async () => {
-    client.submit.mockResolvedValue(successTask);
+    client.submit.mockResolvedValue({ task: successTask, warnings: [] });
     client.get.mockResolvedValue(successTask);
     const onDone = vi.fn();
     const onState = vi.fn();
@@ -113,7 +113,7 @@ describe('usePluginDirectorTask', () => {
       totalCount: 1,
       segments: [{ index: 1, shotId: 's1', state: 'running', prompt: 'p' }],
     };
-    client.submit.mockResolvedValue(runningTask);
+    client.submit.mockResolvedValue({ task: runningTask, warnings: [] });
     client.get.mockRejectedValue(new Error('offline'));
     const onNotice = vi.fn();
     const { result } = renderHook(() => usePluginDirectorTask({

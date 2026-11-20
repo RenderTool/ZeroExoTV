@@ -490,7 +490,8 @@ async function runDirector(taskId: string, base: string): Promise<void> {
       if (!(await ensureComfyGuide(base, gid, sha)) ) {
         throw new McpError(
           "VALIDATION",
-          `起始引导 ${gid} 在 ComfyUI 输出缓存与本机 media/guides 里都不存在/内容不一致；先在项目侧生成/缓存该引导，或把该段改成 none`,
+          `起始引导 ${gid} 在 ComfyUI 输出缓存与本机 media/guides 里都不存在 / 内容不一致，或云端插件不是 0.1.1（guides 查询与上传都会 404）。`
+            + `先确认云端插件已升级；再在项目侧生成/缓存该引导，或把该段改成 none`,
         );
       }
     }
