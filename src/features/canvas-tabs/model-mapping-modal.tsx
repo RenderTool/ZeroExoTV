@@ -3,13 +3,16 @@
  *
  * 2026-11-18 用户口径：机器信息、显存策略、模型清单不要散在「使用指引」和「ComfyUI 连接」两处，
  * 统一到一个页面：连接面板 / 指引都只留一个「高级」按钮打开它。
- * 页内用标签分「视频 / 图片 / 文本 / 语音」：视频可逐槽位选（下拉就是本机真实清单，命中字典才标推荐），
+ * 页内用标签分「视频 / LoRA / 图片 / 文本 / 语音」：视频可逐槽位选（下拉就是本机真实清单，命中字典才标推荐），
+ * LoRA 页只负责「获取清单 + 刷新」（启用哪几条与强度属于项目参数，在导演台参数面板里选），
  * 图片是固定工作流，只显示「已就绪 / 未下载」；文本、语音后续支持。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Modal, Select, Tabs, Tag, Typography } from 'antd';
+import { Button, Checkbox, InputNumber, Modal, Select, Tabs, Tag, Typography, message } from 'antd';
 import { RefreshCw } from 'lucide-react';
+import { MAX_LORAS, type LoraRow } from '@/entities/director-lora.js';
 import { fetchBridgeModels } from './comfyui-bridge-client.js';
+import { hasDirectorLoraSink, getDirectorLoras, setDirectorLoras } from './director-lora-bridge.js';
 import { useComfyuiConnectionStore } from './comfyui-connection.js';
 import { useComfyuiEndpointStore, type ComfyuiVramMode } from './comfyui-endpoint.js';
 
@@ -21,8 +24,10 @@ const { Text } = Typography;
  */
 const RECOMMENDED: Record<'unet' | 'videoVae' | 'audioVae' | 'clip', Record<string, string>> = {
   unet: {
+    'minimax_h3_hybrid_fl2va_ref2va_b30-49-int8.safetensors': '48G 及以下推荐',
     'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors': '8G 推荐',
-    'minimax_h3_hybrid_fl2va_ref2va_b25-49-bf16.safetensors': '24G 推荐',
+    'minimax_h3_hybrid_fl2va_ref2va_b30-49-bf16.safetensors': '需 ≥80G 显存',
+    'minimax_h3_hybrid_fl2va_ref2va_b25-49-bf16.safetensors': '需 ≥48G 显存',
     'minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors': '24G 以上推荐',
   },
   videoVae: { 'minimax_h3_video_vae_int8_convrot.safetensors': '8G 推荐' },
@@ -97,6 +102,8 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
   const conn = useComfyuiConnectionStore();
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState('video');
+  /** LoRA 已选（顺序即串联顺序）：弹窗打开时从导演台桥同步，改动即时写回项目 params.loras */
+  const [loraRows, setLoraRows] = useState<LoraRow[]>([]);
 
   const reload = useCallback(async (): Promise<void> => {
     if (!ep.address) return;
@@ -114,6 +121,13 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
   useEffect(() => {
     if (open && conn.availableModels.unet.length === 0) void reload();
   }, [open, conn.availableModels.unet.length, reload]);
+
+  // LoRA 清单也要在打开时是新的（旧插件不返回就保持空，由页面提示升级）
+  useEffect(() => {
+    if (!open) return;
+    setLoraRows(getDirectorLoras());
+    void reload();
+  }, [open, reload]);
 
   const available = conn.availableModels;
   const listFor = (slot: VideoSlot): string[] => {
@@ -218,6 +232,90 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
     </div>
   );
 
+  /**
+   * LoRA 清单页（2026-11-20 用户定稿）：LoRA 单独一个 Tab，就放在这里。
+   * 清单来自插件 `/models` 的 `lora` 字段（旧插件 0.1.2 不返回 → 明确说要升级，不伪造清单）；
+   * 勾选 + 强度 + 顺序即「启用哪几条、各自强度、串联顺序」，属于项目参数，
+   * 通过 director-lora-bridge 写回导演台的 `sharedParams.params.loras`（payload / 插件只认这份）。
+   */
+  const toggleLora = (name: string): void => {
+    const exists = loraRows.some((r) => r.name === name);
+    let next = loraRows;
+    if (exists) {
+      next = loraRows.filter((r) => r.name !== name);
+    } else {
+      if (loraRows.length >= MAX_LORAS) {
+        message.warning(`最多串 ${MAX_LORAS} 条 LoRA，再选会明显吃显存和耗时`);
+        return;
+      }
+      next = [...loraRows, { name, strength: 1 }];
+    }
+    setLoraRows(next);
+    setDirectorLoras(next);
+  };
+
+  const setLoraStrength = (name: string, v: number | null): void => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return;
+    const clamped = Math.min(2, Math.max(0, v));
+    const next = loraRows.map((r) => (r.name === name ? { ...r, strength: clamped } : r));
+    setLoraRows(next);
+    setDirectorLoras(next);
+  };
+
+  const loraPane = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Text style={{ fontSize: 12 }}>LoRA 清单（{available.lora.length} 个 · 已选 {loraRows.length}/{MAX_LORAS}）</Text>
+        <Button size="small" icon={<RefreshCw size={12} />} loading={refreshing} onClick={() => void reload()}>
+          刷新列表
+        </Button>
+        {loraRows.length > 0 ? (
+          <Button
+            size="small"
+            onClick={() => { setLoraRows([]); setDirectorLoras([]); }}
+          >
+            清空
+          </Button>
+        ) : null}
+      </div>
+      {available.lora.length === 0 ? (
+        <Text type="warning" style={{ fontSize: 12 }}>
+          云端插件没有返回 LoRA 清单：旧版插件（0.1.2）的 /models 不含 lora。升级到 0.1.3 后，这里会列出云端 models/loras 下的全部文件。
+        </Text>
+      ) : (
+        available.lora.map((name) => {
+          const order = loraRows.findIndex((r) => r.name === name);
+          const checked = order >= 0;
+          return (
+            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Checkbox
+                checked={checked}
+                disabled={!checked && loraRows.length >= MAX_LORAS}
+                onChange={() => toggleLora(name)}
+              />
+              <Text style={{ flex: 1, fontSize: 12 }} ellipsis>{name}</Text>
+              {checked ? <Tag color="green" style={{ marginInlineEnd: 0 }}>第 {order + 1} 条</Tag> : null}
+              <InputNumber
+                size="small"
+                min={0}
+                max={2}
+                step={0.05}
+                precision={2}
+                disabled={!checked}
+                value={checked ? loraRows[order]!.strength : 1}
+                onChange={(v) => setLoraStrength(name, v)}
+                style={{ width: 78 }}
+              />
+            </div>
+          );
+        })
+      )}
+      <Text type="secondary" style={{ fontSize: 11 }}>
+        勾选哪几条、各自强度、串联顺序就是实际下发顺序（ComfyUI 里就是多个 LoraLoaderModelOnly 逐节改 MODEL，显存和耗时都会涨）。{hasDirectorLoraSink() ? '' : '当前没有打开导演台，改动无法写入项目。'}
+      </Text>
+    </div>
+  );
+
   return (
     <Modal open={open} onCancel={onClose} footer={null} centered width={640} title="模型映射" destroyOnHidden>
       {machineBlock}
@@ -227,6 +325,7 @@ export function ModelMappingModal({ open, onClose }: ModelMappingModalProps): JS
         style={{ marginTop: 8 }}
         items={[
           { key: 'video', label: '视频', children: videoPane },
+          { key: 'lora', label: 'LoRA', children: loraPane },
           { key: 'image', label: '图片', children: imagePane },
           { key: 'text', label: '文本', children: <Text type="secondary" style={{ fontSize: 12 }}>后续支持</Text> },
           { key: 'voice', label: '语音', children: <Text type="secondary" style={{ fontSize: 12 }}>后续支持</Text> },

@@ -14,17 +14,13 @@
  * 窄窗降级（@container railToolbar，容器 = 导轨工具行）：先隐藏按钮文字（图标+title），
  * 「批量」始终可见；整行 overflowX auto 不换行。
  */
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { InputNumber, Popover, Select } from 'antd';
 import { Play, SlidersHorizontal } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AspectRatioPicker } from '@/features/generator-settings/aspect-ratio-picker.js';
 import { useLastSeed } from '@/shared/last-seed-store.js';
-import { MAX_LORAS, normalizeLoras, type LoraRow } from '@/entities/director-lora.js';
-import { fetchBridgeModels } from './comfyui-bridge-client.js';
-import { useComfyuiConnectionStore } from './comfyui-connection.js';
-import { useComfyuiEndpointStore } from './comfyui-endpoint.js';
 import {
   REF_IMAGE_SIZE_OPTIONS,
   SCALE_FACTOR_MAX,
@@ -60,15 +56,6 @@ export const QUALITY_PRESETS = [
 
 export type QualityPresetId = (typeof QUALITY_PRESETS)[number]['id'];
 
-/** 视频主模型推荐标签：只按文件名命中，标在选项上，绝不替用户选 */
-const RECOMMENDED_UNET: Record<string, string> = {
-  'minimax_h3_hybrid_fl2va_ref2va_b30-49-int8.safetensors': '48G 及以下推荐',
-  'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors': '8G 推荐',
-  'minimax_h3_hybrid_fl2va_ref2va_b30-49-bf16.safetensors': '需 ≥80G 显存',
-  'minimax_h3_hybrid_fl2va_ref2va_b25-49-bf16.safetensors': '需 ≥48G 显存',
-  'minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors': '24G 以上推荐',
-};
-
 /**
  * 参数控件本体：比例九宫格 + 尺寸系数 + 换算尺寸 + 采样步数 + 种子 + 参考图尺寸。
  * 导演台「参数」面板与画布视频节点参数面板共用这一份（用户要求两处一致）。
@@ -82,54 +69,10 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
   const seedValue = Number(params['seed'] ?? -1);
   const lastSeed = useLastSeed();
   const setParam = (key: string, v: unknown) => onChange({ [key]: v });
-  /** 高级参数（2026-11-20）：视频主模型走连接面板同一份选择，LoRA 多行存 params.loras */
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const connModels = useComfyuiConnectionStore((s) => s.models);
-  const availableModels = useComfyuiConnectionStore((s) => s.availableModels);
-  const setModel = useComfyuiConnectionStore((s) => s.setModel);
-  const setConnected = useComfyuiConnectionStore((s) => s.setConnected);
-  const connToken = useComfyuiConnectionStore((s) => s.token);
-  const endpoint = useComfyuiEndpointStore((s) => s.address);
-  const loras = normalizeLoras(params['loras']);
-  const setLoras = (next: LoraRow[]) => setParam('loras', next);
-  const updateLora = (index: number, patch: Partial<LoraRow>) => {
-    setLoras(loras.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  };
   /**
-   * 展开时若还没有清单：主动拉一次（和「模型映射」同一个接口）。
-   * 旧插件没有 lora 字段 → 明确提示要升级插件，不给假清单。
+   * 2026-11-20 四调（用户定稿）：参数面板只管生成参数，**不放 LoRA、不放视频主模型**。
+   * 视频主模型在「模型映射 → 视频」，LoRA 清单与选择在「模型映射 → LoRA」。
    */
-  useEffect(() => {
-    if (!advancedOpen) return;
-    if (availableModels.unet.length > 0 && availableModels.lora.length > 0) return;
-    if (!endpoint) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetchBridgeModels(endpoint.replace(/\/+$/, ''), connToken || undefined);
-        if (!cancelled && res.ok) {
-          setConnected(true, { unet: res.unet, vae: res.vae, clip: res.clip, lora: res.lora ?? [] });
-        }
-      } catch {
-        /* 清单拉不到：保持空，由提示语说明 */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [advancedOpen, endpoint, connToken, availableModels.unet.length, availableModels.lora.length, setConnected]);
-  const loraHint = availableModels.lora.length === 0
-    ? (
-      <span style={{ fontSize: 10, color: subColor }}>
-        {t('director.loraNotLoadedHint', '云端插件没有返回 LoRA 清单（旧版插件），升级插件后这里才能下拉选；现在留空 = 模板默认 8 步 turbo。')}
-      </span>
-    )
-    : loras.length > 1
-      ? (
-        <span style={{ fontSize: 10, color: subColor }}>
-          {t('director.loraMultiHint', '多条 LoRA 会按从上到下的顺序串联，显存与耗时都会涨。')}
-        </span>
-      )
-      : null;
-
   const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 } as const;
   const labelStyle = { fontSize: 11, color: subColor, flexShrink: 0 } as const;
 
@@ -284,109 +227,6 @@ export function DirectorParamsControls({ params, onChange, subColor }: DirectorP
           style={{ width: 160, height: 25 }}
         />
       </div>
-      {/*
-        高级参数（2026-11-20 用户口径）：视频主模型与 LoRA 都要在参数面板里放一份，
-        但收进「高级」折叠，默认不打扰。LoRA 和模型一样「先拉清单 → 下拉选 → 带强度」，
-        支持多条串联（ComfyUI 里就是多个 LoraLoaderModelOnly 逐节 patch MODEL）。
-      */}
-      <div style={{ ...rowStyle, paddingTop: 4 }}>
-        <button
-          type="button"
-          data-advanced-toggle
-          data-open={advancedOpen ? 'true' : undefined}
-          onClick={() => setAdvancedOpen((v) => !v)}
-          style={{
-            flex: 1, height: 26, borderRadius: 5, fontSize: 11, cursor: 'pointer',
-            border: `1px solid ${theme.toolbar.border}`, background: advancedOpen ? 'rgba(128,128,128,0.16)' : 'transparent',
-            color: 'inherit', textAlign: 'left', padding: '0 10px',
-          }}
-        >
-          {advancedOpen ? '▾ ' : '▸ '}{t('director.advanced', '高级参数（视频主模型 / LoRA）')}
-        </button>
-      </div>
-      {advancedOpen ? (
-        <div data-advanced-panel style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 2 }}>
-          <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
-            <span style={labelStyle}>{t('director.videoModel', '视频主模型')}</span>
-            <Select
-              data-param-key="unet"
-              aria-label={t('director.videoModel', '视频主模型')}
-              size="small"
-              value={connModels.unet || undefined}
-              placeholder={availableModels.unet.length ? t('director.pickModel', '选一个本机模型') : t('director.modelsNotLoaded', '清单未加载，先在「模型映射」里刷新')}
-              options={availableModels.unet.map((name) => ({
-                value: name,
-                label: `${name}${RECOMMENDED_UNET[name] ? ` · ${RECOMMENDED_UNET[name]}` : ''}`,
-              }))}
-              onChange={(v) => { setModel('unet', v); setParam('unet', v); }}
-              className="director-select"
-              popupClassName="director-select-popup"
-              style={{ width: '100%', height: 25 }}
-            />
-          </div>
-          <div style={{ ...rowStyle, alignItems: 'baseline' }}>
-            <span style={labelStyle}>{t('director.loraList', 'LoRA 串联')}</span>
-            <span style={{ fontSize: 10, color: subColor }}>
-              {loras.length}/{MAX_LORAS}
-            </span>
-          </div>
-          {loraHint}
-          {loras.map((lora, i) => (
-            <div key={i} data-lora-row style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Select
-                data-param-key={`lora_${i}`}
-                aria-label={`LoRA ${i + 1}`}
-                size="small"
-                value={lora.name || undefined}
-                placeholder={availableModels.lora.length ? t('director.pickLora', '选 LoRA 文件') : t('director.loraNotLoaded', '插件未返回 LoRA 清单')}
-                options={availableModels.lora.map((name) => ({ value: name, label: name }))}
-                onChange={(v) => updateLora(i, { name: v })}
-                className="director-select"
-                popupClassName="director-select-popup"
-                style={{ flex: 1, height: 25 }}
-              />
-              <InputNumber
-                data-param-key={`lora_strength_${i}`}
-                aria-label={`LoRA ${i + 1} 强度`}
-                size="small"
-                min={0}
-                max={2}
-                step={0.05}
-                precision={2}
-                value={lora.strength}
-                onChange={(v) => { if (typeof v === 'number' && Number.isFinite(v)) updateLora(i, { strength: v }); }}
-                className="director-input-number"
-                style={{ width: 78, height: 25 }}
-              />
-              <button
-                type="button"
-                data-lora-remove={i}
-                onClick={() => setLoras(loras.filter((_, idx) => idx !== i))}
-                title={t('director.removeLora', '删除这条 LoRA')}
-                style={{
-                  height: 25, width: 26, borderRadius: 5, cursor: 'pointer', fontSize: 12,
-                  border: `1px solid ${theme.toolbar.border}`, background: 'transparent', color: 'inherit',
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            data-lora-add
-            disabled={loras.length >= MAX_LORAS || availableModels.lora.length === 0}
-            onClick={() => setLoras([...loras, { name: availableModels.lora[0] ?? '', strength: 1 }])}
-            style={{
-              height: 25, borderRadius: 5, fontSize: 11, cursor: loras.length >= MAX_LORAS ? 'not-allowed' : 'pointer',
-              border: `1px dashed ${theme.toolbar.border}`, background: 'transparent', color: 'inherit',
-              opacity: loras.length >= MAX_LORAS || availableModels.lora.length === 0 ? 0.5 : 1,
-            }}
-          >
-            {t('director.addLora', '+ 添加 LoRA（按顺序串联）')}
-          </button>
-        </div>
-      ) : null}
     </>
   );
 }

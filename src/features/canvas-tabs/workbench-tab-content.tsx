@@ -85,6 +85,7 @@ import { syncWorkbenchSendContext } from '@/features/canvas-assets/workbench-sen
 import { DirectorPromptPanel } from './director-prompt-panel.jsx';
 import { useSubjectMediaLinkEventStore } from '@/features/canvas-nodes/storyboard/subject-state-media.js';
 import { DirectorParamsButton, DirectorRunButton } from './director-run-params-row.js';
+import { registerDirectorLoraSink, syncDirectorLoras } from './director-lora-bridge.js';
 import { usePluginDirectorTask } from './use-plugin-director-task.js';
 import { attachDirectorReferenceImages, buildDirectorBatchPayload } from './director-plugin-payload.js';
 import { listAssets, updateAsset } from '@/features/asset-picker/asset-store.js';
@@ -864,6 +865,22 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     message.success(`已应用风格：${preset.nameZh}`);
     message.info('风格会影响构图/机位/镜头时长；现有提示词建议按新风格重写');
   }, [updateSharedParams, sharedParams.params, message]);
+
+  // 2026-11-20 用户口径：LoRA 只在「模型映射 → LoRA」页里选，参数面板不出现 LoRA。
+  // 弹窗是全局的（顶栏打开），所以这里挂一个 sink：弹窗改选择 → 写回本项目 shared.params.loras
+  // （payload / 插件只认这份）；项目切换或外部改了 params.loras 时反向同步进桥。
+  useEffect(() => {
+    return registerDirectorLoraSink(
+      (loras) => {
+        updateSharedParams({ params: { ...sharedParamsRef.current.params, loras } });
+      },
+      sharedParamsRef.current.params['loras'],
+    );
+  }, [updateSharedParams]);
+
+  useEffect(() => {
+    syncDirectorLoras(sharedParams.params['loras']);
+  }, [sharedParams.params]);
 
   // ===== 抽屉「发送到导演台当前片段」宿主监听（2026-11-05 约定） =====
   // 抽屉（canvas-assets）emit zeroexo:workbench-add-ref；这里对当前选中片段落槽——
