@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Checkbox, InputNumber, Modal, Select, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
 import { DEFAULT_LORA_NAME, MAX_LORAS, type LoraRow } from '@/entities/director-lora.js';
+import { LORA_PRESETS, missingPresetFiles, presetToRows } from '@/entities/director-lora-presets.js';
 import { fetchBridgeModels } from './comfyui-bridge-client.js';
 import { getDirectorLoras, setDirectorLoras } from './director-lora-bridge.js';
 import { useComfyuiConnectionStore } from './comfyui-connection.js';
@@ -361,6 +362,76 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
     setDirectorLoras(next);
   };
 
+  const applyPreset = (presetId: string): void => {
+    const preset = LORA_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    const res = presetToRows(preset, available.lora);
+    if (!res.ok) {
+      message.warning(res.reason);
+      return;
+    }
+    setLoraRows(res.rows);
+    setDirectorLoras(res.rows);
+    message.success(`已套用「${preset.title}」：${res.rows.map((r) => `${r.name.replace(/\.safetensors$/, '')}@${r.strength}`).join(' → ')}`);
+  };
+
+  /** 推荐清单：每条给「强项描述」，本机缺文件的组合禁用套用（不假装可用） */
+  const presetCards = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {LORA_PRESETS.map((preset) => {
+        const missing = missingPresetFiles(preset, available.lora);
+        const canApply = missing.length === 0;
+        return (
+          <div
+            key={preset.id}
+            data-lora-preset={preset.id}
+            style={{
+              border: '1px solid rgba(128,128,128,0.28)',
+              borderRadius: 8,
+              padding: '8px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Tag color={preset.badgeColor} style={{ marginInlineEnd: 0 }}>{preset.badge}</Tag>
+              <Text strong style={{ fontSize: 12 }}>{preset.title}</Text>
+              {missing.length > 0 ? <Tag style={{ marginInlineEnd: 0 }}>本机未下载</Tag> : null}
+              <div style={{ flex: 1 }} />
+              <Button
+                size="small"
+                type="link"
+                data-lora-preset-apply={preset.id}
+                disabled={!canApply}
+                onClick={() => applyPreset(preset.id)}
+              >
+                套用
+              </Button>
+            </div>
+            {/* 组合顺序：文件名 → 强度 → 这条负责什么 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {preset.items.map((item, i) => (
+                <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                  <span style={{ color: 'rgba(128,128,128,0.9)', minWidth: 12 }}>{i + 1}.</span>
+                  <Text style={{ fontSize: 11 }} ellipsis>{item.name}</Text>
+                  <Tag color="green" style={{ marginInlineEnd: 0 }}>强度 {item.strength.toFixed(2)}</Tag>
+                  <Text type="secondary" style={{ fontSize: 11 }}>{item.role}</Text>
+                </div>
+              ))}
+            </div>
+            <Text style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(160,160,160,0.95)' }}>
+              {preset.strengths}
+            </Text>
+            {preset.caveat ? (
+              <Text style={{ fontSize: 11, lineHeight: 1.5, color: '#d97706' }}>注意：{preset.caveat}</Text>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   const loraPane = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -424,11 +495,11 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
         </div>
       )}
       <Text type="secondary" style={{ fontSize: 11 }}>
-        LoRA 是可选项：不勾就完全不加 LoRA。勾选即串联，顺序就是下发顺序；勾完即保存（本项目 + 本机设置）。清单里的「默认推荐」只是建议，不勾不会自动启用。
+        LoRA 是可选项：不勾就完全不加 LoRA。勾选即串联，顺序就是下发顺序；勾完即保存（本项目 + 本机设置）。清单里的「推荐」只是建议，不勾不会自动启用。
       </Text>
-      <div data-testid="lora-recommend" style={{ marginTop: 6, fontSize: 11, color: 'rgba(128,128,128,0.95)' }}>
-        推荐：{DEFAULT_LORA_NAME}
-        <span style={{ marginLeft: 6 }}>（8 步 turbo，出片快、8G 显存友好；不需要就别勾）</span>
+      <div data-testid="lora-recommend" style={{ marginTop: 6 }}>
+        <Text style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>推荐清单（含强项描述 · 不预勾）</Text>
+        {presetCards}
       </div>
     </div>
   );

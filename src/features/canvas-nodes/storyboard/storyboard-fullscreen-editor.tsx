@@ -1,15 +1,16 @@
 /**
  * StoryboardFullscreenEditor - 分镜全屏编辑（画布顶部页签承载，仅主体资产视图）
  *
- * - 顶部：共享 header（集切换 + 重新生成当前集 + 关闭；embedded 模式隐藏关闭按钮，由页签 X 关闭）
+ * - 顶部：统一模块工具栏（左操作 / 右纯统计）：① 集切换 ② 重新生成当前集；embedded 模式隐藏关闭
  * - 内容：主体资产管理（StoryboardSubjectTab：主体卡片网格 + 主体树详情）
  * Plan#50:embedded(页签内嵌)——不 createPortal、容器 absolute 填满父级，由调用方 portal 到页签挂载点
  */
 import { memo, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import { Tooltip, ConfigProvider, Select } from 'antd';
-import { X, RotateCcw } from 'lucide-react';
+import { Tooltip, ConfigProvider, Button } from 'antd';
+import { X, RotateCcw, ChevronDown } from 'lucide-react';
 import { StoryboardSubjectTab } from './StoryboardSubjectTab';
+import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDropdown';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
@@ -73,36 +74,81 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
         onWheel={(e) => e.stopPropagation()}
         style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}
       >
-        {/* ===== 标题栏：集切换 + 重新生成当前集 + 关闭 ===== */}
+        {/* ===== 模块顶栏（2026-11-21 统一口径）：左侧操作、右侧纯统计 ===== */}
         <div style={modalHeaderStyle(theme)}>
-          {episodes && episodes.length > 0 && activeEpisodeId && onEpisodeChange && (
-            <Select
-              size="small"
-              value={activeEpisodeId}
-              onChange={onEpisodeChange}
-              style={{ width: 180, flexShrink: 0 }}
-              options={episodes.map((ep, idx) => ({
-                value: ep.id,
-                label: ep.title || t('storyboard.episodeLabel', { number: idx + 1 }),
-              }))}
-            />
-          )}
-          {onRequestRegenerate && (
-            <Tooltip title={t('storyboard.requestRegenerate', '重新生成该集')}>
-              <button
-                type="button"
-                onClick={onRequestRegenerate}
-                style={{ ...modalIconBtnStyle(theme, false), flexShrink: 0 }}
+          {/* ① 切集永远第一项：与剧本同款「标题 + ▾」下拉，而非裸 Select */}
+          <div data-toolbar-zone="left" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {episodes && episodes.length > 0 && activeEpisodeId && onEpisodeChange && (
+              <FullscreenDropdown
+                options={episodes.map((ep, idx) => ({
+                  key: ep.id,
+                  label: ep.title || t('storyboard.episodeLabel', { number: idx + 1 }),
+                  active: ep.id === activeEpisodeId,
+                }))}
+                onSelect={(id) => { if (id !== activeEpisodeId) onEpisodeChange(id); }}
               >
-                <RotateCcw size={15} />
-              </button>
-            </Tooltip>
-          )}
-          <span style={{ flex: 1 }} />
-          {/* Plan#50:embedded(页签)模式隐藏自带关闭按钮——统一由页签 X 关闭 */}
+                <button
+                  type="button"
+                  data-storyboard-episode-switch
+                  aria-label={t('storyboard.switchEpisode', '切换集数')}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 320,
+                    padding: '2px 4px', border: 'none', borderRadius: 6, background: 'transparent',
+                    color: textPrimary, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
+                    fontSize: 14, lineHeight: 1.4,
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      const idx = episodes.findIndex((ep) => ep.id === activeEpisodeId);
+                      const active = episodes[idx];
+                      return active?.title || t('storyboard.episodeLabel', { number: idx + 1 });
+                    })()}
+                  </span>
+                  <ChevronDown size={13} style={{ opacity: 0.6, flexShrink: 0 }} />
+                </button>
+              </FullscreenDropdown>
+            )}
+            <span style={{ width: 1, height: 16, background: theme.toolbar.border ?? 'rgba(128,128,128,0.3)', margin: '0 2px', flexShrink: 0 }} />
+            {/* ② 主动作：带图标 + 文字（不再只留一个裸图标） */}
+            {onRequestRegenerate && (
+              <Tooltip title={t('storyboard.requestRegenerate', '重新生成该集')}>
+                <Button
+                  type="text"
+                  size="small"
+                  data-storyboard-regenerate
+                  icon={<RotateCcw size={15} />}
+                  onClick={onRequestRegenerate}
+                  style={{ ...fullToolBtnStyle, color: theme.toolbar.textMuted }}
+                >
+                  {t('storyboard.regenerateEpisode', '重新生成该集')}
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+
+          {/* 右侧：状态栏，只读统计，不放按钮 */}
+          <div
+            data-toolbar-zone="right"
+            data-storyboard-stats
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
+              flex: 1, minWidth: 0, gap: 12, fontSize: 11, color: theme.toolbar.textMuted,
+              whiteSpace: 'nowrap', overflow: 'hidden',
+            }}
+          >
+            <span>{t('storyboard.subjectCount', '主体')} <b style={{ color: textPrimary }}>{(productionItems ?? []).length}</b></span>
+            {episodes && episodes.length > 0 ? (
+              <>
+                <span style={{ width: 1, height: 12, background: theme.toolbar.border ?? 'rgba(128,128,128,0.3)', flexShrink: 0 }} />
+                <span>{t('storyboard.episodeTotal', '剧集')} <b style={{ color: textPrimary }}>{episodes.length}</b></span>
+              </>
+            ) : null}
+          </div>
+          {/* 关闭固定在右上角（embedded 由页签 X 关闭） */}
           {!embedded && (
             <Tooltip title={t('common.close')}>
-              <button type="button" {...ghostHoverHandlers(theme)} onClick={onClose} style={modalIconBtnStyle(theme, false)}>
+              <button type="button" {...ghostHoverHandlers(theme)} onClick={onClose} style={{ ...modalIconBtnStyle(theme, false), marginLeft: 12 }}>
                 <X size={15} />
               </button>
             </Tooltip>

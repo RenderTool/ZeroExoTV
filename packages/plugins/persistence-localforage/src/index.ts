@@ -23,6 +23,7 @@
 import type { Plugin, PluginContext, GraphModel } from '@zeroexo/core';
 import { CommandEvents } from '@zeroexo/core';
 import localforage from 'localforage';
+import { readNodeTombstones, writeNodeTombstones } from './node-tombstones.js';
 
 // 图片档位单一事实源（征集 #186）：生成/解析/消费三侧共用，禁止再各写一套尺寸常量
 export {
@@ -138,6 +139,14 @@ export class PersistencePlugin implements Plugin {
   private _loadedSavedAt: number | null = null;
   /** 最近一次保存的 Promise(用于 deactivate 等待完成) */
   private _savePromise: Promise<void> | null = null;
+  /**
+   * 2026-11-22（C-24）：上一版节点 id 集合 + 删除墓碑。
+   * 背景：删完立刻刷新时，400ms 防抖 + idle 回调里的快照会被浏览器直接丢掉，
+   * load 读回旧图 → 用户看到「删掉的节点又回来了」。墓碑走 localStorage 同步写，刷新也能兜住。
+   */
+  private _lastNodeIds: Set<string> | null = null;
+  private _tombstones: Set<string> = new Set();
+  private _pageHideHandler: (() => void) | null = null;
 
   constructor(options: PersistenceOptions = {}) {
     this.storageKey = options.storageKey ?? NEW_CONFIG.graphKeyPrefix;
@@ -163,11 +172,13 @@ export class PersistencePlugin implements Plugin {
     if (this.active || !this.context) return;
     this.active = true;
     this.subscribeChanges();
+    this.installUnloadFlush();
   }
 
   deactivate(): void {
     if (!this.active) return;
     this.active = false;
+    this.removeUnloadFlush();
     // 取消未完成的防抖保存和 idle callback, 立即保存一次
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
@@ -189,6 +200,7 @@ export class PersistencePlugin implements Plugin {
   pause(): void {
     if (!this.active) return;
     this.active = false;
+    this.removeUnloadFlush();
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
@@ -227,6 +239,7 @@ export class PersistencePlugin implements Plugin {
   private subscribeChanges(): void {
     if (!this.context) return;
     const onChange = (): void => {
+      this.trackDeletedNodes();
       this.scheduleSave();
     };
     this.context.eventBus.on(CommandEvents.EXECUTED, onChange);
@@ -242,6 +255,62 @@ export class PersistencePlugin implements Plugin {
   private unsubscribeChanges(): void {
     this.unsubscribers.forEach((unsub) => unsub());
     this.unsubscribers = [];
+  }
+
+  /**
+   * C-24：把「上一版有、这一版没有」的节点 id 同步写进 localStorage 墓碑。
+   * 撤销/重做让 id 重新出现时会从墓碑里删掉 → 撤销后刷新不会误删。
+   */
+  private trackDeletedNodes(): void {
+    const ctx = this.context;
+    if (!ctx) return;
+    const current = new Set<string>((ctx.commandQueue.getState().nodes ?? []).map((n) => n.id));
+    const prev = this._lastNodeIds;
+    this._lastNodeIds = current;
+    if (!prev) return;
+    let changed = false;
+    for (const id of prev) {
+      if (!current.has(id) && !this._tombstones.has(id)) {
+        this._tombstones.add(id);
+        changed = true;
+      }
+    }
+    for (const id of current) {
+      if (this._tombstones.delete(id)) changed = true;
+    }
+    if (changed) writeNodeTombstones(this.projectId, this._tombstones);
+  }
+
+  /** 离页兜底：清掉防抖定时器并立刻起一次写盘（异步写不保证完成，墓碑才是硬保证） */
+  private flushSaveNow(): void {
+    if (!this.context) return;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.idleCallbackId !== null) {
+      cancelIdleCallback(this.idleCallbackId);
+      this.idleCallbackId = null;
+    }
+    this._savePromise = this._doSave(this.context.commandQueue.getState());
+  }
+
+  private installUnloadFlush(): void {
+    if (typeof window === 'undefined' || this._pageHideHandler) return;
+    const onVisibility = (): void => {
+      // 只在「切到后台/即将不可见」时抢写一次；回到前台不写，避免每次切窗都整图落盘
+      if (document.visibilityState === 'hidden') this.flushSaveNow();
+    };
+    const handler = (): void => onVisibility();
+    this._pageHideHandler = handler;
+    window.addEventListener('pagehide', handler);
+    document.addEventListener('visibilitychange', handler);
+  }
+  private removeUnloadFlush(): void {
+    if (typeof window === 'undefined' || !this._pageHideHandler) return;
+    window.removeEventListener('pagehide', this._pageHideHandler);
+    document.removeEventListener('visibilitychange', this._pageHideHandler);
+    this._pageHideHandler = null;
   }
 
   uninstall(): void {
@@ -323,6 +392,10 @@ export class PersistencePlugin implements Plugin {
         );
         await Promise.all([this.store.setItem(this.getStorageKey(), { ...data, graph: mainGraph }), ...writes]);
         this._loadedSavedAt = data.savedAt;
+        // C-24：这一版已经落盘（含删除），墓碑不再需要；下次刷新直接读新图
+        this._lastNodeIds = new Set(graph.nodes.map((n) => n.id));
+        this._tombstones = new Set();
+        writeNodeTombstones(this.projectId, this._tombstones);
         // 写成功 → 磁盘历史快照（宿主钩子内部自行去重/轮转，失败不影响保存）
         try { this.snapshotHook?.(graph, this.projectId); } catch { /* ignore */ }
       } catch (err) {
@@ -333,12 +406,46 @@ export class PersistencePlugin implements Plugin {
       try {
         await this.store.setItem(this.getStorageKey(), data);
         this._loadedSavedAt = data.savedAt;
+        // C-24：落盘成功 → 墓碑清空（与上一分支同语义）
+        this._lastNodeIds = new Set(graph.nodes.map((n) => n.id));
+        this._tombstones = new Set();
+        writeNodeTombstones(this.projectId, this._tombstones);
         try { this.snapshotHook?.(graph, this.projectId); } catch { /* ignore */ }
       } catch (err) {
         this._lastSaveError = err instanceof Error ? err : new Error(String(err));
         console.error('[Persistence] save failed:', this._lastSaveError);
       }
     }
+  }
+
+  /**
+   * C-24：读盘后应用墓碑 —— 把「用户已删但没来得及落盘」的节点从磁盘图里剔除（连同其边）。
+   * 墓碑只要还命中图里的 id 就保留；一条都不命中说明磁盘已经写过这一版，顺手清掉。
+   */
+  private applyNodeTombstones(graph: GraphModel): GraphModel {
+    this._tombstones = readNodeTombstones(this.projectId);
+    const ids = new Set<string>((graph.nodes ?? []).map((n) => n.id));
+    this._lastNodeIds = new Set(ids);
+    if (this._tombstones.size === 0) return graph;
+    const removed = new Set<string>([...this._tombstones].filter((id) => ids.has(id)));
+    if (removed.size === 0) {
+      this._tombstones = new Set();
+      writeNodeTombstones(this.projectId, this._tombstones);
+      return graph;
+    }
+    const endId = (end: unknown): string | undefined => {
+      if (typeof end === 'string') return end;
+      const rec = end as { nodeId?: string } | null | undefined;
+      return rec?.nodeId;
+    };
+    const nodes = (graph.nodes ?? []).filter((n) => !removed.has(n.id));
+    const edges = (graph.edges ?? []).filter((e) => {
+      const src = endId((e as { source?: unknown }).source);
+      const tgt = endId((e as { target?: unknown }).target);
+      return !(src && removed.has(src)) && !(tgt && removed.has(tgt));
+    });
+    console.warn('[Persistence] 已按删除墓碑剔除节点:', [...removed].join(', '));
+    return { ...graph, nodes, edges };
   }
 
   /** 获取最近一次保存的错误(消费后清除) */
@@ -374,7 +481,7 @@ export class PersistencePlugin implements Plugin {
         } catch {
           // ignore, 使用未合并的 graph
         }
-        return graph;
+        return this.applyNodeTombstones(graph);
       }
 
       // 新存储没有数据,尝试从旧存储迁移
@@ -388,7 +495,7 @@ export class PersistencePlugin implements Plugin {
         // 迁移后保存到新存储
         await this.store.setItem(this.getStorageKey(), migrated);
         this._loadedSavedAt = migrated.savedAt ?? null;
-        return migrated.graph;
+        return this.applyNodeTombstones(migrated.graph);
       }
 
       // 兜底: 尝试读取旧版单项目 key(zeroexo:graph)
@@ -399,13 +506,17 @@ export class PersistencePlugin implements Plugin {
         const fallbackData = await this.loadFromAlternateStorage();
         if (fallbackData) {
           console.info('[Persistence] recovered data from alternate storage');
-          return fallbackData;
+          return this.applyNodeTombstones(fallbackData);
         }
       }
 
+      // 磁盘没有图：仍要记基线（空集）+ 读墓碑，避免第一次保存把"全部节点"当成新增
+      this._lastNodeIds = new Set();
+      this._tombstones = readNodeTombstones(this.projectId);
       return null;
     } catch (err) {
       console.error('[Persistence] load failed:', err);
+      this._lastNodeIds = null;
       return null;
     }
   }

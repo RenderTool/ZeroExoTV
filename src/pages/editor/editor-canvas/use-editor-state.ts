@@ -1112,6 +1112,8 @@ export function useEditorState(canvasId: string): {
         const cmds = [...ids].map((id) => new RemoveNodeCommand(id));
         editor.core.commandQueue.execute(new BatchCommand(cmds, 'delete-selected'));
       }
+      // C-24：删除后立刻落盘（跳过 400ms 防抖）——否则「删完直接刷新」会读回删前的图
+      void editor.plugins.persistence?.save().catch(() => undefined);
       if (removedKeys.size > 0 || removedMediaKeys.size > 0) {
         // 延迟回收:删除时不立即物理删除媒体数据,30s 后由 cleanupOrphanedResources
         // 基于"是否仍被 graph 引用"判定再清理。撤销发生在窗口内 → 节点恢复 → 资源被引用 → GC 跳过 → 数据无损。
@@ -1137,6 +1139,8 @@ export function useEditorState(canvasId: string): {
         const cmds = graph.nodes.map((n) => new RemoveNodeCommand(n.id));
         editor.core.commandQueue.execute(new BatchCommand(cmds, 'clear-canvas'));
       }
+      // C-24：清空画布同样是删除，立刻落盘
+      void editor.plugins.persistence?.save().catch(() => undefined);
       if (removedKeys.size > 0 || removedMediaKeys.size > 0) {
         // 延迟回收:同 deleteSelected,30s 后由 GC 基于引用判定再清理,撤销窗口内数据保留。
         scheduleDeferredCleanup();

@@ -28,6 +28,11 @@ export interface DirectorPreviewFrame {
   totalSteps: number | null;
   /** 1 基段号 */
   segmentIndex: number | null;
+  /**
+   * 预览短片帧率（插件 `report_director_segment_preview` 的 fps 字段）。
+   * 只在 mime 为 video/webp 时给；缺失时前端不能拿 24 硬推帧号（那是造假数据）。
+   */
+  fps?: number | null;
 }
 
 export interface DirectorProgressInfo {
@@ -174,6 +179,7 @@ export class DirectorPreviewSocket {
           typeof d.segment_index === 'number'
             ? d.segment_index + 1 // 线上是 0 基（seg.timeline_index），展示用 1 基
             : this.lastProgress?.segment ?? null,
+        fps: typeof d.fps === 'number' && d.fps > 0 ? d.fps : null,
       };
       this.enqueueFrame(frame);
     } else if (msg.type === 'minimax_director_progress') {

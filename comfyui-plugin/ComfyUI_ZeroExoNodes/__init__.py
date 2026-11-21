@@ -130,6 +130,10 @@ MOSS_VISIBLE_PARAMS = {
 TEMPLATE_DEFAULTS = {
     "frame_rate": 24.0,
     "reference_image": "",
+    # 2026-11-21（C-22）：模板 12 号节点有这个 BOOLEAN 输入，但既不在 VISIBLE_PARAMS
+    # 也不在这里 → 替换后留下字面量 "__zx:use_prev_guide__"，BOOLEAN 输入收到字符串。
+    # 注：ref_video.run() 目前没消费它（延续走 guide_in_path），所以默认 False 不改变行为。
+    "use_prev_guide": False,
     "project": "zeroexo",
     "episode": "ep01",
     "use_low_vram": False,
@@ -539,7 +543,7 @@ class ZeroExoGuideLoad:
 # ===== HTTP 协议 =====
 routes = PromptServer.instance.routes
 
-PLUGIN_VERSION = "0.1.4"
+PLUGIN_VERSION = "0.1.7"
 
 
 def _queue_counts() -> dict[str, Any]:
@@ -959,6 +963,18 @@ async def submit_job(request):
         template = substitute(load_template(template_kind), params)
     except FileNotFoundError:
         return web.json_response({"ok": False, "error": f"缺少模板 templates/{template_kind}.json"}, status=400)
+    # 2026-11-21（C-22）：替换后仍有 __zx:<name>__ = 参数表漏了这个键（历史 bug：
+    # use_prev_guide 就这样以字面量下发，BOOLEAN 输入收到字符串）。
+    # 不许静默带着垃圾值去排队：直接 400 并点名缺哪个键。
+    leftover = sorted({m.group(1) for m in _PLACEHOLDER.finditer(json.dumps(template, ensure_ascii=False))})
+    if leftover:
+        return web.json_response({
+            "ok": False,
+            "error": (
+                "模板占位符没有对应参数：" + "、".join(leftover)
+                + "。请在 VISIBLE_PARAMS / TEMPLATE_DEFAULTS 里补默认值，或由调用方显式下发。"
+            ),
+        }, status=400)
     # 前端四个槽位是「视频 H3」的配置：只有参考视频工作流能用，图片工作流用模板自己的底模/编码器
     template = apply_model_overrides(
         template,
@@ -1209,6 +1225,13 @@ def _prepare_batch_segment(
     out_guide = os.path.join(guide_dir, f"gd_{uuid.uuid4().hex[:12]}.safetensors")
     params["guide_path"] = out_guide
     template = substitute(load_template("reference_video"), params)
+    # C-22：批次路径同样不许带残留占位符去排队（同一类漏键会在这里炸）
+    leftover = sorted({m.group(1) for m in _PLACEHOLDER.finditer(json.dumps(template, ensure_ascii=False))})
+    if leftover:
+        raise RuntimeError(
+            "模板占位符没有对应参数：" + "、".join(leftover)
+            + "。请在 VISIBLE_PARAMS / TEMPLATE_DEFAULTS 里补默认值。"
+        )
     template = apply_model_overrides(template, models, family="video")
     available_text_encoders = _available_models("text_encoders")
     for node in template.values():

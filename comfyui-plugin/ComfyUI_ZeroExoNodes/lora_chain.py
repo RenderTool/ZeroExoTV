@@ -82,6 +82,39 @@ def parse_loras(text: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _unwrap_torch_file(loaded: Any) -> dict:
+    """把 `load_torch_file` 的返回值统一成权重字典（C-19 崩溃根因）。
+
+    ComfyUI 各版本返回形态不一致（本机 `comfy/utils.py`：
+    `return (sd, metadata) if return_metadata else sd`）：
+      - 默认 → 直接是 dict；
+      - return_metadata=True → (sd, metadata)，个别分支可能更多元。
+    这里一律归一到 dict，禁止再写 `a, b = load_torch_file(...)` 这种假设。
+    """
+    if isinstance(loaded, dict):
+        return loaded
+    if isinstance(loaded, (tuple, list)) and loaded:
+        sd = loaded[0]
+        if isinstance(sd, dict):
+            return sd
+    raise RuntimeError(
+        "ZeroExoLoraChain: 读到的 LoRA 权重不是字典（type=%s）。"
+        "该文件可能不是 LoRA，或 ComfyUI 版本返回形态未知。" % type(loaded).__name__
+    )
+
+
+def _load_weights(path: str) -> dict:
+    """按版本兼容方式读权重：优先带 metadata，老版本退回归一化。"""
+    import comfy.utils  # 只在 ComfyUI 进程里可用
+
+    loader = comfy.utils.load_torch_file
+    try:
+        loaded = loader(path, safe_load=True, return_metadata=True)
+    except TypeError:  # 老版本没有 return_metadata 形参
+        loaded = loader(path, safe_load=True)
+    return _unwrap_torch_file(loaded)
+
+
 def _load_lora_file(path: str):
     """读权重字典：按 path+mtime+size 缓存，最多 8 份。"""
     st = os.stat(path)
@@ -89,9 +122,8 @@ def _load_lora_file(path: str):
     cached = _LORA_CACHE.get(key)
     if cached is not None:
         return cached
-    import comfy.utils  # 只在 ComfyUI 进程里可用
 
-    lora, _metadata = comfy.utils.load_torch_file(path, safe_load=True)
+    lora = _load_weights(path)
     if len(_LORA_CACHE) >= _CACHE_LIMIT:
         _LORA_CACHE.pop(next(iter(_LORA_CACHE)))
     _LORA_CACHE[key] = lora
@@ -118,7 +150,9 @@ def apply_loras(model, rows: list[dict[str, Any]]):
     for row in rows:
         path = folder_paths.get_full_path_or_raise("loras", row["name"])
         lora = _load_lora_file(path)
-        model, _clip = comfy.sd.load_lora_for_models(model, None, lora, row["strength"], 0)
+        patched = comfy.sd.load_lora_for_models(model, None, lora, row["strength"], 0)
+        # 同样不做解包假设：正常回 (model, clip)，异常形态就取第一项
+        model = patched[0] if isinstance(patched, (tuple, list)) else patched
     return model
 
 

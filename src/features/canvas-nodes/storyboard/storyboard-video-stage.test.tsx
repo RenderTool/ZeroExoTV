@@ -8,8 +8,25 @@
  * 4. videoStatus='failed' 时即使有 storageKey 也不渲染 <video>
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
+
+/**
+ * jsdom 没有 PointerEvent：fireEvent.pointerDown 会退化成不带 clientX 的 Event，
+ * 拖动相关断言就永远拿不到坐标。补一个基于 MouseEvent 的 polyfill（仅测试用）。
+ */
+if (typeof window !== 'undefined' && typeof (window as unknown as { PointerEvent?: unknown }).PointerEvent !== 'function') {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId = 1;
+    pointerType = 'mouse';
+    isPrimary = true;
+    constructor(type: string, params: PointerEventInit = {}) {
+      super(type, params);
+    }
+  }
+  (window as unknown as { PointerEvent: unknown }).PointerEvent = PointerEventPolyfill;
+  (globalThis as unknown as { PointerEvent: unknown }).PointerEvent = PointerEventPolyfill;
+}
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -20,8 +37,7 @@ vi.mock('react-i18next', () => ({
     },
   }),
 }));
-vi.mock('@zeroexo/plugin-nodes', () => ({
-  useHydratedContent: (storageKey?: string) => (storageKey ? `blob:hydrated:${storageKey}` : ''),
+vi.mock('@zeroexo/plugin-nodes', () => ({  useHydratedContent: (storageKey?: string) => (storageKey ? `blob:hydrated:${storageKey}` : ''),
   AISkeleton: () => null,
 }));
 
@@ -225,6 +241,141 @@ describe('StoryboardVideoStage 实时预览角标（2026-11-05 修复：文本�
     expect(container.querySelector('[data-live-preview-badge]')).toBeNull();
     const ph = container.querySelector('[data-placeholder-status]') as HTMLElement;
     expect(ph.querySelector('[data-generating-skeleton]')).toBeTruthy();
+  });
+});
+
+describe('生成中实时预览：帧进度条 + 暂停定格（C-20）', () => {
+  const videoFrame = {
+    image: '',
+    video: 'data:video/mp4;base64,zz',
+    mime: 'video/mp4',
+    fps: 24,
+    step: 3,
+    totalSteps: 8,
+    segmentIndex: 1,
+  } as const;
+
+  function renderVideoPreview() {
+    return render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStatus: 'generating',
+      placeholderStatus: 'generating',
+      livePreview: videoFrame,
+    }));
+  }
+
+  it('视频预览带帧进度条：按插件 fps 算「第 N / 共 M 帧」，不是采样步数', async () => {
+    const { container } = renderVideoPreview();
+    const video = container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement;
+    expect(video).toBeTruthy();
+    expect(container.querySelector('[data-live-preview-controls]')).toBeTruthy();
+    expect(container.querySelector('[data-live-preview-bar]')).toBeTruthy();
+
+    // jsdom 不解码视频：手工灌 duration/currentTime 模拟 2s@24fps，播到 0.5s = 第 13 帧
+    Object.defineProperty(video, 'duration', { configurable: true, value: 2 });
+    video.dispatchEvent(new Event('loadedmetadata'));
+    Object.defineProperty(video, 'currentTime', { configurable: true, value: 0.5 });
+    video.dispatchEvent(new Event('timeupdate'));
+    const counter = container.querySelector('[data-live-preview-frame-counter]') as HTMLElement;
+    await waitFor(() => expect(counter.textContent).toBe('帧 13/48'));
+    // 采样步数仍由角标负责，两者不混
+    expect(container.querySelector('[data-live-preview-badge]')?.textContent).toBe('3/8 · 段1');
+  });
+
+  it('点暂停即定格：按钮转「继续预览」，暂停期间新采样帧不替换画面', () => {
+    const { container, rerender } = renderVideoPreview();
+    const toggle = container.querySelector('[data-live-preview-toggle]') as HTMLButtonElement;
+    expect(toggle.getAttribute('title')).toBe('暂停预览');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('title')).toBe('继续预览');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+    // 暂停中来了新一帧（不同 data URL）→ 画面还是定格那一帧
+    rerender(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStatus: 'generating',
+      placeholderStatus: 'generating',
+      livePreview: { ...videoFrame, video: 'data:video/mp4;base64,NEW' },
+    }));
+    const video = container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement;
+    expect(video.getAttribute('src')).toBe('data:video/mp4;base64,zz');
+
+    // 继续后跳到最新帧
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('title')).toBe('暂停预览');
+    const latest = container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement;
+    expect(latest.getAttribute('src')).toBe('data:video/mp4;base64,NEW');
+  });
+
+  it('插件没给 fps 时不伪造帧号：回落成秒读数', () => {
+    const { container } = render(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStatus: 'generating',
+      placeholderStatus: 'generating',
+      livePreview: { ...videoFrame, fps: undefined },
+    }));
+    const counter = container.querySelector('[data-live-preview-frame-counter]') as HTMLElement;
+    expect(counter.textContent).not.toContain('帧');
+    expect(counter.textContent).toContain('s /');
+  });
+
+  it('进度条可拖动定位：按下/拖动按比例 seek，帧号跟着走', async () => {
+    const { container } = renderVideoPreview();
+    const video = container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 2 });
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 });
+    video.dispatchEvent(new Event('loadedmetadata'));
+
+    const bar = container.querySelector('[data-live-preview-scrub]') as HTMLElement;
+    // jsdom 无布局：给进度条一个 100px 宽的假 rect，clientX 直接换算比例
+    bar.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 14, right: 100, bottom: 14, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const counter = container.querySelector('[data-live-preview-frame-counter]') as HTMLElement;
+
+    fireEvent.pointerDown(bar, { clientX: 50 });
+    await waitFor(() => expect(counter.textContent).toBe('帧 25/48'));
+    expect(video.currentTime).toBe(1);
+
+    // 拖到最右 → 最后一帧
+    fireEvent.pointerMove(window, { clientX: 100 });
+    await waitFor(() => expect(counter.textContent).toBe('帧 48/48'));
+
+    // 拖动中也要「定格」：按下即暂停
+    const toggle = container.querySelector('[data-live-preview-toggle]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+    // 松手后（本来是在播）自动回到直播，不把预览卡死在历史帧
+    fireEvent.pointerUp(window);
+    await waitFor(() => expect(toggle.getAttribute('aria-pressed')).toBe('false'));
+  });
+
+  it('拖动期间 step 更新照常生效（只压画面替换，不压数据）', async () => {
+    const { container, rerender } = renderVideoPreview();
+    const video = container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 2 });
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 });
+    video.dispatchEvent(new Event('loadedmetadata'));
+    const bar = container.querySelector('[data-live-preview-scrub]') as HTMLElement;
+    bar.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 14, right: 100, bottom: 14, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(bar, { clientX: 20 });
+
+    // 你正拖在第 20%：新一步采样帧到了（step 3→5，src 也换了）
+    rerender(createElement(StoryboardVideoStage, {
+      ...baseProps,
+      videoStatus: 'generating',
+      placeholderStatus: 'generating',
+      livePreview: { ...videoFrame, video: 'data:video/mp4;base64,NEW', step: 5 },
+    }));
+    const badge = container.querySelector('[data-live-preview-badge]') as HTMLElement;
+    // 角标继续跳（step 数据没有被拖动卡住）
+    await waitFor(() => expect(badge.textContent).toBe('5/8 · 段1'));
+    // 画面仍是你拖到的那一版，不被新帧顶掉
+    expect((container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement).getAttribute('src'))
+      .toBe('data:video/mp4;base64,zz');
+    // 松手回到直播 → 立刻跳到最新一帧，step 数据与画面重新同步
+    fireEvent.pointerUp(window);
+    await waitFor(() => expect(
+      (container.querySelector('video[data-live-preview-frame]') as HTMLVideoElement).getAttribute('src'),
+    ).toBe('data:video/mp4;base64,NEW'));
   });
 });
 

@@ -1079,6 +1079,21 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
     expect(resolveClipStatus('generating', { phase: 'canceled', segmentShotIds: ['a'], currentSegment: null }, 'a')).toBe('cancelled');
   });
 
+  it('C-25 运行已终止（失败/完成）：残留「生成中」必须回退成「未生成」', () => {
+    // 截图场景：run 已 error，段实体已被 onSegmentState 回写成 pending，
+    // 但预览段仍在 run 序列里且 previewSegmentIndex 命中 → 旧逻辑会一直亮「生成中」。
+    const failedRun = { phase: 'error', segmentShotIds: ['a', 'b'], currentSegment: 2, previewSegmentIndex: 2 };
+    expect(resolveClipStatus('pending', failedRun, 'b')).toBe('idle');
+    // 残留 generating 同样回灰，不能永久停在「生成中」
+    expect(resolveClipStatus('generating', failedRun, 'b')).toBe('idle');
+    // 已跑完的段仍保持「完成」，不被失败连坐
+    expect(resolveClipStatus('done', failedRun, 'a')).toBe('done');
+    // 运行正常结束（completed）时，没跑过的段也是「未生成」
+    expect(resolveClipStatus('pending', { phase: 'completed', segmentShotIds: ['a', 'b'], currentSegment: null }, 'b')).toBe('idle');
+    // 活跃运行期仍要正确派生，别把「生成中」一刀切掉
+    expect(resolveClipStatus('pending', { phase: 'running', segmentShotIds: ['a', 'b'], currentSegment: 1 }, 'a')).toBe('generating');
+  });
+
   it('导演台卡片渲染排队/已取消徽标（颜色区分）；出片页（无 directorLabel）徽标零渲染', () => {
     const renderClip = (status: string, directorLabel?: boolean) => render(createElement(TimelineClip, {
       clip: { id: 'x', left: 0, width: 220, data: { id: 'x', number: 1, duration: 5, status: status as never } },

@@ -61,7 +61,7 @@ export interface PluginDirectorState {
   segmentShotIds: string[];
   guidance: Record<number, { image: string | null }>;
   /** 采样预览：mime=video/mp4 时 src 在 video（<video> 循环播放），否则在 image（<img>） */
-  preview: { image: string; video?: string; mime?: string; step: number | null; totalSteps: number | null; segmentIndex: number | null } | null;
+  preview: { image: string; video?: string; mime?: string; step: number | null; totalSteps: number | null; segmentIndex: number | null; fps?: number | null } | null;
   livePreviewSupported: boolean;
   startedAt: number;
 }
@@ -188,6 +188,8 @@ export function usePluginDirectorTask(args: {
           const segmentIndex = typeof d.segment_index === 'number' ? d.segment_index + 1 : null;
           if (!b64 && step === null) return;
           const isVideo = mime === 'video/mp4';
+          // 2026-11-21（C-20）预览帧率：插件按 mime=video / webp 时给 fps，缺了就不推帧号
+          const fps = typeof d.fps === 'number' && d.fps > 0 ? d.fps : null;
           setState((s) => ({
             ...s,
             preview: {
@@ -199,6 +201,7 @@ export function usePluginDirectorTask(args: {
               step,
               totalSteps,
               segmentIndex: segmentIndex ?? s.preview?.segmentIndex ?? null,
+              fps: fps ?? s.preview?.fps ?? null,
             },
           }));
           return;

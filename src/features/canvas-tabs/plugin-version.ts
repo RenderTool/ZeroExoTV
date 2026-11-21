@@ -9,7 +9,7 @@
  * 的 PLUGIN_VERSION 必须一起改（发版时同一条提交里同步）。
  */
 
-export const OFFICIAL_PLUGIN_VERSION = '0.1.4';
+export const OFFICIAL_PLUGIN_VERSION = '0.1.7';
 
 /** 官网下载的插件包文件名（带版本号，2026-11-21 用户要求） */
 export const PLUGIN_ZIP_FILENAME = `ComfyUI_ZeroExoNodes-${OFFICIAL_PLUGIN_VERSION}.zip`;

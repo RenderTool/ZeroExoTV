@@ -1601,6 +1601,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         onConfirm={() => {
           if (dialogs.confirmDeleteGroupId && refs.groupPlugin) {
             refs.groupPlugin.getController().deleteSceneNode(dialogs.confirmDeleteGroupId);
+            // C-24：删组同样立刻落盘，删完直接刷新不会回滚
+            void refs.persistence?.save().catch(() => undefined);
           }
           dialogs.setConfirmDeleteGroupId(null);
         }}

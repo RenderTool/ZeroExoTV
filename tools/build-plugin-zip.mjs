@@ -33,9 +33,19 @@ function zipFolder(srcDir, outFile) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zx-plugin-'));
   const stage = path.join(tmp, PLUGIN_NAME);
   fs.cpSync(srcDir, stage, { recursive: true });
+  // 只装了 PowerShell 7 的机器没有 powershell.exe（系统自带 5.1 被精简掉）→ 依次试 pwsh / powershell
+  const shell = ['pwsh', 'powershell'].find((name) => {
+    try {
+      execFileSync(name, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!shell) throw new Error('找不到 PowerShell（pwsh / powershell 都不可用），无法打包插件 zip');
   try {
     execFileSync(
-      'powershell',
+      shell,
       [
         '-NoProfile',
         '-NonInteractive',

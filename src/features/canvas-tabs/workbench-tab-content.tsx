@@ -198,6 +198,15 @@ export function resolveClipStatus(
   if (run.phase === 'canceled') {
     return status === 'done' ? 'done' : 'cancelled';
   }
+  /* C-25（2026-11-22 用户口径）：运行已终止（失败/完成/空闲）后不得再派生「生成中/排队」。
+     失败段在 onSegmentState 里已回写成 pending（= 未生成），预览区据此显示「未生成 · 生成失败」，
+     卡片角标必须同口径回灰，否则同一段一边「未生成」一边「生成中」。 */
+  const running = run.phase === 'submitting' || run.phase === 'queued' || run.phase === 'running';
+  if (!running) {
+    if (status === 'done') return 'done';
+    if (status === 'failed') return 'failed';
+    return 'idle';
+  }
   if (run.previewSegmentIndex && idx === run.previewSegmentIndex - 1) return 'generating';
   if (run.phase === 'submitting' || run.phase === 'queued') return 'queued';
   if (run.phase === 'running') {
@@ -1858,6 +1867,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                     step: previewFrame.step,
                     totalSteps: previewFrame.totalSteps,
                     segmentIndex: previewFrame.segmentIndex,
+                    ...(previewFrame.fps ? { fps: previewFrame.fps } : {}),
                   }
                 : null,
             progressOnly:

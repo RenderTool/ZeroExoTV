@@ -19,9 +19,45 @@ _LOW_CHAIN = ("45:58", "45:59", "45:60", "45:61")
 # 模板里的单 LoRA 节点 id（2026-11-20：要支持多 LoRA 串联）
 _LORA_NODE_ID = "25"
 _LORA_CLASS = "LoraLoaderModelOnly"
-# 2026-11-21（C-12）：模板底稿改成一个「数组节点」——插件自定义 Node，内部按数组顺序串联。
-# 有它时只写它的 widget，图结构零改动；没有它（老模板）才走下面 0.1.3 的造链兼容路径。
+# 2026-11-21（C-12）：模板底稿曾用「数组节点」——插件自定义 Node，内部按数组顺序串联。
 _LORA_CHAIN_CLASS = "ZeroExoLoraChain"
+# 2026-11-21（C-23）：改用 ComfyUI 官方节点 `Load LoRA (Model)`（class_type LoadLoraModel）。
+# 它的 `loras` 是 COMFY_DYNAMICGROUP_V3 动态行组，API 里是扁平键 `loras.<i>.<field>`，
+# 每行 lora_name / strength / enabled，min 1、max 20 行 → 空列表必须剪节点（不能发 0 行）。
+_OFFICIAL_LORA_CLASS = "LoadLoraModel"
+_OFFICIAL_ROW_PREFIX = "loras."
+
+
+def _bypass_node(template: dict[str, Any], node_id: str) -> dict[str, Any]:
+    """把一个 MODEL 直通节点从图里剪掉：下游输入改接它自己的 model 来源，再删节点。"""
+    node = template.get(node_id)
+    if not isinstance(node, dict):
+        return template
+    source = (node.get("inputs") or {}).get("model")
+    if not (isinstance(source, list) and len(source) == 2):
+        raise RuntimeError(f"LoRA 节点 {node_id} 没有合法的 model 输入，无法剪除（会变成 0 行非法图）")
+    for nid, other in list(template.items()):
+        if nid == node_id or not isinstance(other, dict):
+            continue
+        inputs = other.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for key, value in list(inputs.items()):
+            if isinstance(value, list) and len(value) == 2 and value[0] == node_id:
+                inputs[key] = list(source)
+    template.pop(node_id, None)
+    return template
+
+
+def _fill_official_rows(inputs: dict[str, Any], loras: list[dict[str, Any]]) -> None:
+    """按顺序写 `loras.<i>.lora_name / strength / enabled`（先清旧行，避免残留）。"""
+    for key in [k for k in inputs if k.startswith(_OFFICIAL_ROW_PREFIX) or k == "loras"]:
+        inputs.pop(key, None)
+    for i, lora in enumerate(loras):
+        inputs[f"loras.{i}.lora_name"] = str(lora["name"])
+        inputs[f"loras.{i}.strength"] = float(lora["strength"])
+        # 这里只会收到用户勾选的行；官方节点的 enabled 仍显式写 true，避免默认值被别的分支改掉
+        inputs[f"loras.{i}.enabled"] = True
 
 
 def format_lora_text(loras: list[dict[str, Any]]) -> str:
@@ -35,19 +71,29 @@ def format_lora_text(loras: list[dict[str, Any]]) -> str:
 def apply_lora_chain(template: dict[str, Any], loras: list[dict[str, Any]]) -> dict[str, Any]:
     """把模板里的 LoRA 节点按数组填好。
 
-    优先：模板里若有 `ZeroExoLoraChain`（数组节点），只给它 `inputs["loras"]` 赋值，
-    不改动任何节点结构——这样 ComfyUI 工作流界面看到的图与实际下发完全一致。
+    优先（C-23）：模板里若有官方 `LoadLoraModel`，按顺序注入动态行键；
+    **一条都没勾时把该节点剪掉、下游接回它的 model 来源**（官方 min=1 行，0 行会被校验拒绝）。
 
-    兼容：老模板/老插件产物没有这个节点时，退回 0.1.3 的「造链」做法——
-    ComfyUI 的 LoRA 是 MODEL 的串联 patch：每个 LoraLoaderModelOnly 吃上一个的 MODEL、
-    按 strength_model 加权，所以多个 LoRA = 一串节点，顺序即用户排列顺序。
+    兼容：老模板里的 `ZeroExoLoraChain`（只写文本 widget）；更老的 `LoraLoaderModelOnly`
+    走 0.1.3 的「造链」做法——ComfyUI 的 LoRA 是 MODEL 的串联 patch，顺序即用户排列顺序。
 
-    - loras 为空 → 数组节点写入空文本（原样透传 MODEL）；老模板原样返回
-    - 数组节点存在 → 只写 widget，节点/连线不变
+    - 官方节点 + N 条 → 只写行键，图结构不变
+    - 官方节点 + 0 条 → 剪节点，下游直连 UNETLoader 侧
+    - `ZeroExoLoraChain` + N 条 / 0 条 → 写文本（空文本原样透传 MODEL）
     - 老模板 1 条 → 直接改原节点的两个输入，图结构不变
     - 老模板 N 条 → 原节点被 N 个新节点替换：链首吃原节点原来的 model 输入源，
       链尾接回所有原本消费该节点的下游（通常是 ZeroExoRefVideo）
     """
+    official_id = next(
+        (nid for nid, node in template.items()
+         if isinstance(node, dict) and node.get("class_type") == _OFFICIAL_LORA_CLASS),
+        None,
+    )
+    if official_id is not None:
+        if loras:
+            _fill_official_rows(template[official_id].setdefault("inputs", {}), loras)
+            return template
+        return _bypass_node(template, official_id)
     chain_id = next(
         (nid for nid, node in template.items()
          if isinstance(node, dict) and node.get("class_type") == _LORA_CHAIN_CLASS),

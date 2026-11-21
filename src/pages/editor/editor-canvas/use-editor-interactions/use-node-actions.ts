@@ -161,6 +161,8 @@ export function useNodeActionHooks(params: NodeActionHookParams) {
               } else {
                 refs.commandQueue.execute(new RemoveNodeCommand(nodeId));
               }
+              // C-24：删除后立刻落盘（跳过防抖），删完直接刷新也不会读回旧图
+              void refs.persistence?.save().catch(() => undefined);
             }},
           ];
 

@@ -85,15 +85,14 @@
  },
  "25": {
   "inputs": {
-   "loras": "",
    "model": [
     "45:66",
     0
    ]
   },
-  "class_type": "ZeroExoLoraChain",
+  "class_type": "LoadLoraModel",
   "_meta": {
-   "title": "LoRA 数组串联（多项按顺序叠加）"
+   "title": "LoRA 批量（官方 Load LoRA (Model)，行在提交时注入）"
   }
  },
  "45:1": {

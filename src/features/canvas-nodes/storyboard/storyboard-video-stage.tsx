@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
 // 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
@@ -89,6 +89,8 @@ export interface StoryboardVideoStageProps {
     step?: number | null;
     totalSteps?: number | null;
     segmentIndex?: number | null;
+    /** 预览短片帧率（插件下发）；缺省则帧进度回落为秒读数，不伪造帧号 */
+    fps?: number | null;
   } | null;
   /** 本次运行无实时帧来源（OpenAI 兼容渠道无 ws）→ 占位卡标「仅进度」，不假装实时帧 */
   progressOnly?: boolean;
@@ -136,31 +138,188 @@ const formatTime = (s: number): string => {
 /**
  * 实时采样预览渲染：mime=video/mp4 → <video> 循环播放整段采样片段（浏览器原生解码，
  * 不做前端定时器逐帧替换）；webp/jpeg → <img>（animated WebP 由浏览器原生循环）。
+ *
+ * 2026-11-21（C-20）用户要求：「生成时的帧进度条 + 生成预览时暂停」——本质是同一个播放器能力：
+ * - 帧进度条：用预览短片的 currentTime × 插件下发的 fps 算「第 N / 共 M 帧」，不拿 24 硬推；
+ *   插件没给 fps 就显式回落成秒读数（不伪造帧号）；
+ * - 暂停：暂停即定格当前帧，后续新采样帧**不替换画面**（暂停就是为了看这一帧），继续时跳到最新帧。
  */
 function LivePreviewMedia({ preview }: {
-  preview: { image: string; video?: string };
+  preview: { image: string; video?: string; fps?: number | null };
 }): ReactElement {
   const mediaStyle = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' } as const;
-  if (preview.video) {
-    return (
+  const isVideo = Boolean(preview.video);
+  const src = preview.video || preview.image;
+  const [paused, setPaused] = useState(false);
+  const [shownSrc, setShownSrc] = useState(src);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // 播放中：新帧立刻接上（生成中是连续刷新）；暂停中：保持定格帧，不被后续采样覆盖
+  useEffect(() => {
+    if (!paused) setShownSrc(src);
+  }, [src, paused]);
+
+  const toggle = (): void => {
+    setPaused((prev) => {
+      const next = !prev;
+      const v = videoRef.current;
+      if (next) v?.pause();
+      else {
+        if (shownSrc !== src) setShownSrc(src);
+        // jsdom / 部分浏览器实现里 play() 不返回 Promise，必须判空再 catch
+        const played = v?.play() as Promise<void> | undefined;
+        if (typeof played?.catch === 'function') played.catch(() => { /* 浏览器拦截等，保持静帧 */ });
+      }
+      return next;
+    });
+  };
+
+  const fps = typeof preview.fps === 'number' && preview.fps > 0 ? preview.fps : null;
+  // time 在异常环境下可能是 NaN（video 未就绪 / 坐标缺失），展示层一律按 0 处理
+  const safeTime = Number.isFinite(time) ? time : 0;
+  const totalFrames = fps && duration > 0 ? Math.max(1, Math.round(duration * fps)) : 0;
+  // 1 基帧号：拖到片尾时不能算出「49/48」（+1 必须在 min 里面）
+  const currentFrame = totalFrames > 0 ? Math.min(totalFrames, Math.floor(safeTime * fps!) + 1) : 0;
+  const pct = duration > 0 ? Math.min(100, Math.max(0, (safeTime / duration) * 100)) : 0;
+  const frameText = totalFrames > 0 ? `帧 ${currentFrame}/${totalFrames}` : `${safeTime.toFixed(1)}s / ${duration.toFixed(1)}s`;
+
+  // ===== 拖动定位（2026-11-21 用户：要支持拖动，且不能影响 step 更新）=====
+  // 拖动只接管「画面定格在哪个帧」；父层每步推来的新帧仍在写 preview 状态、角标照常跳，
+  // 唯一被压住的是 shownSrc 的替换（否则拖到一半目标视频被换掉，拖动会跳回开头）。
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  /** 拖动前是否本来就是暂停态：只在「本来在播」时才在松手后自动回到直播帧 */
+  const pausedBeforeDragRef = useRef(false);
+
+  const ratioFromPointer = (clientX: number): number => {
+    const el = barRef.current;
+    if (!el || !Number.isFinite(clientX)) return Number.NaN;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width) return Number.NaN;
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  };
+
+  const seekToRatio = (ratio: number): void => {
+    // 坐标异常（部分环境 PointerEvent 不带 clientX）时不动画面，别把 time 写成 NaN
+    if (!Number.isFinite(ratio)) return;
+    const v = videoRef.current;
+    const d = v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration;
+    if (!v || !d) return;
+    const t = Math.min(d, Math.max(0, ratio * d));
+    if (!Number.isFinite(t)) return;
+    try { v.currentTime = t; } catch { /* 未就绪时忽略，等 metadata 后再拖 */ }
+    setTime(t);
+  };
+
+  const beginDrag = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    pausedBeforeDragRef.current = paused;
+    // 拖动即定格：物理暂停 + 状态置暂停，避免播放推送和拖动位置打架
+    setPaused(true);
+    videoRef.current?.pause();
+    setDragging(true);
+    seekToRatio(ratioFromPointer(e.clientX));
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent): void => seekToRatio(ratioFromPointer(e.clientX));
+    const onUp = (): void => {
+      setDragging(false);
+      // 本来在播 → 松手自动回到直播帧（生成中不该停在历史帧）；本来暂停 → 保持定格
+      if (!pausedBeforeDragRef.current) setPaused(false);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [dragging, duration]);
+
+  if (!isVideo) {
+    return <img data-live-preview-frame src={preview.image} alt="" style={mediaStyle} />;
+  }
+
+  return (
+    <>
       <video
+        ref={videoRef}
         data-live-preview-frame
-        src={preview.video}
-        autoPlay
+        src={shownSrc}
+        autoPlay={!paused}
         muted
         loop
         playsInline
         style={mediaStyle}
+        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => {
+          const d = e.currentTarget.duration;
+          setDuration(Number.isFinite(d) ? d : 0);
+        }}
       />
-    );
-  }
-  return (
-    <img
-      data-live-preview-frame
-      src={preview.image}
-      alt=""
-      style={mediaStyle}
-    />
+      <div
+        data-live-preview-controls
+        style={{
+          position: 'absolute', right: 10, bottom: 10, zIndex: 2,
+          display: 'flex', alignItems: 'center', gap: 8,
+          width: '52%', background: 'rgba(0,0,0,0.45)', borderRadius: 999, padding: '2px 10px',
+        }}
+      >
+        <button
+          type="button"
+          data-live-preview-toggle
+          aria-pressed={paused}
+          title={paused ? '继续预览' : '暂停预览'}
+          onClick={toggle}
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+            color: 'rgba(255,255,255,0.85)', fontSize: 10, lineHeight: 1, width: 14,
+          }}
+        >
+          {paused ? '▶' : '❚❚'}
+        </button>
+        <div
+          ref={barRef}
+          data-live-preview-bar
+          data-live-preview-scrub
+          onPointerDown={beginDrag}
+          title="拖动定位到指定帧"
+          style={{
+            flex: 1, position: 'relative', height: 14, display: 'flex', alignItems: 'center',
+            cursor: dragging ? 'grabbing' : 'pointer', touchAction: 'none',
+          }}
+        >
+          <div style={{ position: 'absolute', left: 0, right: 0, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
+            <div
+              data-live-preview-fill
+              style={{ height: '100%', width: `${pct}%`, background: '#e94560', transition: dragging ? 'none' : 'width 0.15s linear' }}
+            />
+          </div>
+          {/* 拖动拇指：跟手，体验上「能抓得住」 */}
+          <span
+            data-live-preview-thumb
+            style={{
+              position: 'absolute', left: `${pct}%`, width: 7, height: 7, marginLeft: -3.5,
+              borderRadius: '50%', background: '#ffffff', boxShadow: '0 0 2px rgba(0,0,0,0.6)',
+              transition: dragging ? 'none' : 'left 0.15s linear', pointerEvents: 'none',
+            }}
+          />
+        </div>
+        <span
+          data-live-preview-frame-counter
+          style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+        >
+          {frameText}
+        </span>
+      </div>
+    </>
   );
 }
 
