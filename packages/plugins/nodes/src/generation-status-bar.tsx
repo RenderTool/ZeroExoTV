@@ -65,12 +65,15 @@ export function GenerationStatusBar({
         left: overlay ? 0 : undefined,
         right: overlay ? 0 : undefined,
         bottom: overlay ? 0 : undefined,
-        zIndex: 6,
+        // 2026-11-22 报障「点不了取消」：这一条贴在节点底边，右下角正好是画布的
+        // resize 句柄（react-flow 会盖住底下十几像素），按钮点下去落到句柄上。
+        // 抬高整条层级 + 右侧留出句柄宽度，取消才是真的可点。
+        zIndex: 12,
         height: 28,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        padding: '0 8px',
+        padding: overlay ? '0 20px 0 8px' : '0 8px',
         boxSizing: 'border-box',
         background: overlay
           ? 'linear-gradient(to top, rgba(10,10,12,0.86), rgba(10,10,12,0.42))'
@@ -148,6 +151,8 @@ export function GenerationStatusBar({
           }}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
+            position: 'relative',
+            zIndex: 13,
             flexShrink: 0,
             height: 20,
             padding: '0 8px',

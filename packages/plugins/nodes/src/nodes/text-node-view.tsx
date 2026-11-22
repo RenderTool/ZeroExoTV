@@ -85,12 +85,16 @@ export function TextNodeView({
   }, [isEditing]);
 
   // 双击进入编辑模式(初始化草稿快照,退出时以此判定是否产生命令)
+  // 2026-11-22 用户要求「只读历史链路里的提示词也该是只读」：
+  // 快照节点带 __readonly，双击不再进入编辑（位置/尺寸仍可调，这是只读快照的既定语义）。
+  const isReadOnlySnapshot = Boolean((data as Record<string, unknown>).__readonly);
   const handleDoubleClick = useCallback(() => {
+    if (isReadOnlySnapshot) return;
     startContentRef.current = contentRef.current;
     draftRef.current = contentRef.current;
     setDraft(contentRef.current);
     setIsEditing(true);
-  }, []);
+  }, [isReadOnlySnapshot]);
 
   // 退出编辑模式:草稿与进入时快照不同才提交(无变化不产生命令)
   const exitEditing = useCallback(() => {

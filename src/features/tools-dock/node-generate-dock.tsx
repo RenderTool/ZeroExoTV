@@ -53,6 +53,24 @@ import { AssetSlotPicker, type AssetSlotKind, type AssetSlotPick } from '@/share
 /** 生成模式(宿主节点类型映射;text 模式走文本能力) */
 export type GenerationMode = 'text' | 'image' | 'video' | 'audio';
 
+/**
+ * 2026-11-22 报障「输入槽出现两个重复素材」：
+ * 同一源节点被两条边指向（真实画布里一条普通连线 + 一条引用锚点很常见），
+ * 按边展开就会得到两条完全相同的素材卡。按「源节点 + 产物 storageKey」去重：
+ * 边数不参与素材计数，同一个产物只出现一次。
+ */
+function dedupeBySource<T extends { id: string; storageKey?: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const key = `${item.id}::${item.storageKey ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
 export interface NodeGenerateDockProps {
   nodeId: string;
   nodeType: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard';
@@ -445,7 +463,7 @@ export function NodeGenerateDock({
           title: (srcNode.title || (typeof d.title === 'string' ? d.title : undefined) || srcNode.type) as string,
         }];
       });
-    return deriveIncomingReferences(incoming);
+    return deriveIncomingReferences(dedupeBySource(incoming));
   }, [store, nodeId, graphVersion]);
 
   // 稳定化引用(隔离 graphVersion 高频变化导致的无意义重渲染)
@@ -1068,7 +1086,18 @@ export function NodeGenerateDock({
     ).trim();
     const modelText = String(model || generation.model || (nodeData.model as string) || '');
     if (!promptText && !modelText && Object.keys(pv).length === 0) return null;
-    const sizeText = pv.width && pv.height ? `${pv.width}×${pv.height}` : '';
+    /**
+     * 2026-11-22 报障「原图情况下参数错误地用默认选项」：
+     * 只读快照里的 paramValues 可能是模板默认（1024×768），而这次真实产物是 2048×1152。
+     * 尺寸以节点真实产物像素为准，参数只作为没有产物尺寸时的回退。
+     */
+    const realW = Number(nodeData.naturalWidth ?? 0);
+    const realH = Number(nodeData.naturalHeight ?? 0);
+    const pvW = Number(pv.width ?? 0);
+    const pvH = Number(pv.height ?? 0);
+    const sizeText = realW > 0 && realH > 0
+      ? `${realW}×${realH}`
+      : (pvW > 0 && pvH > 0 ? `${pvW}×${pvH}` : '');
     const stepText = pv.steps ? `${pv.steps} 步` : '';
     const seedText = pv.seed !== undefined && pv.seed !== null ? `seed ${pv.seed}` : '';
     const wrapStyle: CSSProperties = inline ? {

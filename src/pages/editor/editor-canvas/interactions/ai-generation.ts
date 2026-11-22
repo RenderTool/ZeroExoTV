@@ -1008,6 +1008,26 @@ export function useAiGeneration({
         },
       }));
 
+      /**
+       * 2026-11-22 报障「刷新页面后提示词又不见了」：
+       * 本次提交的 prompt / model / 参数此前只写进占位节点（ai-placeholder），
+       * 而占位节点是运行时节点、不进画布文档。一刷新占位就消失，
+       * 选中态落回源节点 → 底栏按源节点 data 取 prompt = 空串，看起来就是"提示词丢了"。
+       * 提交即回写源节点：刷新、崩溃、切页都不会再丢（取消时也只是原样保留）。
+       */
+      q.execute(new UpdateNodeDataCommand(event.nodeId, {
+        prompt,
+        model,
+        generationMode,
+        paramValues: {
+          ...genPv,
+          ...(size ? { size } : {}),
+          ...(quality ? { quality } : {}),
+          ...(count > 1 ? { count } : {}),
+          ...(seconds !== 5 ? { seconds } : {}),
+        },
+      } as Record<string, unknown>));
+
       // 连线：复制源节点的「上游 → 自己」这批输入边到新节点，新节点用同一批资产生成；
       // 不建「源节点 → 新节点」这条下游边。
       const upstreamEdges = (graph.edges as unknown as Array<{

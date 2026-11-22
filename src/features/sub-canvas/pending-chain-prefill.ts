@@ -104,9 +104,17 @@ export function buildChainPrefillPayload(
     }
     const isTarget = oldId === targetNodeId;
     if (isTarget) {
+      // 2026-11-22：只读记录的 paramValues 常是模板默认（1024×768），与真实产物尺寸不符。
+      // 「生成同款」要沿用这次实际出的尺寸，否则投递回主画布就按默认值重生成。
+      const realW = Number((n.data as Record<string, unknown> | undefined)?.naturalWidth ?? 0);
+      const realH = Number((n.data as Record<string, unknown> | undefined)?.naturalHeight ?? 0);
       STRIP_KEYS.forEach((key) => { delete data[key]; });
       data.status = 'idle';
       data.content = '';
+      if (realW > 0 && realH > 0) {
+        const pv = (data.paramValues ?? {}) as Record<string, unknown>;
+        data.paramValues = { ...pv, width: realW, height: realH };
+      }
       // 同款的生成节点必须是本机 Qwen Image 2.1（图像编辑：文本 + 参考图）。
       // 历史链快照没存 model 时留空会让提示词面板判定成「只吃文字」，生成直接落到 provider 报请求失败。
       if (String(n.type ?? 'image') === 'image' && !data.model) {
