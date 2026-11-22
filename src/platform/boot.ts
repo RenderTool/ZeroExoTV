@@ -10,10 +10,9 @@
  * 3. bootReady 恒 resolve：启动链每步独立 catch，任何失败只降级、不阻断渲染。
  * 4. 激活驱动可查询（activeStorageKind）：非磁盘驱动时 UI 显示临时存储横幅。
  *
- * 2026-11-05 数据同源修复：vite dev/preview 会自动拉起 8790 fs-server，
- * boot 启动时主动探测并接管（服务端数据根 = 唯一权威）。此前「不自动探测」导致
- * localforage 静默降级到 IndexedDB：assets.json 不落盘、cas: 键读不到 media/cas
- * 真实文件，表现为「导入成功但网格与画布全空白」。探测失败才回退 FSA 目录句柄。
+ * 2026-11-22 收敛：网页只走浏览器目录授权（File System Access），
+ * 不再探测/接管任何本地 HTTP 数据服务；任务进度另走 MCP。
+ * 此前「必须先探到 8790 才渲染」是白屏的根因之一，已移除。
  *
  * 注意：磁盘之后的全部驱动都是**临时存储**（刷新即丢 / 与数据根双轨），
  * 仅用于让界面能开、错误能被看见；权威数据永远只认磁盘数据根。
@@ -23,7 +22,6 @@ import localforage from 'localforage';
 import { FS_DRIVER, registerFsDriver } from './disk-driver.js';
 import { MEMORY_DRIVER, registerMemoryDriver } from './memory-driver.js';
 import { isAuthorized, writeRaw, readRaw, ensureDir } from './fs.js';
-import { probeHttpFs } from './http-fs.js';
 
 /** 数据根标准目录（2026-11-16 空目录冷启动契约：只建不删，幂等）
  *  projects/<pid>、assets/<pid> 由建项目时按需展开，这里只保证顶层存在。 */
@@ -106,14 +104,8 @@ const fsDriverReady = registerFsDriver().catch((err) => {
 });
 
 export const bootReady: Promise<void> = (async () => {
-  try {
-    const info = await probeHttpFs({ retry: false });
-    if (!info) {
-      console.warn('[boot] 本地数据服务未在线，改用已授权的本地目录；数据目录未授权时图片无法落盘');
-    }
-  } catch (err) {
-    console.warn('[boot] 本地数据服务探测异常，保持目录授权路径:', err);
-  }
+  // 2026-11-22 用户拍板：网页读写本地文件只认浏览器目录授权，
+  // 启动不再等待任何本地 HTTP 服务（原先要等 8790 探测 1.5s，且探测未落定不渲染 → 白屏）。
   await memoryDriverReady;
   await fsDriverReady;
   try {

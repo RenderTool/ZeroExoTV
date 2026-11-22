@@ -15,6 +15,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GeneratingProgress } from './generating-preview-store.js';
+import { GenerationStatusBar } from './generation-status-bar.js';
 import {
   AlertTriangle,
   Lock,
@@ -23,7 +24,6 @@ import {
   Server,
   Clock,
   AlertCircle,
-  RefreshCw,
   Upload,
   LoaderCircle,
 } from 'lucide-react';
@@ -527,81 +527,37 @@ export function AIStateView({
           </div>
         ) : null}
         {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
-        {/* 生成中显式取消：用户可能把提示词 dock 收起了，节点上必须能直接取消 */}
-        {onCancel ? (
-          <button
-            type="button"
-            data-generating-cancel
-            onClick={(e) => { e.stopPropagation(); onCancel(); }}
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{
-              // 有采样帧时:右下角小按钮,不挡画面;无帧时保持居中流程
-              ...(previewImage
-                ? { position: 'absolute', right: 8, bottom: 8, zIndex: 4 }
-                : { position: 'relative', zIndex: 3, marginTop: 2 }),
-              height: 24, padding: '0 12px',
-              borderRadius: 999, fontSize: 11, cursor: 'pointer',
-              border: '1px solid rgba(255,255,255,0.28)',
-              background: 'rgba(0,0,0,0.45)', color: '#fff',
-            }}
-          >
-            {t('common.cancel', '取消')}
-          </button>
-        ) : null}
+        {/* 2026-11-22 统一生成 footbar：状态 / 进度 / 唯一动作（取消）全在这一条上。
+            节点中部不再放取消按钮，底栏也不再放第二个停止入口（用户报障「这么多取消按钮」）。 */}
+        <GenerationStatusBar
+          phase="running"
+          text={[
+            progress?.step != null && progress?.totalSteps != null
+              ? t('nodes.sampling', { defaultValue: '生成中 {{step}} / {{total}}', step: progress.step, total: progress.totalSteps })
+              : t('nodes.generating'),
+            taskLabel,
+          ].filter(Boolean).join(' · ')}
+          percent={progress ? progressPct : null}
+          action={onCancel ? { kind: 'cancel', label: t('common.cancel', '取消'), onClick: onCancel } : undefined}
+          accentColor={accentColor}
+        />
       </div>
     );
   }
 
-  // error 且已有内容:保留上次成功内容,叠加错误横幅 + 重试/取消(便于回退)
+  // error 且已有内容：保留上次成功内容，底部统一 footbar 显示原因 + 唯一重试动作
   if (status === 'error' && hasContent) {
-    const visual = errorTypeVisual(errorType);
-    const typeLabel = errorType ? t(visual.labelKey) : null;
+    const typeLabel = errorType ? t(errorTypeVisual(errorType).labelKey) : null;
     return (
       <div className="ze-node-content-wrap" style={{ position: 'relative', width: '100%', height: '100%' }}>
         {children}
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 8px',
-            background: 'rgba(239,68,68,0.92)',
-            color: '#fff',
-            fontSize: 11,
-            zIndex: 9,
-          }}
-        >
-          {visual.icon}
-          {typeLabel && <span style={{ fontWeight: 600, flexShrink: 0 }}>{typeLabel}</span>}
-          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {errorDetails ?? t('nodes.generateFailed')}
-          </span>
-          {onRetry ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              onPointerDown={(e) => e.stopPropagation()}
-              style={errorBtnStyle(false)}
-            >
-              <RefreshCw size={12} />
-              {t('nodes.retry')}
-            </button>
-          ) : null}
-          {onCancel ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              onPointerDown={(e) => e.stopPropagation()}
-              style={errorBtnStyle(true)}
-            >
-              {t('common.cancel')}
-            </button>
-          ) : null}
-        </div>
+        {/* 2026-11-22：原来顶部叠一条红横幅 + 两颗按钮，与底栏/占位卡共三个取消入口。
+            现在只留底部这一条 footbar：失败原因 + 唯一「重试」，取消入口归生成中的 footbar。 */}
+        <GenerationStatusBar
+          phase="error"
+          text={[typeLabel, errorDetails ?? t('nodes.generateFailed')].filter(Boolean).join(' · ')}
+          action={onRetry ? { kind: 'retry', label: t('nodes.retry'), onClick: onRetry } : undefined}
+        />
         <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
       </div>
     );
@@ -631,53 +587,14 @@ export function AIStateView({
         >
           {errorDetails ?? t('nodes.generateFailed')}
         </span>
-        {(onRetry || onCancel) ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            {onRetry ? (
-              <button
-                type="button"
-                onClick={onRetry}
-                onPointerDown={(e) => e.stopPropagation()}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 12px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: '#ef4444',
-                  color: '#fff',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                <RefreshCw size={13} />
-                {t('nodes.retry')}
-              </button>
-            ) : null}
-            {onCancel ? (
-              <button
-                type="button"
-                onClick={onCancel}
-                onPointerDown={(e) => e.stopPropagation()}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 12px',
-                  borderRadius: 6,
-                  border: '1px solid rgba(0,0,0,0.15)',
-                  background: 'transparent',
-                  color: '#6b7280',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                {t('common.cancel')}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+        {/* 2026-11-22 统一 footbar：空节点失败时也只用这一个重试入口，不再给「重试 + 取消」两颗。
+            原因只在上面那一块展示一次，footbar 只承担状态类别（网络错误 / 显存不足 / 插件无响应）。 */}
+        <GenerationStatusBar
+          phase="error"
+          variant="solid"
+          text={typeLabel ? `${t('nodes.generateFailed')} · ${typeLabel}` : t('nodes.generateFailed')}
+          action={onRetry ? { kind: 'retry', label: t('nodes.retry'), onClick: onRetry } : undefined}
+        />
       </div>
     );
   }
@@ -705,24 +622,6 @@ export function AIStateView({
       <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
     </div>
   );
-}
-
-/** error 横幅上的小按钮样式(重试实心 / 取消描边) */
-function errorBtnStyle(outline: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '2px 8px',
-    borderRadius: 5,
-    border: outline ? '1px solid rgba(255,255,255,0.5)' : 'none',
-    background: outline ? 'transparent' : 'rgba(255,255,255,0.25)',
-    color: '#fff',
-    fontSize: 11,
-    cursor: 'pointer',
-    flexShrink: 0,
-    whiteSpace: 'nowrap',
-  };
 }
 
 // Bug1: 节点替换按钮(避免空状态整区域点击误触)

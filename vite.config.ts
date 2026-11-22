@@ -4,7 +4,6 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { readdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { execSync } from 'node:child_process';
-import { spawn } from 'node:child_process';
 
 // ===== `.js` 说明符回落到同名 `.ts/.tsx`（2026-11-17 报障根因修复）=====
 // 这个仓库的源码统一用 ESM 写法 `import './x.js'`（指向同目录的 x.ts）。
@@ -72,58 +71,6 @@ function versionManifest(): Plugin {
   };
 }
 
-// ===== 本地数据服务独立守护（2026-11-18 用户报障：Agent 干活期间 8787/8790 反复掉线）=====
-// 用户打开页面时 fs-server（默认 8790）必须始终在线，否则前端退到临时存储、素材读取失败。
-// 1. dev/preview 启动时只探测 8790 的 /health：已在线就什么都不做；离线才拉起；
-// 2. 拉起经 tools/start-fs-server.mjs 的一次性 launcher 二次 spawn：服务不挂在 dev 的进程树上，
-//    dev/preview 关闭、Ctrl+C、进程树清理都不会带走它（直接在 vite 里 spawn 会被 tree-kill 连着杀）；
-// 3. 幂等由服务自身保证（端口已有实例即 process.exit(0)）；要停服务只能显式结束该进程。
-const FS_SERVER_PORT = process.env.ZEROEXO_FS_PORT ?? '8790';
-function zeroexoFsServer(): Plugin {
-  const start = (log: { info: (m: string) => void; warn: (m: string) => void }): void => {
-    void fetch(`http://127.0.0.1:${FS_SERVER_PORT}/health`)
-      .then((r) => {
-        if (r.ok) {
-          log.info(`[fs-server] ${FS_SERVER_PORT} 已有实例在线，跳过拉起`);
-        } else {
-          throw new Error('health 非 200');
-        }
-      })
-      .catch(() => {
-        const dist = path.resolve(__dirname, 'mcp-server/dist/index.js');
-        if (!existsSync(dist)) {
-          log.warn('[fs-server] 缺少 mcp-server/dist/index.js：先执行 pnpm fs:build，或用 pnpm fs 前台启动');
-          return;
-        }
-        const launcher = path.resolve(__dirname, 'tools/start-fs-server.mjs');
-        spawn(process.execPath, [launcher, dist, '--port', FS_SERVER_PORT], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
-        }).unref();
-        log.info(`[fs-server] 已拉起独立守护进程 http://127.0.0.1:${FS_SERVER_PORT}（关闭 dev 不会停止它）`);
-        // 起没起来以 /health 为准，别只看 spawn 是否成功
-        setTimeout(() => {
-          void fetch(`http://127.0.0.1:${FS_SERVER_PORT}/health`)
-            .then((r) => {
-              if (r.ok) log.info(`[fs-server] ${FS_SERVER_PORT} 就绪`);
-              else log.warn(`[fs-server] ${FS_SERVER_PORT} 未就绪：页面会退到临时存储`);
-            })
-            .catch(() => log.warn(`[fs-server] ${FS_SERVER_PORT} 未就绪：页面会退到临时存储`));
-        }, 1500);
-      });
-  };
-  return {
-    name: 'zeroexo-fs-server',
-    configureServer(server) {
-      start(server.config.logger);
-    },
-    configurePreviewServer(server) {
-      start(server.config.logger);
-    },
-  };
-}
-
 /**
  * 构建产物单版本化（2026-11-06 用户验收：dist 里堆积了 30+ 个历史 chunk / 91 MB）
  *
@@ -154,7 +101,7 @@ function cleanStaleBuildAssets(): Plugin {
 export default defineConfig({
   // GitHub Pages 项目站点：部署时设置 VITE_BASE_PATH=/<repo>/；自定义域名/根站点保持 /
   base: process.env.VITE_BASE_PATH || '/',
-  plugins: [resolveTsFromJsSpecifier(), tailwindcss(), react(), zeroexoFsServer(), cleanStaleBuildAssets(), versionManifest()],
+  plugins: [resolveTsFromJsSpecifier(), tailwindcss(), react(), cleanStaleBuildAssets(), versionManifest()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_PKG.version),
     __MCP_VERSION__: JSON.stringify(MCP_PKG.version),

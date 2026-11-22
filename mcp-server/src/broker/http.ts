@@ -1,8 +1,9 @@
 /**
- * Task Broker HTTP / SSE（挂在本地数据服务端口，默认 8790）。
+ * Task Broker HTTP / SSE（挂在 MCP 自己的端口，默认 8787，与 /mcp 同一端口）。
  *
- * 浏览器没有 MCP 客户端，但已经有 fs-server 的 HTTP 通道（CORS 全开、仅本机）：
+ * 浏览器没有 MCP 客户端，但需要一个能查进度、能订阅的 HTTP 通道：
  * 提交/查询/取消/订阅都走这里，任务本身仍由 MCP worker 执行并落盘。
+ * 2026-11-22：不再复用 8790 本地文件服务端口（该服务已移除）。
  *
  * 接口：
  * - POST /tasks                {kind, projectId, request, title?} → task

@@ -22,6 +22,7 @@ import {
 import { landPluginSegment, pluginViewUrl } from './plugin-task-landing.js';
 import { useTaskQueueStore } from '@/features/task-center/task-queue-store.js';
 import { recordLastSeed } from '@/shared/last-seed-store.js';
+import { consumeFailureNotice, failureNoticeText } from './failure-notice.js';
 
 export type PluginDirectorPhase = 'idle' | 'submitting' | 'queued' | 'running' | 'success' | 'error' | 'canceled';
 
@@ -391,7 +392,10 @@ export function usePluginDirectorTask(args: {
 
     if ((stateKey === 'error' || stateKey === 'interrupted') && (task.error || staleActive) && errorNotifiedRef.current !== task.taskId) {
       errorNotifiedRef.current = task.taskId;
-      cbRef.current.onNotice('error', `生成失败：${task.error ?? OFFLINE_MESSAGE}`);
+      // 2026-11-22：同一条失败只弹一次（跨切页/刷新），文案不再出现「生成失败：生成失败」
+      if (consumeFailureNotice(`director-plugin:${args.projectId ?? ''}`, task.taskId)) {
+        cbRef.current.onNotice('error', failureNoticeText(task.error ?? OFFLINE_MESSAGE));
+      }
     }
     if (['success', 'error', 'interrupted', 'cancelled'].includes(stateKey)) {
       stopPolling();

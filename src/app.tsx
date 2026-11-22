@@ -39,7 +39,6 @@ import { AppearanceDialog, LanguageDialog } from '@/shared/components/index.js';
 import { RootGate } from '@/platform/RootGate.js';
 import { DataRootRecoverGate } from '@/platform/DataRootRecoverGate.js';
 import { dataRootState } from '@/platform/fs.js';
-import { ServiceOfflineGate } from '@/platform/ServiceOfflineGate.js';
 import {
   PROJECTS_LIST_PATH,
   setWatchTarget,
@@ -51,7 +50,6 @@ import {
 import { OPEN_SERVICE_CENTER_EVENT } from '@/features/service-center/service-center-events.js';
 import { publishCurrentProject } from '@/platform/current-project.js';
 import { publishMcpRequiredManifest } from '@/platform/mcp-manifest.js';
-import { purgeOrphanMedia } from '@/entities/orphan-media.js';
 import { purgeOrphanGuides } from '@/entities/guide-purge.js';
 import { OnboardingGuide, isOnboardingDone, markOnboardingDone } from '@/features/onboarding/onboarding-guide.js';
 import { useComfyuiAutoConnect } from '@/features/canvas-tabs/comfyui-auto-connect.js';
@@ -147,19 +145,13 @@ export function App(): React.ReactElement {
 
   // 必须先有可用的数据根才能进主界面（本版本不用浏览器存储）
   const [rootReady, setRootReady] = useState<boolean | null>(null);
-  /** 数据权威在本地服务（8790）却掉线：走服务离线门，不落「选择文件夹」首启门 */
-  const [serviceOffline, setServiceOffline] = useState(false);
   /**
-   * 启动判定（2026-11-18）：只有真的 unauthorized 才拦到首启门。
-   * 本地服务离线（数据本来就在 8790 的数据根）不是授权问题——服务离线门提示重连，
-   * 否则会出现「已授权成功又被要求重新选目录」，而选完也不对路。
+   * 启动判定（2026-11-22 收敛）：只有 unauthorized 才拦到首启门。
+   * 网页读写本地文件只认浏览器目录授权，没有"服务离线"这种状态。
    */
   useEffect(() => {
     void dataRootState()
-      .then((state) => {
-        setServiceOffline(state === 'service-offline');
-        setRootReady(state === 'ok');
-      })
+      .then((state) => setRootReady(state === 'ok'))
       .catch(() => setRootReady(false));
   }, []);
 
@@ -189,25 +181,15 @@ export function App(): React.ReactElement {
     void 0;
   }, [rootReady]);
 
-  // 孤立媒体定时清理（2026-11-11 用户要求：不要回收站，即时清理）：
-  // 每天最多跑一次，直接删掉「没有任何引用」的 CAS 文件与索引外残留；有引用的绝不动。
-  // 2026-11-16 起日常回收由上方 reconcileCasRefs 驱动（含引用摘除），此处保留兜底。
+  // 孤立媒体清理【2026-11-22 用户红线：已停用】
+  // 原逻辑每天自动跑一次 purgeOrphanMedia，直接删「没有任何引用」的 CAS 文件与索引外残留。
+  // 危险点：引用索引只要在某一刻不完整（目录未授权 / 项目未加载完 / 清单读取失败），
+  // 就会被判成"无引用"而删掉真文件——这类不可逆删除一次都不能发生。
+  // 现在不自动删任何 CAS 文件；需要清理时由用户在存储面板显式勾选（只报告，不静默删）。
   useEffect(() => {
     if (!rootReady) return;
-    const KEY = 'zeroexo:orphan-media:lastRun';
-    const DAY = 24 * 60 * 60 * 1000;
-    const last = Number(window.localStorage.getItem(KEY) ?? 0);
-    if (Number.isFinite(last) && Date.now() - last < DAY) return;
-    void (async () => {
-      try {
-        const res = await purgeOrphanMedia();
-        window.localStorage.setItem(KEY, String(Date.now()));
-        if (res.removed > 0) console.info(`[orphan-media] 已清理 ${res.removed} 个无引用文件`);
-        if (res.failed > 0) console.info(`[orphan-media] ${res.failed} 个文件清理失败（下次再试）`);
-      } catch {
-        // 目录未授权 / 离线：下次再试，不影响主界面
-      }
-    })();
+    // 有意为空：不执行任何删除。保留 effect 位置，后续接"只读统计"时在这里实现。
+    void 0;
   }, [rootReady]);
 
   // 引导缓存回收（2026-11-17）：导演台引导帧一帧几百 MB，删项目/删片段后必须回收。
@@ -238,7 +220,6 @@ export function App(): React.ReactElement {
     const check = (): void => {
       void dataRootState()
         .then((state) => {
-          setServiceOffline(state === 'service-offline');
           setRootReady(state === 'ok');
         })
         .catch(() => { /* 探测异常不降级门禁：误判会把用户赶回选目录页 */ });
@@ -489,8 +470,6 @@ export function App(): React.ReactElement {
           </ErrorBoundary>
         </AppLayout>
           </>
-        ) : serviceOffline ? (
-          <ServiceOfflineGate onUseBrowserRoot={() => setServiceOffline(false)} />
         ) : (
           <RootGate open onActivated={() => setRootReady(true)} />
         )}

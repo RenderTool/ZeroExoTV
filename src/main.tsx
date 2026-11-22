@@ -29,9 +29,15 @@ document.addEventListener('enterpictureinpicture', () => {
   }
 }, true);
 
-// 等 bootReady 再渲染：HTTP 实体服务探测（≤600ms）必须先于 RootGate 判定，
-// 否则授权门会在探测完成前弹出。
-void bootReady.then(() => {
+// 渲染不再无限等待启动链（2026-11-22 白屏修复）：最多 1s，超时也先渲染，
+// 由 RootGate / 授权提示接住，绝不让用户看到一张空白页。
+const BOOT_TIMEOUT_MS = 1000;
+const bootSettled = Promise.race([
+  bootReady,
+  new Promise<void>((resolve) => { setTimeout(resolve, BOOT_TIMEOUT_MS); }),
+]);
+void bootSettled.then(() => {
+  document.getElementById('boot-splash')?.remove();
   const root = createRoot(document.getElementById('root')!);
   root.render(
     <ThemeProvider initialMode="dark">

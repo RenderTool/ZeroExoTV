@@ -603,8 +603,12 @@ export function useAiGeneration({
         // 成功:清空失败计数
         nodeFailureCountRef.current.delete(nodeId);
       } catch (err) {
-        // 用户主动取消:回到 idle,不算失败
-        if (ctl.signal.aborted) {
+        // 2026-11-22：本机 ComfyUI 作业取消是抛异常（'本机图像作业已取消'），不是 abort 信号。
+        // 只认 ctl.signal.aborted 会把「用户取消」当成网络错误，还会把提示词一起显示成失败。
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const cancelled = ctl.signal.aborted || /(已取消|cancelled|canceled|aborted)/i.test(errMsg);
+        // 用户主动取消:回到 idle,不算失败（prompt 在第 319 行已写入，取消不动它）
+        if (cancelled) {
           refs.commandQueue.execute(
             new UpdateNodeDataCommand(nodeId, {
               status: 'idle',
@@ -618,7 +622,7 @@ export function useAiGeneration({
         const errorType: AiErrorType = err instanceof AiError
           ? err.errorType
           : classifyError(err);
-        let message = err instanceof Error ? err.message : String(err);
+        let message = errMsg;
         // 本机 ComfyUI 的节点缺失/队列拒绝是机器 JSON，直接甩给客户看不懂：
         // 统一收成一句人话（2026-11-18 用户要求）。
         if (errorType === 'NETWORK_ERROR') message = friendlyLocalJobError(message) || message;
@@ -643,17 +647,80 @@ export function useAiGeneration({
 
   const handlePromptStop = useCallback(
     (nodeId: string): void => {
-      // 触发 AbortController → 上游 fetch 抛 AbortError → catch 中识别为取消
-      const ctl = nodeAbortControllersRef.current.get(canvasDocNodeKey(nodeId));
-      if (ctl) ctl.abort();
-      // 立即切回 idle(防止 provider 重试中的延迟)
-      if (refs.commandQueue) {
-        refs.commandQueue.execute(
-          new UpdateNodeDataCommand(nodeId, { status: 'idle' } as Record<string, unknown>),
-        );
+      const q = refs.commandQueue;
+      if (!q) return;
+      const graph = q.getState() as unknown as {
+        nodes: Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
+      };
+      const nodes = graph.nodes;
+
+      // 2026-11-22 真因：「取消点了没反应 / 要点两次」——
+      // 生成时 ctl 是按【占位节点 id】登记的（见下方 new AbortController），
+      // 取消却按【源节点 id】查 canvasDocNodeKey → 永远取不到，abort 从不触发。
+      // 这里先按传入 id 查，查不到就扫它名下的占位节点逐个 abort。
+      const abortById = (id: string): void => {
+        const key = canvasDocNodeKey(id);
+        const ctl = nodeAbortControllersRef.current.get(key);
+        if (ctl) {
+          ctl.abort();
+          nodeAbortControllersRef.current.delete(key);
+        }
+      };
+      if (nodeAbortControllersRef.current.get(canvasDocNodeKey(nodeId))) {
+        abortById(nodeId);
+      } else {
+        for (const n of nodes) {
+          if (n.type === 'ai-placeholder' && n.id && n.data?.sourceNodeId === nodeId) abortById(n.id);
+        }
       }
+
+      // 2026-11-22 报障「点发送会新建占位节点，再点取消提示词就没了」：
+      // 本次提交的 prompt/model/paramValues 是写进占位节点（ai-placeholder）的，
+      // 取消如果只把当前节点置 idle，占位节点一移除，底栏按源节点 data 取值就是空的。
+      // 取消必须先回写源节点，再移除占位节点。取消点可能落在占位节点上，也可能落在源节点上，两条都处理。
+      const restoreFromPlaceholder = (ph: { id?: string; type?: string; data?: Record<string, unknown> }): void => {
+        const d = ph.data ?? {};
+        const sourceId = typeof d.sourceNodeId === 'string' ? d.sourceNodeId : '';
+        if (sourceId) {
+          const back: Record<string, unknown> = {};
+          for (const key of ['prompt', 'model', 'paramValues', 'generationMode'] as const) {
+            if (d[key] !== undefined) back[key] = d[key];
+          }
+          q.execute(new UpdateNodeDataCommand(sourceId, { ...back, status: 'idle' } as Record<string, unknown>));
+          // 提交时选中态被切到占位节点（见下方 setSelection）。占位节点一删，
+          // 底栏按「当前选中节点」取 prompt 就变成空 → 用户看到的「提示词没了」。
+          // 取消时把选中态搬回源节点，底栏立刻显示刚提交的提示词。
+          try {
+            refs.store?.setSelection?.({ selectedNodeIds: new Set([sourceId]), selectedEdgeIds: new Set() });
+          } catch {
+            // 选中态恢复失败不影响回写本身
+          }
+        }
+        // 占位节点只认 generating/completed/error/removed；'idle' 会渲染成一张空白卡
+        if (ph.id) {
+          q.execute(new UpdateNodeDataCommand(ph.id, { status: 'removed' } as Record<string, unknown>));
+          nodeActionBus.emit('ai:placeholder:remove', { nodeId: ph.id });
+        }
+      };
+
+      const self = nodes.find((n) => n.id === nodeId);
+      // 节点已不在图里（另一条订阅已经处理过这次取消）：什么都别再写，
+      // 否则给一个已删节点补 status 只会留下幽灵占位/空白卡
+      if (!self) return;
+      if (self?.type === 'ai-placeholder') {
+        restoreFromPlaceholder(self);
+        return;
+      }
+      for (const ph of nodes.filter(
+        (n) => n.type === 'ai-placeholder' && n.id && n.data?.sourceNodeId === nodeId,
+      )) {
+        restoreFromPlaceholder(ph);
+      }
+
+      // 立即切回 idle(防止 provider 重试中的延迟)
+      q.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle' } as Record<string, unknown>));
     },
-    [refs.commandQueue],
+    [refs.commandQueue, refs.store],
   );
 
   // 刷新续接：页面加载时扫描 status='loading' 的本机视频节点，自动向后端查作业状态恢复
@@ -918,6 +985,12 @@ export function useAiGeneration({
           targetNodeType: targetType,
           taskLabel: model || '',
           /**
+           * 2026-11-22：占位节点记住"我是替哪个节点生成的"。
+           * 取消时必须把本节点的 prompt/参数回写这个源节点，否则底栏读源节点会变空
+           * （用户报障「重复两次取消生成后提示词没了」）。
+           */
+          sourceNodeId: event.nodeId,
+          /**
            * 2026-11-20 用户报障「生成过程中点开提示词没了」：
            * 提交瞬间选中态会切到这个占位节点，而占位节点此前只有状态字段（没有 prompt / paramValues），
            * 底栏提示词框按选中节点的 data 取值 → 一生成就变空、参数也回默认。
@@ -976,7 +1049,10 @@ export function useAiGeneration({
       };
 
       const ctl = new AbortController();
-      nodeAbortControllersRef.current.set(placeholderId, ctl);
+      // 2026-11-22：登记/查找必须同一个键。之前这里用裸 placeholderId，
+      // 取消侧用 canvasDocNodeKey(nodeId)（"docId:nodeId"）→ 永远查不到 → 取消无效。
+      const ctlKey = canvasDocNodeKey(placeholderId);
+      nodeAbortControllersRef.current.set(ctlKey, ctl);
 
       void agentClient.send('generator_generate', inputPayload)
         .then(({ taskId }) => {
@@ -1066,18 +1142,51 @@ export function useAiGeneration({
               }
             },
             onClose: () => {
-              nodeAbortControllersRef.current.delete(placeholderId);
+              nodeAbortControllersRef.current.delete(ctlKey);
             },
           });
         })
         .catch((err: any) => {
-          if (ctl.signal.aborted) return;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          /**
+           * 2026-11-22 报障「取消后从生成中变成『网络错误 · 本机图像作业已取消』，提示词也没了」：
+           * 本机 ComfyUI 作业取消是抛异常（local-qwen-image: '本机图像作业已取消'），
+           * 不是 abort 信号 → 落到这里被当成网络错误，占位卡变成红错卡（还带「重试/取消」两个按钮），
+           * 源节点也没拿到本次提示词。
+           * 取消不是失败：回滚到提交前——占位卡移除、提示词/参数写回源节点并选中源节点。
+           */
+          const cancelled = ctl.signal.aborted || /(已取消|cancelled|canceled|aborted)/i.test(errMsg);
+          if (cancelled) {
+            const g = q.getState() as unknown as {
+              nodes: Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
+              edges: Array<{ id: string; source?: unknown; target?: unknown }>;
+            };
+            const ph = g.nodes.find((n) => n.id === placeholderId);
+            const back: Record<string, unknown> = {};
+            for (const key of ['prompt', 'model', 'paramValues', 'generationMode'] as const) {
+              if (ph?.data?.[key] !== undefined) back[key] = ph.data[key];
+            }
+            q.execute(new UpdateNodeDataCommand(event.nodeId, { ...back, status: 'idle' } as Record<string, unknown>));
+            for (const e of g.edges) {
+              const tgt = typeof e.target === 'object' ? (e.target as { nodeId?: string })?.nodeId : e.target;
+              const src = typeof e.source === 'object' ? (e.source as { nodeId?: string })?.nodeId : e.source;
+              if (tgt === placeholderId || src === placeholderId) q.execute(new RemoveEdgeCommand(e.id));
+            }
+            q.execute(new RemoveNodeCommand(placeholderId));
+            try {
+              store.setSelection({ selectedNodeIds: new Set([event.nodeId]), selectedEdgeIds: new Set() });
+            } catch {
+              // 选中态失败不影响回滚
+            }
+            nodeAbortControllersRef.current.delete(ctlKey);
+            return;
+          }
           console.error('提交生成任务失败:', err);
           q.execute(new UpdateNodeDataCommand(placeholderId, {
             status: 'error',
-            error: err instanceof Error ? err.message : i18n.t('editor.submitTaskFailed'),
+            error: errMsg,
           }));
-          nodeAbortControllersRef.current.delete(placeholderId);
+          nodeAbortControllersRef.current.delete(ctlKey);
         });
     });
 

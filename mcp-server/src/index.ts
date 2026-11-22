@@ -6,6 +6,7 @@
  */
 
 import http from "node:http";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -14,7 +15,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { bootstrapToken } from "./auth.js";
-import { startFileServer, handleFsRequest, fsServerPort, ensureFsRoot } from "./file-server.js";
+import { ensureFsRoot } from "./file-server.js";
+import { handleBrokerRequest } from "./broker/http.js";
 import { dataRoot, paths } from "./config.js";
 import { TOOL_REGISTRY, TOOL_ACCESS, type Ctx } from "./tools/_register.js";
 import { SERVER_INSTRUCTIONS } from "./guides/instructions.js";
@@ -160,12 +162,11 @@ function printHelp(): void {
       "",
       "用法:",
       "  node dist/index.js                 stdio 模式（默认，本地 Agent spawn）",
-      "  node dist/index.js --http [--port 8787]   StreamableHTTP 模式",
-      "  node dist/index.js --fs-server [--port 8790]   本地 HTTP 实体服务（前端免授权读写数据根）",
+      "  node dist/index.js --http [--port 8787]   StreamableHTTP 模式（同时提供 /mcp 与任务接口 /tasks）",
       "  node dist/index.js --selfcheck     启动自检并退出",
       "",
       "环境变量:",
-      "  ZEROEXO_DATA_ROOT      数据根（硬性默认 D:\\Test，用户拍板；目录缺失时 fs-server 启动自动创建）",
+      "  ZEROEXO_DATA_ROOT      数据根（硬性默认 D:\\Test，用户拍板；目录缺失时启动自动创建）",
       "  ZEROEXO_MCP_TOKEN      stdio 模式 token；首次启动自动 bootstrap 到 .mcp/tokens.json",
       "  ZEROEXO_FRONTEND_URL   前端地址（open_project 拼 URL 用，默认 http://localhost:5173）",
       "",
@@ -200,6 +201,44 @@ async function selfcheck(): Promise<void> {
   );
 }
 
+/**
+ * 自动清理遗留的本地文件服务（2026-11-22 用户要求"更新 MCP 后自动移除冗余服务"）。
+ *
+ * 旧版本会额外起一个 `--fs-server` 进程占 8790，用户在界面上完全看不到它。
+ * 新版不再提供该模式；若升级后旧进程还在跑，这里做一次一次性清理：
+ * 先确认 8790 的 /health 确实是 zeroexo-fs，再核对进程命令行含 `--fs-server`，
+ * 两重校验通过才 taskkill —— 避免误杀别的程序。失败只打日志，不阻断启动。
+ */
+async function reapLegacyFsServer(): Promise<void> {
+  if (process.platform !== "win32") return;
+  const port = Number(process.env.ZEROEXO_FS_PORT ?? 8790);
+  const probe = await fetch(`http://127.0.0.1:${port}/health`).then(
+    async (r) => (r.ok ? (await r.json().catch(() => null)) as { service?: string } | null : null),
+    () => null,
+  );
+  if (probe?.service !== "zeroexo-fs") return;
+  try {
+    // 用绝对路径：由 IDE/宿主 spawn 时 PATH 可能不含 System32，直接写 netstat 会 ENOENT
+    const sys32 = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+    const netstat = execFileSync(path.join(sys32, "netstat.exe"), ["-ano"], { encoding: "utf8" });
+    const line = netstat
+      .split(/\r?\n/)
+      .find((l) => l.includes(`:${port}`) && /LISTENING/i.test(l));
+    const pid = line?.trim().split(/\s+/).pop();
+    if (!pid || !/^\d+$/.test(pid)) return;
+    const cmdline = execFileSync(
+      path.join(sys32, "WindowsPowerShell", "v1.0", "powershell.exe"),
+      ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+      { encoding: "utf8" },
+    );
+    if (!cmdline.includes("--fs-server")) return;
+    execFileSync(path.join(sys32, "taskkill.exe"), ["/PID", pid, "/F"]);
+    process.stderr.write(`[zeroexo-mcp] 已移除遗留文件服务 pid=${pid}（端口 ${port}），该服务已不再需要\n`);
+  } catch (err) {
+    process.stderr.write(`[zeroexo-mcp] 清理遗留文件服务失败（不影响使用）: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.includes("--help") || argv.includes("-h")) return printHelp();
@@ -207,19 +246,19 @@ async function main(): Promise<void> {
 
   await bootstrapToken(dataRoot());
 
+  // 2026-11-22 用户拍板：移除 `--fs-server`（8790 本地文件服务）。
+  // 网页读写本地文件只认浏览器目录授权；任务接口 /tasks 已并入 --http 端口。
+  // 老用户升级后即便仍在跑旧进程，新版本也不再提供该模式，端口自然不再被占用。
   if (argv.includes("--fs-server")) {
-    // 本地 HTTP 实体服务：把数据根暴露给前端（免 File System Access 授权）。
-    // 端口优先取 --port，其次 ZEROEXO_FS_PORT，默认 8790。
-    const portIdx = argv.indexOf("--port");
-    if (portIdx >= 0) process.env.ZEROEXO_FS_PORT = argv[portIdx + 1];
-    await startFileServer();
-    // 画布图片/主体图片由 MCP 代理提交到 ComfyUI 插件；MCP 侧只跑认领台账归档 worker。
-    startBroker();
-    startClaimWorker();
-    return; // server 事件循环保活
+    process.stderr.write(
+      "[zeroexo-mcp-server] --fs-server 已移除：网页改为浏览器目录授权，任务接口请用 --http（默认 8787）\n",
+    );
+    process.exit(2);
   }
 
   if (argv.includes("--http")) {
+    // 升级即清理：后台执行，不阻塞监听
+    void reapLegacyFsServer();
     const portIdx = argv.indexOf("--port");
     const port = portIdx >= 0 ? Number(argv[portIdx + 1]) : 8787;
     // 先注册工具再盖印章：否则 server-info 会写 tools:0/toolNames:[]，网页误报「缺 52 个工具」
@@ -235,6 +274,8 @@ async function main(): Promise<void> {
       return Buffer.concat(chunks).toString("utf8");
     };
     const httpServer = http.createServer(async (req, res) => {
+      // 任务中转（/tasks*）挂在本进程端口：网页只连 MCP 一个地址，不再有独立的文件服务
+      if (await handleBrokerRequest(req, res)) return;
       if (req.url !== "/mcp") {
         res.writeHead(404).end("not found");
         return;
@@ -284,24 +325,12 @@ async function main(): Promise<void> {
       process.stderr.write(`[zeroexo-mcp-server] StreamableHTTP listening on http://localhost:${port}/mcp\n`);
     });
 
-    // T0（2026-11-09）：fs REST 并入 MCP 同一进程 —— 服务数保持 3（MCP / 网页 / ComfyUI）。
-    // Vite 插件探测 8790 /health 在线后会跳过 spawn，不再多起一个 fs-server 子进程。
-    const fsPort = fsServerPort();
-    const fsAlready = await fetch(`http://127.0.0.1:${fsPort}/health`).then((r) => r.ok, () => false);
-    if (fsAlready) {
-      process.stderr.write(`[zeroexo-mcp-server] fs REST ${fsPort} 已在线，跳过（不重复监听）\n`);
-    } else {
-      try {
-        await ensureFsRoot();
-        const fsHttp = http.createServer((req, res) => { void handleFsRequest(req, res); });
-        await new Promise<void>((resolve, reject) => {
-          fsHttp.once("error", reject);
-          fsHttp.listen(fsPort, "127.0.0.1", resolve);
-        });
-        process.stderr.write(`[zeroexo-mcp-server] fs REST listening on http://127.0.0.1:${fsPort} (same process)\n`);
-      } catch (err) {
-        process.stderr.write(`[zeroexo-mcp-server][warn] fs REST ${fsPort} 启动失败（不阻断 MCP）: ${err instanceof Error ? err.message : String(err)}\n`);
-      }
+    // 数据根自愈：原来在这里额外监听 8790 的 fs REST，已撤除——
+    // 文件读写归浏览器授权，任务接口 /tasks 挂在本端口（见上面 handleBrokerRequest）。
+    try {
+      await ensureFsRoot();
+    } catch (err) {
+      process.stderr.write(`[zeroexo-mcp-server][warn] 数据根初始化失败（不阻断 MCP）: ${err instanceof Error ? err.message : String(err)}\n`);
     }
     return;
   }

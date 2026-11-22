@@ -27,7 +27,7 @@ interface McpInfo {
 const STATUS_OK = '#16a34a';
 const STATUS_WARN = '#d97706';
 
-export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElement {
+export function VersionBadge({ theme, variant = 'chip' }: { theme: ThemeConfig; variant?: 'chip' | 'inline' }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [manifest, setManifest] = useState<VersionManifest | null>(null);
   const [mcp, setMcp] = useState<McpInfo | null>(null);
@@ -121,8 +121,17 @@ export function VersionBadge({ theme }: { theme: ThemeConfig }): React.ReactElem
       <button
         type="button"
         data-version-badge
+        data-version-variant={variant}
         title="版本与更新状态"
-        style={{
+        style={variant === 'inline' ? {
+          /* C-27（2026-11-22 用户反馈）：放进页脚时不再当胶囊用 —— 与 12px 页脚文本同级，
+             无边框无底色，只保留可点区域，避免左下角浮层压住「第一次使用？」那行字。 */
+          height: 20, padding: '0 2px', borderRadius: 4, cursor: 'pointer',
+          border: 'none', background: 'transparent',
+          color: appOutdated || mcpOutdated ? STATUS_WARN : muted,
+          opacity: 0.85,
+          fontSize: 11, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit', lineHeight: 1,
+        } : {
           height: 24, padding: '0 8px', borderRadius: 12, cursor: 'pointer',
           border: `1px solid ${appOutdated || mcpOutdated ? STATUS_WARN : border}`,
           background: 'transparent', color: appOutdated || mcpOutdated ? STATUS_WARN : muted,

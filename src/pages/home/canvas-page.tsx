@@ -537,14 +537,11 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
           />
         </Modal>
 
-        {/* 版本号：统一放在画布左下角（2026-11-12 用户要求）。
-            底部「使用指引」条会盖住这里，2026-11-19 用户反馈点不开：抬高层级并让出底部条高度。 */}
-        <div style={{ position: 'fixed', left: 12, bottom: 46, zIndex: 1000 }}>
-          <VersionBadge theme={theme} />
-        </div>
-
-        {/* 使用指引条（代替原来的政策公告位） */}
-        <OnboardingNotice onOpen={() => setGuideOpen(true)} />
+        {/* 使用指引条（代替原来的政策公告位）；C-27：版本号作为页脚右段内联，不再 fixed 浮在左下 */}
+        <OnboardingNotice
+          onOpen={() => setGuideOpen(true)}
+          versionSlot={<VersionBadge theme={theme} variant="inline" />}
+        />
 
         <Modal
           title={t('home.createCanvas')}

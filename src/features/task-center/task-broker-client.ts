@@ -7,7 +7,7 @@
  * - SSE：/tasks/events，断线自动回退轮询（多开时每个页面各自订阅）
  */
 
-import { httpFsInfo } from '@/platform/http-fs.js';
+import { MCP_HTTP_URL } from '@/features/mcp-settings/mcp-client.js';
 
 export type BrokerTaskState = 'queued' | 'running' | 'success' | 'failed' | 'canceled';
 export type BrokerSegmentState = 'queued' | 'running' | 'success' | 'failed' | 'canceled';
@@ -106,8 +106,14 @@ export interface BrokerTask {
   outputs: BrokerOutput[];
 }
 
+/**
+ * 任务接口挂在 MCP 自己的端口上（与 /mcp 同一地址，去掉末尾 /mcp）。
+ * 2026-11-22：不再复用 8790 那个"文件服务"端口——网页文件读写归浏览器授权，
+ * 任务心跳跟 MCP 走：MCP 开着就能查/订阅，没开就是没连上。
+ */
 function brokerBase(): string | null {
-  return httpFsInfo()?.baseUrl ?? null;
+  const base = MCP_HTTP_URL.replace(/\/mcp\/?$/, '').replace(/\/+$/, '');
+  return base || null;
 }
 
 export function brokerOnline(): boolean {

@@ -9,7 +9,7 @@ import { memo, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { LoaderCircle, Lock, Sparkles } from 'lucide-react';
+import { LoaderCircle, Sparkles } from 'lucide-react';
 import { StyledSelect, type StyledSelectOption } from './styled-select.js';
 import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
 import { LOCAL_VIDEO_MODEL_KEY, LOCAL_IMAGE_MODEL_KEY, KREA2_MODEL_KEY, MOSS_MODEL_KEY } from '@/features/canvas-tabs/zeroexo-jobs-client.js';
@@ -31,7 +31,8 @@ export const DockFooterBar = memo(function DockFooterBar({
   isRunning,
   hasText,
   textLength = 0,
-  interruptible = true,
+  // interruptible 仍由外部传入（部分链路只读），2026-11-22 起运行中不再渲染停止按钮，
+  // 底栏只留只读状态；取消统一走节点 footbar。
   onAction,
   onConfigChange,
   onParamValuesChange,
@@ -142,20 +143,20 @@ export const DockFooterBar = memo(function DockFooterBar({
         </span>
       </div>
       {trailing}
-      {isRunning && !interruptible ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 36, padding: '0 12px', borderRadius: 18, flexShrink: 0, background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`, color: theme.toolbar.textMuted ?? '', fontSize: 12, fontWeight: 500, userSelect: 'none' }}
-          title={t('nodeDock.lockedGenerating', '媒体生成提交后不可取消,请稍候')}>
-          <Lock size={13} style={{ flexShrink: 0 }} />
-          {t('nodeDock.lockedGenerating', '生成中，不可取消')}
+      {/* 2026-11-22 统一生成 footbar：运行中底栏只留一条只读状态，不再画第二颗「停止」。
+          取消入口只有节点底部那一条 footbar（用户报障「这么多取消按钮」）。 */}
+      {isRunning ? (
+        <span
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 34, padding: '0 10px', borderRadius: 8, flexShrink: 0, background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`, color: theme.toolbar.textMuted ?? '', fontSize: 11, fontWeight: 500, userSelect: 'none' }}
+          title={t('nodeDock.cancelOnNode', '生成中：取消在节点底部状态条上')}
+        >
+          <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}><LoaderCircle size={13} /></span>
+          {t('nodeDock.generating', '生成中')}
         </span>
       ) : (
-        <button type="button" onClick={onAction} disabled={actionDisabled} aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')} title={actionTitle}
-          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0, minWidth: 34, height: 34, padding: 0, border: 'none', borderRadius: 8, background: actionDisabled ? (isDark ? '#262626' : '#e5e5e5') : isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent, color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff', cursor: actionDisabled ? 'not-allowed' : 'pointer', opacity: actionDisabled ? 0.4 : 1, transition: 'opacity 140ms ease', fontFamily: 'inherit' }}>
-          {isRunning ? (
-            <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}><LoaderCircle size={16} /></span>
-          ) : (
-            <Sparkles size={16} />
-          )}
+        <button type="button" onClick={onAction} disabled={actionDisabled} aria-label={t('prompt.generate', '生成')} title={actionTitle}
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0, minWidth: 34, height: 34, padding: 0, border: 'none', borderRadius: 8, background: actionDisabled ? (isDark ? '#262626' : '#e5e5e5') : theme.toolbar.accent, color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff', cursor: actionDisabled ? 'not-allowed' : 'pointer', opacity: actionDisabled ? 0.4 : 1, transition: 'opacity 140ms ease', fontFamily: 'inherit' }}>
+          <Sparkles size={16} />
         </button>
       )}
     </>

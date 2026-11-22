@@ -62,7 +62,6 @@ import { ScriptTabContent } from '@/features/canvas-tabs/script-tab-content.js';
 import { StoryboardTabContent } from '@/features/canvas-tabs/storyboard-tab-content.js';
 import { SubjectLinkDialogHost } from '@/features/canvas-nodes/storyboard/subject-link-dialog.js';
 import { WorkbenchTabContent } from '@/features/canvas-tabs/workbench-tab-content.js';
-import { McpWorkingBanner } from '@/features/project-log/mcp-working-banner.js';
 import { buildDefaultEpisodes } from '@/services/canvas-script.js';
 import { ensureScript } from '@/entities/script-store.js';
 import { ensureProjectMounts } from '@/entities/slot-containers.js';
@@ -122,6 +121,12 @@ function visibleNodePrompt(data: Record<string, unknown> | null | undefined, nod
   };
   const raw = String(data?.prompt ?? '') || fallback();
   if (!raw) return '';
+  // 2026-11-22 报障「生成的占位卡片里没有提示词」：
+  // 生成中节点（源节点 loading / 占位卡片 generating）的 prompt 就是本次提交的内容，
+  // 一律原样显示——不能走下面那套「像素材标题/像资产 id 就当空」的过滤，
+  // 否则组装后的长提示词（带引用信息）会被误判成资产 id，底栏直接变空。
+  const status = String(data?.status ?? '');
+  if (status === 'loading' || status === 'generating') return raw;
   if (data?.generationId) return raw;
   if (nodeType && nodeType !== 'image' && nodeType !== 'video' && nodeType !== 'audio') return raw;
   if (raw === String(data?.storageKey ?? '') || raw === String(data?.title ?? '')) return '';
@@ -641,7 +646,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
   // 选中节点数据
   const selectedNodeData = state.selectedNodeData;
-  const isPromptRunning = selectedNodeData?.status === 'loading';
+  // 生成中有两种状态：源节点直接生成写 'loading'，占位卡片写 'generating'（2026-11-22）
+  const isPromptRunning = selectedNodeData?.status === 'loading' || selectedNodeData?.status === 'generating';
   // 节点生成面板三态判定(Plan#33 延伸 + 2026-08-25 生成节点语义拍板):
   // - media 节点(text/image/video/audio)有实质内容(content/storageKey)且无上游 = 素材节点态 → 隐藏生成面板
   // - media 节点无内容 = 空节点/生成器态 → 显示生成面板;生成中(loading)强制保持面板(停止按钮)
@@ -847,7 +853,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       <div style={{ position: 'fixed', left: 12, bottom: 10, zIndex: 1000 }}>
         <VersionBadge theme={theme} />
       </div>
-      <McpWorkingBanner />
       <div style={mainRowStyle}>
       <div style={mainColStyle}>
       <div style={headerStyle}>

@@ -7,12 +7,11 @@
  * MCP 工作浮层的开关同时挂在「任务队列」标题旁，浮层本身另有常驻关闭按钮（关掉只隐藏提示，不停任务）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Space, Switch, Tag, Typography } from 'antd';
+import { Button, Space, Tag, Typography } from 'antd';
 import { RefreshCw } from 'lucide-react';
 import { readJson, listDir, readFile } from '@/platform/fs.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
-import { useMcpBannerVisible } from './mcp-banner-visibility.js';
 import { projectLogExists } from './project-log-exists.js';
 
 type Kind = 'requirement' | 'decision' | 'progress' | 'todo' | 'artifact';
@@ -71,7 +70,6 @@ export function ProjectLogTabContent(): React.ReactElement {
   const projectId = window.location.hash.match(/#\/editor\/([^/?]+)/)?.[1] ?? '';
   const [log, setLog] = useState<ProjectLog>(EMPTY);
   const [jobs, setJobs] = useState<OpsJob[]>([]);
-  const [mcpBanner, setMcpBanner] = useMcpBannerVisible();
   const [loading, setLoading] = useState(false);
 
   const loadJobs = useCallback(async () => {
@@ -196,11 +194,6 @@ export function ProjectLogTabContent(): React.ReactElement {
           <Space align="center" size={10}>
             <Typography.Text strong>任务队列</Typography.Text>
             {pipeline.active ? <Tag color="processing" style={{ margin: 0 }}>MCP 代理工作中</Tag> : null}
-            {/* 2026-11-19 用户指令：MCP 浮层开关挂在这里；关掉只隐藏提示，MCP 任务照常跑 */}
-            <span data-mcp-banner-toggle style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-              <span>浮层</span>
-              <Switch size="small" checked={mcpBanner} onChange={setMcpBanner} />
-            </span>
           </Space>
           <div style={{ marginTop: 8 }}>
             <Space size={6} wrap>

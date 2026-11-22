@@ -1089,7 +1089,12 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
   }, [forcedSource]);
   /** 第二层：分类 chips（2026-11-19 用户口径 = 与主体库同一套：角色 / 场景 / 道具 / 备选；
    *  图片/视频降级为卡片左上角类型角标，不再当分类） */
-  const [historyCategory, setHistoryCategory] = useState<HistoryCategory>('character');
+  /**
+   * 分类过滤（2026-11-22 用户要求：默认要有「全部」）。
+   * 之前默认落在「角色」，导致"历史明明有 2 条，进来只看到空态「还没有角色图」"——
+   * 用户以为历史没导进来。现在默认「全部」，分类只是可选的收窄。
+   */
+  const [historyCategory, setHistoryCategory] = useState<HistoryCategory | 'all'>('all');
   /** 主体状态图 storageKey → 主体 kind：历史条目归属哪个角色的判定依据 */
   const [historyKeyToKind, setHistoryKeyToKind] = useState<Map<string, string>>(new Map());
   const [page, setPage] = useState(1);
@@ -1164,6 +1169,8 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
   const items = useMemo(() => {
     const list = filterHistoryAssets(store.allAssets, projectId, 'all', historySource);
     if (directorView) return list;
+    // 「全部」不过滤分类（默认态），分类 chips 只用来收窄
+    if (historyCategory === 'all') return list;
     return list.filter((a) => categoryOfAsset(a, historyKeyToKind) === historyCategory);
   }, [store.allAssets, projectId, historySource, directorView, historyCategory, historyKeyToKind]);
 
@@ -1440,28 +1447,34 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
     });
   };
 
+  // 2026-11-22 用户要求：画布历史也要有「全部」，并且是默认项（否则进来就是一片空态）
   const kindChips = directorView
     ? [{ key: 'all', label: t('assetLibrary.historyTabAll', { defaultValue: '全部' }), count: sourceCounts[historySource].total }]
-    : HISTORY_CATEGORIES.map((c) => ({
-      key: c,
-      label: c === 'character'
-        ? t('subject.kindCharacter', { defaultValue: '角色' })
-        : c === 'scene'
-          ? t('subject.kindScene', { defaultValue: '场景' })
-          : c === 'prop'
-            ? t('subject.kindProp', { defaultValue: '道具' })
-            : t('subject.kindCandidate', { defaultValue: '备选' }),
-      count: categoryCounts[c],
-    }));
+    : [
+        { key: 'all', label: t('assetLibrary.historyTabAll', { defaultValue: '全部' }), count: sourceCounts[historySource].total },
+        ...HISTORY_CATEGORIES.map((c) => ({
+          key: c,
+          label: c === 'character'
+            ? t('subject.kindCharacter', { defaultValue: '角色' })
+            : c === 'scene'
+              ? t('subject.kindScene', { defaultValue: '场景' })
+              : c === 'prop'
+                ? t('subject.kindProp', { defaultValue: '道具' })
+                : t('subject.kindCandidate', { defaultValue: '备选' }),
+          count: categoryCounts[c],
+        })),
+      ];
 
   const handlePromote = (asset: Asset, target: 'project' | 'library'): void => {
     void store.promoteToScope(asset, target);
   };
 
-  // 空态：导演台只有视频；画布按当前分类（角色/场景/道具/备选）给指引
+  // 空态：导演台只有视频；画布按当前分类给指引，「全部」为空说明整个来源都没有产物
   const emptyText = directorView
     ? t('assetLibrary.historyEmptyDirectorVideo', { defaultValue: '还没有导演台视频，在导演台运行片段后会自动存到这里' })
-    : historyCategory === 'character'
+    : historyCategory === 'all'
+      ? t('assetLibrary.historyEmptyAll', { defaultValue: '这个来源下还没有生成产物：生成后会自动存到这里' })
+      : historyCategory === 'character'
       ? t('assetLibrary.historyEmptyCharacter', { defaultValue: '还没有角色图：生成角色定妆后会自动存到这里，也可用卡片「改类型」归类' })
       : historyCategory === 'scene'
         ? t('assetLibrary.historyEmptyScene', { defaultValue: '还没有场景图：生成场景概念图后会自动存到这里' })
@@ -1660,7 +1673,7 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
             items={kindChips}
             active={historyCategory}
             onChange={(k) => {
-              setHistoryCategory((k ?? 'character') as HistoryCategory);
+              setHistoryCategory((k ?? 'all') as HistoryCategory | 'all');
               setPage(1);
               setSelectedIds(new Set());
             }}

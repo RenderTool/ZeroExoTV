@@ -11,7 +11,8 @@
 import { filterVisibleNodes } from '@zeroexo/core';
 import type { EdgeRecord, GraphModel, NodeRecord } from '@zeroexo/core';
 import { getDescendantIds } from '@zeroexo/plugin-group';
-import { createCanvas, listCanvases, type CanvasDocument } from '@/entities/canvas-store.js';
+import { createCanvas, listCanvases, newCanvasId, MAIN_CANVAS_ID, type CanvasDocument } from '@/entities/canvas-store.js';
+import { createProjectVersion, deleteProjectVersion } from '@/entities/version-store.js';
 
 export interface CreateCanvasCopyArgs {
   projectId: string;
@@ -117,13 +118,33 @@ export async function createCanvasCopyFromSelection(args: CreateCanvasCopyArgs):
   }
   const title = args.title?.trim() || `画布副本 ${existingCount + 1}`;
 
+  // 2026-11-22 用户定调：副本 = 整个项目所有历史数据的一个版本。
+  // 所以先固化版本快照（当时的全部画布 + 全部历史记录 + 实体 + 引导索引），再建副本画布；
+  // 版本失败就整件事失败（不许静默降级成"没有历史的空副本"）。
+  // 临时链路画布（ephemeral，提示词快照查看用）不是副本，不做版本化。
+  const canvasId = args.id ?? newCanvasId();
+  const versionId = args.ephemeral || args.readOnly ? undefined : canvasId;
+
   try {
+    if (versionId) {
+      try {
+        await createProjectVersion(projectId, { id: versionId, title, sourceCanvasId: MAIN_CANVAS_ID });
+      } catch (error) {
+        return {
+          ok: false,
+          reason: 'write-failed',
+          message: `副本版本快照写入失败：${error instanceof Error ? error.message : '未知原因'}（数据目录未授权或被占用）`,
+          error,
+        };
+      }
+    }
     const doc = await createCanvas(projectId, {
+      id: canvasId,
+      ...(versionId ? { versionId } : {}),
       title,
       coverKey: pickAutoCoverKey(nodes),
       order: existingCount + 1,
       ephemeral: args.ephemeral,
-      id: args.id,
       graph: {
         nodes,
         edges,
@@ -136,6 +157,8 @@ export async function createCanvasCopyFromSelection(args: CreateCanvasCopyArgs):
     });
     return { ok: true, doc, copiedNodes: nodes.length, copiedEdges: edges.length };
   } catch (error) {
+    // 画布写入失败时把刚建的版本目录清掉，不留孤儿版本（只删自己刚写的目录，不碰媒体）
+    if (versionId) await deleteProjectVersion(projectId, versionId).catch(() => undefined);
     return {
       ok: false,
       reason: 'write-failed',

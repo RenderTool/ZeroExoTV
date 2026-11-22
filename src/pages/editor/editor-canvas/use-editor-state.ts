@@ -609,7 +609,13 @@ export function useEditorState(canvasId: string): {
                             ? 'storyboard'
                             : node?.type === 'workbench'
                               ? 'workbench'
-                              : null,
+                              // 2026-11-22 报障「生成的占位卡片里没有提示词」：
+                              // 占位节点（ai-placeholder）不在白名单 → selectedNodeType=null，
+                              // 底栏拿不到节点语义（也不认它的 prompt），生成中提示词就显示为空。
+                              // 占位节点是「未来某个 image/video/audio/…」的临时载体，按目标类型映射。
+                              : node?.type === 'ai-placeholder'
+                                ? (String((node.data as { targetNodeType?: string } | undefined)?.targetNodeType ?? 'image') as 'image')
+                                : null,
           );
           // 直接在 updateUIState 中计算选中节点数据,避免通过 graphVersion 驱动 useMemo 导致无限循环
           const data = node?.data;

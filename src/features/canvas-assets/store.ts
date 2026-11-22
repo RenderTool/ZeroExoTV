@@ -33,6 +33,7 @@ import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { isAuthorized } from '@/platform/fs.js';
 import { useViewPrefsStore } from '@/shared/view-prefs.js';
 import { countHistoryByKind, countHistoryBySourceAndKind, getHistorySource, libraryCasHashes } from './history-utils.js';
+import { readProjectVersion, readVersionAssets } from '@/entities/version-store.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -98,8 +99,44 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   const activeProjectId = useCanvasTabStore((s) => s.activeProjectId);
   const canvasProjectId = activeProjectId ?? getCurrentCanvasId();
 
+  /**
+   * 版本模式（2026-11-22 用户定调：副本 = 整个项目所有历史数据的一个版本）。
+   * 副本页签的 key 形如 `canvas:<cid>`，而 cid 就是版本 id（vid===cid）。
+   * 命中版本时，本 hook 的**全部读取**走版本快照（历史/素材都只读该版本），
+   * 保证"副本里看到的"就是那一个版本的数据，且不随项目当前数据漂移。
+   * 老副本没有版本目录 → 回落项目共享数据（向后兼容，不报错）。
+   */
+  const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
+  const activeVersionId = useMemo(() => {
+    const key = typeof activeTabKey === 'string' ? activeTabKey : '';
+    return key.startsWith('canvas:') ? key.slice('canvas:'.length) : '';
+  }, [activeTabKey]);
+  const [versionAssets, setVersionAssets] = useState<Asset[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeVersionId || !activeProjectId) {
+      setVersionAssets(null);
+      return;
+    }
+    void (async () => {
+      const manifest = await readProjectVersion(activeProjectId, activeVersionId).catch(() => null);
+      if (!manifest) {
+        if (!cancelled) setVersionAssets(null);
+        return;
+      }
+      const list = await readVersionAssets(activeProjectId, activeVersionId).catch((): Asset[] => []);
+      if (!cancelled) setVersionAssets(list);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVersionId, activeProjectId]);
+
   // ── 独立数据源 ──
   const { assets, loading: loadingAssets, refresh: refreshAssets, removeAssets, updateAsset } = useAssets();
+
+  /** 本 hook 的读取源：副本版本模式下是版本快照；否则是项目当前资产（写操作一律仍走项目真实池） */
+  const viewAssets: Asset[] = versionAssets ?? assets;
 
   // ── 视图状态（分组 / 全局搜索） ──
   // 2026-11-06 用户指令：分组按**模块**独立记忆；层级/画布只在画布模块可挂载——
@@ -218,7 +255,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   const filteredAssets = useMemo(() => {
     if (materialScopeTab === 'subject' || materialScopeTab === 'director') return [];
     const canvasId = canvasProjectId;
-    let result = (Array.isArray(assets) ? assets : []).filter(
+    let result = (Array.isArray(viewAssets) ? viewAssets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
     // 2026-11-04 约定：单段内不混排两种作用域（与资产库弹窗同一严格口径）
@@ -231,11 +268,11 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
     const q = search.trim().toLowerCase();
     if (q) result = result.filter((a) => a.title.toLowerCase().includes(q));
     return result;
-  }, [assets, materialScopeTab, materialKind, search, canvasProjectId]);
+  }, [viewAssets, materialScopeTab, materialKind, search, canvasProjectId]);
 
   /** 分类标签计数（素材分组口径：当前作用域 + 搜索后按类型统计，与结果同一 predicate，避免"有数字没内容"） */
   const materialKindCounts = useMemo(() => {
-    const base = (Array.isArray(assets) ? assets : []).filter(
+    const base = (Array.isArray(viewAssets) ? viewAssets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
     // openlib/subject 段不是用户素材（独立渲染），分类计数直接归零
@@ -255,23 +292,23 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
       audio: list.filter((a) => a.kind === 'audio').length,
       text: list.filter((a) => (a.kind as string) === 'text' || (a.kind as string) === 'zeroexo-text').length,
     };
-  }, [assets, materialScopeTab, search, canvasProjectId]);
+  }, [viewAssets, materialScopeTab, search, canvasProjectId]);
 
   /** 胶囊徽标计数（素材分组口径：排除剧本/实体/plan 后按作用域统计） */
-  const directorCount = useMemo(() => countHistoryBySourceAndKind(assets, canvasProjectId).director.total, [assets, canvasProjectId]);
+  const directorCount = useMemo(() => countHistoryBySourceAndKind(viewAssets, canvasProjectId).director.total, [viewAssets, canvasProjectId]);
   const materialScopeCounts = useMemo(() => {
-    const base = (Array.isArray(assets) ? assets : []).filter(
+    const base = (Array.isArray(viewAssets) ? viewAssets : []).filter(
       (a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan',
     );
     const counts = countAssetsByScope(base, canvasProjectId);
     // 画布类目不含导演台产物（它们只归「导演台」）
     if (counts.project != null) counts.project = Math.max(0, counts.project - directorCount);
     return counts;
-  }, [assets, canvasProjectId, directorCount]);
+  }, [viewAssets, canvasProjectId, directorCount]);
 
   // ===== 历史分组派生（2026-11-04 本地版重建：图片 / 视频，scope='project' 的本项目资产） =====
   const historyProjectId = canvasProjectId;
-  const allAssets = useMemo(() => (Array.isArray(assets) ? assets : []), [assets]);
+  const allAssets = useMemo(() => (Array.isArray(viewAssets) ? viewAssets : []), [viewAssets]);
   const historyCounts = useMemo(() => countHistoryByKind(allAssets, historyProjectId), [allAssets, historyProjectId]);
   const libraryHashes = useMemo(() => libraryCasHashes(allAssets), [allAssets]);
 
@@ -357,7 +394,7 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
   const handleUpload = useCallback(async (raw: FileList | File[]) => {
     const files = Array.from(raw);
     if (files.length === 0) return;
-    // 未授权 / 8790 离线时 CAS 与素材记录都写不进盘，旧行为只会显示「该文件夹暂无内容」。
+    // 未授权时 CAS 与素材记录都写不进盘，旧行为只会显示「该文件夹暂无内容」。
     // 这里直接给出真实原因与恢复入口（浏览器目录授权与 MCP 服务无关）。
     if (!(await isAuthorized().catch(() => false))) {
       antdMessage.error('数据目录未授权且本地数据服务未在线：请在「服务 → 数据目录」重新选择/授权目录，或用 pnpm dev 启动本地数据服务（与 MCP 服务无关）');

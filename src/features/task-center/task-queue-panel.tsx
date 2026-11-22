@@ -9,9 +9,7 @@ import { useTranslation } from 'react-i18next';
 import {
   CheckCircle2, Clapperboard, Image as ImageIcon, ListChecks, Loader2, Music, Upload, Video, X, XCircle, Ban,
 } from 'lucide-react';
-import { Switch } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { useMcpBannerVisible } from '@/features/project-log/mcp-banner-visibility.js';
 import { ProjectMemorySection } from '@/features/project-log/project-memory-section.js';
 import { useTaskQueueStore, countActiveTasks, type QueuedTask, type TaskKind } from './task-queue-store.js';
 import { useComfyuiEndpointStore } from '@/features/canvas-tabs/comfyui-endpoint.js';
@@ -75,7 +73,6 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
   usePluginTaskQueue(pid);
   // MCP 发起的任务落在本地 broker 任务表（8790 /tasks）：云端插件不可达时也必须看得见
   useTaskBrokerSync(pid);
-  const [mcpBanner, setMcpBanner] = useMcpBannerVisible();
   const connected = useComfyuiEndpointStore((s) => s.connected);
   const tasks = useTaskQueueStore((s) => s.tasks);
   const clearFinished = useTaskQueueStore((s) => s.clearFinished);
@@ -174,15 +171,7 @@ export function TaskQueuePanel({ projectId }: { projectId?: string | null }): Re
           }}>{active}</span>
         ) : null}
         <span style={{ flex: 1 }} />
-        {/* 2026-11-19 用户指令：MCP 工作浮层的开关放这里，浮层不再是关不掉的挂件 */}
-        <span
-          data-mcp-banner-toggle
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 400, color: muted }}
-          title={t('taskQueue.mcpBannerHint', 'MCP 代理工作时在右下角显示进度浮层')}
-        >
-          <span>{t('taskQueue.mcpBanner', 'MCP 浮层')}</span>
-          <Switch size="small" checked={mcpBanner} onChange={setMcpBanner} />
-        </span>
+        {/* 2026-11-22 用户指令：删掉 MCP 工作浮层（开关 + 组件），任务进度统一只在任务中心看 */}
         <button
           type="button"
           onClick={() => {

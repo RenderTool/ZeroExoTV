@@ -912,12 +912,76 @@ export function useAgentBridgeHooks(
   const handlePromptStop = useCallback((nodeId: string): void => {
     // 本机作业：立即发 /zeroexo/v1/jobs/{id}/cancel，不等 abort 传播（ComfyUI 侧要马上停）
     void cancelLocalJob(nodeId);
-    const ctl = nodeAbortControllersRef.current.get(canvasDocNodeKey(nodeId));
-    if (ctl) ctl.abort();
-    if (refs.commandQueue) {
-      refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle' } as any));
+    const q = refs.commandQueue;
+    if (!q) return;
+    const graph = q.getState() as unknown as {
+      nodes: Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
+    };
+    const nodes = graph.nodes;
+
+    // 2026-11-22：ctl 是按占位节点 id 登记的，取消点落在源节点上时按源 id 查不到，
+    // 这里补一条：查不到就扫它名下的占位节点逐个 abort（否则点了取消生成还在跑）。
+    const abortById = (id: string): void => {
+      const key = canvasDocNodeKey(id);
+      const ctl = nodeAbortControllersRef.current.get(key);
+      if (ctl) {
+        ctl.abort();
+        nodeAbortControllersRef.current.delete(key);
+      }
+    };
+    if (nodeAbortControllersRef.current.get(canvasDocNodeKey(nodeId))) {
+      abortById(nodeId);
+    } else {
+      for (const n of nodes) {
+        if (n.type === 'ai-placeholder' && n.id && n.data?.sourceNodeId === nodeId) abortById(n.id);
+      }
     }
-  }, [refs.commandQueue]);
+
+    // 2026-11-22 报障「新建占位节点后再次点取消，提示词就没了」：
+    // 取消按钮可能点在**占位节点自己**身上（提交后选中态就在占位节点），也可能点在源节点上。
+    // 两条路径都必须先把握手时写进占位节点的 prompt/model/paramValues 回写源节点，
+    // 否则占位节点一移除/一置空，底栏按源节点 data 取值就是空的。
+    /** 把占位节点上的本次提交信息回写到它的源节点，并让源节点回到可编辑的 idle */
+    const restoreFromPlaceholder = (ph: { id?: string; type?: string; data?: Record<string, unknown> }): void => {
+      const d = ph.data ?? {};
+      const sourceId = typeof d.sourceNodeId === 'string' ? d.sourceNodeId : '';
+      if (sourceId) {
+        const back: Record<string, unknown> = {};
+        for (const key of ['prompt', 'model', 'paramValues', 'generationMode'] as const) {
+          if (d[key] !== undefined) back[key] = d[key];
+        }
+        q.execute(new UpdateNodeDataCommand(sourceId, { ...back, status: 'idle' } as never));
+        // 提交时选中态被切到占位节点；占位一删，底栏按选中节点取 prompt 就是空的。
+        // 把选中态搬回源节点，用户看到的就是刚提交的提示词。
+        try {
+          refs.store?.setSelection?.({ selectedNodeIds: new Set([sourceId]), selectedEdgeIds: new Set() });
+        } catch {
+          // 选中态恢复失败不影响回写
+        }
+      }
+      // 占位节点只认 generating/completed/error/removed，'idle' 是非法态（会渲染成一张空白卡）
+      if (ph.id) {
+        q.execute(new UpdateNodeDataCommand(ph.id, { status: 'removed' } as never));
+        nodeActionBus.emit('ai:placeholder:remove', { nodeId: ph.id });
+      }
+    };
+
+    const self = nodes.find((n) => n.id === nodeId);
+    // 已经不在图里（另一条订阅处理过这次取消）：不要再写，避免给已删节点补状态留下幽灵卡
+    if (!self) return;
+
+    // ① 取消就点在占位节点上：直接回写源节点 + 移除占位，不再给占位写 idle
+    if (self.type === 'ai-placeholder') {
+      restoreFromPlaceholder(self);
+      return;
+    }
+
+    // ② 取消点在源节点上：把它名下所有本轮占位节点回写并移除
+    const placeholders = nodes.filter((n) => n.type === 'ai-placeholder' && n.id && n.data?.sourceNodeId === nodeId);
+    for (const ph of placeholders) restoreFromPlaceholder(ph);
+
+    q.execute(new UpdateNodeDataCommand(nodeId, { status: 'idle' } as any));
+  }, [refs.commandQueue, refs.store]);
 
   return {
     handleSaveNodeAsset,

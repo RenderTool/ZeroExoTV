@@ -12,13 +12,14 @@
  * - completed: 完成文案 → 自动移除(由外部逻辑处理)
  * - error: 错误信息 + 重试/移除按钮
  */
-import { AlertCircle, RefreshCw, X, Square, Check } from 'lucide-react';
+import { AlertCircle, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { NodeRecord, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { BaseNodeView, AISkeleton, type GenLoaderKind } from '../base-node-view.js';
 import { nodeActionBus } from '../base-node-view.js';
+import { GenerationStatusBar } from '../generation-status-bar.js';
 
 export interface AiPlaceholderNodeData {
   /** 生成状态 */
@@ -93,10 +94,6 @@ export function AiPlaceholderNodeView({
     nodeActionBus.emit('ai:placeholder:retry', { nodeId: node.id });
   };
 
-  const handleRemove = () => {
-    nodeActionBus.emit('ai:placeholder:remove', { nodeId: node.id });
-  };
-
   const handleStop = () => {
     // 停止生成:对于分镜重新生成,触发恢复逻辑;其他类型仅停止
     const origNodeId = data.targetNodeId;
@@ -147,28 +144,7 @@ export function AiPlaceholderNodeView({
                 {taskLabel}
               </div>
             )}
-            {/* 停止按钮:分镜重新生成时显示 */}
-            {data.targetNodeId && generationType === 'storyboard' && (
-              <button
-                type="button"
-                onClick={handleStop}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '4px 10px', borderRadius: 5,
-                  border: '1px solid rgba(239,68,68,0.35)',
-                  background: 'rgba(0,0,0,0.4)',
-                  backdropFilter: 'blur(4px)',
-                  color: '#f87171', fontSize: 10, fontWeight: 500,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.4)'; }}
-              >
-                <Square size={9} />
-                停止
-              </button>
-            )}
+            {/* 2026-11-22 统一：停止入口只在底部 footbar 一处，这里不再画第二颗按钮 */}
           </>
         )}
         {status === 'error' && (
@@ -176,46 +152,6 @@ export function AiPlaceholderNodeView({
             <div style={{ fontSize: 13, fontWeight: 500, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 5, textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
               <AlertCircle size={13} />
               {errorMsg || t('nodes.aiPlaceholderError', '生成失败')}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-              <button
-                type="button"
-                onClick={handleRetry}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '5px 12px', borderRadius: 6,
-                  border: '1px solid rgba(139,92,246,0.4)',
-                  background: 'rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(4px)',
-                  color: '#a78bfa', fontSize: 11, fontWeight: 500,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.25)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
-              >
-                <RefreshCw size={11} />
-                重试
-              </button>
-              <button
-                type="button"
-                onClick={handleRemove}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '5px 12px', borderRadius: 6,
-                  border: '1px solid rgba(239,68,68,0.4)',
-                  background: 'rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(4px)',
-                  color: '#f87171', fontSize: 11, fontWeight: 500,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.25)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
-              >
-                <X size={11} />
-                取消
-              </button>
             </div>
           </>
         )}
@@ -225,6 +161,23 @@ export function AiPlaceholderNodeView({
             {t('nodes.aiPlaceholderCompleted', '生成完成')}
           </div>
         )}
+        {/* 2026-11-22 统一生成 footbar：占位卡上也只有这一条。
+            生成中 = 唯一「取消」；失败 = 唯一「重试」；完成态不显示按钮。 */}
+        {status !== 'completed' && status !== 'removed' ? (
+          <GenerationStatusBar
+            phase={status === 'error' ? 'error' : 'running'}
+            text={[
+              status === 'error'
+                ? (errorMsg || t('nodes.aiPlaceholderError', '生成失败'))
+                : t('nodes.aiPlaceholderGenerating', `正在生成${typeLabel(generationType)}`),
+              status === 'error' ? null : taskLabel,
+            ].filter(Boolean).join(' · ')}
+            action={status === 'error'
+              ? { kind: 'retry', label: t('nodes.retry'), onClick: handleRetry }
+              : { kind: 'cancel', label: t('common.cancel', '取消'), onClick: handleStop }}
+            accentColor={NODE_COLOR}
+          />
+        ) : null}
       </div>
     </BaseNodeView>
   );

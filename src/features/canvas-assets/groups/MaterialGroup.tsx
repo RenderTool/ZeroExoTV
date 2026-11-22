@@ -33,7 +33,6 @@ import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { AddTile, CategoryChips, EmptyState, SearchBox, SkeletonGrid, SCROLL_AREA_STYLE, ToolbarRow } from '../components/common.js';
 import { FocusScrollIntoView } from '@/features/canvas-assets/components/focus-scroll-into-view.js';
 import { dataRootState, pickRoot, restoreRoot, withPermissionPrompt, type DataRootState } from '@/platform/fs.js';
-import { probeHttpFs } from '@/platform/http-fs.js';
 import { reloadWithDisk } from '@/platform/boot.js';
 
 const KIND_OPTIONS = [
@@ -87,13 +86,6 @@ export function MaterialGroup({ store, theme, lockedScope, hideCapsules }: {
       message.warning(`没能恢复目录授权：${err instanceof Error ? err.message : String(err)}`);
     }
   }, [message]);
-  /** 服务离线：探测 8790，通了整页刷新（localforage 驱动运行中不换） */
-  const reconnectService = useCallback(async () => {
-    const info = await probeHttpFs();
-    if (info) reloadWithDisk();
-    else message.warning('本地数据服务仍未响应：请在项目目录执行 pnpm fs（或 pnpm dev）后重试');
-  }, [message]);
-
   // 2026-11-05 约定：抽屉用户资产（公共/本项目）补齐「发送到导演台」，与开源库同一执行器
   // sendAssetToWorkbench（不要复制第二份逻辑）；槽位与提示词引用行为与资产库页完全一致
   const sendItemToDirector = (asset: Asset, mode?: 'video' | 'guide') => void sendAssetToWorkbench(asset, message, t, { mode });
@@ -326,20 +318,6 @@ export function MaterialGroup({ store, theme, lockedScope, hideCapsules }: {
           <SkeletonGrid theme={theme} />
         ) : assets.length === 0 ? (
           storageState && storageState.state !== 'ok' ? (
-            storageState.state === 'service-offline' ? (
-              <div data-storage-warning style={{ padding: '36px 24px', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
-                <div style={{ fontSize: 13, color: theme.toolbar.text, marginBottom: 8 }}>本地数据服务离线，素材无法读取</div>
-                <div style={{ lineHeight: 1.8 }}>
-                  素材都在 8790 本地数据服务的数据根里，服务不在线就全是空的——不是没有素材，也不用重新选目录。
-                </div>
-                <Button size="small" type="primary" style={{ marginTop: 14 }} onClick={() => void reconnectService()}>
-                  重新连接
-                </Button>
-                <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.7 }}>
-                  服务没起来就在项目目录执行 pnpm fs（或 pnpm dev），起来后点「重新连接」。
-                </div>
-              </div>
-            ) : (
               <div data-storage-warning style={{ padding: '36px 24px', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
                 <div style={{ fontSize: 13, color: theme.toolbar.text, marginBottom: 8 }}>数据目录未就绪，素材无法写入或读取</div>
                 <div style={{ lineHeight: 1.8 }}>
@@ -353,7 +331,6 @@ export function MaterialGroup({ store, theme, lockedScope, hideCapsules }: {
                   也可以到「服务 → 数据目录」重新选择文件夹。
                 </div>
               </div>
-            )
           ) : (
             <EmptyState theme={theme} />
           )

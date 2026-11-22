@@ -51,6 +51,13 @@ export interface CanvasDocument {
    * 用户在副本里点「保存为画布副本」才会得到一块正式子画布。
    */
   ephemeral?: boolean;
+  /**
+   * 版本 id（2026-11-22 用户定调：副本 = 整个项目所有历史数据的一个版本）。
+   * 有值 = 这块副本打开时读 `projects/<pid>/versions/<versionId>/` 的版本快照，
+   * 历史面板也只读该版本切片；改动只写版本目录，不回写项目当前数据。
+   * 老副本（本次改造前创建）没有该字段，按"普通画布"兼容。
+   */
+  versionId?: string;
   graph?: GraphModel;
 }
 
@@ -235,7 +242,15 @@ export async function saveCanvas(
 /** 新建一份副本（graph 由调用方给；生成语义在 sub-canvas 执行器里，本模块只管落盘） */
 export async function createCanvas(
   projectId: string,
-  input: { title: string; graph: GraphModel; coverKey?: string | null; order?: number; id?: string; ephemeral?: boolean },
+  input: {
+    title: string;
+    graph: GraphModel;
+    coverKey?: string | null;
+    order?: number;
+    id?: string;
+    ephemeral?: boolean;
+    versionId?: string;
+  },
 ): Promise<CanvasDocument> {
   const now = new Date().toISOString();
   const doc: CanvasDocument = {
@@ -252,6 +267,7 @@ export async function createCanvas(
     updatedAt: now,
     graphRef: 'inline',
     ...(input.ephemeral ? { ephemeral: true } : {}),
+    ...(input.versionId ? { versionId: input.versionId } : {}),
     graph: input.graph,
   };
   assertSafeCanvasId(doc.id);

@@ -8,13 +8,13 @@
  *
  * 首次打开自动弹出一次；之后从主页底部「使用指引」再次打开。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Modal, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { BookOpen, Cable, CheckCircle2, Circle, Copy, Download, FolderOpen } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { pickRoot, rootName, currentDataRootPath, switchDataRoot, pickDataRoot, migrateDataRoot } from '@/platform/fs.js';
+import { pickRoot, rootName, currentDataRootPath } from '@/platform/fs.js';
 import {
   loadServerInfo,
   mcpServerMissingTools,
@@ -150,72 +150,30 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
    * 询问框是页面内自绘 Modal（跟随明暗主题），不用 Modal.confirm：
    * confirm 的白底在暗色下不跟随主题，且只有两个按钮位。
    */
-  type RootAction = 'cancel' | 'switch' | 'migrate';
-  const [rootAsk, setRootAsk] = useState<{ current: string; next: string; projects: number; assets: number } | null>(null);
-  const rootAskResolve = useRef<((v: RootAction) => void) | null>(null);
-  const askRootAction = useCallback(
-    (payload: { current: string; next: string; projects: number; assets: number }): Promise<RootAction> => (
-      new Promise<RootAction>((resolve) => {
-        rootAskResolve.current = resolve;
-        setRootAsk(payload);
-      })
-    ),
-    [],
-  );
-  const answerRootAsk = useCallback((value: RootAction) => {
-    setRootAsk(null);
-    const resolve = rootAskResolve.current;
-    rootAskResolve.current = null;
-    resolve?.(value);
-  }, []);
 
+  /**
+   * 换数据目录（2026-11-22 收敛）：浏览器目录授权即唯一数据通道。
+   * 换目录 = 重新选一次文件夹（换完刷新，让磁盘驱动重新绑根），
+   * 不再有"切换服务端数据根 / 迁移数据根"这些只能靠 8790 跑的操作。
+   */
   const chooseRoot = useCallback(async () => {
     try {
-      const picked = await pickDataRoot();
-      if (picked && picked !== 'offline') {
-        const current = currentDataRootPath();
-        if (current && current === picked.path) {
-          message.info(t('onboarding.rootSame', '新目录与当前目录相同，无需切换'));
-          return;
-        }
-        if (current) {
-          const action = await askRootAction({
-            current,
-            next: picked.path,
-            projects: picked.projects,
-            assets: picked.assets,
-          });
-          if (action === 'cancel') {
-            message.info(`已取消：数据仍在 ${current}`);
-            return;
-          }
-          if (action === 'migrate') {
-            message.loading({ content: '正在迁移数据…', key: 'root-migrate', duration: 0 });
-            await migrateDataRoot(current, picked.path);
-            message.success({ content: '已迁移并切换，正在重新加载…', key: 'root-migrate' });
-          } else {
-            await switchDataRoot(picked.path);
-            message.success({ content: '已切换目录，正在重新加载…', key: 'root-switch' });
-          }
-        } else {
-          await switchDataRoot(picked.path);
-          message.success(t('onboarding.rootSwitched', '数据目录已切换，正在重新加载…'));
-        }
-        window.location.reload();
+      const pickedName = await pickRoot();
+      if (!pickedName) {
+        message.info(t('onboarding.rootPickCancelled', '已取消，目录未变更'));
         return;
       }
-      // 本地服务离线：只能授权浏览器句柄（拿不到绝对路径），此时才走浏览器目录选择
-      if (picked === 'offline') {
-        const pickedName = await pickRoot();
-        setRoot(pickedName);
-        message.success(t('onboarding.rootSelected', '存储目录已指定'));
-        return;
-      }
-      message.info(t('onboarding.rootPickCancelled', '已取消，目录未变更'));
+      setRoot(pickedName);
+      message.success(t('onboarding.rootSelected', '存储目录已指定，正在重新加载…'));
+      setTimeout(() => window.location.reload(), 600);
     } catch (err) {
+      if (String(err).includes('AbortError')) {
+        message.info(t('onboarding.rootPickCancelled', '已取消，目录未变更'));
+        return;
+      }
       message.error(err instanceof Error ? err.message : t('onboarding.rootFailed', '选择目录失败'));
     }
-  }, [message, t, askRootAction]);
+  }, [message, t]);
 
   /**
    * 一键复制：把「怎么装」整理成一段 Agent 能直接执行的接入包，用户粘给 IDE 里的 Agent，
@@ -426,52 +384,12 @@ export function OnboardingGuide({ open, onClose }: { open: boolean; onClose: () 
         style={{ width: '100%', display: 'block', borderRadius: 8 }}
       />
     </Modal>
-    {rootAsk && (
-      <div
-        style={{
-          position: 'fixed', inset: 0, zIndex: 5400,
-          background: 'rgba(0,0,0,0.45)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
-        onPointerDown={(e) => { if (e.target === e.currentTarget) answerRootAsk('cancel'); }}
-      >
-        <div
-          style={{
-            width: 460, maxWidth: '92vw', boxSizing: 'border-box',
-            background: theme.toolbar.background, color: theme.toolbar.text,
-            borderRadius: 10, border: `1px solid ${theme.toolbar.border}`,
-            boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
-            padding: '16px 20px 14px',
-          }}
-        >
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
-            {t('onboarding.rootAskTitle', '切换数据目录')}
-          </div>
-          <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-            <div>
-              {t('onboarding.rootAskCurrent', '当前目录：')}{rootAsk.current}（{rootAsk.projects} {t('onboarding.rootAskProjects', '个项目')}、{rootAsk.assets} {t('onboarding.rootAskAssets', '条资产')}）
-            </div>
-            <div>
-              {t('onboarding.rootAskNext', '新目录：')}{rootAsk.next}
-            </div>
-            <div style={{ marginTop: 8, fontSize: 12, color: theme.toolbar.textMuted }}>
-              {t('onboarding.rootAskHint', '迁移 = 把当前数据复制到新目录；仅切换 = 直接从空的新目录开始，旧数据留在原处不动。')}
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-            <Button onClick={() => answerRootAsk('cancel')}>{t('onboarding.rootAskCancel', '取消')}</Button>
-            <Button onClick={() => answerRootAsk('switch')}>{t('onboarding.rootAskSwitch', '仅切换目录')}</Button>
-            <Button type="primary" onClick={() => answerRootAsk('migrate')}>{t('onboarding.rootAskMigrate', '迁移并切换')}</Button>
-          </div>
-        </div>
-      </div>
-    )}
     </>
   );
 }
 
 /** 主页底部「使用指引」条（代替原来的政策公告位），同时充当「MCP 服务已更新」的自动提示位 */
-export function OnboardingNotice({ onOpen }: { onOpen: () => void }): React.ReactElement {
+export function OnboardingNotice({ onOpen, versionSlot }: { onOpen: () => void; versionSlot?: React.ReactNode }): React.ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
 
@@ -492,9 +410,12 @@ export function OnboardingNotice({ onOpen }: { onOpen: () => void }): React.Reac
       }}
     >
       <span>{t('onboarding.notice', '第一次使用？先完成存储目录、MCP、ComfyUI 三项准备。')}</span>
-      <Button size="small" type="link" onClick={onOpen} style={{ paddingInline: 4 }}>
-        {t('onboarding.open', '打开使用指引')}
-      </Button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        {versionSlot ?? null}
+        <Button size="small" type="link" onClick={onOpen} style={{ paddingInline: 4 }}>
+          {t('onboarding.open', '打开使用指引')}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   type BrokerSegment,
   type BrokerTask,
 } from '@/features/task-center/task-broker-client.js';
+import { consumeFailureNotice, failureNoticeText } from './failure-notice.js';
 
 export type DirectorRunPhase = 'idle' | 'submitting' | 'queued' | 'running' | 'success' | 'error' | 'canceled';
 
@@ -108,6 +109,9 @@ export function useDirectorTask(args: UseDirectorTaskArgs): DirectorRunState & {
   const dismissedRef = useRef<Set<string>>(new Set());
   /** 失败提示只弹一次：轮询/SSE 会反复送同一个 failed 快照，不能每 2.5s 弹一次 */
   const errorNotifiedRef = useRef<string | null>(null);
+  /** applyTask 的 deps 是空数组，失败提示去重需要项目作用域，走 ref 取最新值 */
+  const projectIdRef = useRef(args.projectId);
+  projectIdRef.current = args.projectId;
 
   const applyTask = useCallback((task: BrokerTask) => {
     if (dismissedRef.current.has(task.taskId)) return;
@@ -198,7 +202,10 @@ export function useDirectorTask(args: UseDirectorTaskArgs): DirectorRunState & {
     }));
     if (task.state === 'failed' && task.error && errorNotifiedRef.current !== task.taskId) {
       errorNotifiedRef.current = task.taskId;
-      cbRef.current.onNotice('error', `生成失败：${task.error}`);
+      // 2026-11-22：去重落到 localStorage——切页/刷新重挂后不再重弹同一条失败
+      if (consumeFailureNotice(`director:${projectIdRef.current ?? ''}`, task.taskId)) {
+        cbRef.current.onNotice('error', failureNoticeText(task.error));
+      }
     }
   }, []);
 
