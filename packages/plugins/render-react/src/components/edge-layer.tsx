@@ -610,6 +610,10 @@ export const EdgeLayer = React.memo(function EdgeLayer({
   // 工具栏位置 —— 低频元素(仅单条边选中时显示),从 store 读最新 viewport 计算屏幕坐标,
   // 不订阅 viewport(避免平移时重渲染)。位置更新由 invK 量化 state 跨桶时顺带刷新。
   const toolbarData = useMemo(() => {
+    // 2026-11-22 报障「历史提示词链路（只读）里不该出现裁剪按钮」：
+    // 只读链路 editor-page 不传 onCutEdge，但工具栏只看了「有没有选中一条边」，
+    // 于是红色圆按钮照样浮在连线中点上（点了也没用）。没有可执行动作就不渲染。
+    if (!onCutEdge) return null;
     if (!firstSelectedEdgeId) return null;
     const edge = edges.find((e) => e.id === firstSelectedEdgeId);
     if (!edge) return null;
@@ -621,7 +625,7 @@ export const EdgeLayer = React.memo(function EdgeLayer({
       x: mp.x * vp.k + vp.x,
       y: mp.y * vp.k + vp.y,
     };
-  }, [firstSelectedEdgeId, edges, nodesById, extensions, pinDefaults, invK, store]);
+  }, [firstSelectedEdgeId, edges, nodesById, extensions, pinDefaults, invK, store, onCutEdge]);
 
   // 路径生成函数(模块级函数引用稳定,可作为 EdgeItem memo 依赖)
   const pathFn = edgePathType === 'smoothstep' ? smoothstepPath : bezierPath;
