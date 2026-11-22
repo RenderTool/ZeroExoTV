@@ -876,6 +876,24 @@ export function AssetPickPanel({
 
         {panelTab === 'canvas' && (
           <div data-canvas-media-list style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* 2026-11-22 用户要求：「画布」页签里也要有上传按钮（此前只有资产页签和上传页签有） */}
+            {onUploadFiles && (
+              <button
+                type="button"
+                data-canvas-media-upload
+                onClick={() => importInputRef.current?.click()}
+                disabled={uploading}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%',
+                  height: 34, flexShrink: 0, marginBottom: 4, borderRadius: 8, cursor: uploading ? 'default' : 'pointer',
+                  fontFamily: 'inherit', fontSize: 12, opacity: uploading ? 0.6 : 1,
+                  border: `1px dashed ${palette.popBorder}`, background: 'transparent', color: palette.sub,
+                }}
+              >
+                <Plus size={14} />
+                {uploading ? t('director.uploading', '上传中…') : t('director.uploadMedia', '上传素材')}
+              </button>
+            )}
             {filteredCanvasMedia.length === 0 ? (
               <div style={{ padding: 16, fontSize: 12, color: palette.sub, textAlign: 'center' }}>
                 {emptyCanvasText ?? t('director.canvasMediaEmpty', '画布上暂无图片/视频/音频')}

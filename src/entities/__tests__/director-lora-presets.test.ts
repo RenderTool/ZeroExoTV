@@ -42,7 +42,10 @@ describe('director-lora-presets 推荐清单', () => {
 
   it('每条推荐都必须有强项描述，且强度在 0–2、条数不超上限', () => {
     for (const preset of LORA_PRESETS) {
-      expect(preset.strengths).toContain('强项');
+      // 2026-11-22 用户口径：卡片文案要短。强项一句 ≤ 60 字，注意一句 ≤ 46 字，不写小作文。
+      expect(preset.strengths.trim().length).toBeGreaterThan(0);
+      expect(preset.strengths.length).toBeLessThanOrEqual(60);
+      if (preset.caveat) expect(preset.caveat.length).toBeLessThanOrEqual(46);
       expect(preset.items.length).toBeGreaterThan(0);
       expect(preset.items.length).toBeLessThanOrEqual(MAX_LORAS);
       for (const item of preset.items) {

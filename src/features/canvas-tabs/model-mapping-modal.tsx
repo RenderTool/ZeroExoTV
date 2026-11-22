@@ -495,7 +495,7 @@ export function ModelMappingPanel({ visible = true }: ModelMappingPanelProps): J
         </div>
       )}
       <Text type="secondary" style={{ fontSize: 11 }}>
-        LoRA 是可选项：不勾就完全不加 LoRA。勾选即串联，顺序就是下发顺序；勾完即保存（本项目 + 本机设置）。清单里的「推荐」只是建议，不勾不会自动启用。
+        LoRA 可选：不勾不加。勾选按顺序串联并自动保存；推荐项只是建议，不会自动启用。
       </Text>
       <div data-testid="lora-recommend" style={{ marginTop: 6 }}>
         <Text style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>推荐清单（含强项描述 · 不预勾）</Text>

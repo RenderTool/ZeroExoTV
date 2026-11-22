@@ -1375,7 +1375,9 @@ export function NodeGenerateDock({
           anchorEl={assetPickerAnchor}
           acceptKinds={pickerKinds}
           canvasNodes={pickerCanvasNodes}
-          tabs={['historyCanvas', 'subject', 'canvas']}
+          /* 2026-11-22 用户要求：画布节点底栏的选择面板补齐「公共资产 / 分镜历史」，
+             并带「上传」入口（此前只有 画布历史 / 主体 / 画布 三个） */
+          tabs={['historyCanvas', 'asset', 'subject', 'historyDirector', 'canvas', 'upload']}
           initialTab="historyCanvas"
           onPick={handleSlotPick}
         />
@@ -1389,7 +1391,9 @@ export function NodeGenerateDock({
           anchorEl={mentionPanelAnchor}
           acceptKinds={pickerKinds}
           canvasNodes={pickerCanvasNodes}
-          tabs={['historyCanvas', 'subject', 'canvas']}
+          /* 2026-11-22 用户要求：画布节点底栏的选择面板补齐「公共资产 / 分镜历史」，
+             并带「上传」入口（此前只有 画布历史 / 主体 / 画布 三个） */
+          tabs={['historyCanvas', 'asset', 'subject', 'historyDirector', 'canvas', 'upload']}
           initialTab="historyCanvas"
           onPick={handleMentionPick}
         />
