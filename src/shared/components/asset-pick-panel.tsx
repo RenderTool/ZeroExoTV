@@ -786,7 +786,7 @@ export function AssetPickPanel({
                   type="button"
                   data-asset-panel-tab={key}
                   data-asset-pick-tab={key}
-                  onClick={() => setPanelTab(key)}
+                  onClick={() => { setPanelTab(key); setDetail(null); }}
                   style={{
                     padding: '6px 10px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
                     background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
@@ -902,7 +902,10 @@ export function AssetPickPanel({
                   type="button"
                   data-canvas-media-item={ref.id}
                   onClick={() => pickCanvas(ref)}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; }}
+                  /* 2026-11-22 报障「只有主体在右边有预览，普通条目没反应」：
+                     canvas / 画布历史 行原先只改 hover 底色，从不写 detail → 右侧详情永远是空态。
+                     与资产页签保持一致：hover 即出详情（不承担选中，点击仍是拾取）。 */
+                  onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; setDetail({ type: 'asset', ref }); }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
@@ -948,7 +951,8 @@ export function AssetPickPanel({
                   type="button"
                   data-history-media-item={ref.id}
                   onClick={() => pickCanvas(ref)}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; }}
+                  /* 同上：画布历史 / 分镜历史行 hover 也写 detail，右侧才看得到大图与名称/范围 */
+                  onMouseEnter={(e) => { e.currentTarget.style.background = palette.popHover; setDetail({ type: 'asset', ref }); }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: ASSET_PICK_ROW_HEIGHT,
