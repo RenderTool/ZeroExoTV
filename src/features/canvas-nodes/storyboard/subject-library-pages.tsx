@@ -1454,7 +1454,30 @@ function StateEditPanel({
           data-media-slot
           style={{ width: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}
         >
-          {/* 2026-11-19 用户反馈：状态编辑模式下没有快速换图入口，补一行常驻工具条 */}
+          {/* 2026-11-19 用户反馈：状态编辑模式下没有快速换图入口，补一行工具条；
+              2026-11-22 用户反馈「按钮跑到图片上方很别扭」→ 整条移到下面大图之后。 */}
+          <div
+            data-media-view-trigger
+            onClick={(e) => {
+              // 点大图 = 用统一查看器看详情（不再改变素材本身）
+              if (!slotMedia?.key && viewerItems.length === 0) return;
+              e.stopPropagation();
+              setViewerIndex(0);
+            }}
+            style={{ cursor: viewerItems.length > 0 ? 'zoom-in' : undefined }}
+          >
+            <CardShell theme={theme} style={{ width: '100%', height: 300, position: 'relative' }}>
+              <SubjectMediaThumb
+                storageKey={slotMedia?.key}
+                kind={slotKind}
+                dark={isDark}
+                fill
+                fit="contain"
+                emptyLabel={t('subject.mediaPending', '待补媒体')}
+              />
+              <StateJobMediaOverlay jobKey={jobKey} />
+            </CardShell>
+          </div>
           <div data-media-quick-actions style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <Button
               size="small"
@@ -1481,28 +1504,6 @@ function StateEditPanel({
                 {t('subject.historyHint', '历史图可在下方点选恢复')}
               </span>
             ) : null}
-          </div>
-          <div
-            data-media-view-trigger
-            onClick={(e) => {
-              // 点大图 = 用统一查看器看详情（不再改变素材本身）
-              if (!slotMedia?.key && viewerItems.length === 0) return;
-              e.stopPropagation();
-              setViewerIndex(0);
-            }}
-            style={{ cursor: viewerItems.length > 0 ? 'zoom-in' : undefined }}
-          >
-            <CardShell theme={theme} style={{ width: '100%', height: 300, position: 'relative' }}>
-              <SubjectMediaThumb
-                storageKey={slotMedia?.key}
-                kind={slotKind}
-                dark={isDark}
-                fill
-                fit="contain"
-                emptyLabel={t('subject.mediaPending', '待补媒体')}
-              />
-              <StateJobMediaOverlay jobKey={jobKey} />
-            </CardShell>
           </div>
           {viewerIndex !== null && viewerItems.length > 0 && (
             <MediaLightbox

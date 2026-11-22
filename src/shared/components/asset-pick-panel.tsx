@@ -23,7 +23,7 @@ import { ChevronDown, Film, Image as ImageIcon, Music, Plus, User, Waypoints, X,
 import type { DirectorAssetRef } from '@/entities/director-params.js';
 import type { ProductionItem, ProductionItemImage } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { resolveSubjectCover } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import { nonBaseStates, subjectBaseCoverKeys, SUBJECT_BASE_STATE_ID, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
+import { subjectBaseCoverKeys, SUBJECT_BASE_STATE_ID, type SubjectTree, type SubjectNodeMediaRef } from '@/features/canvas-nodes/storyboard/subject-tree-types.js';
 import { ThumbImage } from '@/features/canvas-tabs/thumb-image.js';
 
 /** 素材面板条目拖拽 MIME：拖到已占用的插槽格 = 就地替换该槽内容（槽号不变） */
@@ -47,10 +47,20 @@ export type AssetPickTab = 'canvas' | 'historyCanvas' | 'historyDirector' | 'ass
 
 /** 2026-11-18 用户口径（第 3 次澄清）：不是把两个类目塞进一页，而是**页签顺序对调**——
  *  分镜语境：主体 → 分镜历史（相邻，Tab 能直接切）→ 画布历史 → 公共资产；
- *  画布语境：画布历史 → 公共资产 → 主体 → 分镜历史。 */
+ *  画布语境：画布历史 → 公共资产 → 主体 → 分镜历史。
+ *  2026-11-22 用户改口：「为什么你的排版顺序每个地方都不一样？用户看的很累」
+ *  → 2026-11-18 的按语境对调作废：页签排列统一走 TAB_ORDER，
+ *    这两组常量只保留「该语境显示哪些页签 / 默认落哪个」的职责。 */
 const DEFAULT_TABS: AssetPickTab[] = ['subject', 'historyDirector', 'historyCanvas', 'asset'];
 /** 画布语境默认页签顺序（画布历史 → 公共资产 → 主体 → 分镜历史 → 画布节点媒体） */
 export const CANVAS_TABS: AssetPickTab[] = ['historyCanvas', 'asset', 'subject', 'historyDirector', 'canvas'];
+
+/**
+ * 全应用唯一的页签排列顺序（2026-11-22 统一；调用方只决定显示哪些，不决定谁在前）。
+ * 动作型页签（上传 / 引导）排最前：统一顺序后「上传」若被排到末尾会被横向滚动挤出可视区
+ * （用户报「上传按钮被你吃了」），所以按「先动作、后内容」定序。
+ */
+const TAB_ORDER: AssetPickTab[] = ['upload', 'guide', 'historyCanvas', 'asset', 'subject', 'historyDirector', 'canvas'];
 
 /**
  * 引导数据候选（2026-11-09）：来自已生成视频产物的 guide，进 `WorkbenchShot.guide` 独立槽，
@@ -230,12 +240,10 @@ export function AssetPickPanel({
   slotLabels = {},
   isDuplicate,
   isKindFull,
-  allowedKinds,
   onPickAsset,
   onPickCanvasMedia,
   historyMedia,
   onPickSubjectImage,
-  onPickSubjectState,
   guideCandidates = [],
   onPickGuide,
   onUploadFiles,
@@ -261,7 +269,14 @@ export function AssetPickPanel({
 
       return true;
     });
-    return list.length > 0 ? list : ['asset' as AssetPickTab];
+    /**
+     * 2026-11-22 用户：「为什么你的排版顺序每个地方都不一样？？用户看的很累」。
+     * 页签顺序原先由各调用方各传各的（同一面板一处是 画布历史/公共资产/主体/分镜历史，
+     * 另一处是 主体/分镜历史/画布历史/公共资产）。这里统一成固定顺序：
+     * 调用方只能决定「显示哪些页签」，不能决定「谁在前」。
+     */
+    const ordered = TAB_ORDER.filter((k) => list.includes(k));
+    return ordered.length > 0 ? ordered : (['asset'] as AssetPickTab[]);
   }, [tabs, onUploadFiles, onPickGuide, historyMedia]);
 
   const [activeIdx, setActiveIdx] = useState(0);
@@ -308,8 +323,6 @@ export function AssetPickPanel({
   }, [panelTab, placement]);
 
   const query = searchQ.trim().toLowerCase();
-  const allowedSet = useMemo(() => (allowedKinds ? new Set(allowedKinds) : null), [allowedKinds]);
-  const kindAllowed = useCallback((kind: DirectorAssetRef['kind']): boolean => !allowedSet || allowedSet.has(kind), [allowedSet]);
 
   const groups = useMemo(() => {
     const pool = query ? candidates.filter((a) => (a.title ?? '').toLowerCase().includes(query)) : candidates;
@@ -386,16 +399,6 @@ export function AssetPickPanel({
     };
   }), [subjects, treeByItemId, t]);
 
-  /**
-   * 只有绑定到当前主体的树才参战（孤儿树/别的项目同 ID 树都不列）。
-   * 例外：调用方只给了树、没给主体条目（老数据/纯树场景）时，树来自当前项目容器，照常列出。
-   */
-  const boundTrees = useMemo(() => {
-    if (subjects.length === 0) return subjectTrees;
-    const set = new Set(treeByItemId.values());
-    return subjectTrees.filter((tr) => set.has(tr));
-  }, [subjects.length, subjectTrees, treeByItemId]);
-
   /** 主体页签：按 kind 分组（角色/场景/道具；无内容不渲染）；组内按相关性排序 */
   const subjectGroups = useMemo(() => {
     const g: Array<{ name: string; items: ProductionItem[] }> = [];
@@ -451,26 +454,11 @@ export function AssetPickPanel({
   }, [focusSubjectId, panelTab, subjRows]);
 
   /**
-   * 主体「状态级媒体」行：主体树 → 状态 → 媒体。数据源是主体树本身，
-   * 与片段插槽分配无关；无媒体的状态同样列出（禁用 + 「无素材」）。
+   * 2026-11-22 用户两次质问「主体状态素材是什么？？？」后整块移除：
+   * 主体页签里每个主体已经能展开看到它的全部状态图（含场景的门口轴/屏风轴/庭院外景），
+   * 这块「兜底分组」只是把它们用另一套数据源又列了一遍，还漏过了 scope 过滤，
+   * 表现为凭空冒出的重复条目。状态图入口只保留主体展开这一处。
    */
-  const stateGroups = useMemo(() => {
-    const out: Array<{ tree: SubjectTree; rows: Array<{ stateId: string; stateName: string; media: SubjectNodeMediaRef | null }> }> = [];
-    for (const tree of boundTrees) {
-      const treeHit = tree.name.toLowerCase().includes(query);
-      const rows = nonBaseStates(tree)
-        .filter((st) => !query || treeHit || (st.state ?? '').toLowerCase().includes(query))
-        .map((st) => ({
-          stateId: st.id,
-          stateName: st.state || t('director.subjectStateFallback', '剧照'),
-          media: (st.media ?? []).find((m) => kindAllowed(m.type === 'audio' || m.type === 'video' ? m.type : 'image')) ?? null,
-        }))
-        .filter((row) => !allowedSet || row.media !== null);
-      if (rows.length > 0) out.push({ tree, rows });
-    }
-    return out;
-  }, [boundTrees, query, t, kindAllowed]);
-
   const toggleSubject = useCallback((id: string) => {
     setExpandedSubjects((prev) => {
       const next = new Set(prev);
@@ -688,7 +676,6 @@ export function AssetPickPanel({
 
   const pickCanvas = onPickCanvasMedia ?? onPickAsset;
   const pickSubjectImage = onPickSubjectImage ?? (() => {});
-  const pickSubjectState = onPickSubjectState ?? (() => {});
 
   /** 引导候选按标题 / guideId 搜索（与资产页签共用搜索框） */
   const filteredGuides = useMemo(() => {
@@ -1258,65 +1245,7 @@ export function AssetPickPanel({
                 </div>
               );
             })}
-            {stateGroups.length > 0 && (
-              <>
-                <div style={{ fontSize: 11, color: palette.sub, padding: '10px 8px 4px' }}>
-                  {t('director.subjectStateAssets', '主体状态素材')}
-                </div>
-                {stateGroups.map(({ tree, rows }) => (
-                  <div key={`ss:${tree.rootId}`}>
-                    <div
-                      data-subject-state-tree={tree.rootId}
-                      style={{ fontSize: 12, color: palette.sub, padding: '6px 8px 2px 12px', opacity: 0.85 }}
-                    >
-                      {tree.name}
-                    </div>
-                    {rows.map(({ stateId, stateName, media }) => {
-                      const ref = media ? subjectStateMediaToRef(tree, stateId, stateName, media) : null;
-                      const inSlot = ref ? slotLabels[ref.id] : undefined;
-                      const Icon = media?.type === 'audio' ? Music : media?.type === 'video' ? Film : ImageIcon;
-                      return (
-                        <button
-                          key={`${tree.rootId}/${stateId}`}
-                          type="button"
-                          disabled={!ref}
-                          data-subject-state-asset={ref ? ref.id : undefined}
-                          data-subject-state-empty={ref ? undefined : `${tree.rootId}/${stateId}`}
-                          onClick={() => { if (ref) pickSubjectState(ref); }}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10, width: '100%', height: 38,
-                            padding: '0 10px 0 40px', border: 'none', borderRadius: 8,
-                            cursor: ref ? 'pointer' : 'default', flexShrink: 0,
-                            background: 'transparent', opacity: ref ? 1 : 0.55,
-                            color: palette.sub, fontSize: 12, textAlign: 'left',
-                          }}
-                        >
-                          {ref ? (
-                            <ThumbImage storageKey={ref.storageKey} width={28} height={28} radius={5} title={ref.title} icon={<Icon size={14} style={{ opacity: 0.6 }} />} />
-                          ) : (
-                            <span style={{ width: 28, height: 28, borderRadius: 5, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                              <Icon size={14} style={{ opacity: 0.45 }} />
-                            </span>
-                          )}
-                          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {tree.name}·{stateName}
-                          </span>
-                          {!ref && (
-                            <span data-subject-state-no-media style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>
-                              {t('director.subjectStateNoMedia', '无素材')}
-                            </span>
-                          )}
-                          {inSlot && (
-                            <span data-asset-panel-inuse style={{ fontSize: 10, color: palette.sub, flexShrink: 0 }}>{inSlot}</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </>
-            )}
-            {subjRows.length === 0 && stateGroups.length === 0 && (
+            {subjRows.length === 0 && (
               <div style={{ padding: 20, fontSize: 13, color: palette.sub, textAlign: 'center' }}>
                 {t('director.subjectEmpty', '主体库暂无条目')}
               </div>
