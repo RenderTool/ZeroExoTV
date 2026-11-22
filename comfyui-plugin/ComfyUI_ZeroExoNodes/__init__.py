@@ -608,6 +608,19 @@ def _format_node_errors(node_errors: dict[str, Any]) -> str:
     return "；".join(parts)[:600]
 
 
+def _format_queue_rejection(data: dict[str, Any]) -> str:
+    """队列拒绝时必须把 node_errors 一起带出。
+
+    ComfyUI 的 400 里 `error` 只是一句 `prompt_outputs_failed_validation`，
+    真正原因（哪个节点、哪个字段、几行）全在 `node_errors`。只报 error 等于没报，
+    用户只能看到一串英文——2026-11-22 用户被这条空详情坑过一次。
+    """
+    error = data.get("error") or data
+    node_errors = data.get("node_errors") or {}
+    detail = _format_node_errors(node_errors) if node_errors else ""
+    return f"ComfyUI 队列拒绝: {error}" + (f"｜{detail}" if detail else "")
+
+
 def _save_last_prompt(job_id: str, prompt_id: str, template: dict[str, Any], params: dict[str, Any]) -> None:
     """落盘本次提交给 ComfyUI 的完整 prompt JSON（刷新/重启后仍可查）。"""
     try:
@@ -853,7 +866,7 @@ async def _post_prompt(job: dict[str, Any], template: dict[str, Any], client_id:
         async with sess.post(url, json=payload) as resp:
             data = await resp.json()
             if resp.status != 200 or not data.get("prompt_id"):
-                raise RuntimeError(f"ComfyUI 队列拒绝: {data.get('error') or data}")
+                raise RuntimeError(_format_queue_rejection(data))
             node_errors = data.get("node_errors") or {}
             if node_errors:
                 raise RuntimeError(f"ComfyUI 工作流校验失败: {_format_node_errors(node_errors)}")
@@ -1052,7 +1065,7 @@ async def submit_job(request):
             async with sess.post(url, json=payload) as resp:
                 data = await resp.json()
                 if resp.status != 200 or not data.get("prompt_id"):
-                    raise RuntimeError(f"ComfyUI 队列拒绝: {data.get('error') or data}")
+                    raise RuntimeError(_format_queue_rejection(data))
                 node_errors = data.get("node_errors") or {}
                 if node_errors:
                     raise RuntimeError(f"ComfyUI 工作流校验失败: {_format_node_errors(node_errors)}")
