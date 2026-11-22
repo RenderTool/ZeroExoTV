@@ -1074,6 +1074,37 @@ export function useAiGeneration({
       const ctlKey = canvasDocNodeKey(placeholderId);
       nodeAbortControllersRef.current.set(ctlKey, ctl);
 
+      /**
+       * 2026-11-22 报障「取消后变成『网络错误 · 本机图像作业已取消』，再点这个节点提示词也没了」：
+       * 取消不是失败。回滚到提交前——占位卡及其连线移除、提示词/模型/参数写回源节点并置 idle、选中态回源。
+       * 一次取消会从两条路进来（SSE 送 cancelled 的 onError、promise .catch 抛「已取消」），
+       * 共用这一份，避免一边回滚一边又写红错卡。
+       */
+      const rollbackCanceledPlaceholder = (): void => {
+        const g = q.getState() as unknown as {
+          nodes: Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
+          edges: Array<{ id: string; source?: unknown; target?: unknown }>;
+        };
+        const ph = g.nodes.find((n) => n.id === placeholderId);
+        const back: Record<string, unknown> = {};
+        for (const key of ['prompt', 'model', 'paramValues', 'generationMode'] as const) {
+          if (ph?.data?.[key] !== undefined) back[key] = ph.data[key];
+        }
+        q.execute(new UpdateNodeDataCommand(event.nodeId, { ...back, status: 'idle' } as Record<string, unknown>));
+        for (const e of g.edges) {
+          const tgt = typeof e.target === 'object' ? (e.target as { nodeId?: string })?.nodeId : e.target;
+          const src = typeof e.source === 'object' ? (e.source as { nodeId?: string })?.nodeId : e.source;
+          if (tgt === placeholderId || src === placeholderId) q.execute(new RemoveEdgeCommand(e.id));
+        }
+        q.execute(new RemoveNodeCommand(placeholderId));
+        try {
+          store.setSelection({ selectedNodeIds: new Set([event.nodeId]), selectedEdgeIds: new Set() });
+        } catch {
+          // 选中态失败不影响回滚本身
+        }
+        nodeAbortControllersRef.current.delete(ctlKey);
+      };
+
       void agentClient.send('generator_generate', inputPayload)
         .then(({ taskId }) => {
           // 订阅 SSE 事件流，等待生成完成
@@ -1085,6 +1116,17 @@ export function useAiGeneration({
               }));
             },
             onError: (error) => {
+              /**
+               * 2026-11-22：取消时后端把任务置 cancelled 并通过 SSE 送 error，
+               * 这条路径绕过了下面的 promise .catch，直接把占位卡写成红错卡
+               * （用户看到的「网络错误 · 本机图像作业已取消」+ 重试）。
+               * 取消一律走回滚，只有真失败才写 error。
+               */
+              const cancelledByUser = ctl.signal.aborted || /(已取消|cancelled|canceled|aborted)/i.test(String(error ?? ''));
+              if (cancelledByUser) {
+                rollbackCanceledPlaceholder();
+                return;
+              }
               q.execute(new UpdateNodeDataCommand(placeholderId, {
                 status: 'error',
                 error,
@@ -1177,28 +1219,7 @@ export function useAiGeneration({
            */
           const cancelled = ctl.signal.aborted || /(已取消|cancelled|canceled|aborted)/i.test(errMsg);
           if (cancelled) {
-            const g = q.getState() as unknown as {
-              nodes: Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
-              edges: Array<{ id: string; source?: unknown; target?: unknown }>;
-            };
-            const ph = g.nodes.find((n) => n.id === placeholderId);
-            const back: Record<string, unknown> = {};
-            for (const key of ['prompt', 'model', 'paramValues', 'generationMode'] as const) {
-              if (ph?.data?.[key] !== undefined) back[key] = ph.data[key];
-            }
-            q.execute(new UpdateNodeDataCommand(event.nodeId, { ...back, status: 'idle' } as Record<string, unknown>));
-            for (const e of g.edges) {
-              const tgt = typeof e.target === 'object' ? (e.target as { nodeId?: string })?.nodeId : e.target;
-              const src = typeof e.source === 'object' ? (e.source as { nodeId?: string })?.nodeId : e.source;
-              if (tgt === placeholderId || src === placeholderId) q.execute(new RemoveEdgeCommand(e.id));
-            }
-            q.execute(new RemoveNodeCommand(placeholderId));
-            try {
-              store.setSelection({ selectedNodeIds: new Set([event.nodeId]), selectedEdgeIds: new Set() });
-            } catch {
-              // 选中态失败不影响回滚
-            }
-            nodeAbortControllersRef.current.delete(ctlKey);
+            rollbackCanceledPlaceholder();
             return;
           }
           console.error('提交生成任务失败:', err);

@@ -129,6 +129,14 @@ function visibleNodePrompt(data: Record<string, unknown> | null | undefined, nod
   if (status === 'loading' || status === 'generating') return raw;
   if (data?.generationId) return raw;
   if (nodeType && nodeType !== 'image' && nodeType !== 'video' && nodeType !== 'audio') return raw;
+  /**
+   * 2026-11-22 报障「刷新后提示词还是没了」：
+   * 生成节点的 title 自动取提示词摘要，短提示词（「变成绿头发」）与 title 一字不差，
+   * 于是被下面「=== title 就当素材标题」的规则清空成空串。
+   * 只要节点带生成参数痕迹（steps/size/quality）就是真生成过的节点，prompt 必须原样返回。
+   */
+  const pv = (data?.paramValues ?? {}) as Record<string, unknown>;
+  if ('steps' in pv || 'size' in pv || 'quality' in pv || 'megapixels' in pv) return raw;
   if (raw === String(data?.storageKey ?? '') || raw === String(data?.title ?? '')) return '';
   if (raw.replace(/[^0-9a-f]/gi, '').length >= 24) return '';
   return raw;

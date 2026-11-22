@@ -31,8 +31,9 @@ export const DockFooterBar = memo(function DockFooterBar({
   isRunning,
   hasText,
   textLength = 0,
-  // interruptible 仍由外部传入（部分链路只读），2026-11-22 起运行中不再渲染停止按钮，
-  // 底栏只留只读状态；取消统一走节点 footbar。
+  // 运行中是否可中断：本机作业（zeroexo:/qwen/krea2/moss/文本）为 true → 底栏渲染真正的「取消」按钮；
+  // 不可中断的远端作业才退化为只读「生成中」。
+  interruptible = true,
   onAction,
   onConfigChange,
   onParamValuesChange,
@@ -143,16 +144,36 @@ export const DockFooterBar = memo(function DockFooterBar({
         </span>
       </div>
       {trailing}
-      {/* 2026-11-22 统一生成 footbar：运行中底栏只留一条只读状态，不再画第二颗「停止」。
-          取消入口只有节点底部那一条 footbar（用户报障「这么多取消按钮」）。 */}
+      {/* 2026-11-22 用户明确：底栏这颗「生成中」必须能点取消，不许降级成纯文本。
+          运行中且可中断 → 真的「取消」按钮（点它就走 onAction → onStop）；
+          只在链路本身不可中断（远端非本机作业）时才是只读状态。 */}
       {isRunning ? (
-        <span
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 34, padding: '0 10px', borderRadius: 8, flexShrink: 0, background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`, color: theme.toolbar.textMuted ?? '', fontSize: 11, fontWeight: 500, userSelect: 'none' }}
-          title={t('nodeDock.cancelOnNode', '生成中：取消在节点底部状态条上')}
-        >
-          <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}><LoaderCircle size={13} /></span>
-          {t('nodeDock.generating', '生成中')}
-        </span>
+        interruptible ? (
+          <button
+            type="button"
+            data-dock-cancel
+            onClick={onAction}
+            title={t('prompt.stop', '取消生成')}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, flexShrink: 0,
+              height: 34, padding: '0 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+              background: isDark ? 'rgba(239,68,68,0.16)' : 'rgba(239,68,68,0.10)',
+              border: `1px solid ${isDark ? 'rgba(239,68,68,0.45)' : 'rgba(239,68,68,0.35)'}`,
+              color: isDark ? '#fca5a5' : '#b91c1c', fontSize: 12, fontWeight: 500,
+            }}
+          >
+            <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}><LoaderCircle size={13} /></span>
+            {t('common.cancel', '取消')}
+          </button>
+        ) : (
+          <span
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 34, padding: '0 10px', borderRadius: 8, flexShrink: 0, background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`, color: theme.toolbar.textMuted ?? '', fontSize: 11, fontWeight: 500, userSelect: 'none' }}
+            title={t('nodeDock.cancelOnNode', '该作业不可中断')}
+          >
+            <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}><LoaderCircle size={13} /></span>
+            {t('nodeDock.generating', '生成中')}
+          </span>
+        )
       ) : (
         <button type="button" onClick={onAction} disabled={actionDisabled} aria-label={t('prompt.generate', '生成')} title={actionTitle}
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0, minWidth: 34, height: 34, padding: 0, border: 'none', borderRadius: 8, background: actionDisabled ? (isDark ? '#262626' : '#e5e5e5') : theme.toolbar.accent, color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff', cursor: actionDisabled ? 'not-allowed' : 'pointer', opacity: actionDisabled ? 0.4 : 1, transition: 'opacity 140ms ease', fontFamily: 'inherit' }}>
