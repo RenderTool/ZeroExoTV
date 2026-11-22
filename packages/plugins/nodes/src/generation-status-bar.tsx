@@ -83,6 +83,7 @@ export function GenerationStatusBar({
       {/* 确定性进度：贴在 footbar 顶沿的一条细线，不遮挡状态文字 */}
       {pct !== null ? (
         <div
+          data-generating-progress
           style={{
             position: 'absolute',
             left: 0,
@@ -94,7 +95,7 @@ export function GenerationStatusBar({
           }}
         >
           <div
-            data-generation-status-progress
+            data-generating-progress-bar
             style={{
               height: '100%',
               width: `${pct}%`,
@@ -117,6 +118,7 @@ export function GenerationStatusBar({
       />
       <span
         data-generation-status-text
+        data-generating-progress-text
         title={text}
         style={{
           flex: 1,
@@ -139,6 +141,7 @@ export function GenerationStatusBar({
         <button
           type="button"
           data-generation-status-action={action.kind}
+          data-generating-cancel={action.kind === 'cancel' ? '' : undefined}
           onClick={(e) => {
             e.stopPropagation();
             action.onClick();

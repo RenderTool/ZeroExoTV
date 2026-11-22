@@ -481,51 +481,10 @@ export function AIStateView({
             </span>
           </>
         ))}
-        {taskLabel ? (
-          <span
-            style={{
-              position: 'relative',
-              fontSize: 10,
-              color: 'rgba(255,255,255,0.85)',
-              maxWidth: '90%',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={taskLabel}
-          >
-            {taskLabel}
-          </span>
-        ) : null}
-        {progress ? (
-          <div
-            data-generating-progress
-            style={previewImage
-              ? {
-                  // 有采样帧时:进度条贴底,带渐变暗底,不遮挡画面主体
-                  position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3,
-                  display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center',
-                  padding: '14px 0 8px',
-                  background: 'linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0))',
-                }
-              : { position: 'relative', width: '80%', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}
-          >
-            <div style={{ width: previewImage ? '70%' : '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
-              <div
-                data-generating-progress-bar
-                style={{ height: '100%', width: `${progressPct}%`, background: accentColor, transition: 'width 0.2s linear' }}
-              />
-            </div>
-            <span
-              data-generating-progress-text
-              style={{ fontSize: 10, color: 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
-            >
-              {progress.step != null && progress.totalSteps != null
-                ? t('nodes.sampling', { defaultValue: '采样 {{step}} / {{total}}', step: progress.step, total: progress.totalSteps })
-                : (progress.phaseLabel ?? t('nodes.generating'))}
-            </span>
-          </div>
-        ) : null}
+        {/* 2026-11-22 用户要求「不要出现两个模型文本」：
+            模型名 / 进度 / 阶段文案统一只由底部 footbar 显示一次。
+            节点中间不再重复画 taskLabel 与进度条（也就不再和 footbar 抢底部位置）。 */}
+
         {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
         {/* 2026-11-22 统一生成 footbar：状态 / 进度 / 唯一动作（取消）全在这一条上。
             节点中部不再放取消按钮，底栏也不再放第二个停止入口（用户报障「这么多取消按钮」）。 */}
