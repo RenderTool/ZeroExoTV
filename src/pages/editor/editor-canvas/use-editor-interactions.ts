@@ -1288,6 +1288,15 @@ export function useEditorInteractions({
       if (!store || !q) return;
       const node = store.getGraph().nodes.find((n: any) => n.id === event.nodeId);
       if (!node || node._deleted) return;
+      // 已有素材/结果内容的节点禁止按"参数比例"改尺寸：
+      // 那样会把 736×1308 的竖图塞进 320×240 的 4:3 框，图被 contain 居中后上下左右大片留白，
+      // 用户看到的就是"点开节点后尺寸变得莫名其妙"。比例预览只服务空占位节点。
+      const d = (node.data ?? {}) as Record<string, unknown>;
+      const hasMedia = Boolean(
+        d.content || d.storageKey || d.localJob
+        || Number(d.naturalWidth) > 0 || Number(d.naturalHeight) > 0,
+      );
+      if (hasMedia) return;
       const ratio = aspectRatioOf(event.aspect, event.size);
       if (!ratio) return;
       const longSide = 320;
