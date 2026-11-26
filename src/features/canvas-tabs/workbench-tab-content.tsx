@@ -340,6 +340,10 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   const [runPickerOpen, setRunPickerOpen] = useState(false);
   const [runPickerSelection, setRunPickerSelection] = useState<ReadonlySet<string>>(new Set());
   const dirtyRef = useRef(false);
+  /** 防抖定时器：连续编辑（拖时长滑块）只在停手后落一次盘 */
+  const persistTimerRef = useRef<number | null>(null);
+  /** 导演台写盘串行队列：并发写会拿同一个旧版本号互撞（被误判成「外部修改」） */
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const shotsRef = useRef<WorkbenchShot[]>([]);
   /** 载入/上次写回时的容器版本：写回前校验，防止旧内存覆盖 MCP 的外部修改 */
   const containerVersionRef = useRef(0);
@@ -663,6 +667,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   }, [playSequenceFrom]);
   useEffect(() => () => {
     if (sequenceTimer.current !== null) window.clearTimeout(sequenceTimer.current);
+    // 卸载后还留着待触发的写盘定时器 → 页面已切走、shots 已清空，绝不能再写盘
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
   }, []);
   const episodeOptions = useMemo(() => episodeKeys.map((key) => {
     const count = episodeGroups[key]?.length ?? 0;
@@ -678,57 +687,91 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     if (first) setActiveShotId(first.id);
   }, [projectId, setWorkbenchActiveEpisode, episodeGroups]);
 
+  /**
+   * 防抖调度器：同一个编辑流只排一个定时器。
+   * 2026-11-27 报障「拖分镜时长滑块时一直动态读写、一直提示外部修改」：
+   * 旧 markDirty 每次调用都新排一个 setTimeout 且不清旧的 —— 拖动一次滑块步进十几次，
+   * 就排了十几个 600ms 定时器，同刻全部触发：第一个写盘把版本 +1，
+   * 其余仍拿着旧 expectedVersion → VERSION_CONFLICT → 被当成「外部修改」→ 整页重载。
+   */
+  const schedulePersist = useCallback(() => {
+    if (persistTimerRef.current !== null) window.clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = window.setTimeout(() => {
+      persistTimerRef.current = null;
+      persistRef.current();
+    }, 600);
+  }, []);
+  const persistRef = useRef<() => void>(() => {});
+
   // 编辑防抖写回容器（shots + 单轨镜像 + 总时长；版本 +1 由写 API 保证）
   const persist = useCallback(() => {
     const pid = projectId;
-    if (!pid || !dirtyRef.current || !isActive || loadState !== 'ready') return;
-    dirtyRef.current = false;
-    const current = shotsRef.current;
+    if (!pid || !isActive || loadState !== 'ready') return;
+    if (!dirtyRef.current) return;
     // 切走页签/卸载时 shots 会先被清空；绝不能用空内存覆盖项目里的片段
-    if (current.length === 0) return;
-    updateWorkbenchContainer(pid, {
-      shots: current,
-      tracks: [buildMainTrack(current)],
-      totalDuration: current.reduce((sum, s) => sum + s.duration, 0),
-      sharedParams: sharedParamsRef.current,
-    }, undefined, { expectedVersion: containerVersionRef.current })
-      .then((next) => { containerVersionRef.current = next.version; })
+    if (shotsRef.current.length === 0) return;
+    dirtyRef.current = false;
+    // 排进同一条写链：写盘前不取版本快照，进入队列时才读 containerVersionRef，
+    // 前一次写完已回填，所以排队中的写不会拿旧版本号互撞。
+    const task = writeChainRef.current.then(async () => {
+      const s = shotsRef.current;
+      if (s.length === 0) return;
+      const next = await updateWorkbenchContainer(pid, {
+        shots: s,
+        tracks: [buildMainTrack(s)],
+        totalDuration: s.reduce((sum, x) => sum + x.duration, 0),
+        sharedParams: sharedParamsRef.current,
+      }, undefined, { expectedVersion: containerVersionRef.current });
+      containerVersionRef.current = next.version;
+    });
+    writeChainRef.current = task.catch(() => undefined);
+    void task
       .catch((err: unknown) => {
         console.error('[WorkbenchTabContent] write container failed:', err);
         if (err instanceof Error && err.message.includes('VERSION_CONFLICT')) {
           message.warning('导演台已被外部修改，正在重新载入最新版本');
           setReloadToken((v) => v + 1);
         }
+      })
+      .finally(() => {
+        // 写盘期间又有编辑：补一次尾写（仍然走防抖，不即时连发）
+        if (dirtyRef.current) schedulePersist();
       });
-  }, [projectId, isActive, loadState]);
+  }, [projectId, isActive, loadState, schedulePersist]);
+  persistRef.current = persist;
 
   /** 提交生成任务前立即落盘：MCP 执行时读容器文件，不读网页内存 */
   const persistNow = useCallback(async (): Promise<void> => {
     const pid = projectId;
     if (!pid || !isActive || loadState !== 'ready') return;
     dirtyRef.current = false;
-    const current = shotsRef.current;
-    if (current.length === 0) return;
-    await updateWorkbenchContainer(pid, {
-      shots: current,
-      tracks: [buildMainTrack(current)],
-      totalDuration: current.reduce((sum, s) => sum + s.duration, 0),
-      sharedParams: sharedParamsRef.current,
-    }, undefined, { expectedVersion: containerVersionRef.current })
-      .then((next) => { containerVersionRef.current = next.version; })
-      .catch((err: unknown) => {
-        console.error('[WorkbenchTabContent] persistNow failed:', err);
-        if (err instanceof Error && err.message.includes('VERSION_CONFLICT')) {
-          message.warning('导演台已被外部修改，正在重新载入最新版本');
-          setReloadToken((v) => v + 1);
-        }
-      });
+    if (shotsRef.current.length === 0) return;
+    // 走同一条写链：与防抖写串行，避免两条写同时拿旧版本号
+    const task = writeChainRef.current.then(async () => {
+      const s = shotsRef.current;
+      if (s.length === 0) return;
+      const next = await updateWorkbenchContainer(pid, {
+        shots: s,
+        tracks: [buildMainTrack(s)],
+        totalDuration: s.reduce((sum, x) => sum + x.duration, 0),
+        sharedParams: sharedParamsRef.current,
+      }, undefined, { expectedVersion: containerVersionRef.current });
+      containerVersionRef.current = next.version;
+    });
+    writeChainRef.current = task.catch(() => undefined);
+    await task.catch((err: unknown) => {
+      console.error('[WorkbenchTabContent] persistNow failed:', err);
+      if (err instanceof Error && err.message.includes('VERSION_CONFLICT')) {
+        message.warning('导演台已被外部修改，正在重新载入最新版本');
+        setReloadToken((v) => v + 1);
+      }
+    });
   }, [projectId, isActive, loadState]);
 
   const markDirty = useCallback(() => {
     dirtyRef.current = true;
-    window.setTimeout(persist, 600);
-  }, [persist]);
+    schedulePersist();
+  }, [schedulePersist]);
 
   const updateShot = useCallback(
     (shotId: string, patch: Partial<WorkbenchShot>) => {
