@@ -221,7 +221,7 @@ export function resolveClipStatus(
 }
 
 /** WorkbenchShot → 时间轴 clip（与 workbench-multitrack.tsx byTrack 的转换逐项对齐，同一映射不两套） */
-function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null }, failedIds?: ReadonlySet<string>): TimelineClipData {
+export function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null }, failedIds?: ReadonlySet<string>): TimelineClipData {
   const activeInRun = !!run
     && ['submitting', 'queued', 'running'].includes(run.phase)
     && run.segmentShotIds.includes(s.id);
@@ -240,17 +240,16 @@ function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string>
     duration: s.duration,
     // 重跑已完成片段时，旧成片仍然在 media 里；运行中的这一段必须优先显示进度，
     // 不能被 “有视频 = done” 覆盖成完成。
-    // 2026-11-27：段自身 status=generating 就是后端任务的真实事实（不止本页提交的批次），
-    // 必须压过旧成片 —— 否则「在跑」和「跑完了」在轨道上一模一样，用户根本看不出哪段在生成。
+    // 2026-11-27：只认「有真实活跃批次覆盖这一段」（activeInRun / pendingRunIds），
+    // 不认段自身持久化的 status —— 旧数据里 status=generating 会残留（已有成片却永远
+    // 卡在 generating），拿它当生成中会让整条轨道假亮，比看不到进度还糟。
     status: failedIds?.has(s.id) && !activeInRun
       ? 'failed'
       : activeInRun
         ? resolveClipStatus(s.status, run, s.id)
-        : s.status === 'generating'
-          ? 'generating'
-          : s.clipState === 'completed' && s.media?.storageKey
-            ? 'done'
-            : resolveClipStatus(s.status, run, s.id),
+        : s.clipState === 'completed' && s.media?.storageKey
+          ? 'done'
+          : resolveClipStatus(s.status, run, s.id),
     // 生成完成段的缩略：会话内 objectURL（主线程截帧产物）优先，回落持久化 firstFrameKey
     thumbnailUrl: firstFrameUrls?.[s.id] ?? s.firstFrameKey,
     videoKey: s.clipState === 'completed' && s.media?.storageKey ? s.media.storageKey : undefined,

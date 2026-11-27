@@ -126,7 +126,7 @@ vi.mock('./director-prompt-panel.jsx', () => ({
 
 import { useCanvasTabStore } from './canvas-tab-store';
 import { useViewPrefsStore } from '@/shared/view-prefs';
-import { WorkbenchTabContent, resolveClipStatus } from './workbench-tab-content';
+import { WorkbenchTabContent, resolveClipStatus, toTimelineClip } from './workbench-tab-content';
 import { WorkbenchMultiTrack } from '@/features/canvas-nodes/storyboard/workbench-multitrack';
 import { TimelineClip } from '@/features/canvas-nodes/storyboard/timeline-clip';
 import { pickDirectorCardWidth, directorCardHeight, DIRECTOR_RAIL_HEIGHT, DIRECTOR_ARROW_SIZE, directorRailTone, directorBadgeTone } from '@/features/canvas-nodes/storyboard/timeline-constants';
@@ -1075,6 +1075,23 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
     expect(resolveClipStatus('generating', { phase: 'running', segmentShotIds: ['a'], currentSegment: 1 }, 'c')).toBe('idle');
     // 已取消：运行取消且本段未完成
     expect(resolveClipStatus('generating', { phase: 'canceled', segmentShotIds: ['a'], currentSegment: null }, 'a')).toBe('cancelled');
+  });
+
+  it('C-26 段实体残留 generating + 已有成片 + 无活跃批次 → 必须按「完成」渲染，不得假亮生成中', () => {
+    const shot = {
+      id: 's1', number: 1, description: '', shotType: '', duration: 15,
+      imagePrompt: '', status: 'generating', clipState: 'completed',
+      media: { storageKey: 'v-s1', trimStart: 0 },
+    } as never;
+    // 旧数据残留（本项目第 5~9 段就是这种）：有老成片却卡在 generating，且本页没有批次覆盖它
+    expect(toTimelineClip(shot, undefined, undefined).status).toBe('done');
+    // 有活跃批次覆盖本段时，才是真的在生成（currentSegment 为 1-based）
+    const running = { phase: 'running', segmentShotIds: ['s1'], currentSegment: 1 };
+    expect(toTimelineClip(shot, undefined, running).status).toBe('generating');
+    // 提交窗口期（submitting）显示排队，不显示完成
+    expect(toTimelineClip(shot, undefined, { ...running, phase: 'submitting' }).status).toBe('queued');
+    // 本批失败时红标压过旧成片
+    expect(toTimelineClip(shot, undefined, undefined, new Set(['s1'])).status).toBe('failed');
   });
 
   it('C-25 运行已终止（失败/完成）：残留「生成中」必须回退成「未生成」', () => {
