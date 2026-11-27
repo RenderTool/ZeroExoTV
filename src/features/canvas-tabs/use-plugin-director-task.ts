@@ -124,9 +124,20 @@ function pickActiveTask(tasks: PluginTask[]): PluginTask | null {
     if (!at) return true;
     return now - at <= (t.state === 'running' ? STALE_RUNNING_MS : STALE_QUEUED_MS);
   };
-  const running = tasks.filter((t) => t.state === 'running' && fresh(t)).sort((a, b) => score(b) - score(a));
+  /**
+   * 2026-11-27 用户报障「生成完成后再次发起的任务看不到进度和预览」：
+   * 上一批已经出完片的批次，插件侧可能永远停在 running（回调丢了/进程重启），
+   * 它会一直排在 running 队首，4 秒一次的接管轮询就把本页刚提交的新批次抢掉 ——
+   * 页面回到全「完成」，新任务的进度与预览彻底不可见。
+   * 段全 success 的任务一律不算活跃（它就是「已完成」），不允许再被接管。
+   */
+  const allSegsSuccess = (t: PluginTask) => {
+    const segs = t.segments ?? [];
+    return segs.length > 0 && segs.every((x) => x.state === 'success');
+  };
+  const running = tasks.filter((t) => t.state === 'running' && fresh(t) && !allSegsSuccess(t)).sort((a, b) => score(b) - score(a));
   if (running.length > 0) return running[0]!;
-  const queued = tasks.filter((t) => t.state === 'queued' && fresh(t)).sort((a, b) => score(b) - score(a));
+  const queued = tasks.filter((t) => t.state === 'queued' && fresh(t) && !allSegsSuccess(t)).sort((a, b) => score(b) - score(a));
   return queued[0] ?? null;
 }
 
@@ -371,7 +382,13 @@ export function usePluginDirectorTask(args: {
       error: stateKey === 'error' || stateKey === 'interrupted'
         ? (task.error ?? (staleActive ? OFFLINE_MESSAGE : '任务失败')) : null,
       canceledKept: stateKey === 'cancelled' ? (task.doneCount ?? segs.filter((x) => x.state === 'success').length) : null,
-      segmentShotIds: segs.map((x) => x.shotId).filter((x): x is string => Boolean(x)),
+      // 2026-11-27 报障「重跑看不到进度」：插件刚创建任务时 segments 还是空数组，
+      // 若直接用它覆盖 segmentShotIds，本页刚提交的段集合会被清空 → 卡片立刻回落到旧成片「完成」。
+      // 段清单为空时保留提交时的集合，等插件回传段后再对齐。
+      segmentShotIds: (() => {
+        const fromTask = segs.map((x) => x.shotId).filter((x): x is string => Boolean(x));
+        return fromTask.length > 0 ? fromTask : s.segmentShotIds;
+      })(),
       startedAt: Date.parse(task.createdAt ?? '') || Date.now(),
       preview: (() => {
         if (!previewUrl) return s.preview;
@@ -461,6 +478,14 @@ export function usePluginDirectorTask(args: {
     if (!projectId) return;
     const timer = window.setInterval(() => {
       if (pollRef.current !== null) return; // 自己正在轮询，不抢
+      // 本页正在跟踪一个新鲜活跃任务（排队/运行）时，绝不让别的批次接管：
+      // 否则重跑新批次会被上一条卡死的 running 任务抢回，进度与预览全部不可见。
+      const mine = taskRef.current;
+      if (mine && (mine.state === 'queued' || mine.state === 'running')) {
+        const at = Date.parse(mine.updatedAt ?? mine.createdAt ?? '') || Date.now();
+        const mineFresh = Date.now() - at <= (mine.state === 'running' ? STALE_RUNNING_MS : STALE_QUEUED_MS);
+        if (mineFresh) return;
+      }
       void listPluginTasks(projectId).then((tasks) => {
         const active = pickActiveTask(tasks);
         if (!active || active.taskId === taskRef.current?.taskId) return;

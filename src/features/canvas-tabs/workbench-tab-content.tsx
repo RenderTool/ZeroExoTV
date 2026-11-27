@@ -339,6 +339,13 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   /** 片段选择面板（2026-11-07 统一生成入口：点"生成"弹出，默认勾选当前段，可全选/按需勾选） */
   const [runPickerOpen, setRunPickerOpen] = useState(false);
   const [runPickerSelection, setRunPickerSelection] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * 本页刚提交的运行批次（本地先行）。
+   * 2026-11-27 报障「重新跑任务一直显示完成」：startRun 里先 await 落盘（写链可能排队），
+   * 这段窗口期 comfyRun 仍是旧终态 → 已被成片的段按「有视频=完成」渲染，用户看不到任何运行反馈。
+   * 本地选中集合在提交瞬间压住旧成片，等 comfyRun 真进入 running 或终态后再让位。
+   */
+  const [pendingRunIds, setPendingRunIds] = useState<ReadonlySet<string>>(new Set());
   const dirtyRef = useRef(false);
   /** 防抖定时器：连续编辑（拖时长滑块）只在停手后落一次盘 */
   const persistTimerRef = useRef<number | null>(null);
@@ -1333,6 +1340,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       }
       // 整批锁定：这些段在批次结束前不允许从抽屉替换
       setLockedShotIds(selectedIds);
+      // 本地先行：提交窗口期（落盘/补传参考图）就要看到运行态，不能等 comfyRun 起来
+      setPendingRunIds(new Set(selectedIds));
       // 新一轮运行恢复自动跟随；用户运行中手点片段会关闭跟随
       runAutoFollowRef.current = true;
       setRunAutoFollow(true);
@@ -1347,6 +1356,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         }), shotsRef.current, subjects, subjectTreesLoaded ? subjectTrees : undefined);
       } catch (err) {
         setLockedShotIds([]);
+        setPendingRunIds(new Set());
         message.error(err instanceof Error ? err.message : String(err));
         return;
       }
@@ -1356,7 +1366,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         episode: `${projectId ?? 'workbench'}-E01`,
         beforeSubmit: persistNow,
         payload,
-      });
+      }).then((ok) => { if (!ok) setPendingRunIds(new Set()); });
       if (trackMode === 'batch') exitBatchMode();
     },
     [comfyRun, projectId, trackMode, exitBatchMode, message, t, updateShot, persistNow],
@@ -1398,6 +1408,20 @@ export function WorkbenchTabContent(): React.ReactElement | null {
 
   useEffect(() => {
     if (['success', 'error', 'canceled', 'idle'].includes(comfyRun.phase)) clearLockedShotIds();
+  }, [comfyRun.phase]);
+
+  // 本地先行运行态让位：只有在 comfyRun 真实进入过活跃态之后再收尾，
+  // 否则提交瞬间 phase 仍是上一轮终态，会立刻把刚点下的运行态清掉。
+  const runWentActiveRef = useRef(false);
+  useEffect(() => {
+    if (['submitting', 'queued', 'running'].includes(comfyRun.phase)) {
+      runWentActiveRef.current = true;
+      return;
+    }
+    if (runWentActiveRef.current) {
+      runWentActiveRef.current = false;
+      setPendingRunIds(new Set());
+    }
   }, [comfyRun.phase]);
 
   // 2026-11-05 自愈对账（workbench-stale-generating）：上次旧包/异常退出把段留在 generating，
@@ -1559,14 +1583,31 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   // 活动轨渲染源（根因修复）：WorkbenchMultiTrack 对活动轨取 timeline.shots——
   // 必须与 tracks/data 由同一份实体 shots 派生，否则活动轨渲染 0 个片段
   // 2026-11-05 六态徽标：透传 comfyRun 运行态（排队/已取消派生 + 运行中未轮到=排队）
+  // 2026-11-27：本页刚提交、comfyRun 尚未进入活跃态时，用 pendingRunIds 顶住旧成片，避免「点运行还全是完成」
+  const runView = useMemo(
+    () => {
+      const active = ['submitting', 'queued', 'running'].includes(comfyRun.phase);
+      if (active) {
+        return {
+          phase: comfyRun.phase,
+          segmentShotIds: comfyRun.segmentShotIds,
+          currentSegment: comfyRun.currentSegment,
+          previewSegmentIndex: comfyRun.preview?.segmentIndex ?? null,
+        };
+      }
+      if (pendingRunIds.size === 0) return undefined;
+      return {
+        phase: 'submitting',
+        segmentShotIds: [...pendingRunIds],
+        currentSegment: null,
+        previewSegmentIndex: null,
+      };
+    },
+    [comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment, comfyRun.preview?.segmentIndex, pendingRunIds],
+  );
   const timelineClips = useMemo<TimelineClipData[]>(
-    () => visibleShots.map((s) => toTimelineClip(s, firstFrameUrls, {
-      phase: comfyRun.phase,
-      segmentShotIds: comfyRun.segmentShotIds,
-      currentSegment: comfyRun.currentSegment,
-      previewSegmentIndex: comfyRun.preview?.segmentIndex ?? null,
-    })),
-    [visibleShots, firstFrameUrls, comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment, comfyRun.preview?.segmentIndex],
+    () => visibleShots.map((s) => toTimelineClip(s, firstFrameUrls, runView)),
+    [visibleShots, firstFrameUrls, runView],
   );
 
   // 切项目只清本地运行态，绝不取消上一个项目的云端作业：项目之间是并发排队，
