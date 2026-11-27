@@ -1718,11 +1718,17 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    *    未运行/失败/已中断一律不把旧成片 key 交给播放器（否则显示上一条成片 + 假进度）。
    * 2) /ws 实时帧带 1 基段号，必须映射回 shotId 且等于当前选中的片段才允许显示；
    *    否则用户点选未运行片段时，右侧会错误盖着正在生成的那一帧。
-   * 2026-11-27 追加：段 status=generating 但本页 run 已丢失（刷新/任务由 MCP 或另一页提交）时，
-   * 也必须停掉旧成片播放并显示生成中 —— 这是「看不到最新生成预览」的直接原因：
-   * 预览区一直循环播上一条成片，实时帧永远盖不上来。
    */
-  const rerunningSelected = selectedShot.status === 'generating';
+  /**
+   * 2026-11-27：只认「本次批次真的覆盖了当前段」。
+   * 不能用 selectedShot.status === 'generating' —— 旧数据里段实体残留 generating（本项目第 5~9 段
+   * 有老成片却卡在 generating），拿它判重跑会把已完成的段永久藏进「生成中」占位，比不显示还糟。
+   */
+  const selectedInRun = !!runView
+    && ['submitting', 'queued', 'running'].includes(runView.phase)
+    && runView.segmentShotIds.includes(selectedShot.id);
+  /** 当前段正在本次运行中重跑：旧成片必须让位给进度/实时帧 */
+  const rerunningSelected = selectedInRun;
   const completedVideoKey = sequenceVideoKey ?? (!rerunningSelected
     ? shotCoverKey(selectedShot)
     : undefined);
@@ -1734,10 +1740,10 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     ? comfyRun.segmentShotIds[previewSegment - 1]
     : undefined;
   /** 新一次运行期间，旧缓存版本还挂在 selectedShot 上——不能拿旧视频顶替实时预览。 */
-  const directorRunning = comfyRun.phase === 'running' || comfyRun.phase === 'queued';
-  /** 2026-11-19 修复：只有「当前查看的片段确实在本次运行序列里」才算它生成中，
-      不能因为别的片段在跑就把选中镜头的预览区标成「生成中」。 */
-  const selectedInRun = directorRunning && comfyRun.segmentShotIds.includes(selectedShot.id);
+  // 2026-11-27：提交窗口期（submitting / 本地 pendingRunIds）也算在跑，
+  // 否则重跑已完成段时会先播几秒旧成片，用户以为「点了没反应」。
+  const directorRunning = ['submitting', 'queued', 'running'].includes(comfyRun.phase)
+    || (runView?.phase === 'submitting' && (runView?.segmentShotIds.length ?? 0) > 0);
   const canShowLiveFrame = (directorRunning || !completedVideoKey)
     && !!(previewFrame?.image || previewFrame?.video)
     && !!selectedShot
@@ -1973,11 +1979,9 @@ export function WorkbenchTabContent(): React.ReactElement | null {
                   }
                 : null,
             progressOnly:
-              selectedShot.status === 'generating' &&
-              (comfyRun.phase === 'queued' || comfyRun.phase === 'running') &&
+              selectedInRun &&
               !comfyRun.preview?.image &&
-              !comfyRun.preview?.video &&
-              !comfyRun.livePreviewSupported,
+              !comfyRun.preview?.video,
             /* 2026-11-04 参数合并：预览区只读文字标签（公共参数，随比例/系数实时更新），
                格式「16:9 · 1512×840」；裸控件已收进导轨「参数」浮层面板 */
             paramsLabel: (() => {
