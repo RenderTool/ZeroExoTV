@@ -547,6 +547,25 @@ export function usePluginDirectorTask(args: {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setState((s) => ({ ...s, phase: 'error', error: message }));
+      /**
+       * 2026-11-27 用户报障「看不到进度、一直显示完成」：
+       * 提交失败原来只有一条几秒就消失的 toast，任务中心里根本没有这条记录 ——
+       * 用户没有任何地方能回看「这次为什么没跑」。
+       * 失败也必须落一条任务中心记录，并带上原因。
+       */
+      try {
+        const queue = useTaskQueueStore.getState();
+        const taskId = runArgs.payload.clientJobId;
+        queue.start({
+          id: taskId,
+          kind: 'director',
+          title: runArgs.payload.segments.length > 0
+            ? `导演台出片 · ${runArgs.payload.segments.length} 段`
+            : '导演台出片',
+          phase: '提交中',
+        });
+        queue.finish(taskId, 'error', message);
+      } catch { /* 任务中心不可用不阻断错误上报 */ }
       cbRef.current.onNotice('error', `提交插件任务失败：${message}`);
       return false;
     }

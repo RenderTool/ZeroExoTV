@@ -399,6 +399,30 @@ export const TimelineClip = memo(function TimelineClip({
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1 }}
               />
             )}
+            {/* 2026-11-27 用户口径：生成中必须一眼可辨。
+                重跑时旧成片的缩略图还挂在卡片上，光靠角标分不清「这次在跑」和「历史片段」——
+                生成中直接压一层蒙版盖住旧帧，只留状态。 */}
+            {clip.data.status === 'generating' && (
+              <div
+                data-clip-generating-veil
+                style={{
+                  position: 'absolute', inset: 0, zIndex: 5,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  background: 'rgba(8,10,12,0.62)', backdropFilter: 'blur(1.5px)',
+                  color: '#f2f4f6', pointerEvents: 'none',
+                }}
+              >
+                <span
+                  style={{
+                    width: 7, height: 7, borderRadius: '50%', background: badgeTone.dot,
+                    animation: 'zx-director-badge-pulse 1.2s ease-in-out infinite',
+                  }}
+                />
+                <span style={{ fontSize: 8.5, fontWeight: 600, letterSpacing: 0.3, lineHeight: 1 }}>
+                  {t('storyboard.clipBadgeGenerating', { defaultValue: '生成中' })}
+                </span>
+              </div>
+            )}
             {!hasThumbImage && (frameFailed || !hasMedia) && (
               <div
                 data-director-empty
@@ -416,7 +440,7 @@ export const TimelineClip = memo(function TimelineClip({
                 </span>
               </div>
             )}
-            {hasMedia && (
+            {hasMedia && clip.data.status !== 'generating' && (
               <>
                 <button
                   type="button"
@@ -452,7 +476,10 @@ export const TimelineClip = memo(function TimelineClip({
                 </span>
               </>
             )}
-            {/* 六态徽标缩为缩略框右上角极简角标（不占标签行） */}
+            {/* 六态徽标缩为缩略框右上角极简角标（不占标签行）。
+                2026-11-27 用户口径：「完成」不需要角标——有缩略图、能播放，用户自己看得见；
+                挂个绿标反而把「这次发起的段」淹没在历史片段里。只有非完成态才标。 */}
+            {badgeStatus !== 'done' && (
             <span
               data-clip-badge={badgeStatus}
               title={badgeText}
@@ -478,6 +505,7 @@ export const TimelineClip = memo(function TimelineClip({
               />
               {badgeText}
             </span>
+            )}
           </div>
           {/* 标签行：片段 NN · XXs（i18n key，不硬编码中文） */}
           <div

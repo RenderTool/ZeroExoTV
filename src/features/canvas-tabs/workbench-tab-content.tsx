@@ -221,7 +221,7 @@ export function resolveClipStatus(
 }
 
 /** WorkbenchShot → 时间轴 clip（与 workbench-multitrack.tsx byTrack 的转换逐项对齐，同一映射不两套） */
-function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null }): TimelineClipData {
+function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string> | undefined, run?: { phase: string; segmentShotIds: readonly string[]; currentSegment: number | null; previewSegmentIndex?: number | null }, failedIds?: ReadonlySet<string>): TimelineClipData {
   const activeInRun = !!run
     && ['submitting', 'queued', 'running'].includes(run.phase)
     && run.segmentShotIds.includes(s.id);
@@ -240,11 +240,17 @@ function toTimelineClip(s: WorkbenchShot, firstFrameUrls: Record<string, string>
     duration: s.duration,
     // 重跑已完成片段时，旧成片仍然在 media 里；运行中的这一段必须优先显示进度，
     // 不能被 “有视频 = done” 覆盖成完成。
-    status: activeInRun
-      ? resolveClipStatus(s.status, run, s.id)
-      : s.clipState === 'completed' && s.media?.storageKey
-        ? 'done'
-        : resolveClipStatus(s.status, run, s.id),
+    // 2026-11-27：段自身 status=generating 就是后端任务的真实事实（不止本页提交的批次），
+    // 必须压过旧成片 —— 否则「在跑」和「跑完了」在轨道上一模一样，用户根本看不出哪段在生成。
+    status: failedIds?.has(s.id) && !activeInRun
+      ? 'failed'
+      : activeInRun
+        ? resolveClipStatus(s.status, run, s.id)
+        : s.status === 'generating'
+          ? 'generating'
+          : s.clipState === 'completed' && s.media?.storageKey
+            ? 'done'
+            : resolveClipStatus(s.status, run, s.id),
     // 生成完成段的缩略：会话内 objectURL（主线程截帧产物）优先，回落持久化 firstFrameKey
     thumbnailUrl: firstFrameUrls?.[s.id] ?? s.firstFrameKey,
     videoKey: s.clipState === 'completed' && s.media?.storageKey ? s.media.storageKey : undefined,
@@ -346,6 +352,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    * 本地选中集合在提交瞬间压住旧成片，等 comfyRun 真进入 running 或终态后再让位。
    */
   const [pendingRunIds, setPendingRunIds] = useState<ReadonlySet<string>>(new Set());
+  /** 本次提交明确失败的段：轨道上必须变红，不能因为「上一版还有成片」显示成完成 */
+  const [failedRunIds, setFailedRunIds] = useState<ReadonlySet<string>>(new Set());
   const dirtyRef = useRef(false);
   /** 防抖定时器：连续编辑（拖时长滑块）只在停手后落一次盘 */
   const persistTimerRef = useRef<number | null>(null);
@@ -1357,6 +1365,7 @@ export function WorkbenchTabContent(): React.ReactElement | null {
       } catch (err) {
         setLockedShotIds([]);
         setPendingRunIds(new Set());
+        setFailedRunIds(new Set(selectedIds));
         message.error(err instanceof Error ? err.message : String(err));
         return;
       }
@@ -1366,7 +1375,14 @@ export function WorkbenchTabContent(): React.ReactElement | null {
         episode: `${projectId ?? 'workbench'}-E01`,
         beforeSubmit: persistNow,
         payload,
-      }).then((ok) => { if (!ok) setPendingRunIds(new Set()); });
+      }).then((ok) => {
+        if (ok) {
+          setFailedRunIds(new Set());
+          return;
+        }
+        setPendingRunIds(new Set());
+        setFailedRunIds(new Set(selectedIds));
+      });
       if (trackMode === 'batch') exitBatchMode();
     },
     [comfyRun, projectId, trackMode, exitBatchMode, message, t, updateShot, persistNow],
@@ -1416,6 +1432,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
   useEffect(() => {
     if (['submitting', 'queued', 'running'].includes(comfyRun.phase)) {
       runWentActiveRef.current = true;
+      // 真跑起来就不再保留上一轮的失败红标
+      setFailedRunIds((cur) => (cur.size === 0 ? cur : new Set()));
       return;
     }
     if (runWentActiveRef.current) {
@@ -1606,8 +1624,8 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     [comfyRun.phase, comfyRun.segmentShotIds, comfyRun.currentSegment, comfyRun.preview?.segmentIndex, pendingRunIds],
   );
   const timelineClips = useMemo<TimelineClipData[]>(
-    () => visibleShots.map((s) => toTimelineClip(s, firstFrameUrls, runView)),
-    [visibleShots, firstFrameUrls, runView],
+    () => visibleShots.map((s) => toTimelineClip(s, firstFrameUrls, runView, failedRunIds)),
+    [visibleShots, firstFrameUrls, runView, failedRunIds],
   );
 
   // 切项目只清本地运行态，绝不取消上一个项目的云端作业：项目之间是并发排队，
@@ -1701,10 +1719,11 @@ export function WorkbenchTabContent(): React.ReactElement | null {
    *    未运行/失败/已中断一律不把旧成片 key 交给播放器（否则显示上一条成片 + 假进度）。
    * 2) /ws 实时帧带 1 基段号，必须映射回 shotId 且等于当前选中的片段才允许显示；
    *    否则用户点选未运行片段时，右侧会错误盖着正在生成的那一帧。
+   * 2026-11-27 追加：段 status=generating 但本页 run 已丢失（刷新/任务由 MCP 或另一页提交）时，
+   * 也必须停掉旧成片播放并显示生成中 —— 这是「看不到最新生成预览」的直接原因：
+   * 预览区一直循环播上一条成片，实时帧永远盖不上来。
    */
-  const rerunningSelected = ['submitting', 'queued', 'running'].includes(comfyRun.phase)
-    && comfyRun.segmentShotIds.includes(selectedShot.id)
-    && selectedShot.status === 'generating';
+  const rerunningSelected = selectedShot.status === 'generating';
   const completedVideoKey = sequenceVideoKey ?? (!rerunningSelected
     ? shotCoverKey(selectedShot)
     : undefined);

@@ -1008,20 +1008,18 @@ describe('220px 固定宽度卡片规格：不同时长等宽 + 卡片元素齐�
     // 卡片不填色（跟画布导轨同底色）+ 只留细描边（2026-11-07 用户指令）
     expect(seg2.style.background).toBe('transparent');
     expect(seg2.style.borderWidth).toBe('1px');
-    // 状态徽标：done=完成 / idle=未生成 / failed=失败，颜色区分
-    const badgeOf = (id: string) => container.querySelector(`[data-clip-id="${id}"] [data-clip-badge]`) as HTMLElement;
-    expect(badgeOf('seg-1').getAttribute('data-clip-badge')).toBe('done');
-    expect(badgeOf('seg-1').textContent).toBe('完成');
-    expect(badgeOf('seg-2').getAttribute('data-clip-badge')).toBe('idle');
-    expect(badgeOf('seg-2').textContent).toBe('未生成');
-    expect(badgeOf('seg-3').getAttribute('data-clip-badge')).toBe('failed');
-    expect(badgeOf('seg-3').textContent).toBe('失败');
-    // 颜色区分（dark 主题基色）：done 绿 / failed 红 / idle 灰，三者互不相同
-    const cDone = badgeOf('seg-1').style.color;
-    const cIdle = badgeOf('seg-2').style.color;
-    const cFailed = badgeOf('seg-3').style.color;
-    expect(new Set([cDone, cIdle, cFailed]).size).toBe(3);
-    expect(cDone).toBe('rgb(134, 239, 172)'); // #86efac（dark 徽标文字）
+    // 状态徽标：done 不渲染（用户 2026-11-27 口径：完成有缩略图就够，角标会把新任务淹没在历史里）
+    // / idle=未生成 / failed=失败 仍要标
+    const badgeOf = (id: string) => container.querySelector(`[data-clip-id="${id}"] [data-clip-badge]`) as HTMLElement | null;
+    expect(badgeOf('seg-1')).toBeNull();
+    expect(badgeOf('seg-2')!.getAttribute('data-clip-badge')).toBe('idle');
+    expect(badgeOf('seg-2')!.textContent).toBe('未生成');
+    expect(badgeOf('seg-3')!.getAttribute('data-clip-badge')).toBe('failed');
+    expect(badgeOf('seg-3')!.textContent).toBe('失败');
+    // 颜色区分（dark 主题基色）：failed 红 / idle 灰
+    const cIdle = badgeOf('seg-2')!.style.color;
+    const cFailed = badgeOf('seg-3')!.style.color;
+    expect(cIdle).not.toBe(cFailed);
     expect(cFailed).toBe('rgb(252, 165, 165)'); // #fca5a5（dark 徽标文字）
   });
 
@@ -1334,11 +1332,12 @@ describe('2026-11-05 参考图修订：卡片结构 + 选中态 + 六态角标 +
       const tone = directorBadgeTone('idle', dark);
       expect(tone).toBeTruthy();
     }
+    // done 不再有角标（2026-11-27 用户口径），tone 仍由 directorBadgeTone 提供，供生成中蒙版点色
+    expect(renderClip('done', true).querySelector('[data-clip-badge]')).toBeNull();
     const cases: Array<[string, boolean, string]> = [
       ['idle', true, 'rgb(199, 199, 199)'],
       ['queued', true, 'rgb(147, 197, 253)'],
       ['generating', true, 'rgb(134, 239, 172)'],
-      ['done', true, 'rgb(134, 239, 172)'],
       ['failed', true, 'rgb(252, 165, 165)'],
       ['cancelled', true, 'rgb(203, 213, 225)'],
     ];
