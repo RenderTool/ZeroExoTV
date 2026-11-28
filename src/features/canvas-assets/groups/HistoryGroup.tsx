@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Modal, Select, Tooltip } from 'antd';
-import { CheckSquare, ChevronDown, Download, FileText, Film, Image as ImageIcon, ImagePlus, LibraryBig, MoreHorizontal, Pencil, Share2, Square, Star, Trash2, UserRound, Waypoints } from 'lucide-react';
+import { CheckSquare, ChevronDown, Download, FileText, Film, Image as ImageIcon, ImagePlus, LibraryBig, MoreHorizontal, Move, Pencil, Share2, Square, Star, Trash2, UserRound, Waypoints } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { getCurrentCanvasId } from '@/shared/current-canvas-id.js';
 import { getCanvas, createCanvas, saveCanvas, MAIN_CANVAS_ID } from '@/entities/canvas-store.js';
@@ -229,7 +229,7 @@ function chainCanvasIdOf(ids: string[]): string {
   return `scchain${(h >>> 0).toString(36)}${sorted.length}`;
 }
 
-function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onPromote, onDownload, onSetCover, onSendCanvas, onRename, onDelete, onEdit, onSetCategory, cover, versionLabel, theme, t }: {
+function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onPromote, onDownload, onSetCover, onMove, onSendVideo, onSendGuide, onSendCanvas, onRename, onDelete, onEdit, onSetCategory, cover, versionLabel, theme, t }: {
   asset: Asset;
   visible: boolean;
   /** 多选模式：是否选中 */
@@ -244,6 +244,8 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
   onSendGuide?: () => void;
   /** 历史视频设为当前片段封面（= 选中该片段的当前缓存版本） */
   onSetCover?: () => void;
+  /** 把这个版本移动到另一个片段（仅分镜视图视频版本可用） */
+  onMove?: () => void;
   /** 该版本是否是所属片段的当前封面（默认最新版本） */
   cover?: boolean;
   /** 版本序号文案（如「第 2 版」），导演台分组视图用 */
@@ -728,8 +730,19 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
                       disabled: !onSendCanvas,
                       onClick: () => onSendCanvas?.(),
                     },
-                    // 2026-11-19 用户口径：视频是「视频源 + 引导数据」的集合，成员用卡片上的
-                    // 模式切换选择，所以「发送到分镜」「发送引导」两个独立入口一律去掉。
+                    // 发送到分镜两种模式：源视频进参考槽（提示词带 @视频N）；引导数据进独立引导槽，不占参考槽、不写 @视频N。
+                    ...(onSendVideo ? [{
+                      key: 'director',
+                      icon: <Film size={13} />,
+                      label: t('assetLibrary.sendToDirector', { defaultValue: '发送到分镜（源视频）' }),
+                      onClick: () => onSendVideo?.(),
+                    }] : []),
+                    ...(onSendGuide && hasGuide ? [{
+                      key: 'director-guide',
+                      icon: <Waypoints size={13} />,
+                      label: t('assetLibrary.sendGuideToDirector', { defaultValue: '发送引导数据' }),
+                      onClick: () => onSendGuide?.(),
+                    }] : []),
                     {
                       key: 'library',
                       icon: <LibraryBig size={13} />,
@@ -775,6 +788,12 @@ function HistoryCard({ asset, visible, selected, selectMode, onToggleSelect, onP
                           { key: 'download', icon: <Download size={13} />, label: t('common.download', { defaultValue: '下载' }), onClick: () => onDownload() },
                         ]),
                     { type: 'divider' as const },
+                    ...(onMove ? [{
+                      key: 'move',
+                      icon: <Move size={13} />,
+                      label: t('assetLibrary.moveToSegment', { defaultValue: '移动到…' }),
+                      onClick: () => onMove?.(),
+                    }] : []),
                     // 2026-11-19 用户口径：历史分类与主体库同一套（角色/场景/道具/备选），
                     // 卡片上给同款「改类型」，写回资产记录 data.subjectKind。
                     {
@@ -1106,6 +1125,8 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveEpisode, setMoveEpisode] = useState<string>('');
   const [moveShotId, setMoveShotId] = useState<string>('');
+  /** 单个卡片入口打开移动对话框时锁定的版本 id；空数组表示走批量选中集 */
+  const [moveIds, setMoveIds] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   /** 导演台类目筛选（2026-11-13 用户指令）：按集数 / 按片段（一个片段可有 N 个备用版本） */
   const [directorEpisode, setDirectorEpisode] = useState<string>('all');
@@ -1524,6 +1545,14 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
               void sendVideoAsSegmentCover(asset, antdMessage, t, { shotId });
             }
             : undefined}
+          onMove={isDirectorView && (asset.data as { kind?: string }).kind === 'video'
+            ? () => {
+                setMoveIds([asset.id]);
+                setMoveEpisode('');
+                setMoveShotId('');
+                setMoveOpen(true);
+              }
+            : undefined}
           onSendCanvas={() => store.sendToCanvas({ type: 'asset', id: asset.id, data: asset })}
           onRename={() => {
             store.setRenameItemTarget({ type: 'asset', id: asset.id, name: asset.title });
@@ -1722,7 +1751,7 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
                 size="small"
                 data-history-batch-move
                 disabled={selectedAssets.length === 0}
-                onClick={() => setMoveOpen(true)}
+                onClick={() => { setMoveIds([]); setMoveOpen(true); }}
               >
                 {t('assetLibrary.moveVersions', '移动到片段')}
               </Button>
@@ -1752,10 +1781,11 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
           onCancel={() => setMoveOpen(false)}
           onOk={() => {
             const target = moveShotId;
-            const ids = [...selectedIds];
+            const ids = moveIds.length > 0 ? moveIds : [...selectedIds];
             setMoveOpen(false);
             setMoveEpisode('');
             setMoveShotId('');
+            setMoveIds([]);
             if (!target || ids.length === 0) return;
             void linkGroupToShot(ids, target).then(() => exitSelect());
           }}
@@ -1764,7 +1794,7 @@ export function HistoryGroup({ store, theme, forcedSource, hideHeader }: {
         >
           <div style={{ display: 'grid', gap: 10, paddingTop: 4 }}>
             <div style={{ fontSize: 12, color: theme.toolbar.textMuted }}>
-              {t('assetLibrary.moveVersionsHint', '把选中的 {{n}} 个版本移动到下面这个片段；只改归属，不动封面。', { n: selectedIds.size })}
+              {t('assetLibrary.moveVersionsHint', '把选中的 {{n}} 个版本移动到下面这个片段；只改归属，不动封面。', { n: moveIds.length || selectedIds.size })}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 12, width: 48, flexShrink: 0 }}>{t('assetLibrary.episodeCol', '集')}</span>
