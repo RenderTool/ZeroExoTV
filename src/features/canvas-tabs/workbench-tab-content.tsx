@@ -1655,20 +1655,6 @@ export function WorkbenchTabContent(): React.ReactElement | null {
     comfyRun.reset();
   }, [projectId, comfyRun.reset]);
 
-  // 外部（MCP/另一条链路）已经把全部选中片段写成 done+media 时，网页残留的 submitting/queued
-  // 运行态必须让位，否则卡片会永远停在「排队」，成片入口也被旧 phase 挡住。
-  useEffect(() => {
-    if (loadState !== 'ready') return;
-    if (!['submitting', 'queued', 'running'].includes(comfyRun.phase)) return;
-    if (visibleShots.length === 0) return;
-    // 2026-11-15 修复：重跑已完成片段时，旧版本本来就全是 done+completed；
-    // 不能用 allDone 把刚提交的 comfyRun 重置掉（会立刻退回「完成」，生成中永远不显示）。
-    // 只有提交/轮询真正失联（超过 10 分钟且每段都已有成片）才让位。
-    const stale = comfyRun.startedAt > 0 && Date.now() - comfyRun.startedAt > 10 * 60 * 1000;
-    const allHaveVideo = visibleShots.every((s) => Boolean(s.media?.storageKey));
-    if (stale && allHaveVideo) comfyRun.reset();
-  }, [loadState, comfyRun.phase, comfyRun.reset, comfyRun.startedAt, visibleShots]);
-
   const selectedShot: WorkbenchShot = visibleShots.find((s) => s.id === activeShotId) ?? visibleShots[0] ?? {
     id: '__empty__',
     number: 1,

@@ -597,7 +597,11 @@ export function usePluginDirectorTask(args: {
 
   const reset = useCallback((): void => {
     const task = taskRef.current;
-    if (task) dismissedRef.current.add(task.taskId);
+    // 只把已收口（成功/失败/取消）的批次记入 dismissed；仍在 running/queued 的批次
+    // 不能拉黑，否则接管轮询再次查到它时会被 237 行直接跳过，本会话永远接不回。
+    if (task && task.state !== 'running' && task.state !== 'queued') {
+      dismissedRef.current.add(task.taskId);
+    }
     taskRef.current = null;
     stopPolling();
     closePreview();
