@@ -55,4 +55,14 @@ describe('reconcileStaleGenerating', () => {
     const r = reconcileStaleGenerating({ shots: SHOTS, runPhase: 'idle', queueBusy: null });
     expect(r.demotedIds).toEqual(['s2', 's3']);
   });
+
+  it('⑤ 插件任务表活跃批次里的段（running/queued）→ 即使队列探测为空也不降级', () => {
+    const r = reconcileStaleGenerating({
+      shots: SHOTS,
+      runPhase: 'idle',
+      queueBusy: false,
+      taskActiveShotIds: ['s2'],
+    });
+    expect(r.demotedIds).toEqual(['s3']);
+  });
 });

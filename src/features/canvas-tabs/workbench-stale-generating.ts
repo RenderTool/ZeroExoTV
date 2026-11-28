@@ -23,12 +23,18 @@ export interface StaleReconcileInput {
   /** 本页运行状态机；'idle' = 无进行中的运行 */
   runPhase: string;
   /** 本次运行覆盖的段 id（防御性：即使 phase 判断失效也不误降本次运行的段） */
-  activeSegmentIds?: ReadonlySet<string> | null;
+  activeSegmentIds?: ReadonlyArray<string> | ReadonlySet<string> | null;
   /**
    * 后端 /queue 探测结果：true = 队列里仍有任务在跑（不降级）；
    * null = 探测不了（未连接 / 跨域 / 兼容口无此口）——与取消路径同一语义：后端未确认也落到确定状态。
    */
   queueBusy: boolean | null;
+  /**
+   * 插件任务表中处于活跃批次（running/queued）的段 id（第三事实源，2026-11-28）。
+   * 本项目执行链路走插件/MCP broker 串行跑段，原生队列计数与插件任务表不是一回事；
+   * 对账必须以插件任务表段状态为准，否则重挂载/接管未接上时会把仍在跑的段误降级。
+   */
+  taskActiveShotIds?: ReadonlyArray<string> | ReadonlySet<string> | null;
 }
 
 export interface StaleReconcileResult {
@@ -50,9 +56,21 @@ export function reconcileStaleGenerating(input: StaleReconcileInput): StaleRecon
     return { demotedIds: [], skippedForQueue: true };
   }
   // 3) 无运行 + 队列空/不可探测 → 残留 generating 降级为「已中断」
-  const active = input.activeSegmentIds ?? null;
+  const activeRaw = input.activeSegmentIds ?? null;
+  const active: ReadonlySet<string> | null = activeRaw
+    ? new Set(Array.isArray(activeRaw) ? activeRaw : [...activeRaw])
+    : null;
+  const taskRaw = input.taskActiveShotIds ?? null;
+  const taskActive: ReadonlySet<string> | null = taskRaw
+    ? new Set(Array.isArray(taskRaw) ? taskRaw : [...taskRaw])
+    : null;
   const demotedIds = input.shots
-    .filter((s) => s.status === 'generating' && !(active && active.has(s.id)))
+    .filter(
+      (s) =>
+        s.status === 'generating' &&
+        !(active && active.has(s.id)) &&
+        !(taskActive && taskActive.has(s.id)),
+    )
     .map((s) => s.id);
   return { demotedIds, skippedForQueue: false };
 }

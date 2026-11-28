@@ -15,11 +15,11 @@
 /** 抽屉分组页签定义（数组顺序 = sidebar 按钮顺序） */
 export const DRAWER_TAB_DEFS = [
   // 全局分组（所有模块共用）置顶。
-  // 2026-11-18 用户口径：左侧两组不再叫「历史 / 资产」，改成按产出方命名——
-  //   画布资产 = 画布自己产出（组内 画布历史 → 公共资产）
+  // 2026-11-28 用户口径：实际项目高频使用「主体 / 分镜历史」，分镜资产分组置顶；
   //   分镜资产 = 分镜自己产出（组内 主体 → 分镜历史）
-  { key: 'assets', labelKey: 'assetLibrary.canvasAssetsGroup', defaultLabel: '画布资产', moduleOnly: false },
+  //   画布资产 = 画布自己产出（组内 画布历史 → 公共资产）
   { key: 'history', labelKey: 'assetLibrary.storyboardAssetsGroup', defaultLabel: '分镜资产', moduleOnly: false },
+  { key: 'assets', labelKey: 'assetLibrary.canvasAssetsGroup', defaultLabel: '画布资产', moduleOnly: false },
   // 任务队列：全局分组（MCP 任务 / 取消运行中或排队中任务）
   { key: 'tasks', labelKey: 'taskQueue.title', moduleOnly: false },
   // 2026-11-16 用户指令：模块独有分组（画布结构 / 本剧信息）垫底；按钮之间不加分割线
@@ -37,11 +37,11 @@ export type DrawerModule = 'canvas' | 'script' | 'storyboard' | 'workbench';
 
 /** 每个模块独立挂载自己的分组：层级 / 画布只在画布模块存在（顺序与 DRAWER_TAB_DEFS 一致） */
 export const DRAWER_MODULE_GROUPS: Record<DrawerModule, readonly DrawerGroup[]> = {
-  canvas: ['assets', 'history', 'tasks', 'canvasStructure'],
+  canvas: ['history', 'assets', 'tasks', 'canvasStructure'],
   // 剧本 / 导演台：本剧信息是这两个阶段共用的项目级信息，只在这两个模块挂载
-  script: ['assets', 'history', 'tasks', 'scriptMeta'],
-  storyboard: ['assets', 'history', 'tasks'],
-  workbench: ['assets', 'history', 'tasks', 'scriptMeta'],
+  script: ['history', 'assets', 'tasks', 'scriptMeta'],
+  storyboard: ['history', 'assets', 'tasks'],
+  workbench: ['history', 'assets', 'tasks', 'scriptMeta'],
 };
 
 /**

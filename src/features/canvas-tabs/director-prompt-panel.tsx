@@ -815,7 +815,7 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
         >
           <X size={11} />
         </button>
-        {guide && (
+        {a.kind === 'video' && (
           <Dropdown
             open={slotMenuId === a.id}
             onOpenChange={(open) => setSlotMenuId(open ? a.id : null)}
@@ -826,7 +826,8 @@ export const DirectorPromptPanel = memo(function DirectorPromptPanel({
                   key: 'guide',
                   icon: <Waypoints size={13} />,
                   label: t('director.useGuide', '使用引导'),
-                  onClick: () => useGuideFromVideo(a),
+                  disabled: !guide,
+                  onClick: () => guide && useGuideFromVideo(a),
                 },
               ],
             }}

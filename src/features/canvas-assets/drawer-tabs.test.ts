@@ -18,9 +18,9 @@ import { DRAWER_TAB_DEFS, DRAWER_MODULE_GROUPS, resolveDrawerModule } from './ta
 const readSrc = (rel: string): string => readFileSync(resolve(process.cwd(), rel), 'utf-8');
 
 describe('抽屉页签顺序（全局置顶、模块独有垫底）', () => {
-  it('全局分组在前：公共资产 → 主体 → 历史记录 → 任务队列（2026-11-16 两历史合并）', () => {
+  it('全局分组在前：分镜资产（主体/分镜历史）→ 画布资产（画布历史/公共资产）→ 任务队列（2026-11-28 高频前置）', () => {
     expect(DRAWER_TAB_DEFS.filter((d) => !d.moduleOnly).map((d) => d.key))
-      .toEqual(['assets', 'history', 'tasks']);
+      .toEqual(['history', 'assets', 'tasks']);
   });
 
   it('模块独有分组垫底：画布结构 / 本剧信息', () => {
@@ -32,20 +32,20 @@ describe('抽屉页签顺序（全局置顶、模块独有垫底）', () => {
 
 describe('按模块独立挂载（层级/子画布只在画布模块）', () => {
   it('画布模块含画布专属分组，不含本剧信息', () => {
-    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['assets', 'history', 'tasks', 'canvasStructure']);
+    expect(DRAWER_MODULE_GROUPS.canvas).toEqual(['history', 'assets', 'tasks', 'canvasStructure']);
     expect(resolveDrawerModule('canvas')).toBe('canvas');
     expect(resolveDrawerModule('canvas:sc123')).toBe('canvas');
   });
 
   it('剧本/导演台模块挂本剧信息（垫底），画布模块不挂', () => {
-    expect(DRAWER_MODULE_GROUPS.script).toEqual(['assets', 'history', 'tasks', 'scriptMeta']);
-    expect(DRAWER_MODULE_GROUPS.workbench).toEqual(['assets', 'history', 'tasks', 'scriptMeta']);
+    expect(DRAWER_MODULE_GROUPS.script).toEqual(['history', 'assets', 'tasks', 'scriptMeta']);
+    expect(DRAWER_MODULE_GROUPS.workbench).toEqual(['history', 'assets', 'tasks', 'scriptMeta']);
     expect(DRAWER_MODULE_GROUPS.canvas).not.toContain('scriptMeta');
   });
 
   it('主体库（storyboard）模块只有全局分组（不挂本剧信息、不挂画布结构）', () => {
     for (const key of ['storyboard:node-1', 'storyboard']) {
-      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['assets', 'history', 'tasks']);
+      expect([...DRAWER_MODULE_GROUPS[resolveDrawerModule(key)]]).toEqual(['history', 'assets', 'tasks']);
     }
   });
 
@@ -72,7 +72,7 @@ describe('挂载接线（静态守卫，防回退）', () => {
     expect(panel).toContain('CanvasStructureGroup');
     // store 的 activeGroup 必须由 visibleGroups 派生（否则非画布模块仍可能停在层级/画布）
     const store = readSrc('src/features/canvas-assets/store.ts');
-    expect(store).toContain('visibleGroups.includes(groupByModule[drawerModule])');
+    expect(store).toContain('visibleGroups.includes(activeGroupState)');
     // 抽屉壳层不再自己调层级树 hook（否则又变成「抽屉一打开就订阅整张图」）
     const shell = readSrc('src/features/hierarchy/components/hierarchy-panel.tsx');
     expect(shell).not.toContain('useHierarchyPanelProps');

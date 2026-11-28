@@ -87,6 +87,7 @@ import { useSubjectMediaLinkEventStore } from '@/features/canvas-nodes/storyboar
 import { DirectorParamsButton, DirectorRunButton } from './director-run-params-row.js';
 import { registerDirectorLoraSink, syncDirectorLoras } from './director-lora-bridge.js';
 import { usePluginDirectorTask } from './use-plugin-director-task.js';
+import { listPluginTasks } from '@/features/task-center/plugin-task-client.js';
 import { attachDirectorReferenceImages, buildDirectorBatchPayload } from './director-plugin-payload.js';
 import { listAssets, updateAsset } from '@/features/asset-picker/asset-store.js';
 import type { Asset } from '@/features/asset-picker/index.js';
@@ -1472,17 +1473,35 @@ export function WorkbenchTabContent(): React.ReactElement | null {
           } catch { /* 跨域/未连上 → queueBusy 保持 null，按不可探测处理 */ }
         }
       }
+      // 第三事实源：插件任务表（broker 串行跑段，原生队列计数不一定反映）。
+      // 活跃批次里 running/queued 的段不降级；查询失败留空，退回原保守口径。
+      const taskActiveShotIds = new Set<string>();
+      if (projectId) {
+        try {
+          const tasks = await listPluginTasks(projectId);
+          for (const t of tasks) {
+            if (t.state !== 'running' && t.state !== 'queued') continue;
+            for (const seg of t.segments ?? []) {
+              if ((seg.state === 'running' || seg.state === 'queued') && seg.shotId) {
+                taskActiveShotIds.add(seg.shotId);
+              }
+            }
+          }
+        } catch { /* 任务表取不到 → 不额外保护，交回队列探测口径 */ }
+      }
       const { demotedIds } = reconcileStaleGenerating({
         shots: shotsRef.current.map((s) => ({ id: s.id, status: s.status })),
         runPhase: comfyRun.phase,
         queueBusy,
+        activeSegmentIds: comfyRun.segmentShotIds,
+        taskActiveShotIds,
       });
       if (demotedIds.length > 0) {
         for (const id of demotedIds) updateShot(id, { status: 'interrupted' });
         message.info(t('director.staleGeneratingDemoted', '上次生成已中断，可重新生成'));
       }
     })();
-  }, [loadState, comfyRun.phase, updateShot, message, t]);
+  }, [loadState, comfyRun.phase, comfyRun.segmentShotIds, projectId, updateShot, message, t]);
 
   /* 2026-11-05 统一导航入口（navigate-to-view）：「发送到导演台」→ 选中对应片段并滚动可见、右侧预览跟随。
      双通道接收：已挂载时收 NAVIGATE_FOCUS_SHOT_EVENT；刚切页签未挂载时 mount 取 pendingFocus。 */

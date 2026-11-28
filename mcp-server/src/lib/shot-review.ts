@@ -48,6 +48,8 @@ const APPEARANCE_RE =
   /外貌锁定|发型|脸型|鹅蛋脸|瓜子脸|五官|眉毛|睫毛|眼睛色|瞳色|唇形|嘴唇|胡须|肤色|皮肤|身材|头身比|三围|腰臀|长腿|胸围|衣着|穿着|服装样式/;
 /** 占位词 */
 const PLACEHOLDER_RE = /待补|按剧本|占位|TBD|待定|placeholder/i;
+/** 跨段指代：模型只读本段提示词，写给后续段的连续性指令不进正文 */
+const CROSS_SEGMENT_RE = /段\s*[2-9一二三四五六七八九]|上一段|下一段|后续段|下一集|承上一段|沿用段|复现段|此后全片|previous shot|next shot|following shot|previous segment|next episode|prior segment/i;
 /** 镜头语言：运镜动词计数 */
 const CAMERA_RE = /推镜|拉镜|摇镜|移镜|跟拍|升降|环绕|手持|变焦|甩镜/g;
 /** 动作终点态 */
@@ -156,6 +158,16 @@ function reviewShot(
       fix: "身份交给参考图锁；正文只写「谁 · 在哪 · 做什么」的行为句",
     });
   }
+  const bodyNoDialogue = `${imagePrompt}\n${videoPrompt}`.replace(/<d>[\s\S]*?<\/d>/g, "");
+  if (CROSS_SEGMENT_RE.test(bodyNoDialogue)) {
+    clean = 0;
+    issues.push({
+      code: "CROSS_SEGMENT",
+      level: "error",
+      message: `片段 ${shot.number} 提示词出现跨段指代（段N/上一段/下一段/后续段/下一集），模型只读本段提示词`,
+      fix: "删掉写给后续段的连续性指令；本段可见事实直接写在本段，跨段衔接交给引导帧与工程链路",
+    });
+  }
   if (/三视图|Lineup Sheet|四视图/i.test(imagePrompt)) {
     clean = Math.min(clean, 1);
     issues.push({ code: "VIEW_INDUCE", level: "warn", message: `片段 ${shot.number} 出现「三视图/Lineup」这类诱导词`, fix: "改写成「画面共 N 个：正面全身 / 背面全身 …」" });
@@ -194,7 +206,7 @@ function reviewShot(
     lens = Math.min(lens, 1);
     issues.push({ code: "NO_END_STATE", level: "warn", message: `片段 ${shot.number} 动作没有终点态`, fix: "写成「转身直到侧脸贴上窗边，停住」这类可判定的终点" });
   }
-  if (videoPrompt.trim() && !(/声音[:：]/.test(videoPrompt) && /无字幕/.test(videoPrompt))) {
+  if (videoPrompt.trim() && !(/声音[:：]|Sound:/i.test(videoPrompt) && /无字幕|no subtitles/i.test(videoPrompt))) {
     lens = Math.min(lens, 1);
     issues.push({ code: "VIDEO_FORMAT", level: "warn", message: `片段 ${shot.number} 视频提示词缺五段式关键行（「无字幕…」/「声音：」）`, fix: "按 shots-prompts 技能的五段式补齐" });
   }

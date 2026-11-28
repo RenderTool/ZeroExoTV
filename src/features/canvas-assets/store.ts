@@ -148,7 +148,9 @@ export function useCanvasAssetsPanel({ onSendToCanvas, module }: UseCanvasAssets
    * 不许再偷偷改掉抽屉里选中的分组——抽屉只记**一个**当前分组，只有该分组在这个模块不可挂载
    * （层级 / 本剧信息是模块专属）时才回落到第一个可见分组，这属于必要的跳转。
    */
-  const [activeGroupState, setActiveGroupState] = useState<DrawerGroup>('assets');
+  // 2026-11-28 用户口径：默认落在分镜资产分组（主体 / 分镜历史为高频入口）；
+  // 分组在当前模块不可挂载时由下方回落逻辑取第一个可见分组。
+  const [activeGroupState, setActiveGroupState] = useState<DrawerGroup>('history');
   const activeGroup: DrawerGroup = visibleGroups.includes(activeGroupState)
     ? activeGroupState
     : visibleGroups[0]!;

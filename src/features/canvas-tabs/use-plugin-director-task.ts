@@ -286,12 +286,15 @@ export function usePluginDirectorTask(args: {
       if (!shotId) continue;
       if (taskActive && seg.state === 'interrupted') continue;
       const prev = segmentStateRef.current.get(seg.index);
-      if (prev === seg.state) continue;
       segmentStateRef.current.set(seg.index, seg.state);
       if (seg.state === 'running' || seg.state === 'queued') {
         // 2026-11-19 刷新丢状态：排队中的段也要把片段标成生成中，
         // 否则刷新后插件任务还在跑，网页却把片段显示成「未生成」。
+        // 活跃状态每轮都重新断言：实体被外部重载 / 版本冲突回滚后，
+        // 内存里的生成中状态会被盘上旧态覆盖，不能因 segmentStateRef 已记 running 就跳过点亮。
         cbRef.current.onSegmentState(shotId, 'generating');
+      } else if (prev === seg.state) {
+        continue;
       } else if (seg.state === 'cancelled') {
         cbRef.current.onSegmentState(shotId, 'cancelled');
       } else if (seg.state === 'error') {
@@ -312,12 +315,16 @@ export function usePluginDirectorTask(args: {
       // 2026-11-19：success 段因「已落过库 / outputs 缺 path / 落库失败」跳过落库时，
       // 也必须把片段从「生成中」收口（有片段的保留成片，没片段的回到未生成），
       // 否则任务早已结束，网页却一直转圈。
-      if (landedRef.current.has(key) || !seg.outputs?.some((o) => o.path)) {
+      if (landedRef.current.has(key)) {
+        cbRef.current.onSegmentState(seg.shotId, 'done');
+        continue;
+      }
+      // outputs 缺 path：没有可落库产物，收口状态且不再重试
+      if (!seg.outputs?.some((o) => o.path)) {
         cbRef.current.onSegmentState(seg.shotId, 'done');
         landedRef.current.add(key);
         continue;
       }
-      landedRef.current.add(key);
       try {
         const landed = await landPluginSegment({
           base: base ?? '',
@@ -326,32 +333,36 @@ export function usePluginDirectorTask(args: {
           segment: seg,
           title: `片段 ${seg.index}`,
         });
-        if (landed) {
-          // 2026-11-19 用户实测：出片后「上次种子」还是暂无、历史记录也没有参数/提示词。
-          // 原因是从插件的段里没把真实参数带进版本记录 —— 这里统一补上：
-          // 版本 params 存插件回传的真实参数（尺寸/步数/seed），并把实际种子记到项目级「上次种子」。
-          const segParams = (seg.params ?? {}) as Record<string, unknown>;
-          const usedSeed = Number(segParams.seed);
-          if (Number.isFinite(usedSeed)) {
-            recordLastSeed(usedSeed, task.projectId || args.projectId || '');
-          }
-          const version: WorkbenchShotVersion = {
-            id: `ver_${task.taskId}_${seg.index}`,
-            storageKey: landed.storageKey,
-            previewKey: seg.previewPath ? pluginViewUrl(base ?? '', seg.previewPath) ?? undefined : undefined,
-            guide: landed.guide ?? (seg.guide?.id ? { id: seg.guide.id, frames: seg.guide.frames } : null),
-            prompt: seg.prompt ?? String(segParams.prompt ?? ''),
-            params: segParams,
-            createdAt: new Date().toISOString(),
-            status: 'done',
-          };
-          cbRef.current.onSegmentDone(seg.shotId, {
-            videoStorageKey: landed.storageKey,
-            firstFrameKey: version.previewKey,
-            guide: version.guide ?? undefined,
-            version,
-          });
+        // 空产物 / 下载解析为空：不记成功，下次轮询/重挂后补落
+        if (!landed) {
+          landedRef.current.delete(key);
+          continue;
         }
+        landedRef.current.add(key);
+        // 2026-11-19 用户实测：出片后「上次种子」还是暂无、历史记录也没有参数/提示词。
+        // 原因是从插件的段里没把真实参数带进版本记录 —— 这里统一补上：
+        // 版本 params 存插件回传的真实参数（尺寸/步数/seed），并把实际种子记到项目级「上次种子」。
+        const segParams = (seg.params ?? {}) as Record<string, unknown>;
+        const usedSeed = Number(segParams.seed);
+        if (Number.isFinite(usedSeed)) {
+          recordLastSeed(usedSeed, task.projectId || args.projectId || '');
+        }
+        const version: WorkbenchShotVersion = {
+          id: `ver_${task.taskId}_${seg.index}`,
+          storageKey: landed.storageKey,
+          previewKey: seg.previewPath ? pluginViewUrl(base ?? '', seg.previewPath) ?? undefined : undefined,
+          guide: landed.guide ?? (seg.guide?.id ? { id: seg.guide.id, frames: seg.guide.frames } : null),
+          prompt: seg.prompt ?? String(segParams.prompt ?? ''),
+          params: segParams,
+          createdAt: new Date().toISOString(),
+          status: 'done',
+        };
+        cbRef.current.onSegmentDone(seg.shotId, {
+          videoStorageKey: landed.storageKey,
+          firstFrameKey: version.previewKey,
+          guide: version.guide ?? undefined,
+          version,
+        });
       } catch (err) {
         // 落库失败允许下次刷新重试
         landedRef.current.delete(key);
